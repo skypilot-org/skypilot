@@ -20,6 +20,7 @@ SKY_RUNTIME_DIR = '${SKY_RUNTIME_DIR:-$HOME}'
 #    os.path.expanduser(os.environ.get(SKY_RUNTIME_DIR_ENV_VAR_KEY, '~')),
 #    '.sky/jobs.db')
 SKY_RUNTIME_DIR_ENV_VAR_KEY = 'SKY_RUNTIME_DIR'
+SKY_CLUSTER_NAME_ENV_VAR_KEY = 'SKY_CLUSTER_NAME'
 # We keep sky_logs and sky_workdir in $HOME, because
 # these are artifacts that users can access, and having
 # them be in $HOME makes it more convenient.
@@ -143,17 +144,21 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '28'
+SKYLET_VERSION = '30'  # conditional plugin loading for jobs bwcompat
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 4
+SKYLET_LIB_VERSION = 5  # add wait_for param to set_autostop
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
+
+# Autostop hook timeout default (1 hour in seconds)
+DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
@@ -476,6 +481,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
     ('vast', 'datacenter_only'),
+    ('vast', 'create_instance_kwargs'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
@@ -539,6 +545,11 @@ IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.
 SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
+# Environment variable that is set to 'true' if persistent storage is enabled
+# for the API server deployment (via Helm storage.enabled=true).
+# This enables persistence of managed job logs and file mounts across rolling
+# updates.
+SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
@@ -618,6 +629,7 @@ MEMORY_SIZE_PATTERN = (
 
 LAST_USE_TRUNC_LENGTH = 25
 USED_BY_TRUNC_LENGTH = 25
+ERROR_MESSAGE_TRUNC_LENGTH = 60
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000

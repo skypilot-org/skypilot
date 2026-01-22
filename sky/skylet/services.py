@@ -43,12 +43,17 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
+            hook = request.hook if request.HasField('hook') else None
+            hook_timeout = (request.hook_timeout
+                            if request.HasField('hook_timeout') else None)
             autostop_lib.set_autostop(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,
                 wait_for=wait_for if wait_for is not None else
                 autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
-                down=request.down)
+                down=request.down,
+                hook=hook,
+                hook_timeout=hook_timeout)
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
@@ -502,7 +507,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     entrypoint=job.get('entrypoint'),
                     metadata=converted_metadata,
                     pool=job.get('pool'),
-                    pool_hash=job.get('pool_hash'))
+                    pool_hash=job.get('pool_hash'),
+                    links=job.get('links'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

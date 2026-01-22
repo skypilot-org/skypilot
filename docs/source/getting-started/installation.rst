@@ -3,227 +3,210 @@
 .. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
+.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-F66A0A?style=flat
+   :alt: Early Access
+
 Installation
-==================
+============
 
-Install SkyPilot using pip:
+Install SkyPilot
+----------------
 
-.. tab-set::
-
-    .. tab-item:: Latest Release
-        :sync: latest-release-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          # Choose your infra:
-
-          pip install "skypilot[kubernetes]"
-          pip install "skypilot[aws]"
-          pip install "skypilot[gcp]"
-          pip install "skypilot[azure]"
-          pip install "skypilot[coreweave]"
-          # Nebius is only supported for Python >= 3.10
-          pip install "skypilot[nebius]"
-          # Clouds below are supported/maintained by community/cloud providers.
-          pip install "skypilot[oci]"
-          pip install "skypilot[lambda]"
-          pip install "skypilot[runpod]"
-          pip install "skypilot[fluidstack]"
-          pip install "skypilot[paperspace]"
-          pip install "skypilot[cudo]"
-          pip install "skypilot[shadeform]"
-          # IBM is only supported for Python <= 3.11
-          pip install "skypilot[ibm]"
-          # SCP is only supported for Python <= 3.11
-          pip install "skypilot[scp]"
-          pip install "skypilot[vsphere]"
-          # Seeweb is only supported for Python >= 3.10
-          pip install "skypilot[seeweb]"
-          pip install "skypilot[primeintellect]"
-
-          pip install "skypilot[all]"
-
-
-    .. tab-item:: Nightly
-        :sync: nightly-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          # Choose your infra:
-
-          pip install "skypilot-nightly[kubernetes]"
-          pip install "skypilot-nightly[aws]"
-          pip install "skypilot-nightly[gcp]"
-          pip install "skypilot-nightly[azure]"
-          pip install "skypilot-nightly[coreweave]"
-          # Nebius is only supported for Python >= 3.10
-          pip install "skypilot-nightly[nebius]"
-          # Clouds below are supported/maintained by community/cloud providers.
-          pip install "skypilot-nightly[oci]"
-          pip install "skypilot-nightly[lambda]"
-          pip install "skypilot-nightly[runpod]"
-          pip install "skypilot-nightly[fluidstack]"
-          pip install "skypilot-nightly[paperspace]"
-          pip install "skypilot-nightly[do]"
-          pip install "skypilot-nightly[cudo]"
-          pip install "skypilot-nightly[shadeform]"
-          pip install "skypilot-nightly[ibm]"
-          pip install "skypilot-nightly[scp]"
-          pip install "skypilot-nightly[vsphere]"
-          # Seeweb is only supported for Python >= 3.10
-          pip install "skypilot[seeweb]"
-          pip install "skypilot-nightly[primeintellect]"
-
-          pip install "skypilot-nightly[all]"
-
-
-    .. tab-item:: From Source
-        :sync: from-source-tab
-
-        .. code-block:: shell
-
-          # Recommended: use a new conda env to avoid package conflicts.
-          # SkyPilot requires 3.7 <= python <= 3.13.
-          conda create -y -n sky python=3.10
-          conda activate sky
-
-          git clone https://github.com/skypilot-org/skypilot.git
-          cd skypilot
-
-          # Choose your infra:
-
-          pip install -e ".[kubernetes]"
-          pip install -e ".[aws]"
-          pip install -e ".[gcp]"
-          pip install -e ".[azure]"
-          # Nebius is only supported for Python >= 3.10
-          pip install -e ".[nebius]"
-          # Clouds below are supported/maintained by community/cloud providers.
-          pip install -e ".[oci]"
-          pip install -e ".[lambda]"
-          pip install -e ".[runpod]"
-          pip install -e ".[fluidstack]"
-          pip install -e ".[paperspace]"
-          pip install -e ".[cudo]"
-          pip install -e ".[shadeform]"
-          pip install -e ".[ibm]"
-          pip install -e ".[scp]"
-          pip install -e ".[vsphere]"
-          # Seeweb is only supported for Python >= 3.10
-          pip install -e ".[seeweb]"
-          pip install -e ".[primeintellect]"
-
-          pip install -e ".[all]"
-
-To use more than one cloud, combine the pip extras:
+SkyPilot supports installation with ``uv`` or ``pip``.
 
 .. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
 
-    .. tab-item:: Latest Release
-        :sync: latest-release-tab
+    .. code-block:: shell
 
-        .. code-block:: shell
+      # Create a virtual environment with pip pre-installed (required for SkyPilot)
+      # SkyPilot requires 3.9 <= python <= 3.13.
+      uv venv --seed --python 3.10
+      source .venv/bin/activate  # Use WSL on Windows
+      uv pip install skypilot
 
-          pip install -U "skypilot[kubernetes,aws,gcp]"
+      # install dependencies for the clouds you want to use
+      uv pip install "skypilot[kubernetes,aws,gcp]"
 
-    .. tab-item:: Nightly
-        :sync: nightly-tab
+    .. note::
 
-        .. code-block:: shell
+      The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
+      SkyPilot needs ``pip`` to build wheels for remote cluster setup.
 
-          pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
 
-    .. tab-item:: From Source
-        :sync: from-source-tab
+    .. code-block:: shell
 
-        .. code-block:: shell
+      # Install as a globally available tool with pip included
+      # SkyPilot requires 3.9 <= python <= 3.13.
+      uv tool install --with pip skypilot
 
-          pip install -e ".[kubernetes,aws,gcp]"
+      # install dependencies for the clouds you want to use
+      uv tool install --with pip "skypilot[kubernetes,aws,gcp]"
+
+    .. note::
+
+      The ``--with pip`` flag is **required** when using ``uv tool install``.
+      Without it, SkyPilot will fail when building wheels for remote clusters.
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # Recommended: use a new conda env to avoid package conflicts.
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      conda create -y -n sky python=3.10
+      conda activate sky
+
+      pip install skypilot
+
+      # install dependencies for the clouds you want to use
+      pip install "skypilot[kubernetes,aws,gcp]"
 
 
-Installing via ``uv``
-----------------------
+.. dropdown:: Install SkyPilot from nightly build or source
 
-SkyPilot can be installed using `uv <https://github.com/astral-sh/uv>`_, a fast Python package installer:
+    SkyPilot provides nightly builds and source code for the latest features and for development.
 
-.. tab-set::
+    **Install from nightly build:**
 
-    .. tab-item:: uv venv
+    .. tab-set::
+      .. tab-item:: uv venv
         :sync: uv-venv-tab
 
         .. code-block:: shell
 
           # Create a virtual environment with pip pre-installed (required for SkyPilot)
+          # SkyPilot requires 3.7 <= python <= 3.13.
           uv venv --seed --python 3.10
           source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-          # Install SkyPilot with your chosen cloud providers
-          uv pip install "skypilot[kubernetes,aws,gcp]"
+          uv pip install skypilot-nightly
 
-          # Azure CLI has an issue with uv, and requires '--prerelease allow'.
-          uv pip install --prerelease allow azure-cli
-          uv pip install "skypilot[azure]"
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
 
-        .. note::
-
-          The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
-          SkyPilot needs ``pip`` to build wheels for remote cluster setup.
-
-    .. tab-item:: uv tool
+      .. tab-item:: uv tool
         :sync: uv-tool-tab
 
         .. code-block:: shell
 
           # Install as a globally available tool with pip included
-          uv tool install --with pip "skypilot[aws,gcp]"
+          # SkyPilot requires 3.7 <= python <= 3.13.
+          uv tool install --with pip skypilot-nightly
 
-          # Or with all cloud providers
-          uv tool install --with pip "skypilot[all]"
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
 
-          # Now you can use sky directly
-          sky check
+      .. tab-item:: pip
+        :sync: pip-tab
 
-        .. note::
+        .. code-block:: shell
 
-          The ``--with pip`` flag is **required** when using ``uv tool install``.
-          Without it, SkyPilot will fail when building wheels for remote clusters.
+          # Recommended: use a new conda env to avoid package conflicts.
+          # SkyPilot requires 3.7 <= python <= 3.13.
+          conda create -y -n sky python=3.10
+          conda activate sky
 
+          pip install skypilot-nightly
+
+          # Build the dashboard (requires Node.js and npm)
+          npm --prefix sky/dashboard install
+          npm --prefix sky/dashboard run build
+
+    **Install from source:**
+
+    .. code-block:: shell
+
+      # Recommended: use a new conda env to avoid package conflicts.
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      conda create -y -n sky python=3.10
+      conda activate sky
+
+      git clone https://github.com/skypilot-org/skypilot.git
+      cd skypilot
+
+      pip install -e .
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
+Run locally or connect to a remote API server
+---------------------------------------------
+
+SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration.
+
+**To run SkyPilot locally:**
+
+Refer to the :ref:`cloud setup section <cloud-account-setup>` to download the necessary dependencies for the clouds you want to use.
+
+.. tip::
+
+  You can install dependencies for multiple clouds at once with following commands:
+
+  .. tab-set::
+    .. tab-item:: uv venv
+      :sync: uv-venv-tab
+
+      .. code-block:: shell
+
+        # From stable release
+        uv pip install "skypilot[kubernetes,aws,gcp]"
+        # From nightly build
+        uv pip install "skypilot-nightly[kubernetes,aws,gcp]"
+
+    .. tab-item:: uv tool
+      :sync: uv-tool-tab
+
+      .. code-block:: shell
+
+        # From stable release
+        uv tool install --with pip "skypilot[kubernetes,aws,gcp]"
+        # From nightly build
+        uv tool install --with pip "skypilot-nightly[kubernetes,aws,gcp]"
+
+    .. tab-item:: pip
+      :sync: pip-tab
+
+      .. code-block:: shell
+
+        # From stable release
+        pip install "skypilot[kubernetes,aws,gcp]"
+        # From nightly build
+        pip install "skypilot-nightly[kubernetes,aws,gcp]"
+        # From source
+        pip install -e ".[kubernetes,aws,gcp]"
+
 .. note::
 
-  After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
+  When using SkyPilot locally, run :code:`sky api stop` after each upgrade or dependency installation
+  to enable the new version.
   See :ref:`upgrade-skypilot` for more details.
 
+**To connect to a remote API server:**
 
-Connect to a remote API server (optional)
---------------------------------------------------
-
-If your team has set up a remote :ref:`SkyPilot API server <sky-api-server>`, connect to it by running:
+If your team has set up a :ref:`SkyPilot remote API server <sky-api-server>`, connect to it by running:
 
 .. code-block:: shell
 
   sky api login
 
-This is an optional step---by default, SkyPilot automatically starts and uses a local API server.  See more details in :ref:`sky-api-server-connect`.
+There is no need to install any dependencies locally.
 
+See :ref:`sky-api-server-connect` for more details.
 
+**To deploy a remote API server:**
+
+See :ref:`sky-api-server-deploy` for detailed instructions on how to deploy a remote API server.
 
 .. _verify-cloud-access:
 
 Verify cloud access
-------------------------------------
+-------------------
 
 After installation, run :code:`sky check` to verify that credentials are correctly set up:
 
@@ -273,21 +256,102 @@ section :ref:`below <cloud-account-setup>`.
   If you are having trouble setting up credentials, it may be because the API server started before they were
   configured. Try restarting the API server by running :code:`sky api stop` and then :code:`sky api start`.
 
+
+Request quotas for first time users
+-----------------------------------
+
+If your cloud account has not been used to launch instances before, the
+respective quotas are likely set to zero or a low limit.  This is especially
+true for GPU instances.
+
+Please follow :ref:`Requesting Quota Increase <quota>` to check quotas and request quota
+increases before proceeding.
+
+.. _shell-completion:
+
+Enable shell completion
+-----------------------
+
+SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).
+
+To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
+SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: shell
+
+  sky --install-shell-completion auto
+  # sky --install-shell-completion zsh
+  # sky --install-shell-completion bash
+  # sky --install-shell-completion fish
+
+Shell completion may perform poorly on certain shells and machines.
+If you experience any issues after installation, you can use the :code:`--uninstall-shell-completion` option to uninstall it, which you should similarly call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: shell
+
+  sky --uninstall-shell-completion auto
+  # sky --uninstall-shell-completion zsh
+  # sky --uninstall-shell-completion bash
+  # sky --uninstall-shell-completion fish
+
+---------
+
 .. _cloud-account-setup:
 
-Set up Kubernetes or clouds
----------------------------
+Appendix: Cloud access for local SkyPilot
+-----------------------------------------
 
-SkyPilot supports most major cloud providers.
-If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can access your enabled clouds<verify-cloud-access>`.
+SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration.
 
-Otherwise, configure access to at least one cloud using the following guides.
+When running SkyPilot locally, necessary dependencies and credentials need to be set up for the clouds you want to use. You can configure access to at least one cloud using the guides below.
+
+To configure infra access for team deployment instead, see :ref:`sky-api-server-configure-credentials`.
+
+SkyPilot supports most major cloud providers, Kubernetes, and Slurm.
 
 
 .. _kubernetes-installation:
 
 Kubernetes
 ~~~~~~~~~~
+
+Install the necessary dependencies for Kubernetes.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[kubernetes]"
+      # From nightly build
+      uv pip install "skypilot-nightly[kubernetes]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[kubernetes]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[kubernetes]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[kubernetes]"
+      # From nightly build
+      pip install "skypilot-nightly[kubernetes]"
+      # From source
+      pip install -e ".[kubernetes]"
 
 SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
 (e.g., EKS, GKE, Nebius Managed Kubernetes, Coreweave). The only requirement is a valid kubeconfig at
@@ -302,12 +366,12 @@ SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
 See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. tip::
-   If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
+  If you do not have access to a Kubernetes cluster, you can :ref:`deploy a local Kubernetes cluster on your laptop <kubernetes-setup-kind>` with ``sky local up``.
 
 .. _slurm-installation:
 
-Slurm
-~~~~~
+Slurm |early-access-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. note::
 
@@ -336,8 +400,45 @@ See :ref:`SkyPilot on Slurm <slurm-overview>` for more.
 .. _aws-installation:
 
 AWS
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
 
+Install the necessary dependencies for AWS.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[aws]"
+      # From nightly build
+      uv pip install "skypilot-nightly[aws]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[aws]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[aws]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[aws]"
+      # From nightly build
+      pip install "skypilot-nightly[aws]"
+      # From source
+      pip install -e ".[aws]"
 
 To set up AWS credentials, log into the AWS console and `create an access key for yourself <https://docs.aws.amazon.com/IAM/latest/UserGuide/access-key-self-managed.html#Using_CreateAccessKey>`_. If you don't see the "Security credentials" link shown in the AWS instructions, you may be using SSO; see :ref:`aws-sso`.
 
@@ -359,7 +460,45 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 .. _installation-gcp:
 
 GCP
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+
+Install the necessary dependencies for GCP.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[gcp]"
+      # From nightly build
+      uv pip install "skypilot-nightly[gcp]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[gcp]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[gcp]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[gcp]"
+      # From nightly build
+      pip install "skypilot-nightly[gcp]"
+      # From source
+      pip install -e ".[gcp]"
 
 .. tab-set::
 
@@ -390,8 +529,8 @@ GCP
           ./google-cloud-sdk/install.sh
           # Update your path with the newly installed gcloud
 
-        If you are using other architecture or OS,
-        follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ to download the appropriate package.
+      If you are using other architecture or OS,
+      follow the `Google Cloud SDK installation instructions <https://cloud.google.com/sdk/docs/install#installation_instructions>`_ to download the appropriate package.
 
         Be sure to complete the optional step that adds ``gcloud`` to your ``PATH``.
         This step is required for SkyPilot to recognize that your ``gcloud`` installation is configured correctly.
@@ -412,7 +551,49 @@ GCP
 **Optional**: To create a new GCP user with minimal permissions for SkyPilot, see :ref:`GCP User Creation <cloud-permissions-gcp>`.
 
 Azure
-~~~~~~~~~
+~~~~~
+
+Install the necessary dependencies for Azure.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+      uv pip install --prerelease allow azure-cli
+      uv pip install "skypilot[azure]"
+      # From nightly build
+      # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+      uv pip install --prerelease allow azure-cli
+      uv pip install "skypilot-nightly[azure]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[azure]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[azure]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[azure]"
+      # From nightly build
+      pip install "skypilot-nightly[azure]"
+      # From source
+      pip install -e ".[azure]"
 
 .. code-block:: shell
 
@@ -431,8 +612,46 @@ CoreWeave
 
 `CoreWeave <https://www.coreweave.com/>`__ integrates with SkyPilot through the :ref:`Kubernetes <kubernetes-installation>` integration. To set up:
 
-1. Launch a Coreweave CKS cluster from the CoreWeave console.
-2. Get your `kubeconfig <https://docs.coreweave.com/docs/products/cks/auth-access/manage-api-access-tokens>`_ from the CoreWeave console and place it at ``~/.kube/config``.
+1. Install the necessary dependencies for CoreWeave.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[coreweave]"
+      # From nightly build
+      uv pip install "skypilot-nightly[coreweave]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[coreweave]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[coreweave]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[coreweave]"
+      # From nightly build
+      pip install "skypilot-nightly[coreweave]"
+      # From source
+      pip install -e ".[coreweave]"
+
+2. Launch a Coreweave CKS cluster from the CoreWeave console.
+3. Get your `kubeconfig <https://docs.coreweave.com/docs/products/cks/auth-access/manage-api-access-tokens>`_ from the CoreWeave console and place it at ``~/.kube/config``.
 
 .. tip::
 
@@ -481,12 +700,53 @@ Next, configure the endpoint URL and addressing style for CoreWeave Object Stora
   - **External access (slow but accessible from anywhere)**: Use ``https://cwobject.com`` when launching SkyPilot clusters in non-CoreWeave CKS clusters. This endpoint is accessible from anywhere and uses secure HTTPS.
   - **Internal access (fast but only accessible within CoreWeave's network)**: Use ``http://cwlota.com`` only if you are launching SkyPilot clusters inside CoreWeave CKS clusters and do not need to upload local data to the bucket. The LOTA endpoint provides faster access within CoreWeave's network but only supports HTTP and is not accessible externally. Refer to `LOTA documentation <https://docs.coreweave.com/docs/products/storage/object-storage/lota/about>`_ for more details.
 
-
-
 Nebius
 ~~~~~~
 
-`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
+`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access:
+
+Install the necessary dependencies for Nebius.
+
+.. note::
+  Nebius is only supported for Python >= 3.10
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # Nebius requires 3.10 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[nebius]"
+      # From nightly build
+      uv pip install "skypilot-nightly[nebius]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # Nebius requires 3.10 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[nebius]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[nebius]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # Nebius requires 3.10 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[nebius]"
+      # From nightly build
+      pip install "skypilot-nightly[nebius]"
+      # From source
+      pip install -e ".[nebius]"
+
+Install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
 
 .. code-block:: shell
 
@@ -524,24 +784,100 @@ In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instr
   aws configure set region <REGION> --profile nebius
   aws configure set endpoint_url <ENDPOINT>  --profile nebius
 
-
-
 RunPod |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
+`RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access:
+
+Install the necessary dependencies for RunPod
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[runpod]"
+      # From nightly build
+      uv pip install "skypilot-nightly[runpod]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[runpod]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[runpod]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[runpod]"
+      # From nightly build
+      pip install "skypilot-nightly[runpod]"
+      # From source
+      pip install -e ".[runpod]"
+
+Go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
 
 .. code-block:: shell
 
   pip install "runpod>=1.6.1"
   runpod config
 
-
-
 OCI |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
-To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
+To access Oracle Cloud Infrastructure (OCI):
+
+Install the necessary dependencies for OCI.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[oci]"
+      # From nightly build
+      uv pip install "skypilot-nightly[oci]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[oci]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[oci]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[oci]"
+      # From nightly build
+      pip install "skypilot-nightly[oci]"
+      # From source
+      pip install -e ".[oci]"
+
+Setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
 
 .. code-block:: text
 
@@ -569,28 +905,103 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
       default:
         compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
-
-
 Lambda Cloud |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
+`Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access:
+
+Install the necessary dependencies for Lambda Cloud.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[lambda]"
+      # From nightly build
+      uv pip install "skypilot-nightly[lambda]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[lambda]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[lambda]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[lambda]"
+      # From nightly build
+      pip install "skypilot-nightly[lambda]"
+      # From source
+      pip install -e ".[lambda]"
+
+Go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
 
 .. code-block:: shell
 
   mkdir -p ~/.lambda_cloud
   echo "api_key = <your_api_key_here>" > ~/.lambda_cloud/lambda_keys
 
-
 Together AI |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Together AI <https://together.ai/>`_ offers GPU *instant clusters*. Accessing them is similar to using :ref:`Kubernetes <kubernetes-installation>`:
 
-1. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
-2. Get the Kubernetes config for the cluster
-3. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
-4. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
+1. Install the necessary dependencies for Kubernetes.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[kubernetes]"
+      # From nightly build
+      uv pip install "skypilot-nightly[kubernetes]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[kubernetes]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[kubernetes]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[kubernetes]"
+      # From nightly build
+      pip install "skypilot-nightly[kubernetes]"
+      # From source
+      pip install -e ".[kubernetes]"
+
+2. Launch a Together `Instant Cluster <https://api.together.ai/clusters/create>`_ with cluster type selected as Kubernetes
+3. Get the Kubernetes config for the cluster
+4. Save the kubeconfig to a file, e.g., ``./together.kubeconfig``
+5. Copy the kubeconfig to your ``~/.kube/config`` or merge the Kubernetes config with your existing kubeconfig file by running:
 
 .. code-block:: shell
 
@@ -598,9 +1009,49 @@ Together AI |community-badge|
 
 
 Paperspace |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access, go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
+`Paperspace <https://www.paperspace.com/>`_ is a cloud provider that provides access to GPU accelerated VMs. To configure Paperspace access:
+
+Install the necessary dependencies for Paperspace.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[paperspace]"
+      # From nightly build
+      uv pip install "skypilot-nightly[paperspace]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[paperspace]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[paperspace]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[paperspace]"
+      # From nightly build
+      pip install "skypilot-nightly[paperspace]"
+      # From source
+      pip install -e ".[paperspace]"
+
+Go to follow `these instructions to generate an API key <https://docs.digitalocean.com/reference/paperspace/api-keys/>`_. Add the API key with:
 
 .. code-block:: shell
 
@@ -608,9 +1059,49 @@ Paperspace |community-badge|
   echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
 Vast |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
-`Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
+`Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access:
+
+Install the necessary dependencies for Vast.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[vast]"
+      # From nightly build
+      uv pip install "skypilot-nightly[vast]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[vast]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[vast]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[vast]"
+      # From nightly build
+      pip install "skypilot-nightly[vast]"
+      # From source
+      pip install -e ".[vast]"
+
+Go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
 
 .. code-block:: shell
 
@@ -618,48 +1109,162 @@ Vast |community-badge|
   mkdir -p ~/.config/vastai
   echo "<your_api_key_here>" > ~/.config/vastai/vast_api_key
 
-
-
 Fluidstack |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access, go to the `Home <https://dashboard.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` :
+`Fluidstack <https://fluidstack.io/>`__ is a cloud provider offering low-cost GPUs. To configure Fluidstack access:
+
+Install the necessary dependencies for Fluidstack.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[fluidstack]"
+      # From nightly build
+      uv pip install "skypilot-nightly[fluidstack]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[fluidstack]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[fluidstack]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[fluidstack]"
+      # From nightly build
+      pip install "skypilot-nightly[fluidstack]"
+      # From source
+      pip install -e ".[fluidstack]"
+
+Go to the `Home <https://dashboard.fluidstack.io/>`__ page on your Fluidstack console to generate an API key and then add the :code:`API key` to :code:`~/.fluidstack/api_key` :
 
 .. code-block:: shell
 
   mkdir -p ~/.fluidstack
   echo "your_api_key_here" > ~/.fluidstack/api_key
 
-
-
 Cudo Compute |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Cudo Compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
 
-1. Create a `billing account <https://www.cudocompute.com/docs/guide/billing/>`__.
-2. Create a `project <https://www.cudocompute.com/docs/guide/projects/>`__.
-3. Create an `API Key <https://www.cudocompute.com/docs/guide/api-keys/>`__.
-4. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
-5. Run :code:`cudoctl init`:
+1. Install the necessary dependencies for Cudo Compute.
 
-   .. code-block:: shell
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
 
-     cudoctl init
-       ✔ api key: my-api-key
-       ✔ project: my-project
-       ✔ billing account: my-billing-account
-       ✔ context: default
-       config file saved ~/.config/cudo/cudo.yml
+    .. code-block:: shell
 
-     pip install "cudo-compute>=0.1.10"
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[cudo]"
+      # From nightly build
+      uv pip install "skypilot-nightly[cudo]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[cudo]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[cudo]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[cudo]"
+      # From nightly build
+      pip install "skypilot-nightly[cudo]"
+      # From source
+      pip install -e ".[cudo]"
+
+2. Create a `billing account <https://www.cudocompute.com/docs/guide/billing/>`__.
+3. Create a `project <https://www.cudocompute.com/docs/guide/projects/>`__.
+4. Create an `API Key <https://www.cudocompute.com/docs/guide/api-keys/>`__.
+5. Download and install the `cudoctl <https://www.cudocompute.com/docs/cli-tool/>`__ command line tool
+6. Run :code:`cudoctl init`:
+
+  .. code-block:: shell
+
+    cudoctl init
+      ✔ api key: my-api-key
+      ✔ project: my-project
+      ✔ billing account: my-billing-account
+      ✔ context: default
+      config file saved ~/.config/cudo/cudo.yml
+
+    pip install "cudo-compute>=0.1.10"
 
 If you want to want to use SkyPilot with a different Cudo Compute account or project, run :code:`cudoctl init` again.
 
 Shadeform |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Shadeform <https://www.shadeform.ai/>`_ is a cloud GPU marketplace that offers GPUs across a variety of vetted cloud providers. To configure Shadeform access, go to the `API Key Management <https://platform.shadeform.ai/settings/api>`_ page within your Shadeform account to generate a key and then add it to :code:`~/.shadeform/api_key`:
+`Shadeform <https://www.shadeform.ai/>`_ is a cloud GPU marketplace that offers GPUs across a variety of vetted cloud providers. To configure Shadeform access:
+
+Install the necessary dependencies for Shadeform.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[shadeform]"
+      # From nightly build
+      uv pip install "skypilot-nightly[shadeform]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[shadeform]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[shadeform]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[shadeform]"
+      # From nightly build
+      pip install "skypilot-nightly[shadeform]"
+      # From source
+      pip install -e ".[shadeform]"
+
+Go to the `API Key Management <https://platform.shadeform.ai/settings/api>`_ page within your Shadeform account to generate a key and then add it to :code:`~/.shadeform/api_key`:
 
 .. code-block:: shell
 
@@ -667,9 +1272,52 @@ Shadeform |community-badge|
   echo "<your_api_key_here>" > ~/.shadeform/api_key
 
 IBM |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
-To access `IBM's VPC service <https://www.ibm.com/cloud/vpc>`__, store the following fields in ``~/.ibm/credentials.yaml``:
+To access `IBM's VPC service <https://www.ibm.com/cloud/vpc>`__:
+
+Install the necessary dependencies for IBM.
+
+.. note::
+  IBM is only supported for Python <= 3.11
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # IBM requires 3.7 <= python <= 3.11.
+      # From stable release
+      uv pip install "skypilot[ibm]"
+      # From nightly build
+      uv pip install "skypilot-nightly[ibm]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # IBM requires 3.7 <= python <= 3.11.
+      # From stable release
+      uv tool install --with pip "skypilot[ibm]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[ibm]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # IBM requires 3.7 <= python <= 3.11.
+      # From stable release
+      pip install "skypilot[ibm]"
+      # From nightly build
+      pip install "skypilot-nightly[ibm]"
+      # From source
+      pip install -e ".[ibm]"
+
+Store the following fields in ``~/.ibm/credentials.yaml``:
 
 .. code-block:: text
 
@@ -701,14 +1349,55 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 .. note::
   :code:`sky check` does not reflect IBM COS's enabled status. :code:`IBM: enabled` only guarantees that IBM VM instances are enabled.
 
-
-
 SCP (Samsung Cloud Platform) |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
-To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
+To configure SCP access:
+
+Install the necessary dependencies for SCP.
+
+.. note::
+  SCP is only supported for Python <= 3.11
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SCP requires 3.7 <= python <= 3.11.
+      # From stable release
+      uv pip install "skypilot[scp]"
+      # From nightly build
+      uv pip install "skypilot-nightly[scp]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SCP requires 3.7 <= python <= 3.11.
+      # From stable release
+      uv tool install --with pip "skypilot[scp]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[scp]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SCP requires 3.7 <= python <= 3.11.
+      # From stable release
+      pip install "skypilot[scp]"
+      # From nightly build
+      pip install "skypilot-nightly[scp]"
+      # From source
+      pip install -e ".[scp]"
+
+You need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
 
 .. code-block:: shell
 
@@ -723,12 +1412,50 @@ To configure SCP access, you need access keys and the ID of the project your tas
 
   Multi-node clusters are currently not supported on SCP.
 
-
-
 VMware vSphere |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To configure VMware vSphere access, store the vSphere credentials in :code:`~/.vsphere/credential.yaml`:
+To configure VMware vSphere access:
+
+Install the necessary dependencies for VMware vSphere.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[vsphere]"
+      # From nightly build
+      uv pip install "skypilot-nightly[vsphere]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[vsphere]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[vsphere]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[vsphere]"
+      # From nightly build
+      pip install "skypilot-nightly[vsphere]"
+      # From source
+      pip install -e ".[vsphere]"
+
+Store the vSphere credentials in :code:`~/.vsphere/credential.yaml`:
 
 .. code-block:: shell
 
@@ -763,10 +1490,50 @@ After configuring the vSphere credentials, ensure that the necessary preparation
 .. _cloudflare-r2-installation:
 
 Cloudflare R2
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 Cloudflare offers `R2 <https://www.cloudflare.com/products/r2>`_, an S3-compatible object storage without any egress charges.
-SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up R2 support, run:
+SkyPilot can download/upload data to R2 buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up R2 support:
+
+Install the necessary dependencies for Cloudflare R2.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[cloudflare]"
+      # From nightly build
+      uv pip install "skypilot-nightly[cloudflare]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[cloudflare]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[cloudflare]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[cloudflare]"
+      # From nightly build
+      pip install "skypilot-nightly[cloudflare]"
+      # From source
+      pip install -e ".[cloudflare]"
+
+Run the following commands:
 
 .. code-block:: shell
 
@@ -797,9 +1564,49 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
 
 Prime Intellect |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access, install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
+`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access:
+
+Install the necessary dependencies for Prime Intellect.
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[primeintellect]"
+      # From nightly build
+      uv pip install "skypilot-nightly[primeintellect]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[primeintellect]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[primeintellect]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[primeintellect]"
+      # From nightly build
+      pip install "skypilot-nightly[primeintellect]"
+      # From source
+      pip install -e ".[primeintellect]"
+
+Install and configure `Prime Intellect CLI <https://docs.primeintellect.ai/cli-reference/introduction>`__:
 
 .. code-block:: shell
 
@@ -810,35 +1617,64 @@ Prime Intellect |community-badge|
 
 
 Seeweb |community-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 `Seeweb <https://www.seeweb.it/>`_ is your European GPU Cloud Provider. To access Seeweb:
 
+1. Install the necessary dependencies for Seeweb.
 
-1. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
-2. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
-3. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
+.. note::
+  Seeweb is only supported for Python >= 3.10
 
-.. code-block::
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
 
-    [DEFAULT]
-    api_key = <your-api-token>
+    .. code-block:: shell
 
+      # Seeweb requires 3.10 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[seeweb]"
+      # From nightly build
+      uv pip install "skypilot-nightly[seeweb]"
 
-Request quotas for first time users
---------------------------------------
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
 
-If your cloud account has not been used to launch instances before, the
-respective quotas are likely set to zero or a low limit.  This is especially
-true for GPU instances.
+    .. code-block:: shell
 
-Please follow :ref:`Requesting Quota Increase <quota>` to check quotas and request quota
-increases before proceeding.
+      # Seeweb requires 3.10 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[seeweb]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[seeweb]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # Seeweb requires 3.10 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[seeweb]"
+      # From nightly build
+      pip install "skypilot-nightly[seeweb]"
+      # From source
+      pip install -e ".[seeweb]"
+
+2. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+3. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
+4. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
+
+.. code-block:: text
+
+  [DEFAULT]
+  api_key = <your-api-token>
 
 .. _docker-image:
 
-Using SkyPilot in Docker
--------------------------
+Appendix: Using SkyPilot in Docker
+----------------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.
@@ -856,7 +1692,7 @@ You can simply run:
 
   docker exec -it sky /bin/bash
 
-If your cloud CLIs are already setup, your credentials (AWS and GCP) will be
+If your cloud CLIs are already set up, your credentials (AWS and GCP) will be
 mounted to the container and you can proceed to :ref:`Quickstart <quickstart>`.
 Otherwise, you can follow the instructions in :ref:`Cloud account setup
 <cloud-account-setup>` inside the container to set up your cloud accounts.
@@ -880,30 +1716,3 @@ Finally, you can stop the container with:
 See more details about the dev container image
 ``berkeleyskypilot/skypilot-nightly`` `here
 <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md#testing-in-a-container>`_.
-
-.. _shell-completion:
-
-Enable shell completion
--------------------------
-
-SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).
-
-To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
-SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
-
-.. code-block:: shell
-
-  sky --install-shell-completion auto
-  # sky --install-shell-completion zsh
-  # sky --install-shell-completion bash
-  # sky --install-shell-completion fish
-
-Shell completion may perform poorly on certain shells and machines.
-If you experience any issues after installation, you can use the :code:`--uninstall-shell-completion` option to uninstall it, which you should similarly call using the appropriate shell name or :code:`auto`:
-
-.. code-block:: shell
-
-  sky --uninstall-shell-completion auto
-  # sky --uninstall-shell-completion zsh
-  # sky --uninstall-shell-completion bash
-  # sky --uninstall-shell-completion fish

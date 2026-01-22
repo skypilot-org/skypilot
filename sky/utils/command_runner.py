@@ -10,6 +10,7 @@ import shlex
 import signal
 import socket
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -27,12 +28,17 @@ from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import context_utils
 from sky.utils import control_master_utils
+from sky.utils import env_options
 from sky.utils import git as git_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 logger = sky_logging.init_logger(__name__)
+
+# Global lock to serialize interactive SSH auth attempts from multiple
+# threads in a single request.
+_INTERACTIVE_AUTH_LOCK = threading.Lock()
 
 # Pattern to extract home directory from command output
 _HOME_DIR_PATTERN = re.compile(r'SKYPILOT_HOME_DIR: ([^\s\n]+)')
@@ -56,11 +62,22 @@ RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
-# Owner and group metadata is not needed for downloads.
 RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 
 _HASH_MAX_LENGTH = 10
 _DEFAULT_CONNECT_TIMEOUT = 30
+
+DEFAULT_SSH_CONTROL_NAME = '__default__'
+
+# SSH authentication failure patterns to detect when interactive auth retry
+# is needed.
+_SSH_AUTH_FAILURE_PATTERNS = [
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L542
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L1047
+    'Permission denied',
+    # https://github.com/openssh/openssh-portable/blob/master/sshconnect2.c#L479
+    'Authentication failed',
+]
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -95,6 +112,90 @@ ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD = (
     '{ [ "$(whoami)" == "root" ] && function sudo() { "$@"; } || true; }')
 
 
+def _proxyjump_to_proxycommand(proxy_jump: str,
+                               ssh_log_file: Optional[str] = None) -> str:
+    """Convert ProxyJump spec to an equivalent implicit ProxyCommand.
+
+    This mirrors OpenSSH's behavior when converting ProxyJump to ProxyCommand:
+        ProxyJump ubuntu@machine
+        -> ssh -l ubuntu -W '[%h]:%p' machine
+
+    For multi-hop (comma-separated), earlier hops are passed via -J to the
+    last hop's SSH, which runs -W to the final destination.
+    """
+    hops = [h.strip() for h in proxy_jump.split(',') if h.strip()]
+    if not hops:
+        raise ValueError(f'Invalid ProxyJump: {proxy_jump!r}')
+
+    def parse_hop(dest: str) -> Tuple[Optional[str], str, Optional[int]]:
+        # Parse [user@]host[:port]
+        user = None
+        hostport = dest
+        if '@' in dest:
+            user, hostport = dest.split('@', 1)
+            if not user:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        if not hostport:
+            raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        host = hostport
+        port = None
+        if hostport.startswith('['):
+            # Bracketed IPv6 case. Only parse a port if the closing bracket is
+            # immediately followed by ":" (i.e., "[...]:<port>").
+            end_bracket = hostport.find(']')
+            if end_bracket == -1:
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+            rest = hostport[end_bracket + 1:]
+            # After the closing bracket, only "" or ":<port>" is valid.
+            if rest != '' and not rest.startswith(':'):
+                raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+            if ']:' in hostport:
+                maybe_host, port_str = hostport.rsplit(':', 1)
+                if not port_str.isdigit():
+                    raise ValueError(f'Invalid port: {port_str} in {dest}')
+                host = maybe_host
+                port = int(port_str)
+            # Normalize bracketed IPv6 host by stripping "[...]" so the final
+            # ssh command uses a plain host argument (e.g., "2001:db8::1").
+            if host.startswith('[') and host.endswith(']'):
+                host = host[1:-1]
+        elif hostport.count(':') == 1:
+            # Non-IPv6 host case (hostname or IPv4) with exactly one ":".
+            # We treat this as host:port iff the suffix is a numeric port.
+            maybe_host, port_str = hostport.rsplit(':', 1)
+            if not port_str.isdigit():
+                raise ValueError(f'Invalid port: {port_str} in {dest}')
+            host = maybe_host
+            port = int(port_str)
+        if not host:
+            raise ValueError(f'Invalid ProxyJump argument: {dest!r}')
+        return user, host, port
+
+    # For multi-hop, use -J for earlier hops and last hop as the target
+    *prev_hops, last_hop = hops
+
+    cmd = ['ssh']
+    if ssh_log_file is not None:
+        cmd += ['-E', ssh_log_file]
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            cmd += ['-v']
+    if prev_hops:
+        cmd += ['-J', ','.join(prev_hops)]
+    user, host, port = parse_hop(last_hop)
+    if user:
+        cmd += ['-l', user]
+    if port is not None:
+        cmd += ['-p', str(port)]
+    # Redirect stderr to /dev/null to avoid hanging.
+    # The ProxyCommand inherits the parent ssh's stderr pipe.
+    # Without this, the tunnel might hold the pipe open, causing
+    # log_lib.process_subprocess_stream() to hang waiting for stderr EOF.
+    # Anyways only stdin and stdout is used for -W host:port.
+    cmd += ['-W', '\'[%h]:%p\'', host, '2>/dev/null']
+
+    return ' '.join(cmd)
+
+
 def ssh_options_list(
     ssh_private_key: Optional[str],
     ssh_control_name: Optional[str],
@@ -106,6 +207,7 @@ def ssh_options_list(
     port: int = 22,
     disable_control_master: Optional[bool] = False,
     escape_percent_expand: bool = False,
+    ssh_log_file: Optional[str] = None,
 ) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
@@ -153,13 +255,11 @@ def ssh_options_list(
     # ServerAliveInterval set, since the keepalive message may not be recognized
     # by the custom proxy command, such as AWS SSM Session Manager.
     #
-    # We also do not use ControlMaster when we use `kubectl port-forward`
-    # to access Kubernetes pods over SSH+Proxycommand. This is because the
-    # process running ProxyCommand is kept running as long as the ssh session
-    # is running and the ControlMaster keeps the session, which results in
-    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    # Similarly for ssh_proxy_jump, where we've also observed flakiness that may
+    # occassionally cause ssh to error with exit code 255.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
         control_path = f'{_ssh_control_path(ssh_control_name)}/%C'
         if escape_percent_expand:
             control_path = control_path.replace('%', '%%')
@@ -183,19 +283,26 @@ def ssh_options_list(
 
     if ssh_proxy_command is not None:
         logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
+        if ssh_proxy_jump is not None:
+            logger.warning('Both ProxyCommand and ProxyJump are specified. '
+                           'ProxyCommand will take precedence.')
         arg_dict.update({
             # Due to how log_lib.run_with_log() works (using shell=True) we
             # must quote this value.
             'ProxyCommand': shlex.quote(ssh_proxy_command),
         })
-
-    if ssh_proxy_jump is not None:
-        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} ---')
-        if ssh_proxy_command is not None:
-            logger.warning('Both ProxyCommand and ProxyJump are specified. '
-                           'ProxyCommand will take precedence.')
+    elif ssh_proxy_jump is not None:
+        # Convert ProxyJump to an implicit ProxyCommand, mirroring OpenSSH's
+        # behavior. This allows us to inject -E <log_file> because otherwise
+        # OpenSSH does not pass the log file to the derived ProxyCommand and
+        # we could only log it to stderr (with -v), which can be noisy.
+        # See: https://github.com/openssh/openssh-portable/blob/a6f8f793d427a831be1b350741faa4f34066d55f/ssh.c#L1355-L1382 # pylint: disable=line-too-long
+        derived_proxy_command = _proxyjump_to_proxycommand(
+            ssh_proxy_jump, ssh_log_file)
+        logger.debug(f'--- ProxyJump: {ssh_proxy_jump} -> '
+                     f'ProxyCommand: {derived_proxy_command} ---')
         arg_dict.update({
-            'ProxyJump': shlex.quote(ssh_proxy_jump),
+            'ProxyCommand': shlex.quote(derived_proxy_command),
         })
 
     return ssh_key_option + [
@@ -257,6 +364,7 @@ class CommandRunner:
         skip_num_lines: int,
         source_bashrc: bool = False,
         use_login: bool = True,
+        run_in_background: bool = False,
     ) -> str:
         """Returns the command to run."""
         if isinstance(cmd, list):
@@ -285,9 +393,19 @@ class CommandRunner:
                 shlex.quote('true && export OMP_NUM_THREADS=1 '
                             f'PYTHONWARNINGS=ignore && ({cmd})')
             ]
-        if not separate_stderr:
-            command.append('2>&1')
+        if run_in_background:
+            command = ['nohup'] + command + [
+                '>/dev/null',  # Detach stdout.
+                '2>&1',  # Detach stderr.
+                '</dev/null',  # Detach stdin.
+                '&',  # Run in background.
+            ]
+        else:
+            if not separate_stderr:
+                command.append('2>&1')
         if not process_stream and skip_num_lines:
+            assert not run_in_background, (
+                'run_in_background and skip_num_lines cannot be used together')
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group
@@ -341,8 +459,7 @@ class CommandRunner:
         if prefix_command is not None:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
-        if not up:
-            rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
+        rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.
@@ -448,6 +565,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -466,6 +584,7 @@ class CommandRunner:
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -644,7 +763,7 @@ class SSHCommandRunner(CommandRunner):
         node: Tuple[str, int],
         ssh_user: str,
         ssh_private_key: Optional[str],
-        ssh_control_name: Optional[str] = '__default__',
+        ssh_control_name: Optional[str] = DEFAULT_SSH_CONTROL_NAME,
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
         docker_user: Optional[str] = None,
@@ -765,10 +884,22 @@ class SSHCommandRunner(CommandRunner):
                                      port_forward=port_forward,
                                      connect_timeout=connect_timeout)
 
-    def ssh_base_command(self, *, ssh_mode: SshMode,
+    def ssh_base_command(self,
+                         *,
+                         ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
-                         connect_timeout: Optional[int]) -> List[str]:
+                         connect_timeout: Optional[int],
+                         ssh_log_file: Optional[str] = None) -> List[str]:
         ssh = ['ssh']
+        if ssh_log_file is not None:
+            # -E is needed to capture debug logs from the ControlMaster process
+            # which is forked from the main ssh process.
+            # However, this does not work out of the box with ProxyJump,
+            # since the -E flag is not passed to the ssh proxy subprocess.
+            # For that we have to do some extra work in ssh_options_list.
+            ssh += ['-E', ssh_log_file]
+            if env_options.Options.SHOW_DEBUG_INFO.get():
+                ssh += ['-v']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
@@ -797,9 +928,8 @@ class SSHCommandRunner(CommandRunner):
             docker_ssh_proxy_command=docker_ssh_proxy_command,
             port=self.port,
             connect_timeout=connect_timeout,
-            disable_control_master=self.disable_control_master) + [
-                f'{self.ssh_user}@{self.ip}'
-            ]
+            disable_control_master=self.disable_control_master,
+            ssh_log_file=ssh_log_file) + [f'{self.ssh_user}@{self.ip}']
 
     def _retry_with_interactive_auth(
             self, session_id: str, command: List[str], log_path: str,
@@ -819,108 +949,109 @@ class SSHCommandRunner(CommandRunner):
 
         See ssh_options_list for when ControlMaster is not enabled.
         """
-        extra_options = [
-            # Override ControlPersist to reduce frequency of manual user
-            # intervention. The default from ssh_options_list is only 5m.
-            #
-            # NOTE: When used with ProxyJump, the connection can die
-            # earlier than expected, so it is recommended to also enable
-            # ControlMaster on the jump host's SSH config. It is hard to
-            # tell why exactly, because enabling -v makes this problem
-            # disappear for some reasons.
-            '-o',
-            'ControlPersist=1d',
-        ]
-        if self._ssh_proxy_jump is not None:
-            logger.warning(f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
-                           'recommended to also enable ControlMaster on the '
-                           'jump host\'s SSH config to keep the authenticated '
-                           f'connection alive for longer.{colorama.Fore.RESET}')
-        command = command[:1] + extra_options + command[1:]
+        with _INTERACTIVE_AUTH_LOCK:
+            extra_options = [
+                # Override ControlPersist to reduce frequency of manual user
+                # intervention. The default from ssh_options_list is only 5m.
+                #
+                # NOTE: When used with ProxyJump, the connection can die
+                # earlier than expected, so it is recommended to also enable
+                # ControlMaster on the jump host's SSH config. It is hard to
+                # tell why exactly, because enabling -v makes this problem
+                # disappear for some reasons.
+                '-o',
+                'ControlPersist=1d',
+            ]
+            if self._ssh_proxy_jump is not None:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}When using ProxyJump, it is '
+                    'recommended to also enable ControlMaster on the '
+                    'jump host\'s SSH config to keep the authenticated '
+                    f'connection alive for longer.{colorama.Fore.RESET}')
+            command = command[:1] + extra_options + command[1:]
 
-        # Create PTY for SSH. PTY slave for stdin from user, PTY master
-        # for password/auth prompts from SSH.
-        pty_m_fd, pty_s_fd = pty.openpty()
+            # Create PTY for SSH. PTY slave for stdin from user, PTY master
+            # for password/auth prompts from SSH.
+            pty_m_fd, pty_s_fd = pty.openpty()
 
-        # Create Unix socket to pass PTY master fd to websocket handler
-        fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
-        if os.path.exists(fd_socket_path):
-            os.unlink(fd_socket_path)
-        fd_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        fd_server.bind(fd_socket_path)
-        fd_server.listen(1)
-        fd_server.settimeout(60)
-
-        # Signal client to initiate websocket for interactive auth
-        interactive_signal = f'<sky-interactive session="{session_id}"/>'
-        print(interactive_signal, flush=True)
-
-        def handle_unix_socket_connection():
-            """Background thread to handle Unix socket connection."""
-            conn = None
-            try:
-                # Wait for websocket handler to connect.
-                conn, _ = fd_server.accept()
-                # Send PTY master fd through Unix socket.
-                interactive_utils.send_fd(conn, pty_m_fd)
-                # We don't need to block here to wait for the websocket
-                # handler, as SSH will continue by itself once auth
-                # is complete.
-            except socket.timeout:
-                logger.debug('Timeout waiting for interactive auth connection')
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in Unix socket connection: '
-                             f'{common_utils.format_exception(e)}')
-            finally:
-                if conn is not None:
-                    try:
-                        conn.close()
-                    except Exception:  # pylint: disable=broad-except
-                        pass
-                try:
-                    os.close(pty_m_fd)
-                except Exception:  # pylint: disable=broad-except
-                    pass
-
-        unix_sock_thread = threading.Thread(
-            target=handle_unix_socket_connection, daemon=True)
-        unix_sock_thread.start()
-
-        try:
-
-            def setup_pty_session():
-                # Set PTY as controlling terminal so SSH can access /dev/tty
-                # for keyboard-interactive auth. Without this:
-                # "can't open /dev/tty: Device not configured"
-                fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
-                # Ignore SIGHUP so ControlMaster survives when PTY closes.
-                signal.signal(signal.SIGHUP, signal.SIG_IGN)
-                # Ignore SIGTERM so ControlMaster survives subprocess_daemon
-                # killing the process group.
-                if self._ssh_proxy_jump is not None:
-                    signal.signal(signal.SIGTERM, signal.SIG_IGN)
-
-            return log_lib.run_with_log(' '.join(command),
-                                        log_path,
-                                        require_outputs=require_outputs,
-                                        stream_logs=stream_logs,
-                                        process_stream=process_stream,
-                                        shell=True,
-                                        executable=executable,
-                                        preexec_fn=setup_pty_session,
-                                        **kwargs)
-        except Exception as e:
-            raise RuntimeError(f'Exception in setup: {e}') from e
-        finally:
-            # Clean up PTY fds and sockets.
-            fd_server.close()
+            # Create Unix socket to pass PTY master fd to websocket handler
+            fd_socket_path = interactive_utils.get_pty_socket_path(session_id)
             if os.path.exists(fd_socket_path):
                 os.unlink(fd_socket_path)
+            fd_server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            fd_server.bind(fd_socket_path)
+            fd_server.listen(1)
+            fd_server.settimeout(60)
+
+            # Signal client to initiate websocket for interactive auth
+            interactive_signal = f'<sky-interactive session="{session_id}"/>'
+            print(interactive_signal, flush=True)
+
+            def handle_unix_socket_connection():
+                """Background thread to handle Unix socket connection."""
+                conn = None
+                try:
+                    # Wait for websocket handler to connect.
+                    conn, _ = fd_server.accept()
+                    # Send PTY master fd through Unix socket.
+                    interactive_utils.send_fd(conn, pty_m_fd)
+                    # We don't need to block here to wait for the websocket
+                    # handler, as SSH will continue by itself once auth
+                    # is complete.
+                except socket.timeout:
+                    logger.debug(
+                        'Timeout waiting for interactive auth connection')
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error in Unix socket connection: '
+                                 f'{common_utils.format_exception(e)}')
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+                    try:
+                        os.close(pty_m_fd)
+                    except Exception:  # pylint: disable=broad-except
+                        pass
+
+            unix_sock_thread = threading.Thread(
+                target=handle_unix_socket_connection, daemon=True)
+            unix_sock_thread.start()
+
             try:
-                os.close(pty_m_fd)
-            except OSError:
-                pass  # Already closed by background thread
-            os.close(pty_s_fd)
+
+                def setup_pty_session():
+                    # Set PTY as controlling terminal so SSH can access /dev/tty
+                    # for keyboard-interactive auth. Without this:
+                    # "can't open /dev/tty: Device not configured"
+                    fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
+                    # Ignore SIGHUP so ControlMaster survives when PTY closes.
+                    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    # Ignore SIGTERM so ControlMaster survives subprocess_daemon
+                    # killing the process group.
+                    if self._ssh_proxy_jump is not None:
+                        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+                return log_lib.run_with_log(' '.join(command),
+                                            log_path,
+                                            require_outputs=require_outputs,
+                                            stream_logs=stream_logs,
+                                            process_stream=process_stream,
+                                            shell=True,
+                                            executable=executable,
+                                            preexec_fn=setup_pty_session,
+                                            **kwargs)
+            except Exception as e:
+                raise RuntimeError(f'Exception in setup: {e}') from e
+            finally:
+                # Clean up PTY fds and sockets.
+                fd_server.close()
+                if os.path.exists(fd_socket_path):
+                    os.unlink(fd_socket_path)
+                # Note: pty_m_fd is closed by handle_unix_socket_connection.
+                # Do NOT close it here - the FD number may have been reused.
+                os.close(pty_s_fd)
 
     def close_cached_connection(self) -> None:
         """Close the cached connection to the remote machine.
@@ -962,6 +1093,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -986,17 +1118,25 @@ class SSHCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
             or
             A tuple of (returncode, stdout, stderr).
         """
+        if self.enable_interactive_auth:
+            fd, ssh_log_file = tempfile.mkstemp(prefix='sky_ssh_',
+                                                suffix='.log')
+            os.close(fd)
+        else:
+            ssh_log_file = None
 
         base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
-            connect_timeout=connect_timeout)
+            connect_timeout=connect_timeout,
+            ssh_log_file=ssh_log_file)
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
@@ -1004,11 +1144,13 @@ class SSHCommandRunner(CommandRunner):
             proc = subprocess_utils.run(command, shell=False, check=False)
             return proc.returncode, '', ''
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = base_ssh_command + [shlex.quote(command_str)]
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
@@ -1027,34 +1169,62 @@ class SSHCommandRunner(CommandRunner):
                 command += [f'> {log_path}']
             executable = '/bin/bash'
 
-        result = log_lib.run_with_log(' '.join(command),
-                                      log_path,
-                                      require_outputs=require_outputs,
-                                      stream_logs=stream_logs,
-                                      process_stream=process_stream,
-                                      shell=True,
-                                      executable=executable,
-                                      **kwargs)
-        if not self.enable_interactive_auth:
-            return result
+        try:
+            result = log_lib.run_with_log(' '.join(command),
+                                          log_path,
+                                          require_outputs=require_outputs,
+                                          stream_logs=stream_logs,
+                                          process_stream=process_stream,
+                                          shell=True,
+                                          executable=executable,
+                                          **kwargs)
+            if not self.enable_interactive_auth:
+                return result
 
-        if require_outputs:
-            returncode, _, _ = result
-        else:
-            returncode = result
+            if require_outputs:
+                returncode, _, _ = result
+            else:
+                returncode = result
 
-        if returncode != 255:
-            return result
-        # Exit code 255 indicates an SSH connection error. It does not
-        # necessarily mean an auth failure, but when ControlMaster is used,
-        # the stdout/stderr does not contain the auth failure message,
-        # which is why we don't check the output here, and just attempt
-        # the interactive auth flow.
-        session_id = str(uuid.uuid4())
-        return self._retry_with_interactive_auth(session_id, command, log_path,
-                                                 require_outputs,
-                                                 process_stream, stream_logs,
-                                                 executable, **kwargs)
+            if returncode != 255:
+                return result
+
+            # Check SSH verbose log file for auth failure patterns.
+            # This is more reliable than checking stderr, which may be empty
+            # when ControlMaster or ProxyJump is used.
+            has_auth_failure = False
+            ssh_log_content = ''
+            if ssh_log_file is not None:
+                try:
+                    with open(ssh_log_file, 'r', encoding='utf-8') as f:
+                        ssh_log_content = f.read()
+                    has_auth_failure = any(
+                        pattern in ssh_log_content
+                        for pattern in _SSH_AUTH_FAILURE_PATTERNS)
+                except OSError:
+                    # Fall back to retrying with interactive auth to be safe.
+                    has_auth_failure = True
+
+            if not has_auth_failure:
+                # No auth failure detected; don't attempt interactive auth.
+                if require_outputs:
+                    returncode, stdout, stderr = result
+                    return returncode, stdout, stderr + '\n' + ssh_log_content
+                return result
+
+            session_id = str(uuid.uuid4())
+            return self._retry_with_interactive_auth(session_id, command,
+                                                     log_path, require_outputs,
+                                                     process_stream,
+                                                     stream_logs, executable,
+                                                     **kwargs)
+        finally:
+            # Clean up the SSH verbose log file.
+            if ssh_log_file is not None:
+                try:
+                    os.unlink(ssh_log_file)
+                except OSError:
+                    pass
 
     @timeline.event
     def rsync(
@@ -1209,6 +1379,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
         name and namespace.
@@ -1233,6 +1404,7 @@ class KubernetesCommandRunner(CommandRunner):
                 output. This is used when the output is not processed by
                 SkyPilot but we still want to get rid of some warning messages,
                 such as SSH warnings.
+            run_in_background: Whether to run the command in the background.
 
         Returns:
             returncode
@@ -1269,11 +1441,13 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_base_command.append('-i')
         kubectl_base_command += [*kubectl_args, '--']
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            run_in_background=run_in_background)
         command = kubectl_base_command + [
             # It is important to use /bin/bash -c here to make sure we quote the
             # command to be run properly. Otherwise, directly appending commands
@@ -1387,16 +1561,19 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            run_in_background: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Use subprocess to run the command."""
         del port_forward, ssh_mode, connect_timeout  # Unused.
 
-        command_str = self._get_command_to_run(cmd,
-                                               process_stream,
-                                               separate_stderr,
-                                               skip_num_lines=skip_num_lines,
-                                               source_bashrc=source_bashrc,
-                                               use_login=False)
+        command_str = self._get_command_to_run(
+            cmd,
+            process_stream,
+            separate_stderr,
+            skip_num_lines=skip_num_lines,
+            source_bashrc=source_bashrc,
+            use_login=False,
+            run_in_background=run_in_background)
 
         log_dir = os.path.expanduser(os.path.dirname(log_path))
         os.makedirs(log_dir, exist_ok=True)
@@ -1508,37 +1685,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         self.job_id = job_id
         self.slurm_node = slurm_node
 
-        # Build a chained ProxyCommand that goes through the login node to reach
-        # the compute node where the job is running.
-
-        # First, build SSH options to reach the login node, using the user's
-        # existing proxy command or proxy jump if provided.
-        proxy_ssh_options = ' '.join(
-            ssh_options_list(
-                self.ssh_private_key,
-                self.ssh_control_name,
-                ssh_proxy_command=self._ssh_proxy_command,
-                ssh_proxy_jump=self._ssh_proxy_jump,
-                port=self.port,
-                disable_control_master=self.disable_control_master,
-                # We need to escape the %C on the ControlPath,
-                # since this is going to be embedded in a
-                # ProxyCommand.
-                escape_percent_expand=True))
-        login_node_proxy_command = (f'ssh {proxy_ssh_options} '
-                                    f'-W %h:%p {self.ssh_user}@{self.ip}')
-
-        # Update the proxy command to be the login node proxy, which will
-        # be used by super().run() to reach the compute node.
-        self._ssh_proxy_command = login_node_proxy_command
-        # Clear the proxy jump since it's now embedded in the proxy command.
-        self._ssh_proxy_jump = None
-        # Update self.ip to target the compute node.
-        self.ip = slurm_node
-        # Assume the compute node's SSH port is 22.
-        # TODO(kevin): Make this configurable if needed.
-        self.port = 22
-
     def rsync(
         self,
         source: str,
@@ -1549,40 +1695,46 @@ class SlurmCommandRunner(SSHCommandRunner):
         stream_logs: bool = True,
         max_retry: int = 1,
     ) -> None:
-        """Rsyncs files directly to the Slurm compute node,
-        by proxying through the Slurm login node.
-
-        For Slurm, files need to be accessible by compute nodes where jobs
-        execute via srun. This means either it has to be on the compute node's
-        local filesystem, or on a shared filesystem.
+        """Rsyncs files to/from the Slurm compute node using srun as transport.
         """
-        # TODO(kevin): We can probably optimize this to skip the proxying
-        # if the target dir is in a shared filesystem, since it will
-        # be accessible by the compute node.
+        ssh_command = ' '.join(
+            self.ssh_base_command(ssh_mode=SshMode.NON_INTERACTIVE,
+                                  port_forward=None,
+                                  connect_timeout=None))
 
-        # Build SSH options for rsync using the ProxyCommand set up in __init__
-        # to reach the compute node through the login node.
-        ssh_options = ' '.join(
-            ssh_options_list(
-                # Use the same private key as the one used for
-                # connecting to the login node.
-                self.ssh_private_key,
-                None,
-                ssh_proxy_command=self._ssh_proxy_command,
-                disable_control_master=True))
-        rsh_option = f'ssh {ssh_options}'
-
-        self._rsync(
-            source,
-            target,
-            # Compute node
-            node_destination=f'{self.ssh_user}@{self.slurm_node}',
-            up=up,
-            rsh_option=rsh_option,
-            log_path=log_path,
-            stream_logs=stream_logs,
-            max_retry=max_retry,
-            get_remote_home_dir=lambda: self.sky_dir)
+        # The script parses job_id+node_list from $1 (node_destination)
+        # shifts past $1, and then SSHs to login node, and runs srun with
+        # the remaining arguments.
+        script_content = f"""#!/bin/bash
+job_id=$(echo "$1" | cut -d+ -f1)
+node_list=$(echo "$1" | cut -d+ -f2)
+shift
+exec {ssh_command} srun --unbuffered --quiet --overlap \
+    --jobid="$job_id" --nodelist="$node_list" --nodes=1 --ntasks=1 "$@"
+"""
+        encoded_info = f'{self.job_id}+{self.slurm_node}'
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh',
+                                         delete=False) as f:
+            f.write(script_content)
+            rsh_script_path = f.name
+        try:
+            os.chmod(rsh_script_path, 0o755)
+            self._rsync(source,
+                        target,
+                        node_destination=encoded_info,
+                        up=up,
+                        rsh_option=rsh_script_path,
+                        log_path=log_path,
+                        stream_logs=stream_logs,
+                        max_retry=max_retry,
+                        get_remote_home_dir=lambda: self.sky_dir)
+        finally:
+            try:
+                os.unlink(rsh_script_path)
+            except OSError as e:
+                logger.warning('Failed to remove temporary rsh script '
+                               f'{rsh_script_path}: '
+                               f'{common_utils.exception_to_string(e)}')
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1604,14 +1756,6 @@ class SlurmCommandRunner(SSHCommandRunner):
         # could be part of a shared filesystem.
         # And similarly for SKY_RUNTIME_DIR. See constants.\
         # SKY_RUNTIME_DIR_ENV_VAR_KEY for more details.
-        #
-        # SSH directly to the compute node instead of using srun.
-        # This avoids Slurm's proctrack/cgroup which kills all processes
-        # when the job step ends (including child processes launched as
-        # a separate process group), breaking background process spawning
-        # (e.g., JobScheduler._run_job which uses launch_new_process_tree).
-        # Note: proctrack/cgroup is enabled by default on Nebius'
-        # Managed Soperator.
         cmd = (
             f'export {constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}='
             f'"{self.skypilot_runtime_dir}" && '
@@ -1621,5 +1765,9 @@ class SlurmCommandRunner(SSHCommandRunner):
             # ~/.cache/uv.
             f'export UV_CACHE_DIR=/tmp/uv_cache_$(id -u) && '
             f'cd {self.sky_dir} && export HOME=$(pwd) && {cmd}')
+
+        cmd = (f'srun --unbuffered --quiet --overlap --jobid={self.job_id} '
+               f'--nodelist={self.slurm_node} '
+               f'--nodes=1 --ntasks=1 bash -c {shlex.quote(cmd)}')
 
         return super().run(cmd, **kwargs)

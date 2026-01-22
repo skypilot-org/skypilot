@@ -27,16 +27,13 @@ Values
 
 Below is the available helm value keys and the default value of each key:
 
-..
-  Omitted values:
-  * storage.accessMode: accessMode other than ReadWriteOnce is not tested yet.
-
 .. parsed-literal::
 
   :ref:`global <helm-values-global>`:
     :ref:`imageRegistry <helm-values-global-imageRegistry>`: null
     :ref:`imagePullSecrets <helm-values-global-imagePullSecrets>`: null
     :ref:`extraEnvs <helm-values-global-extraEnvs>`: null
+  :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`apiService <helm-values-apiService>`:
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
@@ -111,6 +108,7 @@ Below is the available helm value keys and the default value of each key:
 
   :ref:`ingress <helm-values-ingress>`:
     :ref:`enabled <helm-values-ingress-enabled>`: true
+    :ref:`unified <helm-values-ingress-unified>`: false
     :ref:`authSecret <helm-values-ingress-authSecret>`: null
     :ref:`authCredentials <helm-values-ingress-authCredentials>`: null
     :ref:`host <helm-values-ingress-host>`: null
@@ -332,6 +330,35 @@ Default: ``null``
       - name: HTTP_PROXY
         value: http://proxy.example.com
 
+
+.. _helm-values-fullnameOverride:
+
+``fullnameOverride``
+~~~~~~~~~~~~~~~~~~~~
+
+Override the full name used for all resources created by this chart. By default, names are derived from the Helm release name (``Release.Name``). Set ``fullnameOverride`` to enforce a specific base name when coordinating multiple environments.
+
+Note that sub charts will not inherit the top-level ``fullnameOverride`` value, so you need to set it for each sub chart if you want to use a different base name for each sub chart, and the ``fullnameOverride`` of prometheus must be consistent with the top-level ``fullnameOverride`` to make sure the scrape target is consistent.
+
+.. code-block:: yaml
+
+  fullenameOverride: custom-name
+  prometheus:
+    # Must use the same fullnameOverride as top-level
+    fullnameOverride: custom-name
+  ingress-nginx:
+    fullnameOverride: other-name
+  grafana:
+    fullnameOverride: other-name
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  fullnameOverride: custom-name
+  prometheus:
+    fullnameOverride: custom-name
+
 .. _helm-values-apiService:
 
 ``apiService``
@@ -391,6 +418,11 @@ Upgrade strategy for the API server deployment. Available options are:
 - ``RollingUpdate``: Create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
 
 When set to ``RollingUpdate``, an external database must be configured via :ref:`apiService.dbConnectionSecretName <helm-values-apiService-dbConnectionSecretName>` or :ref:`apiService.dbConnectionString <helm-values-apiService-dbConnectionString>`.
+
+For persistent storage with RollingUpdate:
+
+- If :ref:`storage.enabled=true <helm-values-storage-enabled>`, use :ref:`storage.accessMode <helm-values-storage-accessMode>` =ReadWriteMany with an RWX-capable storage class (e.g., NFS-backed storage). This sets the ``SKYPILOT_API_SERVER_STORAGE_ENABLED`` environment variable, ensuring managed job logs and file mounts persist across rolling updates.
+- If ``storage.enabled=false``, file mounts and logs will be lost on pod restart. Consider configuring ``jobs.bucket`` in the SkyPilot config to persist file mounts to cloud storage.
 
 Default: ``"Recreate"``
 
@@ -1112,6 +1144,19 @@ Default: ``null``
 
 Enable persistent storage for the API server, setting this to ``false`` is prone to data loss and should only be used for testing.
 
+When enabled, SkyPilot creates a PersistentVolumeClaim (PVC) to persist:
+
+- **Managed job logs**: Accessible via ``sky jobs logs <job_id>`` and ``sky jobs logs --controller <job_id>``
+- **File mounts**: Local files uploaded during managed job submission
+
+.. note::
+
+  Setting ``storage.enabled=true`` sets the environment variable ``SKYPILOT_API_SERVER_STORAGE_ENABLED=true`` on the API server pod. This ensures that managed job logs and file mounts persist across API server restarts and rolling updates.
+
+  Transient logs (api_server logs, sky-* cluster logs) are NOT persisted to minimize storage usage.
+
+For RollingUpdate upgrade strategy, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>` for storage access mode requirements.
+
 Default: ``true``
 
 .. code-block:: yaml
@@ -1138,14 +1183,31 @@ Default: ``""``
 ``storage.accessMode``
 ^^^^^^^^^^^^^^^^^^^^^^
 
-Access mode for the persistent storage volume. Can be set to ``ReadWriteOnce`` or ``ReadWriteMany`` depending on what is supported by the storage class.
+Access mode for the persistent storage volume. Available options:
+
+- ``ReadWriteOnce`` (RWO): The volume can be mounted as read-write by a single node. This is the default and works with most storage classes. Compatible with ``Recreate`` upgrade strategy. **Not compatible with RollingUpdate upgrade strategy** since the PVC cannot be mounted by both old and new pods simultaneously during rolling updates.
+
+- ``ReadWriteMany`` (RWX): The volume can be mounted as read-write by multiple nodes. Compatible with both ``Recreate`` and ``RollingUpdate`` upgrade strategies. Requires an RWX-capable storage class such as:
+
+  - GKE: Filestore-backed storage class
+  - EKS: EFS CSI driver
+  - AKS: Azure Files
+  - On-prem: NFS provisioner
+
+For more details on upgrade strategies, see :ref:`apiService.upgradeStrategy <helm-values-apiService-upgradeStrategy>`.
 
 Default: ``ReadWriteOnce``
 
 .. code-block:: yaml
 
+  # For Recreate upgrade strategy (default), ReadWriteOnce is sufficient
   storage:
     accessMode: ReadWriteOnce
+
+  # For RollingUpdate upgrade strategy with persistent storage, use ReadWriteMany
+  storage:
+    accessMode: ReadWriteMany
+    storageClassName: <your-rwx-storage-class>
 
 .. _helm-values-storage-size:
 
@@ -1221,6 +1283,20 @@ Default: ``true``
 
   ingress:
     enabled: true
+
+.. _helm-values-ingress-unified:
+
+``ingress.unified``
+^^^^^^^^^^^^^^^^^^^
+
+Use a single ingress resource for the API server and other auxiliary services. Dedicated ingresses for these services will be skipped, e.g. grafana and oauth2-proxy.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  ingress:
+    unified: false
 
 .. _helm-values-ingress-authSecret:
 

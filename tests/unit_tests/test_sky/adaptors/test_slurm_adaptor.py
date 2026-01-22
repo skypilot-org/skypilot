@@ -269,6 +269,7 @@ class TestGetJobNodes:
 
             # Verify wait_for_job_nodes was called with the custom timeout
             mock_wait.assert_called_once_with(job_id, timeout=custom_timeout)
+            assert mock_run.call_count == 1
 
     def test_get_job_nodes_uses_default_timeout_when_not_provided(self):
         """Test that get_job_nodes uses default timeout when not provided."""
@@ -290,6 +291,7 @@ class TestGetJobNodes:
             # Verify wait_for_job_nodes was called with None (which becomes default)
             mock_wait.assert_called_once_with(
                 job_id, timeout=slurm._SLURM_DEFAULT_PROVISION_TIMEOUT)
+            assert mock_run.call_count == 1
 
     def test_get_job_nodes_skips_wait_when_wait_false(self):
         """Test that get_job_nodes skips waiting when wait=False."""
@@ -310,3 +312,166 @@ class TestGetJobNodes:
 
             # Verify wait_for_job_nodes was not called
             mock_wait.assert_not_called()
+            assert mock_run.call_count == 1
+
+    def test_get_job_nodes_resolves_hostnames_via_login_node(self):
+        """Test hostnames are resolved via getent ahostsv4 on the login node."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client, 'wait_for_job_nodes'), \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                # First call: squeue output with hostnames
+                (0, 'worker-1 worker-1\nworker-10 worker-10', ''),
+                # Second call: resolve loop output (hostname ip per line)
+                (0, 'worker-1 10.20.30.1\nworker-10 10.20.30.10', ''),
+            ]
+
+            nodes, node_ips = client.get_job_nodes('12345', wait=False)
+
+            assert nodes == ['worker-1', 'worker-10']
+            assert node_ips == ['10.20.30.1', '10.20.30.10']
+
+            # Verify only 2 SSH calls were made (not 1 + N)
+            assert mock_run.call_count == 2
+            # Verify the resolve command was called with both hostnames
+            second_call = mock_run.call_args_list[1][0][0]
+            assert 'for h in worker-1 worker-10' in second_call
+            assert 'getent ahostsv4' in second_call
+
+    def test_get_job_nodes_hostname_resolution_failure(self):
+        """Test error handling when hostname resolution fails."""
+
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        # One hostname resolves, one fails (getent returns empty)
+        resolve_output = (f'worker-1 10.20.30.1\n'
+                          f'worker-10 {slurm._UNRESOLVED_HOSTNAME_MARKER}')
+
+        with mock.patch.object(client, 'wait_for_job_nodes'), \
+             mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                # First call: squeue output with hostnames
+                (0, 'worker-1 worker-1\nworker-10 worker-10', ''),
+                # Second call: resolve loop output with one UNRESOLVED
+                (0, resolve_output, ''),
+            ]
+
+            with pytest.raises(RuntimeError,
+                               match='Failed to resolve hostnames'):
+                client.get_job_nodes('12345', wait=False)
+
+
+class TestGetAllJobsGres:
+    """Test SlurmClient.get_all_jobs_gres()."""
+
+    def test_get_all_jobs_gres_expansion(self):
+        """Test parsing and expanding multi-node jobs using py-hostlist."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        squeue_output = (f'node01{slurm.SEP}gpu:h100:4\n'
+                         f'node01{slurm.SEP}N/A\n'
+                         f'node01,node03{slurm.SEP}gpu:h100:1\n'
+                         f'node[02-03,06]{slurm.SEP}gpu:h100:2')
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, squeue_output, '')
+
+            result = client.get_all_jobs_gres()
+
+            # Verify squeue was called
+            mock_run.assert_called_once_with(
+                f'squeue -h --states=running,completing -o "%N{slurm.SEP}%b"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            assert len(result) == 4
+            assert result['node01'] == ['gpu:h100:4', 'gpu:h100:1']
+            assert result['node02'] == ['gpu:h100:2']
+            assert result['node03'] == ['gpu:h100:1', 'gpu:h100:2']
+            assert result['node06'] == ['gpu:h100:2']
+
+
+class TestParseMaxtime:
+    """Test _parse_maxtime()."""
+
+    def test_parse_maxtime_unlimited(self):
+        """Test parsing UNLIMITED MaxTime returns None."""
+        line = (
+            'PartitionName=ml.g5.2xlarge AllowGroups=ALL AllowAccounts=ALL '
+            'AllowQos=ALL AllocNodes=ALL Default=NO QoS=N/A DefaultTime=NONE '
+            'DisableRootJobs=NO ExclusiveUser=NO ExclusiveTopo=NO GraceTime=0 '
+            'Hidden=NO MaxNodes=UNLIMITED MaxTime=UNLIMITED MinNodes=0 LLN=NO '
+            'MaxCPUsPerNode=UNLIMITED MaxCPUsPerSocket=UNLIMITED Nodes=ip-172-3-132-97,ip-172-3-168-59 '
+            'PriorityJobFactor=1 PriorityTier=1 RootOnly=NO ReqResv=NO OverSubscribe=NO OverTimeLimit=NONE '
+            'PreemptMode=OFF State=UP TotalCPUs=96 TotalNodes=2 SelectTypeParameters=NONE JobDefaults=(null) '
+            'DefMemPerNode=UNLIMITED MaxMemPerNode=UNLIMITED TRES=cpu=96,mem=768G,node=2,billing=96,gres/gpu=8'
+        )
+        result = slurm._parse_maxtime(line)
+        assert result is None
+
+    def test_parse_maxtime_time_only(self):
+        """Test parsing time format without days."""
+        line = 'PartitionName=dev MaxTime=12:30:05 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 12*3600 + 30*60 + 5 = 43200 + 1800 + 5 = 45005
+        assert result == 45005
+
+    def test_parse_maxtime_with_days(self):
+        """Test parsing time format with days."""
+        line = 'PartitionName=dev MaxTime=2-12:30:05 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 2*86400 + 12*3600 + 30*60 + 5 = 172800 + 43200 + 1800 + 5 = 217805
+        assert result == 217805
+
+    def test_parse_maxtime_single_digit_minutes(self):
+        """Test parsing time with single digit minutes (padded to 2 digits)."""
+        # Note: The regex requires 2-digit minutes, so "05" is used
+        line = 'PartitionName=dev MaxTime=10:05:30 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 10*3600 + 5*60 + 30 = 36000 + 300 + 30 = 36330
+        assert result == 36330
+
+    def test_parse_maxtime_single_digit_seconds(self):
+        """Test parsing time with single digit seconds (padded to 2 digits)."""
+        # Note: The regex requires 2-digit seconds, so "05" is used
+        line = 'PartitionName=dev MaxTime=10:30:05 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 10*3600 + 30*60 + 5 = 36000 + 1800 + 5 = 37805
+        assert result == 37805
+
+    def test_parse_maxtime_zero_time(self):
+        """Test parsing zero time."""
+        line = 'PartitionName=dev MaxTime=00:00:00 Default=YES'
+        result = slurm._parse_maxtime(line)
+        assert result == 0
+
+    def test_parse_maxtime_large_days(self):
+        """Test parsing time with large number of days."""
+        line = 'PartitionName=dev MaxTime=300-23:59:59 Default=YES'
+        result = slurm._parse_maxtime(line)
+        # 300*86400 + 23*3600 + 59*60 + 59 = 25920000 + 82800 + 3540 + 59 = 26006399
+        assert result == 26006399
+
+    def test_parse_maxtime_no_match(self):
+        """Test parsing line without MaxTime returns None."""
+        line = 'PartitionName=dev Default=YES Nodes=node1'
+        result = slurm._parse_maxtime(line)
+        assert result is None

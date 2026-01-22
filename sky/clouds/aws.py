@@ -12,6 +12,7 @@ import typing
 from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
                     Tuple, TypeVar, Union)
 
+import colorama
 from typing_extensions import ParamSpec
 
 from sky import catalog
@@ -84,6 +85,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
+    'p6-b300.',
 ]
 
 # Docker run options for EFA.
@@ -757,6 +759,36 @@ class AWS(clouds.Cloud):
         else:
             max_efa_interfaces = 0
             enable_efa = False
+
+        use_internal_ips = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('use_internal_ips',),
+            default_value=False)
+        if max_efa_interfaces > 1 and not use_internal_ips:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                f'Instance type {resources.instance_type} supports up to '
+                f'{max_efa_interfaces} EFA interfaces, but '
+                '`use_internal_ips` is not enabled.\nLaunching with the '
+                'current configuration will use only 1 EFA interface.\n'
+                f'To use all {max_efa_interfaces} EFA interfaces, enable '
+                'internal IPs by adding one of the following '
+                'configurations to SkyPilot config:\n'
+                'Option 1 (with SSM):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    use_ssm: true\n'
+                'Option 2 (with SSH proxy):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    ssh_proxy_command: ssh -W %h:%p -i <ssh key path> '
+                '-o StrictHostKeyChecking=no <user>@<jump server public'
+                ' ip>\n'
+                'Refer to '
+                'https://docs.skypilot.co/en/latest/reference/config.html'
+                '#aws-use-internal-ips for more details.'
+                f'{colorama.Style.RESET_ALL}')
 
         docker_run_options = []
         if resources.extract_docker_image() is not None:

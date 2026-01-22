@@ -146,21 +146,37 @@ Prometheus setup
 
 In the cluster where you deploy the API server, Prometheus is installed automatically as part of :ref:`api-server-setup-dcgm-metrics-scraping`.
 
-For other Kubernetes clusters (external clusters), deploy Prometheus manually. SkyPilot also requires a Service ``skypilot-prometheus-server`` in the ``skypilot`` namespace to scrape metrics from external clusters.
+For other Kubernetes clusters (external clusters), deploy Prometheus manually. SkyPilot requires a Service named ``skypilot-prometheus-server`` in the ``skypilot`` namespace to scrape metrics from external clusters.
 
-If you use the `Prometheus operator <https://prometheus-operator.dev/docs/getting-started/introduction/>`_, e.g., the `kube-prometheus-stack <https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack#install-helm-chart>`_, install it in the ``skypilot`` namespace, then create the ``skypilot-prometheus-server`` Service in the same namespace.
+First, create a ``prometheus-values.yaml`` file with the following configuration:
+
+.. literalinclude:: ../../../../../examples/metrics/prometheus-values.yaml
+   :language: yaml
+
+Then install Prometheus using ``skypilot-prometheus`` as the release name (this creates the required ``skypilot-prometheus-server`` service):
 
 .. code-block:: bash
 
-    kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/skypilot_prometheus_server_service.yaml -n skypilot
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo update
+    helm upgrade --install skypilot-prometheus prometheus-community/prometheus \
+      --namespace skypilot \
+      --create-namespace \
+      -f prometheus-values.yaml
 
-Alternatively, install the SkyPilot Prometheus server chart; it will create the ``skypilot-prometheus-server`` Service automatically:
+Verify the service was created:
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-prometheus-server --devel \
-     --namespace skypilot \
-     --create-namespace
+    kubectl get svc skypilot-prometheus-server -n skypilot
+
+Refer to the `Prometheus helm chart values <https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml>`_ for additional configuration options.
+
+.. note::
+
+    Do not use the Prometheus Operator (kube-prometheus-stack) for GPU metrics.
+    The Prometheus Operator adds an ``exported_`` prefix to pod and namespace labels,
+    which breaks the PromQL queries used by SkyPilot.
 
 If you are using the Nebius Kubernetes cluster, refer to :ref:`api-server-gpu-metrics-setup-nebius` for how to setup the GPU metrics.
 

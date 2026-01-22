@@ -1,7 +1,10 @@
 """Slurm utilities for SkyPilot."""
+import json
 import math
 import os
 import re
+import shlex
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
@@ -9,8 +12,10 @@ from paramiko.config import SSHConfig
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import slurm
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
 
@@ -18,9 +23,28 @@ DEFAULT_SLURM_PATH = '~/.slurm/config'
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 
 # Regex pattern for parsing GPU GRES strings.
-# Format: 'gpu:acc_type:acc_count(optional_extra_info)'
-# Examples: 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)', 'gpu:a10g:8'
-_GRES_GPU_PATTERN = re.compile(r'^gpu:([^:]+):(\d+)')
+# Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
+# Examples: 'gpu:8', 'gpu:H100:8', 'gpu:nvidia_h100_80gb_hbm3:8(S:0-1)'
+_GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
+                               re.IGNORECASE)
+
+_SLURM_NODES_INFO_CACHE_TTL = 30 * 60
+
+
+def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
+    """Parses GPU type and count from a GRES string.
+
+    Returns:
+        A tuple of (GPU type, GPU count). If no GPU is found, returns (None, 0).
+    """
+    match = _GRES_GPU_PATTERN.search(gres_str)
+    if not match:
+        return None, 0
+    return match.group('type'), int(match.group('count'))
+
+
+# SSH host key filename for sshd.
+SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
 
 
 def get_slurm_ssh_config() -> SSHConfig:
@@ -28,6 +52,42 @@ def get_slurm_ssh_config() -> SSHConfig:
     slurm_config_path = os.path.expanduser(DEFAULT_SLURM_PATH)
     slurm_config = SSHConfig.from_path(slurm_config_path)
     return slurm_config
+
+
+@annotations.lru_cache(scope='request')
+def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
+    cache_key = f'slurm:nodes_info:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm nodes info found in cache ({cache_key})')
+        return [slurm.NodeInfo(**item) for item in json.loads(cached)]
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        ssh_config_dict['identityfile'][0],
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+    )
+    nodes_info = client.info_nodes()
+
+    try:
+        # Nodes in a cluster are unlikely to change frequently, so cache
+        # the result for a short period of time.
+        kv_cache.add_or_update_cache_entry(
+            cache_key, json.dumps([n._asdict() for n in nodes_info]),
+            time.time() + _SLURM_NODES_INFO_CACHE_TTL)
+    except Exception as e:  # pylint: disable=broad-except
+        # Catch the error and continue.
+        # Failure to cache the result is not critical to the
+        # success of this function.
+        logger.debug(f'Failed to cache slurm nodes info for {cluster}: '
+                     f'{common_utils.format_exception(e)}')
+
+    return nodes_info
 
 
 class SlurmInstanceType:
@@ -173,6 +233,15 @@ def instance_id(job_id: str, node: str) -> str:
     return f'job{job_id}-{node}'
 
 
+def get_slurm_cluster_from_config(provider_config: Dict[str, Any]) -> str:
+    """Return the Slurm cluster from the provider config.
+    """
+    slurm_cluster = provider_config.get('cluster')
+    if slurm_cluster is None:
+        raise ValueError('Slurm cluster not specified in provider config.')
+    return slurm_cluster
+
+
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     """Return the partition from the provider config.
 
@@ -281,7 +350,7 @@ def check_instance_fits(
     """
     # Get Slurm node list in the given cluster (region).
     try:
-        ssh_config = get_slurm_ssh_config()
+        nodes = _get_slurm_nodes_info(cluster)
     except FileNotFoundError:
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because the Slurm configuration file '
@@ -290,18 +359,7 @@ def check_instance_fits(
         return (False, f'Could not query Slurm cluster {cluster} '
                 f'because Slurm SSH configuration at {DEFAULT_SLURM_PATH} '
                 f'could not be loaded: {common_utils.format_exception(e)}.')
-    ssh_config_dict = ssh_config.lookup(cluster)
 
-    client = slurm.SlurmClient(
-        ssh_config_dict['hostname'],
-        int(ssh_config_dict.get('port', 22)),
-        ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
-        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
-    )
-
-    nodes = client.info_nodes()
     default_partition = get_cluster_default_partition(cluster)
 
     def is_default_partition(node_partition: str) -> bool:
@@ -342,20 +400,17 @@ def check_instance_fits(
 
         gpu_nodes = []
         for node_info in nodes:
-            gres_str = node_info.gres
             # Extract the GPU type and count from the GRES string
-            match = _GRES_GPU_PATTERN.match(gres_str)
-            if not match:
+            node_acc_type, node_acc_count = get_gpu_type_and_count(
+                node_info.gres)
+            if node_acc_type is None:
                 continue
-
-            node_acc_type = match.group(1).lower()
-            node_acc_count = int(match.group(2))
 
             # TODO(jwj): Handle status check.
 
             # Check if the node has the requested GPU type and at least the
             # requested count
-            if (node_acc_type == acc_type.lower() and
+            if (node_acc_type.lower() == acc_type.lower() and
                     node_acc_count >= acc_count):
                 gpu_nodes.append(node_info)
         if len(gpu_nodes) == 0:
@@ -406,11 +461,11 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
         nodes = client.info_nodes()
 
         for node_info in nodes:
-            match = _GRES_GPU_PATTERN.match(node_info.gres)
-            if match:
-                node_gpu_type = match.group(1)
-                if node_gpu_type.lower() == requested_gpu_type.lower():
-                    return node_gpu_type
+            node_gpu_type, _ = get_gpu_type_and_count(node_info.gres)
+            if node_gpu_type is None:
+                continue
+            if node_gpu_type.lower() == requested_gpu_type.lower():
+                return node_gpu_type
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             'Failed to determine the exact GPU GRES type from the Slurm '
@@ -463,8 +518,8 @@ def _get_slurm_node_info_list(
 
     # 2. Process each node, aggregating partitions per node
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
-    gres_gpu_pattern = re.compile(r'((gpu)(?::([^:]+))?:(\d+))')
 
+    nodes_to_jobs_gres = slurm_client.get_all_jobs_gres()
     for node_info in node_infos:
         node_name = node_info.node
         state = node_info.state
@@ -476,43 +531,27 @@ def _get_slurm_node_info_list(
             continue
 
         # Extract GPU info from GRES
-        gres_match = gres_gpu_pattern.search(gres_str)
+        node_gpu_type, total_gpus = get_gpu_type_and_count(gres_str)
+        if total_gpus > 0:
+            if node_gpu_type is not None:
+                node_gpu_type = node_gpu_type.upper()
+            else:
+                node_gpu_type = 'GPU'
 
-        total_gpus = 0
-        gpu_type_from_sinfo = None  # Default to None for CPU-only nodes
-        if gres_match:
-            try:
-                total_gpus = int(gres_match.group(4))
-                if gres_match.group(3):
-                    gpu_type_from_sinfo = gres_match.group(3).upper()
-                # If total_gpus > 0 but no type, default to 'GPU'
-                elif total_gpus > 0:
-                    gpu_type_from_sinfo = 'GPU'
-            except ValueError:
-                logger.warning(
-                    f'Could not parse GPU count from GRES for {node_name}.')
-
-        # Get allocated GPUs via squeue
+        # Get allocated GPUs
         allocated_gpus = 0
         # TODO(zhwu): move to enum
         if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
                      'comp'):
-            try:
-                jobs_gres = slurm_client.get_jobs_gres(node_name)
-                if jobs_gres:
-                    job_gres_pattern = re.compile(r'gpu(?::[^:]+)*:(\d+)')
-                    for job_line in jobs_gres:
-                        gres_job_match = job_gres_pattern.search(job_line)
-                        if gres_job_match:
-                            allocated_gpus += int(gres_job_match.group(1))
-            except Exception as e:  # pylint: disable=broad-except
-                if state == 'alloc':
-                    # We can infer allocated GPUs only if the node is
-                    # in 'alloc' state.
-                    allocated_gpus = total_gpus
-                else:
-                    # Otherwise, just raise the error.
-                    raise e
+            jobs_gres = nodes_to_jobs_gres.get(node_name, [])
+            if jobs_gres:
+                for job_line in jobs_gres:
+                    _, job_gpu_count = get_gpu_type_and_count(job_line)
+                    allocated_gpus += job_gpu_count
+            elif state == 'alloc':
+                # If no GRES info found but node is fully allocated,
+                # assume all GPUs are in use.
+                allocated_gpus = total_gpus
         elif state == 'idle':
             allocated_gpus = 0
 
@@ -522,27 +561,16 @@ def _get_slurm_node_info_list(
                                                                  'maint') else 0
         free_gpus = max(0, free_gpus)
 
-        # Get CPU/Mem info via scontrol
-        vcpu_total = 0
-        mem_gb = 0.0
-        try:
-            node_details = slurm_client.node_details(node_name)
-            vcpu_total = int(node_details.get('CPUTot', '0'))
-            mem_gb = float(node_details.get('RealMemory', '0')) / 1024.0
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(
-                f'Failed to get CPU/memory info for {node_name}: {e}')
-
         slurm_nodes_info[node_name] = {
             'node_name': node_name,
             'slurm_cluster_name': slurm_cluster_name,
             'partitions': [partition],
             'node_state': state,
-            'gpu_type': gpu_type_from_sinfo,
+            'gpu_type': node_gpu_type,
             'total_gpus': total_gpus,
             'free_gpus': free_gpus,
-            'vcpu_count': vcpu_total,
-            'memory_gb': round(mem_gb, 2),
+            'vcpu_count': node_info.cpus,
+            'memory_gb': round(node_info.memory_gb, 2),
         }
 
     for node_info in slurm_nodes_info.values():
@@ -576,7 +604,6 @@ def is_inside_slurm_cluster() -> bool:
     return os.path.exists(marker_file)
 
 
-@annotations.lru_cache(scope='request')
 def get_partitions(cluster_name: str) -> List[str]:
     """Get unique partition names available in a Slurm cluster.
 
@@ -587,6 +614,34 @@ def get_partitions(cluster_name: str) -> List[str]:
         List of unique partition names available in the cluster.
         The default partition appears first,
         and the rest are sorted alphabetically.
+    """
+    partitions_info = get_partition_infos(cluster_name)
+    default_partitions = []
+    other_partitions = []
+    for partition in partitions_info.values():
+        if partition.is_default:
+            default_partitions.append(partition.name)
+        else:
+            other_partitions.append(partition.name)
+    return default_partitions + sorted(other_partitions)
+
+
+def get_partition_info(cluster_name: str,
+                       partition_name: str) -> Optional[slurm.SlurmPartition]:
+    return get_partition_infos(cluster_name=cluster_name).get(partition_name)
+
+
+# Cache the partitions for 1 hour, we do not expect the
+# partitions to change frequently.
+@annotations.ttl_cache(scope='global', timer=time.time, maxsize=10, ttl=60 * 60)
+def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
+    """Get the partition information for a Slurm cluster.
+
+    Args:
+        cluster_name: Name of the Slurm cluster.
+
+    Returns:
+        List of partition information.
     """
     try:
         slurm_config = SSHConfig.from_path(
@@ -603,15 +658,89 @@ def get_partitions(cluster_name: str) -> List[str]:
         )
 
         partitions_info = client.get_partitions_info()
-        default_partitions = []
-        other_partitions = []
-        for partition in partitions_info:
-            if partition.is_default:
-                default_partitions.append(partition.name)
-            else:
-                other_partitions.append(partition.name)
-        return default_partitions + sorted(other_partitions)
     except Exception as e:  # pylint: disable=broad-except
         raise ValueError(
             f'Failed to get partitions for cluster '
             f'{cluster_name}: {common_utils.format_exception(e)}') from e
+
+    return {partition.name: partition for partition in partitions_info}
+
+
+def format_slurm_duration(duration_seconds: Optional[int]) -> str:
+    """Format the duration in seconds into a Slurm duration string.
+    Slurm duration string is in the format of [days-]hours:minutes:seconds.
+
+    if duration_seconds is None, return 'UNLIMITED'.
+
+    Example:
+        format_slurm_duration(10000) -> 0-02:46:40
+        format_slurm_duration(100000) -> 1-03:46:40
+        format_slurm_duration(1000000) -> 11-13:46:40
+        format_slurm_duration(None) -> 'UNLIMITED'
+
+    Args:
+        duration_seconds: The duration in seconds.
+
+    Returns:
+        The duration in a Slurm duration string.
+    """
+    if duration_seconds is None:
+        return 'UNLIMITED'
+    days = duration_seconds // (24 * 3600)
+    hours = (duration_seconds % (24 * 3600)) // 3600
+    minutes = (duration_seconds % 3600) // 60
+    seconds = duration_seconds % 60
+    return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
+
+
+def srun_sshd_command(
+    job_id: str,
+    target_node: str,
+    unix_user: str,
+) -> str:
+    """Build srun command for launching sshd -i inside a Slurm job.
+
+    This is used by the API server to proxy SSH connections to Slurm jobs
+    via sshd running in inetd mode within srun.
+
+    Args:
+        job_id: The Slurm job ID
+        target_node: The target compute node hostname
+        unix_user: The Unix user for the job
+
+    Returns:
+        List of command arguments to be extended to ssh base command
+    """
+    # We use ~username to ensure we use the real home of the user ssh'ing in,
+    # because we override the home directory in SlurmCommandRunner.run.
+    user_home_ssh_dir = f'~{unix_user}/.ssh'
+    return shlex.join([
+        'srun',
+        '--quiet',
+        '--unbuffered',
+        '--overlap',
+        '--jobid',
+        job_id,
+        '-w',
+        target_node,
+        '/usr/sbin/sshd',
+        '-i',  # Uses stdin/stdout
+        '-e',  # Writes errors to stderr
+        '-f',  # Use /dev/null to avoid reading system sshd_config
+        '/dev/null',
+        '-h',
+        f'{user_home_ssh_dir}/{SLURM_SSHD_HOST_KEY_FILENAME}',
+        '-o',
+        f'AuthorizedKeysFile={user_home_ssh_dir}/authorized_keys',
+        '-o',
+        'PasswordAuthentication=no',
+        '-o',
+        'PubkeyAuthentication=yes',
+        # If UsePAM is enabled, we will not be able to run sshd(8)
+        # as a non-root user.
+        # See https://man7.org/linux/man-pages/man5/sshd_config.5.html
+        '-o',
+        'UsePAM=no',
+        '-o',
+        f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
+    ])

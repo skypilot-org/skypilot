@@ -142,32 +142,26 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 Viewing cluster status
 ----------------------
 
-To view the status of all SkyPilot resources in the Kubernetes cluster, run :code:`sky status --k8s`.
-
-Unlike :code:`sky status` which lists only the SkyPilot resources launched by the current user,
-:code:`sky status --k8s` lists all SkyPilot resources in the Kubernetes cluster across all users.
+To view the status of your SkyPilot clusters, use :code:`sky status`:
 
 .. code-block:: console
 
-    $ sky status --k8s
-    Kubernetes cluster state (context: mycluster)
-    SkyPilot clusters
-    USER     NAME                           LAUNCHED    INFRA      RESOURCES                 STATUS
-    alice    infer-svc-1                    23 hrs ago  Kubernetes 1x(gpus=L4:1, ...)        UP
-    alice    sky-jobs-controller-80b50983   2 days ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
-    alice    sky-serve-controller-80b50983  23 hrs ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
-    bob      dev                            1 day ago   Kubernetes 1x(gpus=H100:1, ...)      UP
-    bob      multinode-dev                  1 day ago   Kubernetes 2x(cpus=2, mem=2, ...)    UP
-    bob      sky-jobs-controller-2ea485ea   2 days ago  Kubernetes 1x(cpus=4, mem=4, ...)    UP
+    $ sky status
+    Clusters
+    NAME       WORKSPACE  INFRA                      RESOURCES                    STATUS  AUTOSTOP  LAUNCHED
+    mycluster  prod       Kubernetes (k8s-context1)  1x(cpus=2, mem=4, ...)       UP      -         10 mins ago
+    dev        ml-team    Kubernetes (k8s-context2)  1x(gpus=H100:1, cpus=4, ...) UP      10m       1 hr ago
 
-    Managed jobs
-    In progress tasks: 1 STARTING
-    USER     ID  TASK  NAME      REQUESTED   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-    alice    1   -     eval      1x[CPU:1+]  2 days ago  49s            8s            0            SUCCEEDED
-    bob      4   -     pretrain  1x[H100:4]  1 day ago   1h 1m 11s      1h 14s        0            SUCCEEDED
-    bob      3   -     bigjob    1x[CPU:16]  1 day ago   1d 21h 11m 4s  -             0            STARTING
-    bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
-    bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
+When connected to a shared :ref:`SkyPilot API server <sky-api-server>`, you can view resources from all users with :code:`sky status -u`:
+
+.. code-block:: console
+
+    $ sky status -u
+    Clusters
+    NAME       USER              WORKSPACE  INFRA                      RESOURCES                            STATUS  AUTOSTOP  LAUNCHED
+    mycluster  alice@example.com prod       Kubernetes (k8s-context1)  1x(cpus=2, mem=4, ...)               UP      -         10 mins ago
+    dev        alice@example.com ml-team    Kubernetes (k8s-context2)  1x(gpus=H100:1, cpus=4, mem=16, ...) UP      10m       1 hr ago
+    training   bob@example.com   ml-team    Kubernetes (k8s-context1)  1x(gpus=L4:4, cpus=8, mem=32, ...)   UP      -         2 hrs ago
 
 You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --infra k8s`.
 
@@ -219,7 +213,7 @@ Your image must satisfy the following requirements:
 
 Using images from private repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Artifact Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Artifact Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :ref:`SkyPilot config <config-yaml>` to specify the secret like so:
 
 .. code-block:: yaml
 
@@ -280,7 +274,7 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
                 --docker-username=_json_key \
                 --docker-password="$(cat ~/gcp-key.json)" \
                 --docker-server=gcr.io
-            
+
             .. hint::
               If you are not sure which registry to use, check the base of your
               image URL. For example, if your image URL looks like ``gcr.io/project-id/repo/image-name:latest``,
@@ -297,6 +291,23 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
                 --docker-password=<NGC_API_KEY> \
                 --docker-server=nvcr.io
 
+
+
+
+.. _kubernetes-using-volumes:
+
+Mounting NFS and other volumes
+------------------------------
+
+SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
+
+* :ref:`Persistent volumes <volumes-quickstart>`: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These are backed by Kubernetes PVCs on block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
+
+* :ref:`Ephemeral volumes <ephemeral-volumes>`: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific. Also backed by Kubernetes PVCs.
+
+* :ref:`Other volume types <advanced-mount-pvc-with-kubernetes-configs>`: Mount hostPath, NFS, and other Kubernetes volume types by overriding SkyPilot's ``pod_config``.
+
+For detailed information on configuring and using volumes, see :ref:`Volumes on Kubernetes <volumes-quickstart>`.
 
 Opening ports
 -------------
@@ -381,15 +392,6 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
          kubernetes:
            pod_config:
              ...
-
-.. _kubernetes-using-volumes:
-
-Mounting NFS and other volumes
-------------------------------
-
-`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
-
-Refer to :ref:`kubernetes-setup-volumes` for details and examples.
 
 FAQs
 ----

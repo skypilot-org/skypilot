@@ -1968,6 +1968,94 @@ def test_managed_jobs_exit_code_recovery_single(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
+@pytest.mark.managed_jobs
+def test_managed_job_labels_in_queue(generic_cloud: str):
+    """Test that labels in managed job YAML are stored and returned in queue."""
+    from sky.client import sdk
+
+    name = smoke_tests_utils.get_cluster_name()
+    expected_labels = {'test-label': 'test-value', 'project': 'smoke-test'}
+
+    def check_labels_in_queue():
+        """Check that labels are present in the job queue."""
+        # Get the job queue using SDK
+        queue_request_id = jobs_sdk.queue_v2(refresh=False, all_users=True)
+        queue_records = sdk.stream_and_get(queue_request_id)
+
+        # Parse the queue response
+        if isinstance(queue_records, tuple):
+            jobs, _, _, _ = queue_records
+        else:
+            jobs = queue_records
+
+        # Find our job in the queue
+        job_record = None
+        for job in jobs:
+            if job.get('job_name') == name:
+                job_record = job
+                break
+
+        if job_record is None:
+            yield f'Job {name} not found in queue'
+            return
+
+        if 'labels' not in job_record:
+            yield 'labels field missing from job record'
+            return
+
+        if job_record['labels'] is None:
+            yield 'labels field is None'
+            return
+
+        if job_record['labels'] != expected_labels:
+            yield (f"Expected labels {expected_labels}, "
+                   f"got {job_record['labels']}")
+            return
+
+        # Success - labels are correct
+        return
+
+    # Create YAML with labels
+    yaml_content = textwrap.dedent("""\
+        resources:
+          cpus: 2+
+          labels:
+            test-label: test-value
+            project: smoke-test
+
+        run: |
+          echo "Hello from labeled job"
+          sleep 10000
+        """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'managed_job_labels_in_queue',
+            [
+                f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {yaml_path} -y -d',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[
+                        sky.ManagedJobStatus.STARTING,
+                        sky.ManagedJobStatus.RUNNING,
+                        sky.ManagedJobStatus.SUCCEEDED,
+                    ],
+                    timeout=120),
+                lambda: check_labels_in_queue(),
+            ],
+            teardown=f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server
 @pytest.mark.no_dependency
 @pytest.mark.kubernetes
 def test_large_production_performance(request):
@@ -1983,3 +2071,66 @@ def test_large_production_performance(request):
         timeout=30 * 60,  # 30 minutes for data injection and testing
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_instance_links(generic_cloud: str):
+    """Test that instance links are auto-generated for managed jobs.
+
+    This test verifies that when a managed job runs on AWS, GCP, or Azure,
+    the instance links are automatically populated in the job record.
+    """
+    # Only run on clouds that support instance links
+    if generic_cloud not in ('aws', 'gcp', 'azure'):
+        pytest.skip(f'Instance links not supported on {generic_cloud}')
+
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Simple job that runs for a bit
+    yaml_content = textwrap.dedent("""\
+        resources:
+          cpus: 2+
+
+        run: |
+          echo "Job started"
+          sleep 60
+          echo "Job finished"
+        """)
+
+    # Load Jinja template to poll for instance links using Python SDK
+    template_path = pathlib.Path('tests/test_yamls/test_instance_links.py.j2')
+    check_links_template = jinja2.Template(template_path.read_text())
+    check_script = check_links_template.render(
+        name=name,
+        generic_cloud=generic_cloud,
+    )
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f, \
+         tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as script_f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+        # Write rendered script to temp file
+        script_f.write(check_script)
+        script_f.flush()
+        check_links_cmd = f'python3 {script_f.name}'
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_instance_links',
+            [
+                f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra {generic_cloud} {yaml_path} -y -d',
+                # Wait for job to start running
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=300),
+                # Check for instance links
+                check_links_cmd,
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=15 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)

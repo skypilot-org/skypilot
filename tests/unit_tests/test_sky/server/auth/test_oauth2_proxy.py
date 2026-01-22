@@ -531,32 +531,3 @@ class TestOriginalOAuth2ProxyMiddlewareLoopback:
 
             # Should NOT bypass due to proxy headers - proceed to normal OAuth2 flow
             assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT.value
-
-    @pytest.mark.asyncio
-    async def test_loopback_disabled_in_non_consolidation_mode(
-            self, middleware_enabled, loopback_request, mock_call_next):
-        """Test that loopback bypass is disabled when not in consolidation mode."""
-        # Create loopback request
-        request = loopback_request
-        request.url.path = '/api/status'
-
-        # Mock OAuth2 to return unauthorized
-        mock_response = mock.Mock()
-        mock_response.status = http.HTTPStatus.UNAUTHORIZED
-
-        mock_response_ctx = mock.AsyncMock()
-        mock_response_ctx.__aenter__.return_value = mock_response
-        mock_response_ctx.__aexit__.return_value = None
-
-        with mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=False), \
-             mock.patch('aiohttp.ClientSession') as mock_session_class:
-            mock_session = mock.Mock()
-            mock_session.request.return_value = mock_response_ctx
-            mock_session_class.return_value.__aenter__.return_value = mock_session
-            mock_session_class.return_value.__aexit__.return_value = None
-
-            response = await middleware_enabled.authenticate(
-                request, mock_call_next)
-
-            # Should NOT bypass when consolidation mode is disabled - uses normal OAuth2 flow
-            assert response.status_code == http.HTTPStatus.TEMPORARY_REDIRECT.value

@@ -255,7 +255,7 @@ class SSH(kubernetes.Kubernetes):
     @classmethod
     def expand_infras(cls) -> List[str]:
         return [
-            f'{cls.canonical_name()}/{c.lstrip("ssh-")}'
+            f'{cls.canonical_name()}/{common_utils.removeprefix(c, "ssh-")}'
             for c in cls.existing_allowed_contexts(silent=True)
         ]
 

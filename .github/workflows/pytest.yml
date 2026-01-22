@@ -16,7 +16,7 @@ jobs:
   python-test:
     strategy:
       matrix:
-        python-version: ["3.8"]
+        python-version: ["3.9"]
         test-path:
           # Group them based on running time to save CI time and resources
           - tests/unit_tests
@@ -56,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8", "3.13"]
+        python-version: ["3.9", "3.13"]
         test-path:
           - tests/test_jobs_and_serve.py tests/test_cli.py
         include:

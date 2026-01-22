@@ -77,10 +77,15 @@ jobs:
           # Trigger a build for the PR branch on ReadTheDocs
           # The branch needs to exist as a version on ReadTheDocs
 
-          # URL-encode the branch name (replace / with %2F, etc.)
-          VERSION_SLUG=$(echo -n "${BRANCH_NAME}" | jq -sRr @uri)
+          # ReadTheDocs automatically replaces forward slashes with dashes when generating version slugs
+          # See: https://docs.readthedocs.com/platform/latest/versions.html
+          # So we need to match that behavior when calling the API
+          # Then URL-encode the sanitized branch name for the API call
+          SANITIZED_BRANCH=$(echo -n "${BRANCH_NAME}" | sed 's/\//-/g')
+          VERSION_SLUG=$(echo -n "${SANITIZED_BRANCH}" | jq -sRr @uri)
 
           echo "Triggering ReadTheDocs build for project: ${READTHEDOCS_PROJECT}, branch: ${BRANCH_NAME}"
+          echo "Using version slug: ${SANITIZED_BRANCH} (sanitized from branch name)"
 
           # Activate and configure the version (works for both existing and inactive versions)
           echo "Activating and configuring version for branch: ${BRANCH_NAME}"
@@ -186,8 +191,12 @@ jobs:
             const branch = '${{ steps.get-branch.outputs.result }}';
             const projectSlug = process.env.READTHEDOCS_PROJECT;
 
-            // URL-encode the branch name for the documentation URL
-            const encodedBranch = encodeURIComponent(branch);
+            // ReadTheDocs automatically replaces forward slashes with dashes when generating version slugs
+            // See: https://docs.readthedocs.com/platform/latest/versions.html
+            // So we need to match that behavior for the documentation URL
+            // Then URL-encode the sanitized branch name for the documentation URL
+            const sanitizedBranch = branch.replace(/\//g, '-');
+            const encodedBranch = encodeURIComponent(sanitizedBranch);
 
             // Add label to track that a preview was built
             try {
@@ -238,10 +247,15 @@ jobs:
           READTHEDOCS_PROJECT: ${{ secrets.READTHEDOCS_PROJECT }}
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
         run: |
-          # URL-encode the branch name (replace / with %2F, etc.)
-          VERSION_SLUG=$(echo -n "${BRANCH_NAME}" | jq -sRr @uri)
+          # ReadTheDocs automatically replaces forward slashes with dashes when generating version slugs
+          # See: https://docs.readthedocs.com/platform/latest/versions.html
+          # So we need to match that behavior when calling the API
+          # Then URL-encode the sanitized branch name for the API call
+          SANITIZED_BRANCH=$(echo -n "${BRANCH_NAME}" | sed 's/\//-/g')
+          VERSION_SLUG=$(echo -n "${SANITIZED_BRANCH}" | jq -sRr @uri)
 
           echo "Deactivating ReadTheDocs preview for branch: ${BRANCH_NAME}"
+          echo "Using version slug: ${SANITIZED_BRANCH} (sanitized from branch name)"
 
           # Deactivate the version (set active to false)
           RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \

@@ -58,6 +58,7 @@ _SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 DEFAULT_CLUSTER_EVENT_RETENTION_HOURS = 24.0
 DEBUG_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
+TERMINAL_CLUSTER_EVENT_RETENTION_HOURS = 30 * 24.0
 MIN_CLUSTER_EVENT_DAEMON_INTERVAL_SECONDS = 3600
 
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSGS = [
@@ -124,6 +125,10 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('skylet_ssh_tunnel_metadata',
                       sqlalchemy.LargeBinary,
                       server_default=None),
+    # Infrastructure columns for efficient filtering
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -152,6 +157,10 @@ volume_table = sqlalchemy.Table(
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
     sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('error_message', sqlalchemy.Text, server_default=None),
+    # JSON-encoded lists of pods/clusters using the volume
+    sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -195,16 +204,24 @@ cluster_history_table = sqlalchemy.Table(
                       sqlalchemy.Integer,
                       server_default=None,
                       index=True),
+    # Infrastructure columns for efficient filtering
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 
 class ClusterEventType(enum.Enum):
     """Type of cluster event."""
     DEBUG = 'DEBUG'
-    """Used to denote events that are not related to cluster status."""
+    """Detailed debugging information from the cloud"""
 
     STATUS_CHANGE = 'STATUS_CHANGE'
     """Used to denote events that modify cluster status."""
+
+    TERMINAL = 'TERMINAL'
+    """Used to denote events that are directly related to
+    a cluster's termination."""
 
 
 # Table for cluster status change events.
@@ -360,7 +377,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            await context_utils.to_thread(initialize_and_get_db_async)
+            await asyncio.to_thread(initialize_and_get_db_async)
 
         return await func(*args, **kwargs)
 
@@ -668,6 +685,17 @@ def add_or_update_cluster(cluster_name: str,
         status = status_lib.ClusterStatus.UP
     status_updated_at = int(time.time())
 
+    # Extract cloud/region/zone from launched_resources for efficient filtering
+    cloud = None
+    region = None
+    zone = None
+    if hasattr(cluster_handle, 'launched_resources'):
+        lr = cluster_handle.launched_resources
+        if lr is not None:
+            cloud = str(lr.cloud) if getattr(lr, 'cloud', None) else None
+            region = str(lr.region) if getattr(lr, 'region', None) else None
+            zone = str(lr.zone) if getattr(lr, 'zone', None) else None
+
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
     # It can be more inaccurate for the multi-node cluster
@@ -757,9 +785,13 @@ def add_or_update_cluster(cluster_name: str,
         if existing_cluster_hash is not None:
             count = session.query(cluster_table).filter_by(
                 name=cluster_name, cluster_hash=existing_cluster_hash).update({
-                    **conditional_values, cluster_table.c.handle: handle,
+                    **conditional_values,
+                    cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
-                    cluster_table.c.status_updated_at: status_updated_at
+                    cluster_table.c.status_updated_at: status_updated_at,
+                    cluster_table.c.cloud: cloud,
+                    cluster_table.c.region: region,
+                    cluster_table.c.zone: zone,
                 })
             assert count <= 1
             if count == 0:
@@ -777,6 +809,9 @@ def add_or_update_cluster(cluster_name: str,
                 # set storage_mounts_metadata to server default (null)
                 status_updated_at=status_updated_at,
                 is_managed=int(is_managed),
+                cloud=cloud,
+                region=region,
+                zone=zone,
             )
             insert_or_update_stmt = insert_stmnt.on_conflict_do_update(
                 index_elements=[cluster_table.c.name],
@@ -790,6 +825,9 @@ def add_or_update_cluster(cluster_name: str,
                     # do not update storage_mounts_metadata
                     cluster_table.c.status_updated_at: status_updated_at,
                     # do not update user_hash
+                    cluster_table.c.cloud: cloud,
+                    cluster_table.c.region: region,
+                    cluster_table.c.zone: zone,
                 })
             session.execute(insert_or_update_stmt)
 
@@ -825,6 +863,9 @@ def add_or_update_cluster(cluster_name: str,
             provision_log_path=provision_log_path,
             last_activity_time=last_activity_time,
             launched_at=launched_at,
+            cloud=cloud,
+            region=region,
+            zone=zone,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -843,6 +884,9 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.provision_log_path: provision_log_path,
                 cluster_history_table.c.last_activity_time: last_activity_time,
                 cluster_history_table.c.launched_at: launched_at,
+                cluster_history_table.c.cloud: cloud,
+                cluster_history_table.c.region: region,
+                cluster_history_table.c.zone: zone,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -944,28 +988,60 @@ def get_last_cluster_event(cluster_hash: str,
     return row.reason
 
 
-def _get_last_cluster_event_multiple(
-        cluster_hashes: Set[str],
-        event_type: ClusterEventType) -> Dict[str, str]:
+def get_terminal_or_last_status_change_event(
+        cluster_hash: str) -> Optional[str]:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        # Use a subquery to get the latest event for each cluster_hash
-        latest_events = session.query(
-            cluster_event_table.c.cluster_hash,
-            sqlalchemy.func.max(cluster_event_table.c.transitioned_at).label(
-                'max_time')).filter(
-                    cluster_event_table.c.cluster_hash.in_(cluster_hashes),
-                    cluster_event_table.c.type == event_type.value).group_by(
-                        cluster_event_table.c.cluster_hash).subquery()
+        # Order by type (TERMINAL first, STATUS_CHANGE after),
+        # then by transitioned_at desc.
+        # Use a CASE expression for ordering type.
+        type_priority = sqlalchemy.case(
+            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
+            else_=1)
+        row = session.query(cluster_event_table).filter(
+            cluster_event_table.c.cluster_hash == cluster_hash,
+            cluster_event_table.c.type.in_([
+                ClusterEventType.TERMINAL.value,
+                ClusterEventType.STATUS_CHANGE.value
+            ])).order_by(type_priority,
+                         cluster_event_table.c.transitioned_at.desc()).first()
+    if row is None:
+        return None
+    return row.reason
 
-        # Join with original table to get the full event details
-        rows = session.query(cluster_event_table).join(
-            latest_events,
-            sqlalchemy.and_(
-                cluster_event_table.c.cluster_hash ==
-                latest_events.c.cluster_hash,
-                cluster_event_table.c.transitioned_at ==
-                latest_events.c.max_time)).all()
+
+def _get_last_or_terminal_cluster_event_multiple(
+        cluster_hashes: Set[str]) -> Dict[str, str]:
+    """Returns the last or terminal cluster event for each cluster."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
+        type_priority = sqlalchemy.case(
+            (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
+            else_=1)
+
+        # Use ROW_NUMBER to rank events within each cluster_hash,
+        # ordered by type priority (TERMINAL first) then by transitioned_at
+        # (latest first)
+        row_number = sqlalchemy.func.row_number().over(
+            partition_by=cluster_event_table.c.cluster_hash,
+            order_by=[
+                type_priority,
+                cluster_event_table.c.transitioned_at.desc()
+            ]).label('rn')
+
+        # Subquery to get all events with their rank
+        ranked_events = session.query(
+            cluster_event_table.c.cluster_hash, cluster_event_table.c.reason,
+            row_number).filter(
+                cluster_event_table.c.cluster_hash.in_(cluster_hashes),
+                cluster_event_table.c.type !=
+                ClusterEventType.DEBUG.value).subquery()
+
+        # Select only the top-ranked event for each cluster
+        rows = session.query(
+            ranked_events.c.cluster_hash,
+            ranked_events.c.reason).filter(ranked_events.c.rn == 1).all()
 
     return {row.cluster_hash: row.reason for row in rows}
 
@@ -996,6 +1072,9 @@ async def cluster_event_retention_daemon():
         debug_retention_hours = skypilot_config.get_nested(
             ('api_server', 'cluster_debug_event_retention_hours'),
             DEBUG_CLUSTER_EVENT_RETENTION_HOURS)
+        terminal_retention_hours = skypilot_config.get_nested(
+            ('api_server', 'cluster_terminal_event_retention_hours'),
+            TERMINAL_CLUSTER_EVENT_RETENTION_HOURS)
         try:
             if retention_hours >= 0:
                 logger.debug('Cleaning up cluster events with retention '
@@ -1007,6 +1086,12 @@ async def cluster_event_retention_daemon():
                              f'{debug_retention_hours} hours.')
                 cleanup_cluster_events_with_retention(debug_retention_hours,
                                                       ClusterEventType.DEBUG)
+            if terminal_retention_hours >= 0:
+                logger.debug(
+                    'Cleaning up terminal cluster events with retention '
+                    f'{terminal_retention_hours} hours.')
+                cleanup_cluster_events_with_retention(terminal_retention_hours,
+                                                      ClusterEventType.TERMINAL)
         except asyncio.CancelledError:
             logger.info('Cluster event retention daemon cancelled')
             break
@@ -1025,7 +1110,7 @@ def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
     event_type: ClusterEventType,
-    include_timestamps: Literal[False],
+    include_timestamps: Literal[False] = False,
     limit: Optional[int] = ...,
 ) -> List[str]:
     ...
@@ -1720,8 +1805,7 @@ def get_cluster_from_name(
         user = get_user(user_hash)
         user_name = user.name if user is not None else None
     if not summary_response:
-        last_event = get_last_cluster_event(
-            row.cluster_hash, event_type=ClusterEventType.STATUS_CHANGE)
+        last_event = get_terminal_or_last_status_change_event(row.cluster_hash)
     # TODO: use namedtuple instead of dict
     record = {
         'name': row.name,
@@ -1852,16 +1936,21 @@ def get_clusters(
     # get last cluster event for each row
     if not summary_response:
         cluster_hashes = {row.cluster_hash for row in rows}
-        last_cluster_event_dict = _get_last_cluster_event_multiple(
-            cluster_hashes, ClusterEventType.STATUS_CHANGE)
+        last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
+            cluster_hashes)
 
     for row in rows:
+        handle = pickle.loads(row.handle)
+        priority = (handle.launched_resources.priority
+                    if handle.launched_resources is not None else None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
             'launched_at': row.launched_at,
-            'handle': pickle.loads(row.handle),
+            'handle': handle,
             'status': status_lib.ClusterStatus[row.status],
+            'priority': priority
+                        if priority is not None else constants.DEFAULT_PRIORITY,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
@@ -1994,17 +2083,15 @@ def get_clusters_from_history(
     user_hashes = set(row_to_user_hash.values())
     user_hash_to_user = get_users(user_hashes)
     cluster_hashes = set(row_to_user_hash.keys())
-    if not abbreviate_response:
-        last_cluster_event_dict = _get_last_cluster_event_multiple(
-            cluster_hashes, ClusterEventType.STATUS_CHANGE)
+    last_cluster_event_dict = _get_last_or_terminal_cluster_event_multiple(
+        cluster_hashes)
 
     records = []
     for row in rows:
         user_hash = row_to_user_hash[row.cluster_hash]
         user = user_hash_to_user.get(user_hash, None)
         user_name = user.name if user is not None else None
-        if not abbreviate_response:
-            last_event = last_cluster_event_dict.get(row.cluster_hash, None)
+        last_event = last_cluster_event_dict.get(row.cluster_hash, None)
         launched_at = row.launched_at
         usage_intervals: Optional[List[Tuple[
             int,
@@ -2033,17 +2120,19 @@ def get_clusters_from_history(
             'duration': duration,
             'num_nodes': row.num_nodes,
             'resources': launched_resources,
+            'priority': launched_resources.priority
+                        if launched_resources is not None else None,
             'cluster_hash': row.cluster_hash,
             'usage_intervals': usage_intervals,
             'status': status,
             'user_hash': user_hash,
             'user_name': user_name,
             'workspace': workspace,
+            'last_event': last_event,
         }
         if not abbreviate_response:
             record['last_creation_yaml'] = row.last_creation_yaml
             record['last_creation_command'] = row.last_creation_command
-            record['last_event'] = last_event
 
         records.append(record)
 
@@ -2336,6 +2425,10 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
                 is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
+        # Decode JSON-encoded usedby fields
+        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
+        usedby_clusters = (json.loads(row.usedby_clusters)
+                           if row.usedby_clusters else [])
         records.append({
             'name': row.name,
             'launched_at': row.launched_at,
@@ -2346,6 +2439,9 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
             'is_ephemeral': bool(row.is_ephemeral),
+            'error_message': row.error_message,
+            'usedby_pods': usedby_pods,
+            'usedby_clusters': usedby_clusters,
         })
     return records
 
@@ -2357,6 +2453,10 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
+        # Decode JSON-encoded usedby fields
+        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
+        usedby_clusters = (json.loads(row.usedby_clusters)
+                           if row.usedby_clusters else [])
         return {
             'name': row.name,
             'launched_at': row.launched_at,
@@ -2366,6 +2466,9 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
+            'error_message': row.error_message,
+            'usedby_pods': usedby_pods,
+            'usedby_clusters': usedby_clusters,
         }
     return None
 
@@ -2417,6 +2520,17 @@ def add_volume(
 
 @_init_db
 @metrics_lib.time_me
+def update_volume_config(name: str, config: models.VolumeConfig) -> None:
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(volume_table).filter_by(name=name).update({
+            volume_table.c.handle: pickle.dumps(config),
+        })
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
 def update_volume(name: str, last_attached_at: int,
                   status: status_lib.VolumeStatus) -> None:
     assert _SQLALCHEMY_ENGINE is not None
@@ -2430,12 +2544,34 @@ def update_volume(name: str, last_attached_at: int,
 
 @_init_db
 @metrics_lib.time_me
-def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
+def update_volume_status(name: str,
+                         status: status_lib.VolumeStatus,
+                         error_message: Optional[str] = None,
+                         usedby_pods: Optional[List[str]] = None,
+                         usedby_clusters: Optional[List[str]] = None) -> None:
+    """Update volume status and related fields.
+
+    Args:
+        name: Volume name.
+        status: New volume status.
+        error_message: Error message (None clears it).
+        usedby_pods: List of pods using the volume (None keeps existing value).
+        usedby_clusters: List of clusters using the volume (None keeps it).
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(volume_table).filter_by(name=name).update({
+        update_dict: Dict[str, Any] = {
             volume_table.c.status: status.value,
-        })
+        }
+        # Always update error_message (None clears it)
+        update_dict[volume_table.c.error_message] = error_message
+        # Update usedby fields if provided (encode as JSON)
+        if usedby_pods is not None:
+            update_dict[volume_table.c.usedby_pods] = json.dumps(usedby_pods)
+        if usedby_clusters is not None:
+            update_dict[volume_table.c.usedby_clusters] = json.dumps(
+                usedby_clusters)
+        session.query(volume_table).filter_by(name=name).update(update_dict)
         session.commit()
 
 

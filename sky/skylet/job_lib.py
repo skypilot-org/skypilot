@@ -550,6 +550,20 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return get_status_no_lock(job_id)
 
 
+def wait_for_job_completion(job_id: int, poll_interval: float = 1.0) -> None:
+    """Wait for a job to reach a terminal state.
+
+    Args:
+        job_id: The job ID to wait for.
+        poll_interval: How often to poll the job status in seconds.
+    """
+    while True:
+        status = get_status(job_id)
+        if status is None or status.is_terminal():
+            break
+        time.sleep(poll_interval)
+
+
 @init_db
 def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     return message_utils.encode_payload(get_statuses(job_ids))
@@ -1201,6 +1215,15 @@ class JobLibCodeGen:
             'job_lib.scheduler.queue('
             f'{job_id!r},'
             f'{cmd!r})',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def wait_for_job(cls, job_id: int) -> str:
+        code = [
+            # TODO(kevin): backward compatibility, remove in 0.13.0.
+            (f'job_lib.wait_for_job_completion({job_id!r}) if '
+             'hasattr(job_lib, "wait_for_job_completion") else None'),
         ]
         return cls._build(code)
 

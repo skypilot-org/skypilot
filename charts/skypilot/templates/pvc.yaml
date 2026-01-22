@@ -1,8 +1,9 @@
 {{- if .Values.storage.enabled }}
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Name }}-state
+  name: {{ $fullName }}-state
   namespace: {{ .Release.Namespace }}
   {{- with .Values.storage.annotations }}
   annotations:

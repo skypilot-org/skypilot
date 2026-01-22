@@ -9,6 +9,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision.slurm import utils as slurm_utils
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
@@ -383,6 +384,10 @@ class Slurm(clouds.Cloud):
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': ssh_config_dict['identityfile'][0],
+            'slurm_sshd_host_key_filename':
+                (slurm_utils.SLURM_SSHD_HOST_KEY_FILENAME),
+            'slurm_cluster_name_env_var':
+                (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
         }
 
         return deploy_vars

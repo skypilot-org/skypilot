@@ -374,6 +374,7 @@ class TestHelperFunctions:
         # Mock cluster records that would be returned by stream_and_get
         mock_handle = mock.MagicMock()
         mock_handle.cluster_name = 'test-cluster'
+        mock_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
         mock_handle.cached_external_ips = ['1.2.3.4']
         mock_handle.cached_external_ssh_ports = [22]
         mock_handle.docker_user = None
@@ -420,10 +421,11 @@ class TestHelperFunctions:
         records = command._get_cluster_records_and_set_ssh_config(
             ['test-cluster'])
         assert records == mock_records
-        mock_add_cluster.assert_called_once_with('test-cluster', ['1.2.3.4'], {
-            'ssh_user': 'ubuntu',
-            'ssh_private_key': '/path/to/key.pem'
-        }, [22], None, 'ubuntu')
+        mock_add_cluster.assert_called_once_with(
+            'test-cluster', 'test-cluster-abcdef', ['1.2.3.4'], {
+                'ssh_user': 'ubuntu',
+                'ssh_private_key': '/path/to/key.pem'
+            }, [22], None, 'ubuntu')
         # Shouldn't remove anything because all clusters provided are in the returned records
         mock_remove_cluster.assert_not_called()
 
@@ -457,6 +459,7 @@ class TestHelperFunctions:
         # Test case 4: Test with a cluster that is using kubernetes
         mock_k8s_handle = mock.MagicMock()
         mock_k8s_handle.cluster_name = 'test-cluster'
+        mock_k8s_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
         mock_k8s_handle.cached_external_ips = ['1.2.3.4']
         mock_k8s_handle.cached_external_ssh_ports = [22]
         mock_k8s_handle.docker_user = None
@@ -481,16 +484,17 @@ class TestHelperFunctions:
         mock_add_cluster.assert_called_once()
         added_cluster_args = mock_add_cluster.call_args
         assert added_cluster_args[0][0] == 'test-cluster'
-        assert added_cluster_args[0][1] == ['1.2.3.4']
+        assert added_cluster_args[0][1] == 'test-cluster-abcdef'
+        assert added_cluster_args[0][2] == ['1.2.3.4']
         # proxy command should be set, but is dependent on the server url, so we don't check the exact value
-        assert added_cluster_args[0][2].get('ssh_proxy_command') is not None
-        assert server_url in added_cluster_args[0][2].get('ssh_proxy_command')
-        assert added_cluster_args[0][2].get(
+        assert added_cluster_args[0][3].get('ssh_proxy_command') is not None
+        assert server_url in added_cluster_args[0][3].get('ssh_proxy_command')
+        assert added_cluster_args[0][3].get(
             'ssh_private_key') == '/path/to/key.pem'
-        assert added_cluster_args[0][2].get('ssh_user') == 'ubuntu'
-        assert added_cluster_args[0][3] == [22]
-        assert added_cluster_args[0][4] is None
-        assert added_cluster_args[0][5] == 'ubuntu'
+        assert added_cluster_args[0][3].get('ssh_user') == 'ubuntu'
+        assert added_cluster_args[0][4] == [22]
+        assert added_cluster_args[0][5] is None
+        assert added_cluster_args[0][6] == 'ubuntu'
         mock_remove_cluster.assert_not_called()
 
     def test_list_to_str_float_formatting(self):

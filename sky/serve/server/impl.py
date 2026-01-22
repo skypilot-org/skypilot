@@ -282,17 +282,22 @@ def up(
         if not serve_utils.is_consolidation_mode(pool):
             print(f'{colorama.Fore.YELLOW}Launching controller for '
                   f'{service_name!r}...{colorama.Style.RESET_ALL}')
-            with common.with_server_user():
-                with skypilot_config.local_active_workspace_ctx(
-                        constants.SKYPILOT_DEFAULT_WORKSPACE):
-                    controller_job_id, controller_handle = execution.launch(
-                        task=controller_task,
-                        cluster_name=controller_name,
-                        retry_until_up=True,
-                        _request_name=request_names.AdminPolicyRequestName.
-                        SERVE_LAUNCH_CONTROLLER,
-                        _disable_controller_check=True,
-                    )
+            with common.with_server_user(
+            ), skypilot_config.local_active_workspace_ctx(
+                    constants.SKYPILOT_DEFAULT_WORKSPACE
+            ), (
+                    # Serve controller is not placed in kueue, as the controller
+                    # pod is considered a "system" pod and is not subject to
+                    # queue limits or preemption.
+                    skypilot_config.remove_queue_name_from_config()):
+                controller_job_id, controller_handle = execution.launch(
+                    task=controller_task,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    _request_name=request_names.AdminPolicyRequestName.
+                    SERVE_LAUNCH_CONTROLLER,
+                    _disable_controller_check=True,
+                )
         else:
             controller_type = controller_utils.get_controller_for_pool(pool)
             controller_handle = backend_utils.is_controller_accessible(
@@ -517,7 +522,7 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        yaml_content = service_record['pool_yaml']
+        yaml_content = service_record['yaml_content']
 
         # Load the existing task configuration
         task = task_lib.Task.from_yaml_str(yaml_content)

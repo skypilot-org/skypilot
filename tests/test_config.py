@@ -1168,3 +1168,114 @@ def test_standardized_region_configs(monkeypatch, tmp_path) -> None:
         keys=('vcn_ocid',),
         default_value=None)
     assert vcn_ocid is None
+
+
+def test_kubernetes_kueue_configs(monkeypatch, tmp_path) -> None:
+    """Test that the nested config works."""
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    with open(tmp_path / 'context_configs.yaml', 'w', encoding='utf-8') as f:
+        f.write(f"""\
+        kubernetes:
+            kueue:
+                local_queue_name: default-queue
+            context_configs:
+                contextA:
+                    kueue:
+                        local_queue_name: contextA-queue
+                contextB:
+                    kueue:
+                        local_queue_name: contextB-queue
+        workspaces:
+            workspaceA:
+                kubernetes:
+                    kueue:
+                        local_queue_name: workspaceA-queue
+                    context_configs:
+                        contextA:
+                            kueue:
+                                local_queue_name: workspaceA-contextA-queue
+            workspaceB:
+                kubernetes:
+                    context_configs:
+                        contextA:
+                            kueue:
+                                local_queue_name: workspaceB-contextA-queue
+        """)
+    monkeypatch.setattr(skypilot_config, '_GLOBAL_CONFIG_PATH',
+                        tmp_path / 'context_configs.yaml')
+    skypilot_config.reload_config()
+
+    # default workspace
+    default_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region=None,
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='default')
+    assert default_queue == 'default-queue'
+    contextA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='default')
+    assert contextA_queue == 'contextA-queue'
+    contextB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextB',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='default')
+    assert contextB_queue == 'contextB-queue'
+
+    # workspace A
+    workspaceA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceA')
+    assert workspaceA_queue == 'workspaceA-queue'
+    workspaceA_contextA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceA')
+    assert workspaceA_contextA_queue == 'workspaceA-contextA-queue'
+    # fall back to workspace default
+    workspaceA_contextB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextB',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceA')
+    assert workspaceA_contextB_queue == 'workspaceA-queue'
+
+    # workspace B
+    # fall back to non-workspaced default
+    workspaceB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceB')
+    assert workspaceB_queue == 'default-queue'
+    workspaceB_contextA_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextA',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceB')
+    assert workspaceB_contextA_queue == 'workspaceB-contextA-queue'
+    # fall back to non-workspaced context B
+    workspaceB_contextB_queue = skypilot_config.get_effective_workspace_region_config(
+        cloud='kubernetes',
+        region='contextB',
+        keys=('kueue', 'local_queue_name'),
+        default_value=None,
+        workspace='workspaceB')
+    assert workspaceB_contextB_queue == 'contextB-queue'
+
+    contexts = kubernetes_utils.get_custom_config_k8s_contexts()
+    assert len(contexts) == 2
+    assert contexts[0] == 'contextA'
+    assert contexts[1] == 'contextB'

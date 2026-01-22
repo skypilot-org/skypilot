@@ -95,6 +95,36 @@ def _get_dag(job_id: int) -> 'sky.Dag':
     return dag
 
 
+def _add_k8s_annotations(task: 'sky.Task', job_id: int) -> None:
+    """Adds Kubernetes pod config annotations to the task resources.
+
+    This function is a NOP for non-Kubernetes resources, as
+    the kubernetes specific config is not used when launching
+    a cluster on other clouds.
+    """
+    original_resources = task.resources
+    new_resources_list: List['sky.Resources'] = []
+    for original_resource in original_resources:
+        # Get existing config overrides or create new dict
+        config_overrides = original_resource.cluster_config_overrides.copy()
+
+        # Initialize nested structure and add annotations
+        pod_annotations = config_overrides.setdefault(
+            'kubernetes',
+            {}).setdefault('pod_config',
+                           {}).setdefault('metadata',
+                                          {}).setdefault('annotations', {})
+        pod_annotations['skypilot-managed-job-id'] = str(job_id)
+        pod_annotations['skypilot-managed-job-name'] = str(task.name)
+        # Create new resource with updated config
+        new_resource = original_resource.copy(
+            _cluster_config_overrides=config_overrides)
+        new_resources_list.append(new_resource)
+
+    # Set the new resources back to the task
+    task.set_resources(new_resources_list)
+
+
 class JobController:
     """Controls the lifecycle of a single managed job.
 
@@ -240,8 +270,8 @@ class JobController:
         if cluster_name is None:
             return
         if self._pool is None:
-            await context_utils.to_thread(managed_job_utils.terminate_cluster,
-                                          cluster_name)
+            await asyncio.to_thread(managed_job_utils.terminate_cluster,
+                                    cluster_name)
 
     async def _get_job_exit_codes(
         self, job_id: Optional[int],
@@ -265,7 +295,7 @@ class JobController:
                     if job_id is not None:
                         request.job_id = job_id
 
-                    response = await context_utils.to_thread(
+                    response = await asyncio.to_thread(
                         backend_utils.invoke_skylet_with_retries,
                         lambda: cloud_vm_ray_backend.SkyletClient(
                             handle.get_grpc_channel()).get_job_exit_codes(
@@ -282,7 +312,7 @@ class JobController:
                 # Use existing SSH-based code generation
                 code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
 
-                returncode, stdout, stderr = await context_utils.to_thread(
+                returncode, stdout, stderr = await asyncio.to_thread(
                     self._backend.run_on_head,
                     handle,
                     code,
@@ -336,6 +366,7 @@ class JobController:
                 3. Any unexpected error happens during the `sky.launch`.
         Other exceptions may be raised depending on the backend.
         """
+        _add_k8s_annotations(task, self._job_id)
         task_start_time = time.time()
         logger.info(
             f'Starting task {task_id} ({task.name}) for job {self._job_id}')
@@ -399,15 +430,11 @@ class JobController:
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
 
-            # Get full_resources_json using to_yaml_config from task resources
+            # Get full_resources_json using get_resource_config which handles
+            # heterogeneous resource configurations (any_of/ordered).
             full_resources_json = None
             if task.resources:
-                # Get the first Resources object from the set/list.
-                # TODO(lloyd): This does not work with tasks that have an any_of
-                # config. When we're adding support for heterogeneity we should
-                # change this to use `_resources_to_config`.
-                task_resource = next(iter(task.resources))
-                full_resources_json = task_resource.to_yaml_config()
+                full_resources_json = task.get_resource_config()
 
             await managed_job_state.set_starting_async(
                 self._job_id,
@@ -577,7 +604,7 @@ class JobController:
                 logger.info(f'Task {task_id} succeeded! '
                             'Getting end time and cleaning up')
                 try:
-                    success_end_time = await context_utils.to_thread(
+                    success_end_time = await asyncio.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -600,7 +627,7 @@ class JobController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await context_utils.to_thread(
+                    clusters = await asyncio.to_thread(
                         backend_utils.get_clusters,
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
@@ -610,9 +637,9 @@ class JobController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await context_utils.to_thread(
-                            self._download_log_and_stream, task_id, handle,
-                            job_id_on_pool_cluster)
+                        await asyncio.to_thread(self._download_log_and_stream,
+                                                task_id, handle,
+                                                job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -652,13 +679,14 @@ class JobController:
             # depending on the cloud, which can also cause failure of the job.
             # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status, handle) = await context_utils.to_thread(
+            (cluster_status, handle) = await asyncio.to_thread(
                 backend_utils.refresh_cluster_status_handle,
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
-            if cluster_status != status_lib.ClusterStatus.UP:
+            if cluster_status not in (status_lib.ClusterStatus.UP,
+                                      status_lib.ClusterStatus.AUTOSTOPPING):
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
                 # the cloud. Spot recovery is needed (will be done later in the
@@ -669,7 +697,7 @@ class JobController:
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
                 if ExternalFailureSource.is_registered():
-                    cluster_failures = await context_utils.to_thread(
+                    cluster_failures = await asyncio.to_thread(
                         ExternalFailureSource.get, cluster_name=cluster_name)
                     if cluster_failures:
                         logger.info(
@@ -687,7 +715,7 @@ class JobController:
                     # The user code has probably crashed, fail immediately.
                     logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await context_utils.to_thread(
+                    end_time = await asyncio.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
                     logger.info(
@@ -695,9 +723,9 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await context_utils.to_thread(self._download_log_and_stream,
-                                                  task_id, handle,
-                                                  job_id_on_pool_cluster)
+                    await asyncio.to_thread(self._download_log_and_stream,
+                                            task_id, handle,
+                                            job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -1078,7 +1106,7 @@ class ControllerManager:
         for task in dag.tasks:
             # most things in this function are blocking
             try:
-                await context_utils.to_thread(task_cleanup, task, job_id)
+                await asyncio.to_thread(task_cleanup, task, job_id)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
 

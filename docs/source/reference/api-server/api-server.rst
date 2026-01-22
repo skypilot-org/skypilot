@@ -69,7 +69,7 @@ Getting started with a remote API server
 .. _sky-api-server-connect:
 
 Connecting to an API server
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can configure your local SkyPilot
 to connect to it.
@@ -79,7 +79,7 @@ We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See
 
 .. code-block:: console
 
-    $ pip install -U skypilot-nightly
+    $ pip install -U skypilot
 
 Run ``sky api login`` to connect to the API server.
 

@@ -462,52 +462,54 @@ def cost_report(
         cluster_reports = subprocess_utils.run_in_parallel(
             _process_cluster_report, cluster_reports)
 
-    def _update_record_with_resources(record: Dict[str, Any]) -> None:
-        """Add resource fields for dashboard compatibility."""
-        if record is None:
-            return
-        resources = record.get('resources')
-        if resources is None:
-            return
-        if not dashboard_summary_response:
-            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-        else:
-            fields = ['cloud']
-        for field in fields:
-            try:
-                record[field] = str(getattr(resources, field))
-            except Exception as e:  # pylint: disable=broad-except
-                # Ok to skip the fields as this is just for display
-                # purposes.
-                logger.debug(f'Failed to get resources.{field} for cluster '
-                             f'{record["name"]}: {str(e)}')
-                record[field] = None
-
-        # Add resources_str and resources_str_full for dashboard
-        # compatibility
-        num_nodes = record.get('num_nodes', 1)
-        try:
-            resource_str_simple, resource_str_full = (
-                resources_utils.format_resource(resources,
-                                                simplified_only=False))
-            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to get resources_str for cluster '
-                         f'{record["name"]}: {str(e)}')
-            for field in fields:
-                record[field] = None
-            record['resources_str'] = '-'
-            record['resources_str_full'] = '-'
-
     for report in cluster_reports:
-        _update_record_with_resources(report)
+        _update_record_with_resources(report, dashboard_summary_response)
         if dashboard_summary_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
             report.pop('resources')
 
     return cluster_reports
+
+
+def _update_record_with_resources(
+        record: Dict[str, Any],
+        dashboard_summary_response: bool = False) -> None:
+    """Add resource fields for dashboard compatibility."""
+    if record is None:
+        return
+    resources = record.get('resources')
+    if resources is None:
+        return
+    if not dashboard_summary_response:
+        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+    else:
+        fields = ['cloud']
+    for field in fields:
+        try:
+            record[field] = str(getattr(resources, field))
+        except Exception as e:  # pylint: disable=broad-except
+            # Ok to skip the fields as this is just for display
+            # purposes.
+            logger.debug(f'Failed to get resources.{field} for cluster '
+                         f'{record["name"]}: {str(e)}')
+            record[field] = None
+
+    # Add resources_str and resources_str_full for dashboard
+    # compatibility
+    num_nodes = record.get('num_nodes', 1)
+    try:
+        resource_str_simple, resource_str_full = (
+            resources_utils.format_resource(resources, simplified_only=False))
+        record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+        record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get resources_str for cluster '
+                     f'{record["name"]}: {str(e)}')
+        for field in fields:
+            record[field] = None
+        record['resources_str'] = '-'
+        record['resources_str_full'] = '-'
 
 
 def _start(
@@ -538,6 +540,8 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         if down or idle_minutes_to_autostop:
@@ -566,6 +570,9 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+            wait_for = controller_autostop_config.wait_for
+            hook = controller_autostop_config.hook
+            hook_timeout = controller_autostop_config.hook_timeout
     else:
         # For non-controller clusters, restore autostop configuration from
         # database if not explicitly provided.
@@ -611,7 +618,15 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
+        # For controller clusters, hook comes from controller_autostop_config.
+        # For regular clusters, hook is None so it will be inherited from the
+        # existing config on the remote cluster.
+        backend.set_autostop(handle,
+                             idle_minutes_to_autostop,
+                             wait_for,
+                             down,
+                             hook=hook,
+                             hook_timeout=hook_timeout)
     return handle
 
 
@@ -795,11 +810,13 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
 @usage_lib.entrypoint
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[
+        autostop_lib.AutostopWaitFor] = autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedules an autostop/autodown for a cluster.
@@ -833,6 +850,12 @@ def autostop(
           to a negative number cancels any autostop/autodown setting.
         down: if true, use autodown (tear down the cluster; non-restartable),
           rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+          The script runs before the cluster is stopped or torn down. If the
+          hook fails, autostop will still proceed but a warning will be logged.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+          DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+          be terminated if it exceeds this timeout.
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
@@ -888,7 +911,12 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, wait_for, down)
+    backend.set_autostop(handle,
+                         idle_minutes,
+                         wait_for,
+                         down,
+                         hook=hook,
+                         hook_timeout=hook_timeout)
 
 
 # ==================
@@ -1131,6 +1159,43 @@ def tail_logs(cluster_name: str,
 
 
 @usage_lib.entrypoint
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs of a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+
+    Returns:
+        Return code 0 on success, non-zero on failure.
+    """
+    # Check the status of the cluster.
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='tailing autostop logs',
+    )
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
+    return returnval
+
+
+@usage_lib.entrypoint
 def download_logs(
         cluster_name: str,
         job_ids: Optional[List[str]],
@@ -1340,11 +1405,13 @@ def realtime_kubernetes_gpu_availability(
             region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be the same.')
+
+        all_keys = set(counts.keys()) | set(capacity.keys()) | set(
+            available.keys())
+        counts = {key: counts.get(key, []) for key in all_keys}
+        capacity = {key: capacity.get(key, 0) for key in all_keys}
+        available = {key: available.get(key, 0) for key in all_keys}
+
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 
@@ -1407,6 +1474,7 @@ def realtime_slurm_gpu_availability(
     This function calls the Slurm backend to fetch GPU info.
 
     Args:
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
         name_filter: Optional name filter for GPUs.
         quantity_filter: Optional quantity filter for GPUs.
         env_vars: Environment variables (may be needed for backend).
@@ -1438,7 +1506,6 @@ def realtime_slurm_gpu_availability(
     del env_vars, kwargs  # Currently unused
 
     if slurm_cluster_name is None:
-        # Include contexts from both Kubernetes and SSH clouds
         slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
     else:
         slurm_cluster_names = [slurm_cluster_name]
