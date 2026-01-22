@@ -76,6 +76,8 @@ install_requires = [
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
+    # Required by sqlalchemy.ext.asyncio which is used in sky/utils/db/db_utils.py
+    'greenlet',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
     'casbin',
