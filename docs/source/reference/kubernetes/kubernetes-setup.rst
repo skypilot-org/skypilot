@@ -257,18 +257,18 @@ The following setup steps are optional and can be performed based on your specif
 
 .. _kubernetes-setup-volumes:
 
-Set up volumes
-^^^^^^^^^^^^^^^
+Set up NFS and other volumes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 SkyPilot supports mounting various types of volumes to your pods on Kubernetes:
 
-* **Persistent volumes**: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These can be backed by block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
+* :ref:`Persistent volumes <volumes-quickstart>`: Independently managed volumes with lifecycle separate from clusters, ideal for long-term data storage and sharing datasets across clusters. These are backed by Kubernetes PVCs on block storage (e.g., AWS EBS, GCP Persistent Disk) or distributed file systems (e.g., JuiceFS, Nebius shared file system, AWS EFS, GCP Filestore).
 
-* **Ephemeral volumes**: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific.
+* :ref:`Ephemeral volumes <ephemeral-volumes>`: Automatically created and deleted with your cluster, suitable for temporary storage and caches that are cluster-specific. Also backed by Kubernetes PVCs.
 
-* **Other volume types**: You can also mount hostPath, NFS, etc. as needed.
+* :ref:`Other volume types <advanced-mount-pvc-with-kubernetes-configs>`: Mount hostPath, NFS, and other Kubernetes volume types by overriding SkyPilot's ``pod_config``.
 
-For detailed information on configuring and using volumes, see :ref:`volumes-on-kubernetes`.
+For detailed information on configuring and using volumes, see :ref:`Volumes on Kubernetes <volumes-quickstart>`.
 
 .. _kubernetes-setup-priority:
 
@@ -394,33 +394,27 @@ Below, we provide tips on how to monitor SkyPilot resources on your Kubernetes c
 List SkyPilot resources across all users
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-We provide a convenience command, :code:`sky status --k8s`, to view the status of all SkyPilot resources in the cluster.
+When using the :ref:`SkyPilot API server <sky-api-server>`, you can use the :ref:`SkyPilot dashboard <dashboard>` to view SkyPilot resources across all users:
 
-Unlike :code:`sky status` which lists only the SkyPilot resources launched by the current user,
-:code:`sky status --k8s` lists all SkyPilot resources in the cluster across all users.
+
+.. image:: ../../images/dashboard-clusters.png
+    :width: 100%
+    :align: center
+    :alt: SkyPilot Dashboard
+
+|
+
+Or run :code:`sky status -u`:
 
 .. code-block:: console
 
-    $ sky status --k8s
-    Kubernetes cluster state (context: mycluster)
-    SkyPilot clusters
-    USER     NAME                           LAUNCHED    RESOURCES                                  STATUS
-    alice    infer-svc-1                    23 hrs ago  1x Kubernetes(cpus=1, mem=1, {'L4': 1})    UP
-    alice    sky-jobs-controller-80b50983   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
-    alice    sky-serve-controller-80b50983  23 hrs ago  1x Kubernetes(cpus=4, mem=4)               UP
-    bob      dev                            1 day ago   1x Kubernetes(cpus=2, mem=8, {'H100': 1})  UP
-    bob      multinode-dev                  1 day ago   2x Kubernetes(cpus=2, mem=2)               UP
-    bob      sky-jobs-controller-2ea485ea   2 days ago  1x Kubernetes(cpus=4, mem=4)               UP
-
-    Managed jobs
-    In progress tasks: 1 STARTING
-    USER     ID  TASK  NAME      RESOURCES   SUBMITTED   TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-    alice    1   -     eval      1x[CPU:1+]  2 days ago  49s            8s            0            SUCCEEDED
-    bob      4   -     pretrain  1x[H100:4]  1 day ago   1h 1m 11s      1h 14s        0            SUCCEEDED
-    bob      3   -     bigjob    1x[CPU:16]  1 day ago   1d 21h 11m 4s  -             0            STARTING
-    bob      2   -     failjob   1x[CPU:1+]  1 day ago   54s            9s            0            FAILED
-    bob      1   -     shortjob  1x[CPU:1+]  2 days ago  1h 1m 19s      1h 16s        0            SUCCEEDED
-
+    $ sky status -u
+    Clusters
+    NAME                USER               WORKSPACE         INFRA                   RESOURCES                                   STATUS   AUTOSTOP  LAUNCHED
+    training-multinode  alice@skypilot.co  ml-team           Kubernetes (nebius)     2x(gpus=H100:8, cpus=200, mem=800, ...)     RUNNING  60m       5d ago
+    dev-alice           alice@skypilot.co  research-private  Kubernetes (coreweave)  1x(gpus=H200:1, cpus=8, mem=32, ...)        RUNNING  -         6d ago
+    inference           mike@skypilot.co   default           AWS (us-west-2)         1x(gpus=L4:1, g6.2xlarge, ...)              RUNNING  30m       4d ago
+    dev-bob             bob@skypilot.co    default           GCP (us-west1)          1x(cpus=4, mem=15, n1-standard-4, ...)      STOPPED  -         6d ago
 
 .. _kubernetes-observability-dashboard:
 
@@ -434,6 +428,7 @@ SkyPilot resources on your cluster.
     :align: center
     :alt: Kubernetes dashboard
 
+|
 
 As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:
 

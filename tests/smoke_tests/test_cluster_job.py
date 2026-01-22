@@ -1250,16 +1250,50 @@ def test_volume_env_mount_kubernetes():
 # ---------- Container logs from task on Kubernetes ----------
 
 
-def _check_container_logs(name, logs, total_lines, count):
+def _check_container_logs(name, logs, total_lines, count, timeout=60):
     """Check if the container logs contain the expected number of logging lines.
 
     Each line should be only one number in the given range and should show up
     count number of times. We skip the messages that we see in the job from
     running setup with set -x.
+
+    This function includes a retry mechanism because there can be a small delay
+    between job completion and when container logs become fully available via
+    kubectl logs.
     """
-    output_cmd = f's=$({logs});'
-    for num in range(1, total_lines + 1):
-        output_cmd += f' echo "$s" | grep -x "{num}" | wc -l | grep {count};'
+    # The awk script checks if each number from 1 to total_lines appears
+    # exactly 'count' times and that no other numbers are present.
+    awk_check = f"""awk '
+  /^[0-9]+$/ {{ counts[$0]++ }}
+  END {{
+    if (length(counts) != {total_lines}) {{
+      exit 1
+    }}
+    for (i = 1; i <= {total_lines}; i++) {{
+      if (counts[i] != {count}) {{
+        exit 1
+      }}
+    }}
+    exit 0
+  }}'"""
+
+    # Wrap in a retry loop with timeout
+    output_cmd = f'''
+start_time=$SECONDS
+while true; do
+    if (( $SECONDS - start_time > {timeout} )); then
+        echo "Timeout after {timeout} seconds waiting for container logs"
+        exit 1
+    fi
+    s=$({logs})
+    if echo "$s" | {awk_check}; then
+        echo "Container logs verified successfully"
+        break
+    fi
+    echo "Waiting for container logs to be ready..."
+    sleep 5
+done
+'''
     return smoke_tests_utils.run_cloud_cmd_on_cluster(
         name,
         output_cmd,
@@ -1286,7 +1320,7 @@ def test_container_logs_multinode_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml} --num-nodes 2',
                 _check_container_logs(name, head_logs, 9, 1),
                 _check_container_logs(name, worker_logs, 9, 1),
             ],
@@ -1340,7 +1374,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name}',
+                f'sky launch -y -c {name} --infra kubernetes',
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
@@ -1859,6 +1893,28 @@ def test_aws_custom_image():
         'test-aws-custom-image',
         [
             f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra aws/us-east-2 --image-id ami-062ddd90fb6f8267a',  # Nvidia image
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        'docker:verlai/verl:sgl055.latest',
+        # 'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
+    ])
+def test_aws_custom_docker_image_with_motd(image_id):
+    """Test AWS custom image with MOTD contamination"""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-aws-custom-image',
+        [
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra aws --image-id {image_id}',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',

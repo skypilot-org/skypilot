@@ -148,6 +148,25 @@ tests:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.uid
+      # Verify sky-ephemeral is NOT added when storage.enabled=false (backward compatibility)
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Verify state-volume uses emptyDir (not PVC)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state-volume
+            emptyDir: {}
+      # Verify ~/.sky is mounted from state-volume with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
 
   - it: should use RollingUpdate strategy when configured with external database via connection string
     set:
@@ -179,14 +198,162 @@ tests:
       - failedTemplate:
           errorMessage: "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy"
 
-  - it: should fail RollingUpdate strategy with local storage enabled
+  - it: should fail RollingUpdate strategy with local storage enabled using ReadWriteOnce
     set:
       apiService.upgradeStrategy: RollingUpdate
       apiService.dbConnectionSecretName: test-db-secret
       storage.enabled: true
     asserts:
       - failedTemplate:
-          errorMessage: "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false."
+          errorMessage: "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)."
+
+  - it: should allow RollingUpdate strategy with local storage enabled using ReadWriteMany
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+
+  - it: should use emptyDir for ~/.sky when RollingUpdate with storage enabled to avoid SQLite on NFS
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      # Should have sky-ephemeral emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Should mount sky-ephemeral at ~/.sky
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: sky-ephemeral
+            mountPath: /root/.sky
+      # Should NOT mount state-volume at ~/.sky with subPath .sky
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+
+  - it: should persist api_server/clients directory when RollingUpdate with storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      # Should mount api_server/clients from PVC
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/api_server/clients
+            subPath: api_server/clients
+
+  - it: should use state-volume for ~/.sky when Recreate with storage enabled
+    set:
+      apiService.upgradeStrategy: Recreate
+      storage.enabled: true
+    asserts:
+      # Should NOT have sky-ephemeral volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Should mount state-volume at ~/.sky with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+      # Should NOT have separate clients mount
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/api_server/clients
+            subPath: api_server/clients
+
+  - it: should use sky-ephemeral for logrotate sidecar when RollingUpdate with storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+      apiService.logs.retention.enabled: true
+    asserts:
+      # Logrotate sidecar should mount sky-ephemeral at ~/.sky
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: sky-ephemeral
+            mountPath: /root/.sky
+
+  - it: should use state-volume for logrotate sidecar when Recreate with storage enabled
+    set:
+      apiService.upgradeStrategy: Recreate
+      storage.enabled: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      # Logrotate sidecar should mount state-volume at ~/.sky with subPath
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+
+  - it: should mount managed job log directories when storage is enabled
+    set:
+      storage.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/jobs_controller
+            subPath: sky_logs/jobs_controller
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/managed_jobs
+            subPath: sky_logs/managed_jobs
+
+  - it: should not mount managed job log directories when storage is disabled
+    set:
+      storage.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/jobs_controller
+            subPath: sky_logs/jobs_controller
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/managed_jobs
+            subPath: sky_logs/managed_jobs
 
   - it: should honor fullnameOverride for deployment names and labels
     set:

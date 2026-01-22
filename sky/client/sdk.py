@@ -1024,6 +1024,44 @@ def tail_provision_logs(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Returns:
+        Exit code 0 on streaming success; non-zero on failure.
+
+    Request Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+    """
+    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
+                                     follow=follow,
+                                     tail=tail)
+
+    response = server_common.make_authenticated_request(
+        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    return stream_and_get(request_id)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:
     """Downloads the logs of jobs.
@@ -1247,10 +1285,12 @@ def stop(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1291,6 +1331,13 @@ def autostop(
             3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+            The script runs before the cluster is stopped or torn down. If the
+            hook fails, autostop will still proceed but a warning will be
+            logged.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            be terminated if it exceeds this timeout.
 
     Returns:
         The request ID of the autostop request.
@@ -1299,6 +1346,7 @@ def autostop(
         None
 
     Request Raises:
+        ValueError: if arguments are invalid.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -1308,10 +1356,19 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    if hook_timeout is not None and hook is None:
+        raise ValueError('hook_timeout can only be set if hook is set.')
+
     remote_api_version = versions.get_remote_api_version()
     if wait_for is not None and (remote_api_version is None or
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
+    # Hook support requires API version 28 or higher
+    if hook is not None and (remote_api_version is None or
+                             remote_api_version < 28):
+        logger.warning('Autostop hook is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
     body = payloads.AutostopBody(
@@ -1319,6 +1376,8 @@ def autostop(
         idle_minutes=idle_minutes,
         wait_for=wait_for,
         down=down,
+        hook=hook,
+        hook_timeout=hook_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)
@@ -2698,11 +2757,11 @@ def api_login(endpoint: Optional[str] = None,
         token: Optional[str] = None
 
         # Try methods in order:
-        # 1. New polling-based flow - only on servers >= API v28
+        # 1. New polling-based flow - only on servers >= API v30
         # 2. Old localhost callback flow
         # 3. Manual token entry
         remote_api_version = versions.get_remote_api_version()
-        if remote_api_version is not None and remote_api_version >= 28:
+        if remote_api_version is not None and remote_api_version >= 30:
             token = _try_polling_auth(endpoint)
 
         if token is None:

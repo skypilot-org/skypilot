@@ -428,38 +428,29 @@ Setup GPU metrics in Nebius Kubernetes cluster
 
 If you are using Nebius Kubernetes cluster, you can setup GPU metrics in the cluster to get real-time GPU metrics in the SkyPilot dashboard.
 
-1. Install the Prometheus operator.
+1. Install Prometheus.
 
-On Nebius console, in the detail page of the Nebius Kubernetes cluster, go to ``Applications`` -> Search for ``Prometheus Operator`` -> ``Deploy`` -> Enter ``skypilot`` for the ``Namespace`` -> ``Deploy application``.
+First, create a ``prometheus-values.yaml`` file with the following configuration:
 
-.. image:: ../../../images/metrics/search-prom-operator.png
-    :alt: Search for Prometheus Operator
-    :align: center
-    :width: 60%
+.. literalinclude:: ../../../../../examples/metrics/prometheus-values.yaml
+   :language: yaml
 
-.. image:: ../../../images/metrics/deploy-prom-operator.png
-    :alt: Deploy Prometheus Operator
-    :align: center
-    :width: 60%
-
-Wait for the Prometheus operator to be installed, the status badge will become ``Deployed``.
-
-.. image:: ../../../images/metrics/status-prom-operator.png
-    :alt: Status of Prometheus Operator
-    :align: center
-    :width: 60%
-
-You can also check the Pod status to verify the installation.
+Then install Prometheus using ``skypilot-prometheus`` as the release name:
 
 .. code-block:: bash
 
-  kubectl get pods -n skypilot
+    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+    helm repo update
+    helm upgrade --install skypilot-prometheus prometheus-community/prometheus \
+      --namespace skypilot \
+      --create-namespace \
+      -f prometheus-values.yaml
 
-By default, the CPU and memory metrics exported by node exporter do not include the ``node`` label, which is required for the SkyPilot dashboard to display the metrics. You can add the ``node`` label to the metrics by applying the following config to the node exporter service monitor resource:
+Verify the ``skypilot-prometheus-server`` service was created:
 
 .. code-block:: bash
 
-  kubectl apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/kube_prometheus_node_exporter_service_monitor.yaml -n skypilot
+    kubectl get svc skypilot-prometheus-server -n skypilot
 
 2. Install the Nvidia Device Plugin.
 
@@ -490,21 +481,7 @@ You can also check the Pod status to verify the installation.
 
 The dcgm exporter will be installed automatically.
 
-3. Create the Prometheus service for SkyPilot API server to retrieve the GPU metrics:
-
-   .. code-block:: bash
-
-     kubectl create -f https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/metrics/skypilot_prometheus_server_service.yaml -n skypilot
-
-Confirm that the service endpoint is created by running the following command:
-
-.. code-block:: bash
-
-  kubectl get endpoints skypilot-prometheus-server -n skypilot
-  NAME                         ENDPOINTS           AGE
-  skypilot-prometheus-server   10.24.20.128:9090   62s
-
-4. If you are using multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config.
+3. If you are using multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config.
 
 An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
 

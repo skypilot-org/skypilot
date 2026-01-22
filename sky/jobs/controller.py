@@ -270,8 +270,8 @@ class JobController:
         if cluster_name is None:
             return
         if self._pool is None:
-            await context_utils.to_thread(managed_job_utils.terminate_cluster,
-                                          cluster_name)
+            await asyncio.to_thread(managed_job_utils.terminate_cluster,
+                                    cluster_name)
 
     async def _get_job_exit_codes(
         self, job_id: Optional[int],
@@ -295,7 +295,7 @@ class JobController:
                     if job_id is not None:
                         request.job_id = job_id
 
-                    response = await context_utils.to_thread(
+                    response = await asyncio.to_thread(
                         backend_utils.invoke_skylet_with_retries,
                         lambda: cloud_vm_ray_backend.SkyletClient(
                             handle.get_grpc_channel()).get_job_exit_codes(
@@ -312,7 +312,7 @@ class JobController:
                 # Use existing SSH-based code generation
                 code = job_lib.JobLibCodeGen.get_job_exit_codes(job_id)
 
-                returncode, stdout, stderr = await context_utils.to_thread(
+                returncode, stdout, stderr = await asyncio.to_thread(
                     self._backend.run_on_head,
                     handle,
                     code,
@@ -604,7 +604,7 @@ class JobController:
                 logger.info(f'Task {task_id} succeeded! '
                             'Getting end time and cleaning up')
                 try:
-                    success_end_time = await context_utils.to_thread(
+                    success_end_time = await asyncio.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -627,7 +627,7 @@ class JobController:
                 try:
                     logger.info(f'Downloading logs on cluster {cluster_name} '
                                 f'and job id {job_id_on_pool_cluster}.')
-                    clusters = await context_utils.to_thread(
+                    clusters = await asyncio.to_thread(
                         backend_utils.get_clusters,
                         cluster_names=[cluster_name],
                         refresh=common.StatusRefreshMode.NONE,
@@ -637,9 +637,9 @@ class JobController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await context_utils.to_thread(
-                            self._download_log_and_stream, task_id, handle,
-                            job_id_on_pool_cluster)
+                        await asyncio.to_thread(self._download_log_and_stream,
+                                                task_id, handle,
+                                                job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
@@ -679,13 +679,14 @@ class JobController:
             # depending on the cloud, which can also cause failure of the job.
             # Plugins can report such failures via ExternalFailureSource.
             # TODO(cooperc): do we need to add this to asyncio thread?
-            (cluster_status, handle) = await context_utils.to_thread(
+            (cluster_status, handle) = await asyncio.to_thread(
                 backend_utils.refresh_cluster_status_handle,
                 cluster_name,
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
-            if cluster_status != status_lib.ClusterStatus.UP:
+            if cluster_status not in (status_lib.ClusterStatus.UP,
+                                      status_lib.ClusterStatus.AUTOSTOPPING):
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
                 # the cloud. Spot recovery is needed (will be done later in the
@@ -696,7 +697,7 @@ class JobController:
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
                 if ExternalFailureSource.is_registered():
-                    cluster_failures = await context_utils.to_thread(
+                    cluster_failures = await asyncio.to_thread(
                         ExternalFailureSource.get, cluster_name=cluster_name)
                     if cluster_failures:
                         logger.info(
@@ -714,7 +715,7 @@ class JobController:
                     # The user code has probably crashed, fail immediately.
                     logger.info(
                         f'Task {task_id} failed with status: {job_status}')
-                    end_time = await context_utils.to_thread(
+                    end_time = await asyncio.to_thread(
                         managed_job_utils.try_to_get_job_end_time,
                         self._backend, cluster_name, job_id_on_pool_cluster)
                     logger.info(
@@ -722,9 +723,9 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await context_utils.to_thread(self._download_log_and_stream,
-                                                  task_id, handle,
-                                                  job_id_on_pool_cluster)
+                    await asyncio.to_thread(self._download_log_and_stream,
+                                            task_id, handle,
+                                            job_id_on_pool_cluster)
 
                     failure_reason = (
                         'To see the details, run: '
@@ -1105,7 +1106,7 @@ class ControllerManager:
         for task in dag.tasks:
             # most things in this function are blocking
             try:
-                await context_utils.to_thread(task_cleanup, task, job_id)
+                await asyncio.to_thread(task_cleanup, task, job_id)
             except Exception as e:  # pylint: disable=broad-except
                 error = e
 
