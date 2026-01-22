@@ -814,10 +814,12 @@ export async function downloadManagedJobLogs({
  * before the first API call completes, so we just need a simple check.
  *
  * @param {Object} options - Hook options
- * @param {number} options.refreshInterval - Auto-refresh interval in ms
- * @param {Object} options.sortConfig - Sort configuration { key, direction }
- * @param {Array} options.filters - Array of filter objects
- * @param {Array} options.statuses - Array of status strings to filter by
+ * @param {number} [options.refreshInterval] - Auto-refresh interval in ms
+ * @param {Object} [options.sortConfig] - Sort configuration { key, direction }
+ * @param {Array} [options.filters] - Array of filter objects
+ * @param {Array} [options.statuses] - Array of status strings to filter by
+ * @param {number} [options.initialPage=1] - Initial page number
+ * @param {number} [options.initialLimit=10] - Initial page size/limit
  * @returns {Object} Jobs data with pagination state and actions
  */
 export function useJobsData(options = {}) {
@@ -826,6 +828,8 @@ export function useJobsData(options = {}) {
     sortConfig = { key: null, direction: 'ascending' },
     filters = [],
     statuses = [],
+    initialPage = 1,
+    initialLimit = 10,
   } = options;
 
   // Convert sortConfig to API format
@@ -844,8 +848,8 @@ export function useJobsData(options = {}) {
   const [data, setData] = useState([]);
   const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
+  const [page, setPage] = useState(initialPage);
+  const [limit, setLimit] = useState(initialLimit);
   const [total, setTotal] = useState(0);
   const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
