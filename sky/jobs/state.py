@@ -106,9 +106,6 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
-    # Per-task cluster name for JobGroups (each task may run on a
-    # different cluster)
-    sqlalchemy.Column('cluster_name', sqlalchemy.Text, server_default=None),
     # Whether this task is a primary task (True) or auxiliary task (False)
     # within a job group. NULL for non-job-group jobs (single jobs/pipelines).
     # Auxiliary tasks are terminated when all primary tasks complete.
@@ -420,8 +417,6 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'current_cluster_name': r.get('current_cluster_name'),
         'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
         'pool_hash': r.get('pool_hash'),
-        # Per-task cluster name for JobGroups
-        'cluster_name': r.get('cluster_name'),
         # Whether this task is primary (True) or auxiliary (False) in a job
         # group. NULL for non-job-group jobs.
         'is_primary_in_job_group': r.get('is_primary_in_job_group'),
@@ -2997,69 +2992,3 @@ async def job_event_retention_daemon():
             logger.error(f'Error running job event retention daemon: {e}')
 
         await asyncio.sleep(JOB_EVENT_DAEMON_INTERVAL_SECONDS)
-
-
-# === JobGroup functions ===
-
-
-@_init_db
-def set_task_cluster_name(job_id: int, task_id: int, cluster_name: str) -> None:
-    """Set the cluster name for a specific task.
-
-    This is used by JobGroups where each task may run on a different cluster.
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-        task_id: The task_id within the job.
-        cluster_name: The name of the cluster running this task.
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(spot_table).filter(
-            sqlalchemy.and_(
-                spot_table.c.spot_job_id == job_id,
-                spot_table.c.task_id == task_id,
-            )).update({spot_table.c.cluster_name: cluster_name})
-        session.commit()
-
-
-@_init_db_async
-async def set_task_cluster_name_async(job_id: int, task_id: int,
-                                      cluster_name: str) -> None:
-    """Set the cluster name for a specific task (async version).
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-        task_id: The task_id within the job.
-        cluster_name: The name of the cluster running this task.
-    """
-    assert _SQLALCHEMY_ENGINE_ASYNC is not None
-    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        await session.execute(
-            sqlalchemy.update(spot_table).where(
-                sqlalchemy.and_(
-                    spot_table.c.spot_job_id == job_id,
-                    spot_table.c.task_id == task_id,
-                )).values({spot_table.c.cluster_name: cluster_name}))
-        await session.commit()
-
-
-@_init_db
-def get_task_cluster_names(job_id: int) -> Dict[int, Optional[str]]:
-    """Get cluster names for all tasks in a job.
-
-    Args:
-        job_id: The spot_job_id of the managed job.
-
-    Returns:
-        Dict mapping task_id to cluster_name (may be None if not set).
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        results = session.execute(
-            sqlalchemy.select(
-                spot_table.c.task_id,
-                spot_table.c.cluster_name,
-            ).where(spot_table.c.spot_job_id == job_id).order_by(
-                spot_table.c.task_id.asc())).fetchall()
-        return {row[0]: row[1] for row in results}

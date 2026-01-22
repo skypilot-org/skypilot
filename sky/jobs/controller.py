@@ -953,7 +953,7 @@ class JobController:
     async def _prepare_job_group_task_for_launch(
         self, task: 'sky.Task', task_id: int, job_group_name: str,
         other_job_names: List[str]
-    ) -> Tuple[Optional[str], recovery_strategy.StrategyExecutor]:
+    ) -> Tuple[str, recovery_strategy.StrategyExecutor]:
         """Prepare a JobGroup task for launch.
 
         This function:
@@ -968,7 +968,8 @@ class JobController:
             other_job_names: Other task names in the group (to wait for).
 
         Returns:
-            Tuple of (cluster_name, executor).
+            Tuple of (cluster_name, executor). cluster_name is always
+            deterministic for JobGroups (no pool support).
         """
         task_name = task.name
         assert task_name is not None, f'Task {task_id} must have a name'
@@ -985,12 +986,13 @@ class JobController:
             current_run = task.run or ''
             task.run = wait_script + '\n\n' + current_run
 
-        cluster_name = (managed_job_utils.generate_managed_job_cluster_name(
-            task_name, self._job_id) if self._pool is None else None)
+        # JobGroups don't support pools, so cluster name is always deterministic
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task_name, self._job_id)
 
         executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._job_id, task_id,
-            self._pool, self.starting, self.starting_lock, self.starting_signal)
+            cluster_name, self._backend, task, self._job_id, task_id, None,
+            self.starting, self.starting_lock, self.starting_signal)
 
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
@@ -1045,9 +1047,9 @@ class JobController:
             for t, _ in all_tasks_handles:
                 t_name = t.name
                 assert t_name is not None
+                # JobGroups don't support pools, cluster name is deterministic
                 t_cluster = managed_job_utils.generate_managed_job_cluster_name(
-                    t_name,
-                    self._job_id) if self._pool is None else cluster_name
+                    t_name, self._job_id)
                 t_handle = await asyncio.to_thread(
                     global_user_state.get_handle_from_cluster_name, t_cluster)
                 updated_handles.append((t, t_handle))
@@ -1080,6 +1082,7 @@ class JobController:
         """
         job_group_name = self._dag.name
         assert job_group_name is not None, 'JobGroup name must be set'
+        assert self._pool is None, 'JobGroups do not support pools'
         tasks = self._dag.tasks
         logger.info(f'Starting JobGroup "{job_group_name}" with '
                     f'{len(tasks)} jobs: {[t.name for t in tasks]}')
@@ -1207,20 +1210,16 @@ class JobController:
         logger.info('Phase 2: Waiting for all clusters to be ready...')
 
         async def sync_task_state(
-            task_id: int, task: 'task_lib.Task',
-            cluster_name: typing.Optional[str], is_resuming: bool
-        ) -> Tuple[str, 'cloud_vm_ray_backend.CloudVmRayResourceHandle']:
-            """Sync state for a single task (parallel execution)."""
-            if cluster_name is None:
-                cluster_name, _ = await (
-                    managed_job_state.get_pool_submit_info_async(self._job_id))
+            task_id: int, task: 'task_lib.Task', cluster_name: str,
+            is_resuming: bool
+        ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+            """Sync state for a single task (parallel execution).
 
+            JobGroups don't support pools, so cluster_name is always
+            deterministic and provided by the caller.
+            """
             handle = await asyncio.to_thread(
                 global_user_state.get_handle_from_cluster_name, cluster_name)
-
-            if cluster_name is not None:
-                await managed_job_state.set_task_cluster_name_async(
-                    self._job_id, task_id, cluster_name)
 
             # Only set STARTED state if not resuming (already started before)
             if not is_resuming:
@@ -1232,7 +1231,7 @@ class JobController:
                     start_time=time.time(),
                     callback_func=callback_func)
 
-            return cluster_name, handle
+            return handle
 
         # Execute all state syncs in parallel (only for non-terminal tasks)
         sync_coros = []
@@ -1242,21 +1241,24 @@ class JobController:
                 continue
             # Task is resuming if it has a status (i.e., was already started)
             task_is_resuming = task_resume_info[task_id][0] is not None
+            # JobGroups always have deterministic cluster names
+            task_cluster_name = cluster_names[task_id]
+            assert task_cluster_name is not None, (
+                f'cluster_name should be set for non-terminal task {task_id}')
             sync_coros.append(
-                sync_task_state(task_id, task, cluster_names[task_id],
+                sync_task_state(task_id, task, task_cluster_name,
                                 task_is_resuming))
             sync_task_ids.append(task_id)
 
         sync_results = await asyncio.gather(*sync_coros)
 
-        # Unpack results and build handles list
+        # Build handles list from sync results
         handles: List[
             Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle']] = [
                 None
             ] * len(tasks)
-        for i, (synced_name, handle) in enumerate(sync_results):
+        for i, handle in enumerate(sync_results):
             task_id = sync_task_ids[i]
-            cluster_names[task_id] = synced_name
             handles[task_id] = handle
 
         # Phase 3: Set up networking

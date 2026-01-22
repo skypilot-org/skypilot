@@ -324,6 +324,10 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task, chain DAG, or JobGroup is '
                              f'allowed for job_launch. Dag: {dag}')
+    if dag.is_job_group() and pool is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('JobGroups do not support pools. Please remove '
+                             'the --pool argument when launching a job group.')
     dag.validate()
     # TODO(aylei): use consolidated job controller instead of performing
     # pre-mount operations when submitting jobs.

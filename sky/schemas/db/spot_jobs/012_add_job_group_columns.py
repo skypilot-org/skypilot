@@ -1,9 +1,11 @@
-"""Add job group columns to spot and job_info tables.
+"""Add job group columns to job_info table.
 
 Adds:
-- cluster_name (TEXT) to spot table for per-task cluster tracking
 - execution (TEXT) to job_info table: 'parallel' (job group) or 'serial'
   (pipeline/single job)
+
+Note: cluster_name is not stored for job groups because it's deterministic
+(computed from task name and job ID). Job groups don't support pools.
 
 Revision ID: 012
 Revises: 011
@@ -27,14 +29,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add job group columns to spot and job_info tables."""
+    """Add job group columns to job_info table."""
     with op.get_context().autocommit_block():
-        # Add cluster_name column to spot table for per-task cluster tracking
-        # in JobGroups (each task may run on a different cluster)
-        db_utils.add_column_to_table_alembic('spot',
-                                             'cluster_name',
-                                             sa.Text(),
-                                             server_default=None)
         # Add execution column to job_info table for execution mode:
         # 'parallel' (job group) or 'serial' (pipeline/single job)
         db_utils.add_column_to_table_alembic(
