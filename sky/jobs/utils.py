@@ -2371,6 +2371,10 @@ class ManagedJobCodeGen:
         sort_order: Optional[str] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
+        # Filter out is_primary_in_job_group for older controllers (< 15)
+        _fields = {fields!r}
+        if managed_job_version < 15 and _fields is not None:
+            _fields = [f for f in _fields if f != 'is_primary_in_job_group']
         if managed_job_version < 9:
             # For backward compatibility, since filtering is not supported
             # before #6652.
@@ -2411,7 +2415,7 @@ class ManagedJobCodeGen:
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r},
-                                fields={fields!r})
+                                fields=_fields)
         else:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
@@ -2424,7 +2428,7 @@ class ManagedJobCodeGen:
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r},
-                                fields={fields!r},
+                                fields=_fields,
                                 sort_by={sort_by!r},
                                 sort_order={sort_order!r})
         print(job_table, flush=True)
