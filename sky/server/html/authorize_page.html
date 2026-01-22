@@ -1,0 +1,204 @@
+<!-- TODO(cooperc): Migrate this page to the React dashboard for consistency. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in to SkyPilot CLI</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f8f9fa;
+            color: #202124;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 48px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+        }
+        .logo {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 20px;
+            display: inline-block;
+        }
+        .logo svg {
+            width: 100%;
+            height: 100%;
+        }
+        h1 {
+            font-size: 24px;
+            font-weight: 500;
+            margin-bottom: 20px;
+            color: #202124;
+        }
+        .user-identifier {
+            font-size: 12px;
+            color: #80868b;
+            margin-bottom: 8px;
+        }
+        .description {
+            font-size: 14px;
+            line-height: 1.5;
+            color: #5f6368;
+            margin-bottom: 32px;
+        }
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+        .authorize-button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .authorize-button:hover {
+            background-color: #287ae6;
+        }
+        .authorize-button:active {
+            background-color: #1b66c9;
+        }
+        .authorize-button:disabled {
+            background-color: #94c4f8;
+            cursor: not-allowed;
+        }
+        .cancel-button {
+            background-color: #ffffff;
+            color: #5f6368;
+            border: 1px solid #dadce0;
+            border-radius: 4px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .cancel-button:hover {
+            background-color: #f8f9fa;
+        }
+        .footer-text {
+            font-size: 12px;
+            color: #5f6368;
+            margin-top: 30px;
+        }
+        .error-message {
+            color: #d93025;
+            font-size: 14px;
+            margin-top: 16px;
+            display: none;
+        }
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <!-- SkyPilot Logo Icon -->
+            <svg viewBox="0 0 50 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M25.1258 30.8274L19.2842 31.6783L33.8316 46.2268L31.492 37.1925L25.1258 30.8274Z" fill="#372F8A"/>
+                <path d="M46.9433 0.000976562L0.719727 13.1148L15.2661 27.6601L16.633 21.3925L10.3728 15.1323L40.183 6.74118C40.183 6.74118 46.102 0.855027 46.9444 0.00203721L46.9433 0.000976562Z" fill="#372F8A"/>
+                <path d="M40.1821 6.74021L31.4922 37.1925L33.8318 46.2257L46.9445 0C46.1022 0.85299 40.1831 6.73915 40.1831 6.73915L40.1821 6.74021Z" fill="#372F8A"/>
+                <path d="M21.3356 25.6089L19.2842 31.6783L25.1258 30.8275L30.3741 16.6011L30.3275 16.617L21.3356 25.6089Z" fill="#195D7F"/>
+                <path d="M16.632 21.3918L15.2651 27.6605L21.3357 25.6091L30.3276 16.6172L16.632 21.3918Z" fill="#39A4DD"/>
+            </svg>
+        </div>
+        <h1>Sign in to SkyPilot CLI</h1>
+        <p class="user-identifier">USER_PLACEHOLDER</p>
+        <p class="description">
+            Click <strong>Authorize</strong> to link the SkyPilot CLI to your account.
+        </p>
+        <div class="button-group">
+            <button class="cancel-button" onclick="cancelAuth()">Cancel</button>
+            <button id="authorize-btn" class="authorize-button" onclick="authorize()">Authorize</button>
+        </div>
+        <p id="error-message" class="error-message"></p>
+        <p class="footer-text">Only authorize if you initiated this request from the SkyPilot CLI.</p>
+    </div>
+
+    <script>
+        const authorizeBtn = document.getElementById('authorize-btn');
+        const errorMessage = document.getElementById('error-message');
+
+        function getCodeChallenge() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('code_challenge');
+        }
+
+        function showMessage(title, message) {
+            document.body.innerHTML = `
+                <div style="display: flex; align-items: center; justify-content: center;
+                            height: 100vh; font-family: sans-serif; color: #5f6368;">
+                    <div style="text-align: center;">
+                        <h2>${title}</h2>
+                        <p>${message}</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function authorize() {
+            authorizeBtn.disabled = true;
+            authorizeBtn.innerHTML = '<span class="spinner"></span>Authorizing...';
+            errorMessage.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/v1/auth/authorize', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({code_challenge: getCodeChallenge()})
+                });
+
+                if (response.ok) {
+                    showMessage('Authorization Complete',
+                                'You can close this tab and return to your terminal.');
+                } else {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Authorization failed');
+                }
+            } catch (error) {
+                errorMessage.textContent = error.message || 'An error occurred. Please try again.';
+                errorMessage.style.display = 'block';
+                authorizeBtn.disabled = false;
+                authorizeBtn.textContent = 'Authorize';
+            }
+        }
+
+        function cancelAuth() {
+            showMessage('Authorization Cancelled', 'You can close this tab.');
+        }
+    </script>
+</body>
+</html>
