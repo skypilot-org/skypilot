@@ -565,6 +565,9 @@ class JobsQueueV2Body(RequestBody):
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
     fields: Optional[List[str]] = None
+    # Sorting parameters, added in ManagedJobsService v14.
+    sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
+    sort_order: Optional[str] = None  # 'asc' or 'desc'
 
 
 class JobsCancelBody(RequestBody):
