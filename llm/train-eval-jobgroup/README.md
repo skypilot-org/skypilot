@@ -4,22 +4,7 @@ This example demonstrates SkyPilot job groups with parallel training and evaluat
 
 ## Architecture
 
-```
-┌─────────────────────┐     ┌─────────────────────┐
-│      trainer        │     │     evaluator       │
-│      (GPU)          │     │      (GPU)          │
-│  Train ResNet-18    │     │  Watch for ckpts    │
-│  Save checkpoints   │     │  Evaluate & report  │
-└──────────┬──────────┘     └──────────┬──────────┘
-           │                           │
-           │  writes checkpoints       │ reads checkpoints
-           └───────────┬───────────────┘
-                       ▼
-              ┌─────────────────┐
-              │  SkyPilot Volume│
-              │   /checkpoints  │
-              └─────────────────┘
-```
+![](./diagram.png)
 
 ### Components
 
