@@ -580,7 +580,7 @@ SKYPILOT_DEFAULT_WORKSPACE = 'default'
 # BEGIN constants used for service catalog.
 HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs'  # pylint: disable=line-too-long
 HOSTED_CATALOG_DIR_URL_S3_MIRROR = 'https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs'  # pylint: disable=line-too-long
-CATALOG_SCHEMA_VERSION = 'v8'
+CATALOG_SCHEMA_VERSION = 'v9'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
@@ -646,3 +646,8 @@ X86_64_ARCH = 'x86_64'
 
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
+
+SSD_LOCAL_DISK = 'ssd'
+HDD_LOCAL_DISK = 'hdd'
+
+LOCAL_DISK_TYPES = {SSD_LOCAL_DISK, HDD_LOCAL_DISK}
