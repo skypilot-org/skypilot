@@ -26,18 +26,14 @@ async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
         refresh: If True, refresh volume state from cloud APIs before returning.
             If False (default), return cached data from the database.
     """
-    auth_user = request.state.auth_user
-    auth_user_env_vars_kwargs = {
-        'env_vars': auth_user.to_env_vars()
-    } if auth_user else {}
-    request_body = payloads.VolumeListBody(refresh=refresh,
-                                           **auth_user_env_vars_kwargs)
+    request_body = payloads.VolumeListBody(refresh=refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.VOLUME_LIST,
         request_body=request_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -51,6 +47,7 @@ async def volume_delete(request: fastapi.Request,
         request_body=volume_delete_body,
         func=core.volume_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -127,4 +124,5 @@ async def volume_apply(request: fastapi.Request,
         request_body=volume_apply_body,
         func=core.volume_apply,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )

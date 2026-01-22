@@ -5,7 +5,7 @@ Kubernetes Troubleshooting
 
 If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide will help you debug common issues.
 
-If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
+If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <https://github.com/skypilot-org/skypilot>`_.
 
 .. _kubernetes-troubleshooting-basic:
 

@@ -593,8 +593,6 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
-        request_id = response.headers.get('X-Request-ID')
-    if request_id is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 'Failed to get request ID from SkyPilot API server at '

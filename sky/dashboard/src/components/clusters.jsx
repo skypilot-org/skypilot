@@ -32,7 +32,11 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
+import {
+  getClusters,
+  getClusterHistory,
+  useClusterData,
+} from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
@@ -591,15 +595,47 @@ export function ClusterTable({
   setOptionValues,
   preloadingComplete,
 }) {
-  const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
   });
-  const [loading, setLocalLoading] = useState(false);
+
+  // Use the cluster data hook (supports plugin override for server-side pagination)
+  const {
+    data: hookData,
+    allData,
+    total,
+    page,
+    limit,
+    totalPages: hookTotalPages,
+    hasNext,
+    hasPrev,
+    setPage,
+    setLimit,
+    loading: hookLoading,
+    refresh,
+    isServerPagination,
+  } = useClusterData({
+    showHistory,
+    historyDays,
+    refreshInterval: preloadingComplete ? refreshInterval : null,
+    sortConfig,
+    filters,
+  });
+
+  // Track loading state for parent component
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    if (!hookLoading && isInitialLoad) {
+      setIsInitialLoad(false);
+    }
+  }, [hookLoading, isInitialLoad]);
+
+  // Sync loading state with parent
+  useEffect(() => {
+    setLoading(hookLoading);
+  }, [hookLoading, setLoading]);
 
   const fetchOptionValuesFromClusters = (clusters) => {
     let optionValues = {
@@ -622,7 +658,11 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.cluster, cluster.cluster);
       pushWithoutDuplication(optionValues.user, cluster.user);
       pushWithoutDuplication(optionValues.workspace, cluster.workspace);
-      pushWithoutDuplication(optionValues.infra, cluster.infra);
+      // Use full_infra for filter values so they match database values
+      pushWithoutDuplication(
+        optionValues.infra,
+        cluster.full_infra || cluster.infra
+      );
 
       // Extract labels - add only key:value pairs
       const labels = cluster.labels || {};
@@ -639,71 +679,16 @@ export function ClusterTable({
     return optionValues;
   };
 
-  const fetchData = React.useCallback(async () => {
-    setLoading(true);
-    setLocalLoading(true);
-
-    try {
-      // Use cached data if available, which should have been preloaded by cache preloader
-      const activeClusters = await dashboardCache.get(getClusters);
-
-      if (showHistory) {
-        let historyClusters = [];
-        try {
-          historyClusters = await dashboardCache.get(getClusterHistory, [
-            null,
-            historyDays,
-          ]);
-        } catch (error) {
-          console.error('Error fetching cluster history:', error);
-        }
-        // Mark clusters as active or historical for UI distinction
-        const markedActiveClusters = activeClusters.map((cluster) => ({
-          ...cluster,
-          isHistorical: false,
-        }));
-        const markedHistoryClusters = historyClusters.map((cluster) => ({
-          ...cluster,
-          isHistorical: true,
-        }));
-        // Combine and remove duplicates (prefer active over historical)
-        const combinedData = [...markedActiveClusters];
-        markedHistoryClusters.forEach((histCluster) => {
-          const existsInActive = activeClusters.some(
-            (activeCluster) =>
-              activeCluster.cluster_hash === histCluster.cluster_hash
-          );
-          if (!existsInActive) {
-            combinedData.push(histCluster);
-          }
-        });
-
-        setOptionValues(fetchOptionValuesFromClusters(combinedData));
-
-        setData(combinedData);
-      } else {
-        // Mark active clusters for consistency
-        const markedActiveClusters = activeClusters.map((cluster) => ({
-          ...cluster,
-          isHistorical: false,
-        }));
-
-        setOptionValues(fetchOptionValuesFromClusters(markedActiveClusters));
-
-        setData(markedActiveClusters);
-      }
-    } catch (error) {
-      console.error('Error fetching cluster data:', error);
-      setOptionValues(fetchOptionValuesFromClusters([]));
-      setData([]);
+  // Update filter option values when data changes
+  useEffect(() => {
+    if (allData && allData.length > 0) {
+      setOptionValues(fetchOptionValuesFromClusters(allData));
     }
+  }, [allData, setOptionValues]);
 
-    setLoading(false);
-    setLocalLoading(false);
-    setIsInitialLoad(false);
-  }, [setLoading, showHistory, historyDays, setOptionValues]);
-
-  // Use useMemo to compute sorted data
+  // Use useMemo to compute sorted and filtered data
+  // For server-side pagination, data is already paginated, so we apply filters/sort to hookData
+  // For client-side pagination, we apply filters/sort to allData, then paginate
   const sortedData = React.useMemo(() => {
     // Main filter function
     const filterData = (data, filters) => {
@@ -729,47 +714,37 @@ export function ClusterTable({
       });
     };
 
-    const filteredData = filterData(data, filters);
+    // For server-side pagination, server already handles filtering - just apply sorting
+    // For client-side pagination, we filter/sort the full data then paginate
+    const dataToProcess = isServerPagination ? hookData : allData;
+
+    if (!isServerPagination) {
+      const historicalCount = (allData || []).filter(
+        (c) => c.isHistorical
+      ).length;
+      console.log(
+        '[ClusterTable] Client-side - allData length:',
+        (allData || []).length,
+        ', historical:',
+        historicalCount,
+        ', filters:',
+        filters.length
+      );
+    }
+
+    const filteredData = isServerPagination
+      ? dataToProcess
+      : filterData(dataToProcess, filters);
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, filters]);
+  }, [hookData, allData, sortConfig, filters, isServerPagination]);
 
-  // Expose fetchData to parent component
+  // Expose refresh to parent component
   React.useEffect(() => {
     if (refreshDataRef) {
-      refreshDataRef.current = fetchData;
+      refreshDataRef.current = refresh;
     }
-  }, [refreshDataRef, fetchData]);
-
-  useEffect(() => {
-    setData([]);
-    let isCurrent = true;
-
-    // Only start fetching data after preloading is complete
-    if (preloadingComplete) {
-      fetchData();
-
-      const interval = setInterval(() => {
-        if (isCurrent && window.document.visibilityState === 'visible') {
-          fetchData();
-        }
-      }, refreshInterval);
-
-      return () => {
-        isCurrent = false;
-        clearInterval(interval);
-      };
-    }
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [refreshInterval, fetchData, preloadingComplete]);
-
-  // Reset to first page when data changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [data.length]);
+  }, [refreshDataRef, refresh]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -786,25 +761,42 @@ export function ClusterTable({
     return '';
   };
 
-  // Calculate pagination using sortedData
-  const totalPages = Math.ceil(sortedData.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedData = sortedData.slice(startIndex, endIndex);
+  // Calculate pagination
+  // For server-side: use hook's total (server already filtered)
+  // For client-side: use sortedData.length (filtered in component)
+  const displayTotal = isServerPagination ? total : sortedData.length;
+  const totalPages = isServerPagination
+    ? hookTotalPages || Math.ceil(total / limit) || 1
+    : Math.ceil(sortedData.length / limit) || 1;
+  const startIndex = (page - 1) * limit;
+  const endIndex = startIndex + limit;
 
-  // Page navigation handlers
+  // For server-side pagination, sortedData is already the current page
+  // For client-side pagination, we need to slice after filtering/sorting
+  const paginatedData = isServerPagination
+    ? sortedData
+    : sortedData.slice(startIndex, endIndex);
+
+  // Page navigation handlers - use hook's setPage
   const goToPreviousPage = () => {
-    setCurrentPage((page) => Math.max(page - 1, 1));
+    if (isServerPagination) {
+      if (hasPrev) setPage(page - 1);
+    } else {
+      setPage(Math.max(page - 1, 1));
+    }
   };
 
   const goToNextPage = () => {
-    setCurrentPage((page) => Math.min(page + 1, totalPages));
+    if (isServerPagination) {
+      if (hasNext) setPage(page + 1);
+    } else {
+      setPage(Math.min(page + 1, totalPages));
+    }
   };
 
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
-    setPageSize(newSize);
-    setCurrentPage(1); // Reset to first page when changing page size
+    setLimit(newSize);
   };
 
   // Get plugin columns
@@ -1141,7 +1133,7 @@ export function ClusterTable({
             </TableHeader>
 
             <TableBody>
-              {loading || !preloadingComplete ? (
+              {hookLoading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
@@ -1181,14 +1173,14 @@ export function ClusterTable({
       </Card>
 
       {/* Pagination controls */}
-      {data.length > 0 && (
+      {displayTotal > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
               <div className="relative inline-block">
                 <select
-                  value={pageSize}
+                  value={limit}
                   onChange={handlePageSizeChange}
                   className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
                   style={{ minWidth: '40px' }}
@@ -1216,14 +1208,14 @@ export function ClusterTable({
               </div>
             </div>
             <div>
-              {`${startIndex + 1} - ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`}
+              {`${startIndex + 1} - ${Math.min(endIndex, displayTotal)} of ${displayTotal}`}
             </div>
             <div className="flex items-center space-x-2">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={goToPreviousPage}
-                disabled={currentPage === 1}
+                disabled={isServerPagination ? !hasPrev : page === 1}
                 className="text-gray-500 h-8 w-8 p-0"
               >
                 <svg
@@ -1245,7 +1237,11 @@ export function ClusterTable({
                 variant="ghost"
                 size="icon"
                 onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
+                disabled={
+                  isServerPagination
+                    ? !hasNext
+                    : page === totalPages || totalPages === 0
+                }
                 className="text-gray-500 h-8 w-8 p-0"
               >
                 <svg

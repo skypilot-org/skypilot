@@ -25,7 +25,7 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getPoolStatus } from '@/data/connectors/jobs';
+import { getPoolStatus, useJobsData } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -358,9 +358,6 @@ export function ManagedJobsTable({
   preloadingComplete,
   lastFetchedTime,
 }) {
-  const [data, setData] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -373,7 +370,6 @@ export function ManagedJobsTable({
   const expandedRowRef = useRef(null);
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
-  const [apiStatusCounts, setApiStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -388,6 +384,74 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Compute statuses based on UI state for the hook
+  const computedStatuses = React.useMemo(() => {
+    // If specific statuses are selected, use those
+    if (selectedStatuses.length > 0) {
+      return selectedStatuses;
+    }
+    // If not in "show all" mode but no specific statuses selected, show no jobs
+    if (!showAllMode) {
+      return [];
+    }
+    // Show all active jobs
+    if (activeTab === 'active') {
+      return statusGroups.active;
+    }
+    // Show all finished jobs
+    if (activeTab === 'finished') {
+      return statusGroups.finished;
+    }
+    // For activeTab === 'all' and showAllMode === true, show all jobs
+    return [];
+  }, [selectedStatuses, showAllMode, activeTab]);
+
+  // Use the jobs data hook for fetching
+  const {
+    data: hookData,
+    allData: hookAllData,
+    total: hookTotal,
+    totalNoFilter: hookTotalNoFilter,
+    statusCounts: hookStatusCounts,
+    page: hookPage,
+    limit: hookLimit,
+    setPage: hookSetPage,
+    setLimit: hookSetLimit,
+    loading: hookLoading,
+    refresh: hookRefresh,
+    isServerPagination,
+    controllerStopped: hookControllerStopped,
+  } = useJobsData({
+    sortConfig,
+    filters,
+    statuses: computedStatuses,
+    initialPage: currentPage,
+    initialLimit: pageSize,
+  });
+
+  // Sync local page/limit state with hook when they change
+  React.useEffect(() => {
+    if (currentPage !== hookPage) {
+      hookSetPage(currentPage);
+    }
+  }, [currentPage, hookPage, hookSetPage]);
+
+  React.useEffect(() => {
+    if (pageSize !== hookLimit) {
+      hookSetLimit(pageSize);
+    }
+  }, [pageSize, hookLimit, hookSetLimit]);
+
+  // Aliases for hook values to maintain backward compatibility
+  const data = hookData;
+  const totalCount = hookTotal;
+  const totalNoFilter = hookTotalNoFilter;
+
+  // Sync status counts from hook
+  React.useEffect(() => {
+    setStatusCounts(hookStatusCounts);
+  }, [hookStatusCounts]);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
@@ -429,6 +493,7 @@ export function ManagedJobsTable({
     });
   };
 
+  // Fetch data - the hook handles jobs fetching, we just check controller status
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
@@ -436,133 +501,65 @@ export function ManagedJobsTable({
       const version = requestSeqRef.current + 1;
       requestSeqRef.current = version;
       setLocalLoading(true);
-      setLoading(true); // Set parent loading state
+      setLoading(true); // Set parent loading state.
+
       try {
-        // Build server-side filter params from UI filters
-        const getFilterValue = (prop) => {
-          const f = (filters || []).find(
-            (fi) => (fi.property || '').toLowerCase() === prop
-          );
-          return f && f.value ? String(f.value) : undefined;
-        };
-        // Determine statuses parameter based on current state
-        let statusesParam = undefined;
+        // Trigger hook to refresh its data
+        await hookRefresh();
 
-        // If specific statuses are selected, use those
-        if (selectedStatuses.length > 0) {
-          statusesParam = selectedStatuses;
-        } else if (!showAllMode) {
-          // If not in "show all" mode but no specific statuses selected, show no jobs
-          statusesParam = [];
-        } else if (activeTab === 'active') {
-          // Show all active jobs
-          statusesParam = statusGroups.active;
-        } else if (activeTab === 'finished') {
-          // Show all finished jobs
-          statusesParam = statusGroups.finished;
-        }
-        // For activeTab === 'all' and showAllMode === true, don't set statuses (show all jobs)
-
-        const params = {
-          allUsers: true,
-          nameMatch: getFilterValue('name'),
-          userMatch: getFilterValue('user'),
-          workspaceMatch: getFilterValue('workspace'),
-          poolMatch: getFilterValue('pool'),
-          statuses: statusesParam,
-          page: currentPage, // page index starting from 1
-          limit: pageSize,
-        };
-
-        let jobsResponse;
-        let clustersData = null;
-
-        // Check cache status before making requests
-        const isDataCached = jobsCacheManager.isDataCached(params);
-        const isDataLoading = jobsCacheManager.isDataLoading(params);
-
+        // Check controller status from clusters
         if (includeStatus) {
           try {
-            clustersData = await dashboardCache.get(getClusters);
+            const clustersData = await dashboardCache.get(getClusters);
+
+            let isControllerStopped = false;
+            let isLaunching = false;
+
+            if (clustersData) {
+              const jobControllerCluster = clustersData?.find((c) =>
+                isJobController(c.cluster)
+              );
+              const jobControllerClusterStatus = jobControllerCluster
+                ? jobControllerCluster.status
+                : 'NOT_FOUND';
+              // Use hookControllerStopped from the hook for the API-level stopped flag
+              if (
+                jobControllerClusterStatus === 'STOPPED' &&
+                hookControllerStopped
+              ) {
+                isControllerStopped = true;
+              }
+              if (jobControllerClusterStatus === 'LAUNCHING') {
+                isLaunching = true;
+              }
+            }
+
+            if (version === requestSeqRef.current) {
+              setControllerStopped(!!isControllerStopped);
+              setControllerLaunching(!!isLaunching);
+            }
           } catch (error) {
             console.error('Error fetching clusters:', error);
           }
         }
-        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
-        // Always process the response, even if it's null
-        const {
-          jobs = [],
-          total = 0,
-          totalNoFilter = 0,
-          controllerStopped = false,
-          cacheStatus = 'unknown',
-          statusCounts = {},
-        } = jobsResponse || {};
-
-        let isControllerStopped = false;
-        let isLaunching = false;
-        if (includeStatus && clustersData) {
-          const jobControllerCluster = clustersData?.find((c) =>
-            isJobController(c.cluster)
-          );
-          const jobControllerClusterStatus = jobControllerCluster
-            ? jobControllerCluster.status
-            : 'NOT_FOUND';
-          if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
-            isControllerStopped = true;
-          }
-          if (jobControllerClusterStatus == 'LAUNCHING') {
-            isLaunching = true;
-          }
-        }
-
-        // Only commit if this is still the latest request
         if (version === requestSeqRef.current) {
-          setData(jobs);
-          setTotalCount(total || 0);
-          setTotalNoFilter(totalNoFilter || 0);
-          setControllerStopped(!!isControllerStopped);
-          setControllerLaunching(!!isLaunching);
-          setApiStatusCounts(statusCounts);
           setIsInitialLoad(false);
-        }
-
-        // Log cache status for debugging
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Jobs cache status:', {
-            cacheStatus,
-            isDataCached,
-            isDataLoading,
-            jobCount: jobs.length,
-            totalCount: total,
-            totalNoFilter: totalNoFilter,
-          });
         }
       } catch (err) {
         console.error('Error fetching data:', err);
-        // Still set data to empty array on error to show proper UI
         if (version === requestSeqRef.current) {
-          setData([]);
           setControllerStopped(false);
           setIsInitialLoad(false);
         }
       } finally {
         if (version === requestSeqRef.current) {
           setLocalLoading(false);
-          setLoading(false); // Clear parent loading state
+          setLoading(false);
         }
       }
     },
-    [
-      setLoading,
-      filters,
-      currentPage,
-      pageSize,
-      selectedStatuses,
-      showAllMode,
-      activeTab,
-    ]
+    [setLoading, hookRefresh, hookControllerStopped]
   );
 
   // Expose fetchData to parent component
@@ -618,6 +615,14 @@ export function ManagedJobsTable({
       fetchData({ includeStatus: true });
     }
   }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
+
+  // Fetch on sort config changes for server-side sorting
+  // Skip on initial fetch (sortConfig has default value)
+  React.useEffect(() => {
+    if (!isInitialFetch.current && preloadingComplete) {
+      fetchData({ includeStatus: false });
+    }
+  }, [sortConfig, fetchData, preloadingComplete]);
 
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
@@ -837,11 +842,6 @@ export function ManagedJobsTable({
     // Reset to first page when changing status filters
     setCurrentPage(1);
   };
-
-  // Update status counts from API data
-  useEffect(() => {
-    setStatusCounts(apiStatusCounts);
-  }, [apiStatusCounts]);
 
   // Page navigation handlers
   const goToPreviousPage = () => {

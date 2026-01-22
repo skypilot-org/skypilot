@@ -309,7 +309,7 @@ class Vast(clouds.Cloud):
                 '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
-                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
+                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
             )
 
         return True, None

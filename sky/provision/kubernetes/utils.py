@@ -37,6 +37,7 @@ from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
+from sky.utils import plugin_extensions
 from sky.utils import schemas
 from sky.utils import status_lib
 from sky.utils import timeline
@@ -3198,6 +3199,20 @@ def get_kubernetes_node_info(
         KubernetesNodesInfo: A model that contains the node info map and other
             information.
     """
+    # Try external node info source first (e.g., node-info-service cache).
+    # This allows plugins to provide cached node info for faster queries.
+    if plugin_extensions.NodeInfoSource.is_registered():
+        # Resolve context before calling the provider so it can be cached
+        resolved_context = (context if context is not None else
+                            get_current_kube_config_context_name())
+        if resolved_context is not None:
+            result = plugin_extensions.NodeInfoSource.get(resolved_context)
+            if result is not None:
+                logger.debug(f'Got node info from external provider for '
+                             f'{resolved_context}')
+                return result
+        # Fall through to direct Kubernetes API query if provider returns None
+
     nodes = get_kubernetes_nodes(context=context)
 
     lf, _ = detect_gpu_label_formatter(context)
