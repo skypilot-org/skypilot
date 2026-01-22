@@ -2528,8 +2528,8 @@ class ManagedJobCodeGen:
             # Versions before 6 did not support tail parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller})
-        elif managed_job_version < 14:
-            # Versions before 14 did not support task parameter
+        elif managed_job_version < 15:
+            # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
         else:
@@ -2577,7 +2577,7 @@ class ManagedJobCodeGen:
                 set_job_info_kwargs['pool_hash'] = pool_hash
             if managed_job_version >= 11:
                 set_job_info_kwargs['user_hash'] = {user_hash!r}
-            if managed_job_version >= 14:
+            if managed_job_version >= 15:
                 set_job_info_kwargs['execution'] = {execution!r}
             managed_job_state.set_job_info(
                 {job_id}, {dag_name!r}, **set_job_info_kwargs)
@@ -2596,7 +2596,7 @@ class ManagedJobCodeGen:
                 if managed_job_version < 7:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r})
-                elif managed_job_version < 14:
+                elif managed_job_version < 15:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r},
                                     {task.metadata_json!r})

@@ -7,8 +7,8 @@ Adds:
 Note: cluster_name is not stored for job groups because it's deterministic
 (computed from task name and job ID). Job groups don't support pools.
 
-Revision ID: 012
-Revises: 011
+Revision ID: 013
+Revises: 012
 Create Date: 2025-12-29
 
 """
@@ -22,8 +22,8 @@ from sky.dag import DagExecution
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '012'
-down_revision: Union[str, Sequence[str], None] = '011'
+revision: str = '013'
+down_revision: Union[str, Sequence[str], None] = '012'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

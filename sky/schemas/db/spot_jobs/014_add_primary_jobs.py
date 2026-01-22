@@ -6,8 +6,8 @@ This migration adds support for primary/auxiliary task markers in job groups:
   jobs (single jobs and pipelines). When all primary tasks complete, auxiliary
   tasks are automatically terminated.
 
-Revision ID: 013
-Revises: 012
+Revision ID: 014
+Revises: 013
 Create Date: 2026-01-19
 
 """
@@ -20,8 +20,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '013'
-down_revision: Union[str, Sequence[str], None] = '012'
+revision: str = '014'
+down_revision: Union[str, Sequence[str], None] = '013'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
