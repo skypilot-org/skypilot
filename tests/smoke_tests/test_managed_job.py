@@ -2314,7 +2314,9 @@ def test_job_group_task_logs_sdk(generic_cloud: str):
 
         # Test 1: task=int(0) should filter by task_id and show only job-a
         output = io.StringIO()
-        jobs_sdk.tail_logs(job_id=job_id, follow=False, task=0,
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task=0,
                            output_stream=output)
         content = output.getvalue()
         assert 'Job A' in content, f'Expected "Job A" in output for task=0'
@@ -2322,7 +2324,9 @@ def test_job_group_task_logs_sdk(generic_cloud: str):
 
         # Test 2: task=str('job-b') should filter by task_name and show only job-b
         output = io.StringIO()
-        jobs_sdk.tail_logs(job_id=job_id, follow=False, task='job-b',
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task='job-b',
                            output_stream=output)
         content = output.getvalue()
         assert 'Job B' in content, f'Expected "Job B" in output for task="job-b"'
@@ -2330,7 +2334,9 @@ def test_job_group_task_logs_sdk(generic_cloud: str):
 
         # Test 3: task=int(999) should fail (non-existent task_id)
         output = io.StringIO()
-        jobs_sdk.tail_logs(job_id=job_id, follow=False, task=999,
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task=999,
                            output_stream=output)
         content = output.getvalue()
         assert 'No task found matching 999' in content, (
@@ -2338,7 +2344,9 @@ def test_job_group_task_logs_sdk(generic_cloud: str):
 
         # Test 4: task=str('nonexistent') should fail (non-existent task_name)
         output = io.StringIO()
-        jobs_sdk.tail_logs(job_id=job_id, follow=False, task='nonexistent',
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task='nonexistent',
                            output_stream=output)
         content = output.getvalue()
         assert 'No task found matching' in content, (

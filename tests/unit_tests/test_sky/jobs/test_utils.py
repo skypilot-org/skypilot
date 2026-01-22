@@ -760,7 +760,9 @@ class TestStreamLogsByIdTaskFiltering:
     """
 
     def _create_task_info(
-        self, tasks: List[Tuple[int, str]], log_file: Optional[str] = None
+        self,
+        tasks: List[Tuple[int, str]],
+        log_file: Optional[str] = None
     ) -> List[Tuple[int, str, managed_job_state.ManagedJobStatus, Optional[str],
                     Optional[str]]]:
         """Create task info tuples for mocking.

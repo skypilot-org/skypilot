@@ -924,10 +924,11 @@ def controller_log_file_for_job(job_id: int,
     return os.path.join(log_dir, f'{job_id}.log')
 
 
-def stream_logs_by_id(job_id: int,
-                      follow: bool = True,
-                      tail: Optional[int] = None,
-                      task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
+def stream_logs_by_id(
+        job_id: int,
+        follow: bool = True,
+        tail: Optional[int] = None,
+        task: Optional[Union[str, int]] = None) -> Tuple[str, int]:
     """Stream logs by job id.
 
     Args:
