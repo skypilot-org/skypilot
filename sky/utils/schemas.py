@@ -1851,6 +1851,9 @@ def get_config_schema():
                 'type': 'integer',
                 'minimum': 1,
             },
+            'install_conda': {
+                'type': 'boolean',
+            },
         }
     }
 

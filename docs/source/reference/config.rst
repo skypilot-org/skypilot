@@ -615,6 +615,25 @@ determines how long to wait for the connection to be established.
 
 Default: ``10``.
 
+.. _config-yaml-provision-install-conda:
+
+``provision.install_conda``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to install conda on the remote cluster (optional).
+
+When set to ``false``, SkyPilot will not install conda on the remote cluster,
+and will only set up the runtime environment using ``uv``.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    install_conda: false
+
 .. _config-yaml-aws:
 
 ``aws``

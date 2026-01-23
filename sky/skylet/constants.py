@@ -234,7 +234,9 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    'fi;'
+    'fi;')
+
+UV_INSTALLATION_COMMANDS = (
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate python environment for SkyPilot dependencies.
@@ -252,7 +254,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
 
 _sky_version = str(version.parse(sky.__version__))
