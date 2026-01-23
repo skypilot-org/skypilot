@@ -90,12 +90,12 @@ def _construct_k8s_internal_svc(cluster_name_on_cloud: str, namespace: str,
         node_idx: Node index (0 for head, 1+ for workers)
 
     Returns:
-        DNS URL like '{cluster}-head.{namespace}.svc.cluster.local'
+        DNS URL like '{cluster}-head.{namespace}.svc.gpus.local'
     """
     if node_idx == 0:
-        return f'{cluster_name_on_cloud}-head.{namespace}.svc.cluster.local'
+        return f'{cluster_name_on_cloud}-head.{namespace}.svc.gpus.local'
     return (f'{cluster_name_on_cloud}-worker{node_idx}.'
-            f'{namespace}.svc.cluster.local')
+            f'{namespace}.svc.gpus.local')
 
 
 def _get_job_address(job_name: str,
