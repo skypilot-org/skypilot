@@ -70,8 +70,7 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Arch',
-    'LocalDiskSupported', 'LocalDiskType', 'NVMeSupported', 'LocalDiskSize',
-    'LocalDiskCount'
+    'LocalDiskType', 'NVMeSupported', 'LocalDiskSize', 'LocalDiskCount',
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -274,13 +273,13 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
 
         def get_local_disk_info(row) -> Dict[str, Any]:
             info = {}
-            info['LocalDiskSupported'] = row['InstanceStorageSupported']
+            local_disk_supported = row['InstanceStorageSupported']
             info['LocalDiskType'] = None
             info['NVMeSupported'] = False
             info['LocalDiskSize'] = None
             info['LocalDiskCount'] = None
 
-            if info['LocalDiskSupported']:
+            if local_disk_supported:
                 raw_info = row['InstanceStorageInfo']
                 info['NVMeSupported'] = raw_info['NvmeSupport'] == 'required'
                 # This is always 1. AWS probably made this as a list
