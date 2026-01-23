@@ -93,7 +93,7 @@ class TestVolumeIsEphemeralHandling:
                             mock_insert.values.assert_called_once()
                             call_kwargs = mock_insert.values.call_args[1]
                             assert call_kwargs['is_ephemeral'] == 1
-                            assert isinstance(call_kwargs['is_ephemeral'], int)
+                            assert type(call_kwargs['is_ephemeral']) is int
 
     def test_add_volume_is_ephemeral_false_sqlite(
             self,
@@ -128,7 +128,7 @@ class TestVolumeIsEphemeralHandling:
                             mock_insert.values.assert_called_once()
                             call_kwargs = mock_insert.values.call_args[1]
                             assert call_kwargs['is_ephemeral'] == 0
-                            assert isinstance(call_kwargs['is_ephemeral'], int)
+                            assert type(call_kwargs['is_ephemeral']) is int
 
     def test_add_volume_is_ephemeral_true_postgresql(
             self,
@@ -169,7 +169,7 @@ class TestVolumeIsEphemeralHandling:
                             mock_insert.values.assert_called_once()
                             call_kwargs = mock_insert.values.call_args[1]
                             assert call_kwargs['is_ephemeral'] == 1
-                            assert isinstance(call_kwargs['is_ephemeral'], int)
+                            assert type(call_kwargs['is_ephemeral']) is int
 
     def test_add_volume_is_ephemeral_false_postgresql(
             self,
@@ -205,7 +205,7 @@ class TestVolumeIsEphemeralHandling:
                             mock_insert.values.assert_called_once()
                             call_kwargs = mock_insert.values.call_args[1]
                             assert call_kwargs['is_ephemeral'] == 0
-                            assert isinstance(call_kwargs['is_ephemeral'], int)
+                            assert type(call_kwargs['is_ephemeral']) is int
 
     def test_get_volumes_filter_is_ephemeral_true_sqlite(
             self,
@@ -216,9 +216,12 @@ class TestVolumeIsEphemeralHandling:
 
         global_user_state.get_volumes(is_ephemeral=True)
 
-        # Verify filter_by was called with is_ephemeral=1 (int)
-        mock_session.query.return_value.filter_by.assert_called_once_with(
-            is_ephemeral=1)
+        # Verify filter_by was called with is_ephemeral=1 (int, not bool)
+        mock_session.query.return_value.filter_by.assert_called_once()
+        call_kwargs = mock_session.query.return_value.filter_by.call_args[1]
+        assert call_kwargs['is_ephemeral'] == 1
+        # Use 'type() is int' because bool is a subclass of int
+        assert type(call_kwargs['is_ephemeral']) is int
 
     def test_get_volumes_filter_is_ephemeral_false_sqlite(
             self,
@@ -229,9 +232,11 @@ class TestVolumeIsEphemeralHandling:
 
         global_user_state.get_volumes(is_ephemeral=False)
 
-        # Verify filter_by was called with is_ephemeral=0 (int)
-        mock_session.query.return_value.filter_by.assert_called_once_with(
-            is_ephemeral=0)
+        # Verify filter_by was called with is_ephemeral=0 (int, not bool)
+        mock_session.query.return_value.filter_by.assert_called_once()
+        call_kwargs = mock_session.query.return_value.filter_by.call_args[1]
+        assert call_kwargs['is_ephemeral'] == 0
+        assert type(call_kwargs['is_ephemeral']) is int
 
     def test_get_volumes_filter_is_ephemeral_true_postgresql(
             self, mock_engine, mock_session):
@@ -246,9 +251,11 @@ class TestVolumeIsEphemeralHandling:
 
         global_user_state.get_volumes(is_ephemeral=True)
 
-        # Verify filter_by was called with is_ephemeral=1 (int)
-        mock_session.query.return_value.filter_by.assert_called_once_with(
-            is_ephemeral=1)
+        # Verify filter_by was called with is_ephemeral=1 (int, not bool)
+        mock_session.query.return_value.filter_by.assert_called_once()
+        call_kwargs = mock_session.query.return_value.filter_by.call_args[1]
+        assert call_kwargs['is_ephemeral'] == 1
+        assert type(call_kwargs['is_ephemeral']) is int
 
     def test_get_volumes_filter_is_ephemeral_false_postgresql(
             self, mock_engine, mock_session):
@@ -258,9 +265,11 @@ class TestVolumeIsEphemeralHandling:
 
         global_user_state.get_volumes(is_ephemeral=False)
 
-        # Verify filter_by was called with is_ephemeral=0 (int)
-        mock_session.query.return_value.filter_by.assert_called_once_with(
-            is_ephemeral=0)
+        # Verify filter_by was called with is_ephemeral=0 (int, not bool)
+        mock_session.query.return_value.filter_by.assert_called_once()
+        call_kwargs = mock_session.query.return_value.filter_by.call_args[1]
+        assert call_kwargs['is_ephemeral'] == 0
+        assert type(call_kwargs['is_ephemeral']) is int
 
     def test_get_volumes_filter_none_returns_all(
             self,
