@@ -1637,9 +1637,23 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
-        ).with_only_columns(spot_table.c.spot_job_id).distinct().order_by(
-            spot_table.c.spot_job_id.desc()).offset(
-                (page - 1) * limit).limit(limit)
+        ).with_only_columns(spot_table.c.spot_job_id).distinct()
+
+        # Apply sorting to pagination query - this determines which jobs appear
+        # on each page.
+        if sort_by and sort_by in sort_field_map:
+            sort_column = sort_field_map[sort_by]
+            if sort_order == 'asc':
+                job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
+            else:
+                job_ids_subquery = job_ids_subquery.order_by(sort_column.desc())
+        else:
+            # Default sort: job_id desc (newest first)
+            job_ids_subquery = job_ids_subquery.order_by(
+                spot_table.c.spot_job_id.desc())
+
+        job_ids_subquery = job_ids_subquery.offset(
+            (page - 1) * limit).limit(limit)
 
         with orm.Session(_SQLALCHEMY_ENGINE) as session:
             paginated_job_ids = [
