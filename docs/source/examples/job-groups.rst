@@ -312,7 +312,7 @@ Current limitations
 -------------------
 
 - **Co-location**: All tasks in a Job Group run on the same infrastructure
-  (same Kubernetes cluster or cloud region).
+  (same Kubernetes cluster or cloud zone).
 
 - **Networking**: Service discovery (hostname-based communication between tasks)
   currently only works on Kubernetes. On other clouds, tasks can run in parallel
