@@ -66,6 +66,10 @@ HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
 
 IJSON_BUFFER_SIZE = 64 * 1024  # 64KB, default from ijson
 
+# TODO (kyuds): remove 0.13.0.
+ALLOWED_SKYPILOT_NODE_NAMES = ['skypilot-node', 'ray-node']
+SKYPILOT_NODE_NAME = 'skypilot-node'
+
 
 class KubernetesHighPerformanceNetworkType(enum.Enum):
     """Enum for different Kubernetes cluster types with high performance
@@ -2849,17 +2853,32 @@ def combine_pod_config_fields(
     if isinstance(cloud, clouds.SSH) and context is not None:
         assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
         context_str = context[len('ssh-'):]
+
+    def _verify_skypilot_container_name(pod_config):
+        containers = pod_config.get('spec', {}).get('containers')
+        if containers:
+            if containers[0].get('name') in ALLOWED_SKYPILOT_NODE_NAMES:
+                containers[0]['name'] = SKYPILOT_NODE_NAME
+            else:
+                raise ValueError('`pod_config.spec.containers[0].name` must '
+                                 f'be `{SKYPILOT_NODE_NAME}`. It is currently '
+                                 f'`{containers[0]["name"]}`. Refer to '
+                                 'https://docs.skypilot.co/en/latest/reference/config.html#config-yaml-kubernetes-autoscaler '  # pylint: disable=line-too-long
+                                 'for more details.')
+
     kubernetes_config = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context_str,
         keys=('pod_config',),
         default_value={})
+    _verify_skypilot_container_name(kubernetes_config)
     override_pod_config = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
         cloud=cloud_str,
         region=context_str,
         keys=('pod_config',),
         default_value={})
+    _verify_skypilot_container_name(override_pod_config)
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.

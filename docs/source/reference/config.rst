@@ -1430,7 +1430,7 @@ By default, SkyPilot automatically creates a single container named ``skypilot-n
 
 .. tip::
 
-  This container was previously named ``ray-node``. While using ``ray-node`` is also still supported for compatibility, we encourage users to migrate to ``skypilot-node``.
+  This container was previously named ``ray-node``. While using ``ray-node`` is also still supported for compatibility, we encourage users to migrate to ``skypilot-node``. SkyPilot will automatically rename ``ray-node`` to ``skypilot-node`` before launching.
 
 .. _config-yaml-kubernetes-kueue:
 
