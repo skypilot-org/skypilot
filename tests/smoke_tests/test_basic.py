@@ -1040,25 +1040,13 @@ def test_cluster_labels_in_status(generic_cloud: str):
                 cluster_record = cluster
                 break
 
-        if cluster_record is None:
-            yield f'Cluster {name} not found in status'
-            return
-
-        if 'labels' not in cluster_record:
-            yield 'labels field missing from cluster record'
-            return
-
-        if cluster_record['labels'] is None:
-            yield 'labels field is None'
-            return
-
-        if cluster_record['labels'] != expected_labels:
-            yield (f"Expected labels {expected_labels}, "
-                   f"got {cluster_record['labels']}")
-            return
-
-        # Success - labels are correct
-        return
+        assert cluster_record is not None, f'Cluster {name} not found in status'
+        assert 'labels' in cluster_record, (
+            'labels field missing from cluster record')
+        assert cluster_record['labels'] is not None, 'labels field is None'
+        assert cluster_record['labels'] == expected_labels, (
+            f'Expected labels {expected_labels}, '
+            f'got {cluster_record["labels"]}')
 
     # Create YAML with labels
     yaml_content = textwrap.dedent("""\
