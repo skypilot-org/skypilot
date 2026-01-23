@@ -25,7 +25,6 @@ def test_recursive_update_k8s_config():
             'allowed_contexts': ['base1', 'base2'],
             'pod_config': {
                 'containers': [{
-                    'name': 'ray-node',
                     'resources': {
                         'limits': {
                             'cpu': '1',
@@ -44,7 +43,6 @@ def test_recursive_update_k8s_config():
             'allowed_contexts': ['override1', 'override2'],
             'pod_config': {
                 'containers': [{
-                    'name': 'ray-node',
                     'resources': {
                         'limits': {
                             'memory': '2Gi',
@@ -71,7 +69,6 @@ def test_merge_k8s_configs_with_container_resources():
     """Test merging Kubernetes configs with container resource specifications."""
     base_config = {
         'containers': [{
-            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'cpu': '1',
@@ -85,7 +82,6 @@ def test_merge_k8s_configs_with_container_resources():
     }
     override_config = {
         'containers': [{
-            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'memory': '2Gi'
@@ -127,7 +123,6 @@ def test_merge_k8s_configs_with_init_container_resources():
 def test_merge_k8s_configs_with_deeper_override():
     base_config = {
         'containers': [{
-            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'cpu': '1',
@@ -138,7 +133,6 @@ def test_merge_k8s_configs_with_deeper_override():
     }
     override_config = {
         'containers': [{
-            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'memory': '2Gi'
@@ -373,7 +367,6 @@ def test_nested_config_override_precedence():
                 },
                 'spec': {
                     'containers': [{
-                        'name': 'ray-node',
                         'resources': {
                             'limits': {
                                 'cpu': '1',
@@ -397,7 +390,6 @@ def test_nested_config_override_precedence():
                 },
                 'spec': {
                     'containers': [{
-                        'name': 'ray-node',
                         'resources': {
                             'limits': {
                                 'memory': '2Gi'  # Should override

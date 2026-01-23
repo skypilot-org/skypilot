@@ -211,6 +211,11 @@ def merge_k8s_configs(
     etc.), items are merged by their patch merge key (e.g., 'name' for
     containers). If an item with the same key exists in base_config, it is
     merged; otherwise, the new item is appended.
+
+    Special handling for 'containers': for backward compatibility, if a
+    container in the override does not have a 'name' field, it is merged
+    into the first container in the base config (legacy behavior). If the
+    container has a 'name' field, patch merge by name is used.
     """
     for key, value in override_config.items():
         (next_allowed_override_keys, next_disallowed_override_keys
@@ -223,11 +228,11 @@ def merge_k8s_configs(
         elif isinstance(value, list) and key in base_config:
             assert isinstance(base_config[key], list), \
                 f'Expected {key} to be a list, found {base_config[key]}'
-            if key in ['imagePullSecrets']:
-                # If the key is 'imagePullSecrets, we take the
-                # first and only secret in the list and merge it
+            if key == 'imagePullSecrets':
+                # For imagePullSecrets, merge the first item from override
+                # into the first item in base (legacy behavior).
                 assert len(value) == 1, \
-                    f'Expected only one container, found {value}'
+                    f'Expected only one imagePullSecret, found {value}'
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
@@ -238,6 +243,7 @@ def merge_k8s_configs(
                 for override_item in value:
                     override_item_name = override_item.get(patch_merge_key)
                     if override_item_name is not None:
+                        # Item has a name - use patch merge by name
                         existing_base_item = next(
                             (v for v in base_config[key]
                              if v.get(patch_merge_key) == override_item_name),
@@ -246,6 +252,12 @@ def merge_k8s_configs(
                             merge_k8s_configs(existing_base_item, override_item)
                         else:
                             base_config[key].append(override_item)
+                    elif key == 'containers' and base_config[key]:
+                        # Backward compatibility for containers: if no name is
+                        # specified, merge into the first container (index 0)
+                        merge_k8s_configs(base_config[key][0], override_item,
+                                          next_allowed_override_keys,
+                                          next_disallowed_override_keys)
                     else:
                         base_config[key].append(override_item)
             else:
