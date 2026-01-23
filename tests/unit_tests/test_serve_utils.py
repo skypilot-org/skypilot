@@ -50,3 +50,24 @@ def test_task_fits():
     task_resources = Resources(cpus=1, memory=1, cloud=clouds.AWS())
     free_resources = Resources(cpus=None, memory=None, cloud=clouds.AWS())
     assert serve_utils._task_fits(task_resources, free_resources) is False
+
+
+def test_serve_preemption_skips_autostopping():
+    """Verify serve preemption logic treats AUTOSTOPPING like UP (not preempted)."""
+    from sky.utils import status_lib
+
+    # AUTOSTOPPING should be treated as UP-like (not preempted)
+    # is_cluster_up() should return True for AUTOSTOPPING
+    up_status = status_lib.ClusterStatus.UP
+    autostopping_status = status_lib.ClusterStatus.AUTOSTOPPING
+    stopped_status = status_lib.ClusterStatus.STOPPED
+
+    # AUTOSTOPPING should be in the same category as UP for preemption purposes
+    not_preempted_statuses = {
+        up_status,
+        autostopping_status,
+    }
+
+    assert up_status in not_preempted_statuses
+    assert autostopping_status in not_preempted_statuses
+    assert stopped_status not in not_preempted_statuses

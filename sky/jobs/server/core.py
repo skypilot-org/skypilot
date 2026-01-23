@@ -105,6 +105,14 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
     if os.environ.get(skylet_constants.SKYPILOT_ROLLING_UPDATE_ENABLED) is None:
         return
 
+    # If persistent storage is enabled (via Helm storage.enabled=true or by
+    # default for local deployments), file mounts are persisted and will
+    # survive rolling updates. Default to True if not explicitly set to False.
+    storage_enabled_str = os.environ.get(
+        skylet_constants.SKYPILOT_API_SERVER_STORAGE_ENABLED, 'true')
+    if storage_enabled_str.lower() == 'true':
+        return
+
     # If consolidation mode is not enabled, don't warn.
     if not managed_job_utils.is_consolidation_mode():
         return
@@ -136,7 +144,10 @@ def _warn_file_mounts_rolling_update(dag: 'sky.Dag') -> None:
         'with rolling update enabled for API server. To persist files'
         ' across API server restarts/update, use buckets, volumes, or git '
         'for your file mounts; or, configure a bucket in your SkyPilot config '
-        f'under `jobs.bucket`. {colorama.Style.RESET_ALL}')
+        'under `jobs.bucket`; or, enable persistent storage in Helm with '
+        '`storage.enabled=true`. See: https://docs.skypilot.co/en/latest/'
+        'reference/kubernetes/kubernetes-deployment.html'
+        f'{colorama.Style.RESET_ALL}')
 
 
 def _upload_files_to_controller(dag: 'sky.Dag') -> Dict[str, str]:
@@ -561,16 +572,18 @@ def launch(
                         for k, v in controller_task.envs.items()
                     ]
                     run_script = '\n'.join(env_cmds + [run_script])
-                    log_dir = os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
-                                           'managed_jobs')
+                    log_dir = os.path.expanduser(
+                        os.path.join(skylet_constants.SKY_LOGS_DIRECTORY,
+                                     'managed_jobs'))
                     os.makedirs(log_dir, exist_ok=True)
                     log_path = os.path.join(
                         log_dir, f'submit-job-{consolidation_mode_job_id}.log')
                     backend.run_on_head(local_handle,
                                         run_script,
                                         log_path=log_path)
-                    ux_utils.starting_message(
-                        f'Job submitted, ID: {consolidation_mode_job_id}')
+                    logger.info(
+                        ux_utils.starting_message(
+                            f'Job submitted, ID: {consolidation_mode_job_id}'))
                     return consolidation_mode_job_id, local_handle
 
     if pool is None:
@@ -807,12 +820,15 @@ def queue_v2_api(
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> Tuple[List[responses.ManagedJobRecord], int, Dict[str, int], int]:
     """Gets statuses of managed jobs and parse the
     jobs to responses.ManagedJobRecord."""
     jobs, total, status_counts, total_no_filter = queue_v2(
         refresh, skip_finished, all_users, job_ids, user_match, workspace_match,
-        name_match, pool_match, page, limit, statuses, fields)
+        name_match, pool_match, page, limit, statuses, fields, sort_by,
+        sort_order)
     return [responses.ManagedJobRecord(**job) for job in jobs
            ], total, status_counts, total_no_filter
 
@@ -831,6 +847,8 @@ def queue_v2(
     limit: Optional[int] = None,
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> Tuple[List[Dict[str, Any]], int, Dict[str, int], int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs with filtering.
@@ -925,6 +943,8 @@ def queue_v2(
                 fields=managed_jobsv1_pb2.Fields(
                     fields=fields) if fields is not None else None,
                 show_jobs_without_user_hash=show_jobs_without_user_hash,
+                sort_by=sort_by,
+                sort_order=sort_order,
             )
             response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
@@ -938,7 +958,8 @@ def queue_v2(
     with metrics_lib.time_it('jobs.queue.generate_code', group='jobs'):
         code = managed_job_utils.ManagedJobCodeGen.get_job_table(
             skip_finished, accessible_workspaces, job_ids, workspace_match,
-            name_match, pool_match, page, limit, user_hashes, statuses, fields)
+            name_match, pool_match, page, limit, user_hashes, statuses, fields,
+            sort_by, sort_order)
     with metrics_lib.time_it('jobs.queue.run_on_head', group='jobs'):
         returncode, job_table_payload, stderr = backend.run_on_head(
             handle,

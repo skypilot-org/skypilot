@@ -40,7 +40,6 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
 from sky.utils import log_utils
@@ -344,7 +343,7 @@ async def get_job_status(
     # TODO(zhwu, cooperc): Make this get job status aware of cluster status, so
     # that it can exit retry early if the cluster is down.
     # TODO(luca) make this async
-    handle = await context_utils.to_thread(
+    handle = await asyncio.to_thread(
         global_user_state.get_handle_from_cluster_name, cluster_name)
     if handle is None:
         # This can happen if the cluster was preempted and background status
@@ -356,10 +355,10 @@ async def get_job_status(
     try:
         logger.info('=== Checking the job status... ===')
         statuses = await asyncio.wait_for(
-            context_utils.to_thread(backend.get_job_status,
-                                    handle,
-                                    job_ids=job_ids,
-                                    stream_logs=False),
+            asyncio.to_thread(backend.get_job_status,
+                              handle,
+                              job_ids=job_ids,
+                              stream_logs=False),
             timeout=_JOB_STATUS_FETCH_TIMEOUT_SECONDS)
         status = list(statuses.values())[0]
         if status is None:
@@ -774,7 +773,7 @@ def event_callback_func(
         logger.info(f'=== END: event callback for {status!r} ===')
 
     async def async_callback_func(status: str):
-        return await context_utils.to_thread(callback_func, status)
+        return await asyncio.to_thread(callback_func, status)
 
     return async_callback_func
 
@@ -1351,11 +1350,14 @@ def dump_managed_job_queue(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> str:
     return message_utils.encode_payload(
         get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
                               workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses, fields))
+                              limit, user_hashes, statuses, fields, sort_by,
+                              sort_order))
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -1500,6 +1502,8 @@ def get_managed_job_queue(
     user_hashes: Optional[List[Optional[str]]] = None,
     statuses: Optional[List[str]] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Get the managed job queue.
 
@@ -1515,6 +1519,8 @@ def get_managed_job_queue(
         user_hashes: The user hashes.
         statuses: The statuses.
         fields: The fields to include in the response.
+        sort_by: The field to sort by.
+        sort_order: The sort order ('asc' or 'desc').
 
     Returns:
         A dictionary containing the managed job queue.
@@ -1554,6 +1560,8 @@ def get_managed_job_queue(
         skip_finished=skip_finished,
         page=page,
         limit=limit,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
     if cluster_handle_required:
@@ -2194,11 +2202,13 @@ class ManagedJobCodeGen:
         from sky.jobs import utils
         from sky.jobs import state as managed_job_state
         from sky.jobs import constants as managed_job_constants
-        from sky.server import plugins
-
-        plugins.load_plugins(plugins.ExtensionContext())
 
         managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
+
+        # Plugins are only loaded for managed jobs version 13 and above.
+        if managed_job_version >= 13:
+            from sky.server import plugins
+            plugins.load_plugins(plugins.ExtensionContext())
         """)
 
     @classmethod
@@ -2215,6 +2225,8 @@ class ManagedJobCodeGen:
         user_hashes: Optional[List[Optional[str]]] = None,
         statuses: Optional[List[str]] = None,
         fields: Optional[List[str]] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> str:
         code = textwrap.dedent(f"""\
         if managed_job_version < 9:
@@ -2245,7 +2257,7 @@ class ManagedJobCodeGen:
                                 limit={limit!r},
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r})
-        else:
+        elif managed_job_version < 14:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -2258,6 +2270,21 @@ class ManagedJobCodeGen:
                                 user_hashes={user_hashes!r},
                                 statuses={statuses!r},
                                 fields={fields!r})
+        else:
+            job_table = utils.dump_managed_job_queue(
+                                skip_finished={skip_finished},
+                                accessible_workspaces={accessible_workspaces!r},
+                                job_ids={job_ids!r},
+                                workspace_match={workspace_match!r},
+                                name_match={name_match!r},
+                                pool_match={pool_match!r},
+                                page={page!r},
+                                limit={limit!r},
+                                user_hashes={user_hashes!r},
+                                statuses={statuses!r},
+                                fields={fields!r},
+                                sort_by={sort_by!r},
+                                sort_order={sort_order!r})
         print(job_table, flush=True)
         """)
         return cls._build(code)

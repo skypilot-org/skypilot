@@ -1268,6 +1268,7 @@ Can be one of:
 
 - ``loadbalancer``: Use LoadBalancer service to expose ports.
 - ``nodeport``: Use NodePort service to expose ports.
+- ``podip``: Use Pod IPs to expose ports. Cannot be accessed from outside the cluster.
 
 Default: ``loadbalancer``.
 
@@ -1363,6 +1364,7 @@ Example:
         myannotation: myvalue
     provision_timeout: 10
     autoscaler: gke
+    set_pod_resource_limits: true  # or a multiplier like 1.5
     pod_config:
       metadata:
         labels:
@@ -1469,6 +1471,47 @@ Example:
   kubernetes:
     post_provision_runcmd:
       - echo "hello world!"
+
+.. _config-yaml-kubernetes-set-pod-resource-limits:
+
+``kubernetes.set_pod_resource_limits``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Set pod CPU/memory limits relative to requests (optional).
+
+This is useful for Kubernetes clusters that require resource limits to be set
+(e.g., for LimitRange enforcement, resource quotas, or cluster policies).
+
+Can be one of:
+
+- ``false`` (default): Do not set CPU/memory limits (only requests are set).
+- ``true``: Set limits equal to requests (multiplier of 1).
+- A positive number: Set limits to requests multiplied by this value (e.g., ``1.5`` for 50% headroom).
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    # Set limits equal to requests
+    set_pod_resource_limits: true
+
+.. code-block:: yaml
+
+  kubernetes:
+    # Set limits to 1.5x requests (50% headroom)
+    set_pod_resource_limits: 1.5
+
+This can also be configured per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        set_pod_resource_limits: 2.0
 
 .. _config-yaml-kubernetes-context-configs:
 

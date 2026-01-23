@@ -21,7 +21,7 @@ Follow the steps below to set up a local development environment for contributin
 #### Create a virtual environment
 To avoid package conflicts, create and activate a clean virtual environment using [uv](https://docs.astral.sh/uv/):
 ```bash
-# SkyPilot requires python 3.8-3.11.
+# SkyPilot requires python 3.9-3.11.
 # --seed is required to ensure pip is installed (needed for building wheels)
 uv venv --seed --python 3.11
 source .venv/bin/activate

@@ -233,6 +233,15 @@ def instance_id(job_id: str, node: str) -> str:
     return f'job{job_id}-{node}'
 
 
+def get_slurm_cluster_from_config(provider_config: Dict[str, Any]) -> str:
+    """Return the Slurm cluster from the provider config.
+    """
+    slurm_cluster = provider_config.get('cluster')
+    if slurm_cluster is None:
+        raise ValueError('Slurm cluster not specified in provider config.')
+    return slurm_cluster
+
+
 def get_partition_from_config(provider_config: Dict[str, Any]) -> str:
     """Return the partition from the provider config.
 
@@ -595,7 +604,6 @@ def is_inside_slurm_cluster() -> bool:
     return os.path.exists(marker_file)
 
 
-@annotations.lru_cache(scope='request')
 def get_partitions(cluster_name: str) -> List[str]:
     """Get unique partition names available in a Slurm cluster.
 
@@ -606,6 +614,34 @@ def get_partitions(cluster_name: str) -> List[str]:
         List of unique partition names available in the cluster.
         The default partition appears first,
         and the rest are sorted alphabetically.
+    """
+    partitions_info = get_partition_infos(cluster_name)
+    default_partitions = []
+    other_partitions = []
+    for partition in partitions_info.values():
+        if partition.is_default:
+            default_partitions.append(partition.name)
+        else:
+            other_partitions.append(partition.name)
+    return default_partitions + sorted(other_partitions)
+
+
+def get_partition_info(cluster_name: str,
+                       partition_name: str) -> Optional[slurm.SlurmPartition]:
+    return get_partition_infos(cluster_name=cluster_name).get(partition_name)
+
+
+# Cache the partitions for 1 hour, we do not expect the
+# partitions to change frequently.
+@annotations.ttl_cache(scope='global', timer=time.time, maxsize=10, ttl=60 * 60)
+def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
+    """Get the partition information for a Slurm cluster.
+
+    Args:
+        cluster_name: Name of the Slurm cluster.
+
+    Returns:
+        List of partition information.
     """
     try:
         slurm_config = SSHConfig.from_path(
@@ -622,18 +658,39 @@ def get_partitions(cluster_name: str) -> List[str]:
         )
 
         partitions_info = client.get_partitions_info()
-        default_partitions = []
-        other_partitions = []
-        for partition in partitions_info:
-            if partition.is_default:
-                default_partitions.append(partition.name)
-            else:
-                other_partitions.append(partition.name)
-        return default_partitions + sorted(other_partitions)
     except Exception as e:  # pylint: disable=broad-except
         raise ValueError(
             f'Failed to get partitions for cluster '
             f'{cluster_name}: {common_utils.format_exception(e)}') from e
+
+    return {partition.name: partition for partition in partitions_info}
+
+
+def format_slurm_duration(duration_seconds: Optional[int]) -> str:
+    """Format the duration in seconds into a Slurm duration string.
+    Slurm duration string is in the format of [days-]hours:minutes:seconds.
+
+    if duration_seconds is None, return 'UNLIMITED'.
+
+    Example:
+        format_slurm_duration(10000) -> 0-02:46:40
+        format_slurm_duration(100000) -> 1-03:46:40
+        format_slurm_duration(1000000) -> 11-13:46:40
+        format_slurm_duration(None) -> 'UNLIMITED'
+
+    Args:
+        duration_seconds: The duration in seconds.
+
+    Returns:
+        The duration in a Slurm duration string.
+    """
+    if duration_seconds is None:
+        return 'UNLIMITED'
+    days = duration_seconds // (24 * 3600)
+    hours = (duration_seconds % (24 * 3600)) // 3600
+    minutes = (duration_seconds % 3600) // 60
+    seconds = duration_seconds % 60
+    return f'{days}-{hours:02}:{minutes:02}:{seconds:02}'
 
 
 def srun_sshd_command(

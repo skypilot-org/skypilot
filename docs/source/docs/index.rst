@@ -301,6 +301,7 @@ Read the research:
    :caption: Jobs
 
    ../examples/managed-jobs
+   Checkpointing and Recovery <../examples/checkpointing>
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>

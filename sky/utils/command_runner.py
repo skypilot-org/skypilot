@@ -62,7 +62,6 @@ RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
-# Owner and group metadata is not needed for downloads.
 RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 
 _HASH_MAX_LENGTH = 10
@@ -256,13 +255,11 @@ def ssh_options_list(
     # ServerAliveInterval set, since the keepalive message may not be recognized
     # by the custom proxy command, such as AWS SSM Session Manager.
     #
-    # We also do not use ControlMaster when we use `kubectl port-forward`
-    # to access Kubernetes pods over SSH+Proxycommand. This is because the
-    # process running ProxyCommand is kept running as long as the ssh session
-    # is running and the ControlMaster keeps the session, which results in
-    # 'ControlPersist' number of seconds delay per ssh commands ran.
+    # Similarly for ssh_proxy_jump, where we've also observed flakiness that may
+    # occassionally cause ssh to error with exit code 255.
     if (ssh_control_name is not None and docker_ssh_proxy_command is None and
-            ssh_proxy_command is None and not disable_control_master):
+            ssh_proxy_command is None and ssh_proxy_jump is None and
+            not disable_control_master):
         control_path = f'{_ssh_control_path(ssh_control_name)}/%C'
         if escape_percent_expand:
             control_path = control_path.replace('%', '%%')
@@ -396,10 +393,16 @@ class CommandRunner:
                 shlex.quote('true && export OMP_NUM_THREADS=1 '
                             f'PYTHONWARNINGS=ignore && ({cmd})')
             ]
-        if not separate_stderr:
-            command.append('2>&1')
         if run_in_background:
-            command = ['nohup'] + command + ['&']
+            command = ['nohup'] + command + [
+                '>/dev/null',  # Detach stdout.
+                '2>&1',  # Detach stderr.
+                '</dev/null',  # Detach stdin.
+                '&',  # Run in background.
+            ]
+        else:
+            if not separate_stderr:
+                command.append('2>&1')
         if not process_stream and skip_num_lines:
             assert not run_in_background, (
                 'run_in_background and skip_num_lines cannot be used together')
@@ -456,8 +459,7 @@ class CommandRunner:
         if prefix_command is not None:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
-        if not up:
-            rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
+        rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.

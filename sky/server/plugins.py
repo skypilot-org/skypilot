@@ -101,6 +101,17 @@ class BasePlugin(abc.ABC):
         return None
 
     @property
+    def requires_early_init(self) -> bool:
+        """Whether this plugin needs to initialize before dashboard API calls.
+
+        Set to True if the plugin needs to intercept fetch requests or
+        otherwise must be ready before the dashboard makes API calls.
+        The dashboard will wait for window.__skyPluginsReady before
+        proceeding with API calls when this is True.
+        """
+        return False
+
+    @property
     def version(self) -> Optional[str]:
         """Plugin version."""
         return None
@@ -109,6 +120,15 @@ class BasePlugin(abc.ABC):
     def commit(self) -> Optional[str]:
         """Plugin git commit hash."""
         return None
+
+    @property
+    def hidden_from_display(self) -> bool:
+        """Whether this plugin should be hidden from version display.
+
+        Set to True to exclude this plugin from appearing in the version
+        information tooltip. Defaults to False.
+        """
+        return False
 
     @abc.abstractmethod
     def install(self, extension_context: ExtensionContext):

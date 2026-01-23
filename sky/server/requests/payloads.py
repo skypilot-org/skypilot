@@ -346,6 +346,8 @@ class AutostopBody(RequestBody):
     idle_minutes: int
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
 
 class QueueBody(RequestBody):
@@ -376,6 +378,13 @@ class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
     worker: Optional[int] = None
+
+
+class AutostopLogsBody(RequestBody):
+    """Autostop logs request body."""
+    cluster_name: str
+    follow: bool = True
+    tail: int = 0
 
 
 class ClusterJobBody(RequestBody):
@@ -487,7 +496,7 @@ class VolumeDeleteBody(RequestBody):
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
-    pass
+    refresh: bool = False
 
 
 class VolumeValidateBody(RequestBody):
@@ -556,6 +565,9 @@ class JobsQueueV2Body(RequestBody):
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
     fields: Optional[List[str]] = None
+    # Sorting parameters, added in ManagedJobsService v14.
+    sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
+    sort_order: Optional[str] = None  # 'asc' or 'desc'
 
 
 class JobsCancelBody(RequestBody):
@@ -864,6 +876,7 @@ class RequestPayload(BasePayload):
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):
     """Request body for getting Slurm real-time GPU availability."""
+    slurm_cluster_name: Optional[str] = None
     name_filter: Optional[str] = None
     quantity_filter: Optional[int] = None
 

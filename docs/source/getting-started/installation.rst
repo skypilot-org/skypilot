@@ -21,10 +21,9 @@ SkyPilot supports installation with ``uv`` or ``pip``.
     .. code-block:: shell
 
       # Create a virtual environment with pip pre-installed (required for SkyPilot)
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       uv venv --seed --python 3.10
       source .venv/bin/activate  # Use WSL on Windows
-
       uv pip install skypilot
 
       # install dependencies for the clouds you want to use
@@ -34,14 +33,14 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
       The ``--seed`` flag is **required** as it ensures ``pip`` is installed in the virtual environment.
       SkyPilot needs ``pip`` to build wheels for remote cluster setup.
-    
+
   .. tab-item:: uv tool
     :sync: uv-tool-tab
 
     .. code-block:: shell
 
       # Install as a globally available tool with pip included
-      # SkyPilot requires 3.7 <= python <= 3.13.
+      # SkyPilot requires 3.9 <= python <= 3.13.
       uv tool install --with pip skypilot
 
       # install dependencies for the clouds you want to use
@@ -66,6 +65,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
       # install dependencies for the clouds you want to use
       pip install "skypilot[kubernetes,aws,gcp]"
+
 
 .. dropdown:: Install SkyPilot from nightly build or source
 
@@ -131,7 +131,7 @@ SkyPilot supports installation with ``uv`` or ``pip``.
       git clone https://github.com/skypilot-org/skypilot.git
       cd skypilot
 
-      pip install -e . 
+      pip install -e .
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
@@ -431,7 +431,7 @@ Install the necessary dependencies for AWS.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[aws]"
@@ -586,7 +586,7 @@ Install the necessary dependencies for Azure.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[azure]"
@@ -641,7 +641,7 @@ CoreWeave
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[coreweave]"
@@ -737,7 +737,7 @@ Install the necessary dependencies for Nebius.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # Nebius requires 3.10 <= python <= 3.13.
       # From stable release
       pip install "skypilot[nebius]"
@@ -818,7 +818,7 @@ Install the necessary dependencies for RunPod
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[runpod]"
@@ -868,7 +868,7 @@ Install the necessary dependencies for OCI.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[oci]"
@@ -939,7 +939,7 @@ Install the necessary dependencies for Lambda Cloud.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[lambda]"
@@ -989,7 +989,7 @@ Together AI |community-badge|
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[kubernetes]"
@@ -1042,7 +1042,7 @@ Install the necessary dependencies for Paperspace.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[paperspace]"
@@ -1092,7 +1092,7 @@ Install the necessary dependencies for Vast.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[vast]"
@@ -1143,7 +1143,7 @@ Install the necessary dependencies for Fluidstack.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[fluidstack]"
@@ -1193,7 +1193,7 @@ Cudo Compute |community-badge|
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[cudo]"
@@ -1255,7 +1255,7 @@ Install the necessary dependencies for Shadeform.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[shadeform]"
@@ -1308,7 +1308,7 @@ Install the necessary dependencies for IBM.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # IBM requires 3.7 <= python <= 3.11.
       # From stable release
       pip install "skypilot[ibm]"
@@ -1388,7 +1388,7 @@ Install the necessary dependencies for SCP.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SCP requires 3.7 <= python <= 3.11.
       # From stable release
       pip install "skypilot[scp]"
@@ -1446,7 +1446,7 @@ Install the necessary dependencies for VMware vSphere.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[vsphere]"
@@ -1524,7 +1524,7 @@ Install the necessary dependencies for Cloudflare R2.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[cloudflare]"
@@ -1566,7 +1566,7 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 Prime Intellect |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access: 
+`Prime Intellect <https://primeintellect.ai/>`__ makes it easy to find global compute resources and train state-of-the-art models through distributed training across clusters. To configure Prime Intellect access:
 
 Install the necessary dependencies for Prime Intellect.
 
@@ -1597,7 +1597,7 @@ Install the necessary dependencies for Prime Intellect.
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
       pip install "skypilot[primeintellect]"
@@ -1653,7 +1653,7 @@ Seeweb |community-badge|
     :sync: pip-tab
 
     .. code-block:: shell
-      
+
       # Seeweb requires 3.10 <= python <= 3.13.
       # From stable release
       pip install "skypilot[seeweb]"

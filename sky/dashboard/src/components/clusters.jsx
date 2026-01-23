@@ -32,7 +32,11 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getClusters, getClusterHistory } from '@/data/connectors/clusters';
+import {
+  getClusters,
+  getClusterHistory,
+  useClusterData,
+} from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
 import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
@@ -45,6 +49,7 @@ import {
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { useTableColumns } from '@/plugins/PluginProvider';
 import {
   Select,
   SelectContent,
@@ -590,15 +595,47 @@ export function ClusterTable({
   setOptionValues,
   preloadingComplete,
 }) {
-  const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
   });
-  const [loading, setLocalLoading] = useState(false);
+
+  // Use the cluster data hook (supports plugin override for server-side pagination)
+  const {
+    data: hookData,
+    allData,
+    total,
+    page,
+    limit,
+    totalPages: hookTotalPages,
+    hasNext,
+    hasPrev,
+    setPage,
+    setLimit,
+    loading: hookLoading,
+    refresh,
+    isServerPagination,
+  } = useClusterData({
+    showHistory,
+    historyDays,
+    refreshInterval: preloadingComplete ? refreshInterval : null,
+    sortConfig,
+    filters,
+  });
+
+  // Track loading state for parent component
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    if (!hookLoading && isInitialLoad) {
+      setIsInitialLoad(false);
+    }
+  }, [hookLoading, isInitialLoad]);
+
+  // Sync loading state with parent
+  useEffect(() => {
+    setLoading(hookLoading);
+  }, [hookLoading, setLoading]);
 
   const fetchOptionValuesFromClusters = (clusters) => {
     let optionValues = {
@@ -621,7 +658,11 @@ export function ClusterTable({
       pushWithoutDuplication(optionValues.cluster, cluster.cluster);
       pushWithoutDuplication(optionValues.user, cluster.user);
       pushWithoutDuplication(optionValues.workspace, cluster.workspace);
-      pushWithoutDuplication(optionValues.infra, cluster.infra);
+      // Use full_infra for filter values so they match database values
+      pushWithoutDuplication(
+        optionValues.infra,
+        cluster.full_infra || cluster.infra
+      );
 
       // Extract labels - add only key:value pairs
       const labels = cluster.labels || {};
@@ -638,71 +679,16 @@ export function ClusterTable({
     return optionValues;
   };
 
-  const fetchData = React.useCallback(async () => {
-    setLoading(true);
-    setLocalLoading(true);
-
-    try {
-      // Use cached data if available, which should have been preloaded by cache preloader
-      const activeClusters = await dashboardCache.get(getClusters);
-
-      if (showHistory) {
-        let historyClusters = [];
-        try {
-          historyClusters = await dashboardCache.get(getClusterHistory, [
-            null,
-            historyDays,
-          ]);
-        } catch (error) {
-          console.error('Error fetching cluster history:', error);
-        }
-        // Mark clusters as active or historical for UI distinction
-        const markedActiveClusters = activeClusters.map((cluster) => ({
-          ...cluster,
-          isHistorical: false,
-        }));
-        const markedHistoryClusters = historyClusters.map((cluster) => ({
-          ...cluster,
-          isHistorical: true,
-        }));
-        // Combine and remove duplicates (prefer active over historical)
-        const combinedData = [...markedActiveClusters];
-        markedHistoryClusters.forEach((histCluster) => {
-          const existsInActive = activeClusters.some(
-            (activeCluster) =>
-              activeCluster.cluster_hash === histCluster.cluster_hash
-          );
-          if (!existsInActive) {
-            combinedData.push(histCluster);
-          }
-        });
-
-        setOptionValues(fetchOptionValuesFromClusters(combinedData));
-
-        setData(combinedData);
-      } else {
-        // Mark active clusters for consistency
-        const markedActiveClusters = activeClusters.map((cluster) => ({
-          ...cluster,
-          isHistorical: false,
-        }));
-
-        setOptionValues(fetchOptionValuesFromClusters(markedActiveClusters));
-
-        setData(markedActiveClusters);
-      }
-    } catch (error) {
-      console.error('Error fetching cluster data:', error);
-      setOptionValues(fetchOptionValuesFromClusters([]));
-      setData([]);
+  // Update filter option values when data changes
+  useEffect(() => {
+    if (allData && allData.length > 0) {
+      setOptionValues(fetchOptionValuesFromClusters(allData));
     }
+  }, [allData, setOptionValues]);
 
-    setLoading(false);
-    setLocalLoading(false);
-    setIsInitialLoad(false);
-  }, [setLoading, showHistory, historyDays, setOptionValues]);
-
-  // Use useMemo to compute sorted data
+  // Use useMemo to compute sorted and filtered data
+  // For server-side pagination, data is already paginated, so we apply filters/sort to hookData
+  // For client-side pagination, we apply filters/sort to allData, then paginate
   const sortedData = React.useMemo(() => {
     // Main filter function
     const filterData = (data, filters) => {
@@ -728,47 +714,37 @@ export function ClusterTable({
       });
     };
 
-    const filteredData = filterData(data, filters);
+    // For server-side pagination, server already handles filtering - just apply sorting
+    // For client-side pagination, we filter/sort the full data then paginate
+    const dataToProcess = isServerPagination ? hookData : allData;
+
+    if (!isServerPagination) {
+      const historicalCount = (allData || []).filter(
+        (c) => c.isHistorical
+      ).length;
+      console.log(
+        '[ClusterTable] Client-side - allData length:',
+        (allData || []).length,
+        ', historical:',
+        historicalCount,
+        ', filters:',
+        filters.length
+      );
+    }
+
+    const filteredData = isServerPagination
+      ? dataToProcess
+      : filterData(dataToProcess, filters);
 
     return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [data, sortConfig, filters]);
+  }, [hookData, allData, sortConfig, filters, isServerPagination]);
 
-  // Expose fetchData to parent component
+  // Expose refresh to parent component
   React.useEffect(() => {
     if (refreshDataRef) {
-      refreshDataRef.current = fetchData;
+      refreshDataRef.current = refresh;
     }
-  }, [refreshDataRef, fetchData]);
-
-  useEffect(() => {
-    setData([]);
-    let isCurrent = true;
-
-    // Only start fetching data after preloading is complete
-    if (preloadingComplete) {
-      fetchData();
-
-      const interval = setInterval(() => {
-        if (isCurrent && window.document.visibilityState === 'visible') {
-          fetchData();
-        }
-      }, refreshInterval);
-
-      return () => {
-        isCurrent = false;
-        clearInterval(interval);
-      };
-    }
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [refreshInterval, fetchData, preloadingComplete]);
-
-  // Reset to first page when data changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [data.length]);
+  }, [refreshDataRef, refresh]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -785,26 +761,363 @@ export function ClusterTable({
     return '';
   };
 
-  // Calculate pagination using sortedData
-  const totalPages = Math.ceil(sortedData.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedData = sortedData.slice(startIndex, endIndex);
+  // Calculate pagination
+  // For server-side: use hook's total (server already filtered)
+  // For client-side: use sortedData.length (filtered in component)
+  const displayTotal = isServerPagination ? total : sortedData.length;
+  const totalPages = isServerPagination
+    ? hookTotalPages || Math.ceil(total / limit) || 1
+    : Math.ceil(sortedData.length / limit) || 1;
+  const startIndex = (page - 1) * limit;
+  const endIndex = startIndex + limit;
 
-  // Page navigation handlers
+  // For server-side pagination, sortedData is already the current page
+  // For client-side pagination, we need to slice after filtering/sorting
+  const paginatedData = isServerPagination
+    ? sortedData
+    : sortedData.slice(startIndex, endIndex);
+
+  // Page navigation handlers - use hook's setPage
   const goToPreviousPage = () => {
-    setCurrentPage((page) => Math.max(page - 1, 1));
+    if (isServerPagination) {
+      if (hasPrev) setPage(page - 1);
+    } else {
+      setPage(Math.max(page - 1, 1));
+    }
   };
 
   const goToNextPage = () => {
-    setCurrentPage((page) => Math.min(page + 1, totalPages));
+    if (isServerPagination) {
+      if (hasNext) setPage(page + 1);
+    } else {
+      setPage(Math.min(page + 1, totalPages));
+    }
   };
 
   const handlePageSizeChange = (e) => {
     const newSize = parseInt(e.target.value, 10);
-    setPageSize(newSize);
-    setCurrentPage(1); // Reset to first page when changing page size
+    setLimit(newSize);
   };
+
+  // Get plugin columns
+  const pluginColumns = useTableColumns('clusters', { showHistory });
+
+  // Define base columns with their order
+  const baseColumns = [
+    {
+      id: 'status',
+      order: 0,
+      header: {
+        label: 'Status',
+        sortKey: 'status',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('status')}
+        >
+          Status{getSortDirection('status')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <PluginSlot
+            name="clusters.table.status.badge"
+            context={item}
+            fallback={
+              <StatusBadge
+                status={item.status}
+                statusTooltip={item.statusTooltip}
+              />
+            }
+          />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'cluster',
+      order: 1,
+      header: {
+        label: 'Cluster',
+        sortKey: 'cluster',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('cluster')}
+        >
+          Cluster{getSortDirection('cluster')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <Link
+            href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
+            className="text-blue-600"
+          >
+            {item.cluster || item.name}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'user',
+      order: 2,
+      header: {
+        label: 'User',
+        sortKey: 'user',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('user')}
+        >
+          User{getSortDirection('user')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <UserDisplay username={item.user} userHash={item.user_hash} />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'workspace',
+      order: 3,
+      header: {
+        label: 'Workspace',
+        sortKey: 'workspace',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('workspace')}
+        >
+          Workspace{getSortDirection('workspace')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <Link
+            href="/workspaces"
+            className="text-gray-700 hover:text-blue-600 hover:underline"
+          >
+            {item.workspace || 'default'}
+          </Link>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'infra',
+      order: 4,
+      header: {
+        label: 'Infra',
+        sortKey: 'infra',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('infra')}
+        >
+          Infra{getSortDirection('infra')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <NonCapitalizedTooltip
+            content={item.full_infra || item.infra}
+            className="text-sm text-muted-foreground"
+          >
+            <span>
+              <Link href="/infra" className="text-blue-600 hover:underline">
+                {item.cloud}
+              </Link>
+              {item.infra.includes('(') && (
+                <span>
+                  {' ' + item.infra.substring(item.infra.indexOf('('))}
+                </span>
+              )}
+            </span>
+          </NonCapitalizedTooltip>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'resources',
+      order: 5,
+      header: {
+        label: 'Resources',
+        sortKey: 'resources_str',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('resources_str')}
+        >
+          Resources{getSortDirection('resources_str')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <NonCapitalizedTooltip
+            content={item.resources_str_full || item.resources_str}
+            className="text-sm text-muted-foreground"
+          >
+            <span>{item.resources_str}</span>
+          </NonCapitalizedTooltip>
+        </TableCell>
+      ),
+    },
+    {
+      id: 'started',
+      order: 6,
+      header: {
+        label: 'Started',
+        sortKey: 'time',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('time')}
+        >
+          Started{getSortDirection('time')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          <TimestampWithTooltip date={item.time} />
+        </TableCell>
+      ),
+    },
+    {
+      id: 'duration',
+      order: 7,
+      conditional: true, // Only show when showHistory is true
+      header: {
+        label: 'Duration',
+        sortKey: 'duration',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () =>
+        showHistory ? (
+          <TableHead
+            className="sortable whitespace-nowrap"
+            onClick={() => requestSort('duration')}
+          >
+            Duration{getSortDirection('duration')}
+          </TableHead>
+        ) : null,
+      renderCell: (item) =>
+        showHistory ? (
+          <TableCell>{formatDuration(item.duration)}</TableCell>
+        ) : null,
+    },
+    {
+      id: 'autostop',
+      order: 8,
+      header: {
+        label: 'Autostop',
+        sortKey: 'autostop',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('autostop')}
+        >
+          Autostop{getSortDirection('autostop')}
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell>
+          {item.isHistorical
+            ? '-'
+            : formatAutostop(item.autostop, item.to_down)}
+        </TableCell>
+      ),
+    },
+    {
+      id: 'actions',
+      order: 9,
+      header: {
+        label: 'Actions',
+        className: 'md:sticky md:right-0 md:bg-white',
+      },
+      renderHeader: () => (
+        <TableHead className="md:sticky md:right-0 md:bg-white">
+          Actions
+        </TableHead>
+      ),
+      renderCell: (item) => (
+        <TableCell className="text-left md:sticky md:right-0 md:bg-white">
+          {!item.isHistorical && (
+            <Status2Actions
+              cluster={item.cluster}
+              status={item.status}
+              onOpenSSHModal={onOpenSSHModal}
+              onOpenVSCodeModal={onOpenVSCodeModal}
+            />
+          )}
+        </TableCell>
+      ),
+    },
+  ];
+
+  // Add plugin columns to the array
+  const pluginColumnDefs = pluginColumns.map((col) => ({
+    id: col.id,
+    order: col.header.order,
+    isPlugin: true,
+    pluginColumn: col,
+    renderHeader: () => {
+      const baseClasses = col.header.sortKey
+        ? 'sortable whitespace-nowrap'
+        : 'whitespace-nowrap';
+      const className = `${baseClasses}${col.header.className ? ' ' + col.header.className : ''}`;
+      return (
+        <TableHead
+          className={className}
+          onClick={
+            col.header.sortKey
+              ? () => requestSort(col.header.sortKey)
+              : undefined
+          }
+        >
+          {col.header.label}
+          {col.header.sortKey ? getSortDirection(col.header.sortKey) : ''}
+        </TableHead>
+      );
+    },
+    renderCell: (item) => {
+      const context = { item, showHistory, historyDays };
+      const cellContent = col.cell.render(item, context);
+      return (
+        <TableCell className={col.cell.className || ''}>
+          {cellContent}
+        </TableCell>
+      );
+    },
+  }));
+
+  // Merge base and plugin columns, sort by order
+  const allColumns = [...baseColumns, ...pluginColumnDefs].sort(
+    (a, b) => a.order - b.order
+  );
+
+  // Filter out conditional columns that shouldn't be shown
+  const visibleColumns = allColumns.filter(
+    (col) => !col.conditional || (col.conditional && showHistory)
+  );
+
+  // Calculate dynamic colSpan
+  const totalColSpan = visibleColumns.length;
 
   return (
     <div>
@@ -813,73 +1126,17 @@ export function ClusterTable({
           <Table className="min-w-full">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('status')}
-                >
-                  Status{getSortDirection('status')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('cluster')}
-                >
-                  Cluster{getSortDirection('cluster')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('user')}
-                >
-                  User{getSortDirection('user')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('workspace')}
-                >
-                  Workspace{getSortDirection('workspace')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('infra')}
-                >
-                  Infra{getSortDirection('infra')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('resources_str')}
-                >
-                  Resources{getSortDirection('resources_str')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('time')}
-                >
-                  Started{getSortDirection('time')}
-                </TableHead>
-                {showHistory && (
-                  <TableHead
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('duration')}
-                  >
-                    Duration{getSortDirection('duration')}
-                  </TableHead>
+                {visibleColumns.map((col) =>
+                  React.cloneElement(col.renderHeader(), { key: col.id })
                 )}
-                <TableHead
-                  className="sortable whitespace-nowrap"
-                  onClick={() => requestSort('autostop')}
-                >
-                  Autostop{getSortDirection('autostop')}
-                </TableHead>
-                <TableHead className="md:sticky md:right-0 md:bg-white">
-                  Actions
-                </TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
-              {loading || !preloadingComplete ? (
+              {hookLoading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
-                    colSpan={9}
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     <div className="flex justify-center items-center">
@@ -892,99 +1149,18 @@ export function ClusterTable({
                 paginatedData.map((item, index) => {
                   return (
                     <TableRow key={index}>
-                      <TableCell>
-                        <PluginSlot
-                          name="clusters.table.status.badge"
-                          context={item}
-                          fallback={
-                            <StatusBadge
-                              status={item.status}
-                              statusTooltip={item.statusTooltip}
-                            />
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
-                          className="text-blue-600"
-                        >
-                          {item.cluster || item.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <UserDisplay
-                          username={item.user}
-                          userHash={item.user_hash}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          href="/workspaces"
-                          className="text-gray-700 hover:text-blue-600 hover:underline"
-                        >
-                          {item.workspace || 'default'}
-                        </Link>
-                      </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={item.full_infra || item.infra}
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>
-                            <Link
-                              href="/infra"
-                              className="text-blue-600 hover:underline"
-                            >
-                              {item.cloud}
-                            </Link>
-                            {item.infra.includes('(') && (
-                              <span>
-                                {' ' +
-                                  item.infra.substring(item.infra.indexOf('('))}
-                              </span>
-                            )}
-                          </span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
-                      <TableCell>
-                        <NonCapitalizedTooltip
-                          content={
-                            item.resources_str_full || item.resources_str
-                          }
-                          className="text-sm text-muted-foreground"
-                        >
-                          <span>{item.resources_str}</span>
-                        </NonCapitalizedTooltip>
-                      </TableCell>
-                      <TableCell>
-                        <TimestampWithTooltip date={item.time} />
-                      </TableCell>
-                      {showHistory && (
-                        <TableCell>{formatDuration(item.duration)}</TableCell>
+                      {visibleColumns.map((col) =>
+                        React.cloneElement(col.renderCell(item), {
+                          key: col.id,
+                        })
                       )}
-                      <TableCell>
-                        {item.isHistorical
-                          ? '-'
-                          : formatAutostop(item.autostop, item.to_down)}
-                      </TableCell>
-                      <TableCell className="text-left md:sticky md:right-0 md:bg-white">
-                        {!item.isHistorical && (
-                          <Status2Actions
-                            cluster={item.cluster}
-                            status={item.status}
-                            onOpenSSHModal={onOpenSSHModal}
-                            onOpenVSCodeModal={onOpenVSCodeModal}
-                          />
-                        )}
-                      </TableCell>
                     </TableRow>
                   );
                 })
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={9}
+                    colSpan={totalColSpan}
                     className="text-center py-6 text-gray-500"
                   >
                     {showHistory ? 'No clusters found' : 'No active clusters'}
@@ -997,14 +1173,14 @@ export function ClusterTable({
       </Card>
 
       {/* Pagination controls */}
-      {data.length > 0 && (
+      {displayTotal > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
               <div className="relative inline-block">
                 <select
-                  value={pageSize}
+                  value={limit}
                   onChange={handlePageSizeChange}
                   className="py-1 pl-2 pr-6 appearance-none outline-none cursor-pointer border-none bg-transparent"
                   style={{ minWidth: '40px' }}
@@ -1032,14 +1208,14 @@ export function ClusterTable({
               </div>
             </div>
             <div>
-              {`${startIndex + 1} - ${Math.min(endIndex, sortedData.length)} of ${sortedData.length}`}
+              {`${startIndex + 1} - ${Math.min(endIndex, displayTotal)} of ${displayTotal}`}
             </div>
             <div className="flex items-center space-x-2">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={goToPreviousPage}
-                disabled={currentPage === 1}
+                disabled={isServerPagination ? !hasPrev : page === 1}
                 className="text-gray-500 h-8 w-8 p-0"
               >
                 <svg
@@ -1061,7 +1237,11 @@ export function ClusterTable({
                 variant="ghost"
                 size="icon"
                 onClick={goToNextPage}
-                disabled={currentPage === totalPages || totalPages === 0}
+                disabled={
+                  isServerPagination
+                    ? !hasNext
+                    : page === totalPages || totalPages === 0
+                }
                 className="text-gray-500 h-8 w-8 p-0"
               >
                 <svg
