@@ -1123,7 +1123,7 @@ class TestKubernetesSecurityContext(unittest.TestCase):
                         'kind': 'Pod',
                         'spec': {
                             'containers': [{
-                                'name': 'ray-node',
+                                'name': 'skypilot-node',
                                 'image': 'test-image',
                                 'securityContext': {
                                     'capabilities': {
@@ -1194,7 +1194,7 @@ class TestKubernetesSecurityContext(unittest.TestCase):
                         'kind': 'Pod',
                         'spec': {
                             'containers': [{
-                                'name': 'ray-node',
+                                'name': 'skypilot-node',
                                 'image': 'test-image'
                                 # No securityContext initially
                             }]
@@ -1269,7 +1269,7 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
                                 }
                             }],
                             'containers': [{
-                                'name': 'ray-node',
+                                'name': 'skypilot-node',
                                 'image': 'test-image',
                                 'volumeMounts': [{
                                     'mountPath': '/dev/shm',

@@ -4022,7 +4022,7 @@ def open_ssh_tunnel(head_runner: Union[command_runner.SSHCommandRunner,
             # We did not observe this with real Kubernetes clusters.
             timeout = 5
             port_check_cmd = (
-                # We install netcat in our ray-node container,
+                # We install netcat in our skypilot-node container,
                 # so we can use it here.
                 # (See kubernetes-ray.yml.j2)
                 f'end=$((SECONDS+{timeout})); '
