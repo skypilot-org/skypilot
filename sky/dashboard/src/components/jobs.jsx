@@ -656,7 +656,16 @@ export function ManagedJobsTable({
         }
       }
     },
-    [setLoading, hookRefresh, hookControllerStopped]
+    [
+      setLoading,
+      filters,
+      currentPage,
+      pageSize,
+      selectedStatuses,
+      showAllMode,
+      activeTab,
+      hookControllerStopped,
+    ]
   );
 
   // Expose fetchData to parent component

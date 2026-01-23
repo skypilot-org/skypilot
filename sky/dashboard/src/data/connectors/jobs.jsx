@@ -6,6 +6,7 @@ import {
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
@@ -988,9 +989,13 @@ export function useJobsData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useJobsData] Using client-side pagination');
 
-    const response = await dashboardCache.get(getManagedJobs, [
-      { allUsers: true },
-    ]);
+    // Use jobsCacheManager which correctly paginates by jobs (not tasks)
+    // and groups tasks by job_id for proper display
+    const response = await jobsCacheManager.getPaginatedJobs({
+      allUsers: true,
+      page,
+      limit,
+    });
 
     // Handle controller stopped
     if (response.controllerStopped) {
@@ -1002,20 +1007,16 @@ export function useJobsData(options = {}) {
       return;
     }
 
-    const allJobs = response.jobs || [];
+    const jobs = response.jobs || [];
+    const uniqueJobCount = response.total || 0;
+    const totalPages = Math.ceil(uniqueJobCount / limit) || 1;
 
-    // Client-side pagination
-    const clientTotal = allJobs.length;
-    const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
-    const startIndex = (page - 1) * limit;
-    const paginatedData = allJobs.slice(startIndex, startIndex + limit);
-
-    setData(paginatedData);
-    setFullData(allJobs);
-    setTotal(clientTotal);
-    setTotalNoFilter(response.totalNoFilter || clientTotal);
-    setTotalPages(clientTotalPages);
-    setHasNext(page < clientTotalPages);
+    setData(jobs);
+    setFullData(jobs);
+    setTotal(uniqueJobCount);
+    setTotalNoFilter(response.totalNoFilter || uniqueJobCount);
+    setTotalPages(totalPages);
+    setHasNext(page < totalPages);
     setHasPrev(page > 1);
     setIsServerPagination(false);
     setControllerStopped(false);
