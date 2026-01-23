@@ -196,6 +196,7 @@ Navigate to the **Infra** tab to see all your Slurm clusters with GPU types and 
    :width: 100%
 
 |
+
 Click on a cluster name to see detailed GPU availability per node:
 
 .. image:: /images/slurm-cluster-details-page.png
@@ -203,6 +204,7 @@ Click on a cluster name to see detailed GPU availability per node:
    :width: 100%
 
 |
+
 You can also view GPU availability from the CLI:
 
 .. code-block:: console
