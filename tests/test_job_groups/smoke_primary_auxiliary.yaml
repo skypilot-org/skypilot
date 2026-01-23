@@ -1,0 +1,42 @@
+# Primary/Auxiliary Job Group Smoke Test
+# Tests the primary/auxiliary termination behavior:
+# - Primary task (trainer) runs for a short time and succeeds
+# - Auxiliary task (replay-buffer) runs indefinitely until terminated
+# - After primary task completes, auxiliary should be terminated with delay
+---
+name: {{name}}
+execution: parallel
+primary_tasks: [trainer]
+termination_delay: {{delay}}
+---
+name: trainer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Primary trainer task starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Trainer will run for a short time and then complete successfully"
+  for i in {1..5}; do
+    echo "Training iteration $i"
+    sleep 2
+  done
+  echo "PRIMARY TRAINER COMPLETED SUCCESSFULLY"
+---
+name: replay-buffer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Auxiliary replay-buffer task starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This task runs indefinitely until primary completes and triggers termination"
+  iteration=0
+  while true; do
+    iteration=$((iteration + 1))
+    echo "Replay buffer heartbeat $iteration"
+    sleep 2
+  done
+  echo "REPLAY BUFFER SHOULD NOT REACH HERE - should be terminated"

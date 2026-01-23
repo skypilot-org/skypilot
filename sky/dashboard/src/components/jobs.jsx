@@ -25,7 +25,7 @@ import {
   renderPoolLink,
 } from '@/components/utils';
 import { UI_CONFIG } from '@/lib/config';
-import { getPoolStatus } from '@/data/connectors/jobs';
+import { getPoolStatus, useJobsData } from '@/data/connectors/jobs';
 import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { getClusters, downloadJobLogs } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
@@ -41,6 +41,8 @@ import {
   MonitorPlay,
   RefreshCcw,
   Download,
+  ChevronDownIcon,
+  ChevronRightIcon,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -49,6 +51,7 @@ import {
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
+import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
@@ -88,6 +91,59 @@ export const statusGroups = {
     'FAILED_CONTROLLER',
   ],
 };
+
+// Status priority for aggregation (higher index = worse status)
+const STATUS_PRIORITY = {
+  SUCCEEDED: 0,
+  PENDING: 1,
+  SUBMITTED: 2,
+  STARTING: 3,
+  RUNNING: 4,
+  RECOVERING: 5,
+  CANCELLING: 6,
+  CANCELLED: 7,
+  FAILED_SETUP: 8,
+  FAILED_PRECHECKS: 9,
+  FAILED_NO_RESOURCE: 10,
+  FAILED: 11,
+  FAILED_CONTROLLER: 12,
+};
+
+// Helper function to aggregate status for a job group
+// Returns the "worst" status based on priority
+// For job groups with primary/auxiliary tasks, status is determined only by primary tasks
+// Uses is_primary_in_job_group per task: null (non-group), true (primary), false (auxiliary)
+export function getAggregatedStatus(tasks) {
+  if (!tasks || tasks.length === 0) return 'PENDING';
+  if (tasks.length === 1) return tasks[0].status;
+
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null/undefined for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
+
+  let worstStatus = 'SUCCEEDED';
+  let worstPriority = 0;
+
+  for (const task of tasksForStatus) {
+    const priority = STATUS_PRIORITY[task.status] ?? 0;
+    if (priority > worstPriority) {
+      worstPriority = priority;
+      worstStatus = task.status;
+    }
+  }
+
+  return worstStatus;
+}
 
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
@@ -358,9 +414,6 @@ export function ManagedJobsTable({
   preloadingComplete,
   lastFetchedTime,
 }) {
-  const [data, setData] = useState([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [totalNoFilter, setTotalNoFilter] = useState(0);
   const [sortConfig, setSortConfig] = useState({
     key: null,
     direction: 'ascending',
@@ -371,9 +424,9 @@ export function ManagedJobsTable({
   const [pageSize, setPageSize] = useState(10);
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
+  const [expandedJobGroups, setExpandedJobGroups] = useState(new Set());
   const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
-  const [apiStatusCounts, setApiStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
@@ -388,6 +441,74 @@ export function ManagedJobsTable({
   const isMobile = useMobile();
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
+
+  // Compute statuses based on UI state for the hook
+  const computedStatuses = React.useMemo(() => {
+    // If specific statuses are selected, use those
+    if (selectedStatuses.length > 0) {
+      return selectedStatuses;
+    }
+    // If not in "show all" mode but no specific statuses selected, show no jobs
+    if (!showAllMode) {
+      return [];
+    }
+    // Show all active jobs
+    if (activeTab === 'active') {
+      return statusGroups.active;
+    }
+    // Show all finished jobs
+    if (activeTab === 'finished') {
+      return statusGroups.finished;
+    }
+    // For activeTab === 'all' and showAllMode === true, show all jobs
+    return [];
+  }, [selectedStatuses, showAllMode, activeTab]);
+
+  // Use the jobs data hook for fetching
+  const {
+    data: hookData,
+    allData: hookAllData,
+    total: hookTotal,
+    totalNoFilter: hookTotalNoFilter,
+    statusCounts: hookStatusCounts,
+    page: hookPage,
+    limit: hookLimit,
+    setPage: hookSetPage,
+    setLimit: hookSetLimit,
+    loading: hookLoading,
+    refresh: hookRefresh,
+    isServerPagination,
+    controllerStopped: hookControllerStopped,
+  } = useJobsData({
+    sortConfig,
+    filters,
+    statuses: computedStatuses,
+    initialPage: currentPage,
+    initialLimit: pageSize,
+  });
+
+  // Sync local page/limit state with hook when they change
+  React.useEffect(() => {
+    if (currentPage !== hookPage) {
+      hookSetPage(currentPage);
+    }
+  }, [currentPage, hookPage, hookSetPage]);
+
+  React.useEffect(() => {
+    if (pageSize !== hookLimit) {
+      hookSetLimit(pageSize);
+    }
+  }, [pageSize, hookLimit, hookSetLimit]);
+
+  // Aliases for hook values to maintain backward compatibility
+  const data = hookData;
+  const totalCount = hookTotal;
+  const totalNoFilter = hookTotalNoFilter;
+
+  // Sync status counts from hook
+  React.useEffect(() => {
+    setStatusCounts(hookStatusCounts);
+  }, [hookStatusCounts]);
 
   // Determine if we should show the Workspace column
   // Only show if there are multiple workspaces or a workspace other than 'default'
@@ -429,6 +550,7 @@ export function ManagedJobsTable({
     });
   };
 
+  // Fetch data - the hook handles jobs fetching, we just check controller status
   const fetchData = React.useCallback(
     async (options = {}) => {
       const includeStatus = options.includeStatus !== false;
@@ -436,7 +558,8 @@ export function ManagedJobsTable({
       const version = requestSeqRef.current + 1;
       requestSeqRef.current = version;
       setLocalLoading(true);
-      setLoading(true); // Set parent loading state
+      setLoading(true); // Set parent loading state.
+
       try {
         // Build server-side filter params from UI filters
         const getFilterValue = (prop) => {
@@ -471,7 +594,7 @@ export function ManagedJobsTable({
           poolMatch: getFilterValue('pool'),
           statuses: statusesParam,
           page: currentPage, // page index starting from 1
-          limit: pageSize,
+          limit: pageSize, // Backend now paginates by jobs, not tasks
         };
 
         let jobsResponse;
@@ -481,76 +604,55 @@ export function ManagedJobsTable({
         const isDataCached = jobsCacheManager.isDataCached(params);
         const isDataLoading = jobsCacheManager.isDataLoading(params);
 
+        // Check controller status from clusters
         if (includeStatus) {
           try {
-            clustersData = await dashboardCache.get(getClusters);
+            const clustersData = await dashboardCache.get(getClusters);
+
+            let isControllerStopped = false;
+            let isLaunching = false;
+
+            if (clustersData) {
+              const jobControllerCluster = clustersData?.find((c) =>
+                isJobController(c.cluster)
+              );
+              const jobControllerClusterStatus = jobControllerCluster
+                ? jobControllerCluster.status
+                : 'NOT_FOUND';
+              // Use hookControllerStopped from the hook for the API-level stopped flag
+              if (
+                jobControllerClusterStatus === 'STOPPED' &&
+                hookControllerStopped
+              ) {
+                isControllerStopped = true;
+              }
+              if (jobControllerClusterStatus === 'LAUNCHING') {
+                isLaunching = true;
+              }
+            }
+
+            if (version === requestSeqRef.current) {
+              setControllerStopped(!!isControllerStopped);
+              setControllerLaunching(!!isLaunching);
+            }
           } catch (error) {
             console.error('Error fetching clusters:', error);
           }
         }
-        jobsResponse = await jobsCacheManager.getPaginatedJobs(params);
 
-        // Always process the response, even if it's null
-        const {
-          jobs = [],
-          total = 0,
-          totalNoFilter = 0,
-          controllerStopped = false,
-          cacheStatus = 'unknown',
-          statusCounts = {},
-        } = jobsResponse || {};
-
-        let isControllerStopped = false;
-        let isLaunching = false;
-        if (includeStatus && clustersData) {
-          const jobControllerCluster = clustersData?.find((c) =>
-            isJobController(c.cluster)
-          );
-          const jobControllerClusterStatus = jobControllerCluster
-            ? jobControllerCluster.status
-            : 'NOT_FOUND';
-          if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
-            isControllerStopped = true;
-          }
-          if (jobControllerClusterStatus == 'LAUNCHING') {
-            isLaunching = true;
-          }
-        }
-
-        // Only commit if this is still the latest request
         if (version === requestSeqRef.current) {
-          setData(jobs);
-          setTotalCount(total || 0);
-          setTotalNoFilter(totalNoFilter || 0);
-          setControllerStopped(!!isControllerStopped);
-          setControllerLaunching(!!isLaunching);
-          setApiStatusCounts(statusCounts);
           setIsInitialLoad(false);
-        }
-
-        // Log cache status for debugging
-        if (process.env.NODE_ENV === 'development') {
-          console.log('Jobs cache status:', {
-            cacheStatus,
-            isDataCached,
-            isDataLoading,
-            jobCount: jobs.length,
-            totalCount: total,
-            totalNoFilter: totalNoFilter,
-          });
         }
       } catch (err) {
         console.error('Error fetching data:', err);
-        // Still set data to empty array on error to show proper UI
         if (version === requestSeqRef.current) {
-          setData([]);
           setControllerStopped(false);
           setIsInitialLoad(false);
         }
       } finally {
         if (version === requestSeqRef.current) {
           setLocalLoading(false);
-          setLoading(false); // Clear parent loading state
+          setLoading(false);
         }
       }
     },
@@ -562,6 +664,7 @@ export function ManagedJobsTable({
       selectedStatuses,
       showAllMode,
       activeTab,
+      hookControllerStopped,
     ]
   );
 
@@ -618,6 +721,14 @@ export function ManagedJobsTable({
       fetchData({ includeStatus: true });
     }
   }, [activeTab, selectedStatuses, showAllMode, fetchData, preloadingComplete]);
+
+  // Fetch on sort config changes for server-side sorting
+  // Skip on initial fetch (sortConfig has default value)
+  React.useEffect(() => {
+    if (!isInitialFetch.current && preloadingComplete) {
+      fetchData({ includeStatus: false });
+    }
+  }, [sortConfig, fetchData, preloadingComplete]);
 
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
@@ -803,12 +914,102 @@ export function ManagedJobsTable({
     });
   }, [filteredData, sortConfig]);
 
-  // Pagination is performed server-side; derive display indices and end-of-list
+  // Pagination is performed server-side by unique jobs (not tasks)
   const startIndex = (currentPage - 1) * pageSize;
   const paginatedData = sortedData; // already paginated by server
   const totalPages = totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0;
-  const endIndexDisplay =
-    totalCount > 0 ? Math.min(startIndex + sortedData.length, totalCount) : 0;
+
+  // Group jobs by job_id for expandable row functionality
+  const groupedJobs = React.useMemo(() => {
+    const groups = new Map();
+    paginatedData.forEach((job) => {
+      const jobId = job.id;
+      if (!groups.has(jobId)) {
+        groups.set(jobId, []);
+      }
+      groups.get(jobId).push(job);
+    });
+    return groups;
+  }, [paginatedData]);
+
+  // Pre-compute aggregated data for job groups to avoid inline computations during render
+  const jobGroupAggregates = React.useMemo(() => {
+    const aggregates = new Map();
+    groupedJobs.forEach((tasks, jobId) => {
+      if (tasks.length > 1) {
+        // Check if this job group has auxiliary tasks (is_primary_in_job_group=false)
+        const hasAuxiliaryTasks = tasks.some(
+          (t) => t.is_primary_in_job_group === false
+        );
+
+        // Compute aggregated status (respects is_primary_in_job_group)
+        const aggregatedStatus = getAggregatedStatus(tasks);
+
+        // Compute status tooltip showing all task statuses
+        // Also indicate which tasks are primary with a star marker
+        const statusTooltip = hasAuxiliaryTasks
+          ? `Task statuses:\n${tasks
+              .map((t, i) => {
+                const isPrimary = t.is_primary_in_job_group === true;
+                return `Task ${i}${isPrimary ? ' ★' : ''}: ${t.status}`;
+              })
+              .join('\n')}\n\n★ = Primary task`
+          : `Task statuses:\n${tasks.map((t, i) => `Task ${i}: ${t.status}`).join('\n')}`;
+
+        // Compute aggregated resources
+        const resourcesList = tasks
+          .map((t) => t.requested_resources || t.resources_str)
+          .filter(Boolean);
+        const uniqueResources = [...new Set(resourcesList)];
+        const resourcesDisplay =
+          resourcesList.length === 0
+            ? '-'
+            : uniqueResources.length === 1
+              ? uniqueResources[0]
+              : `${uniqueResources[0]} (+${tasks.length - 1} more)`;
+        const resourcesTooltip =
+          resourcesList.length === 0
+            ? null
+            : `Aggregated from ${tasks.length} tasks:\n${resourcesList.map((r, i) => `Task ${i}: ${r}`).join('\n')}`;
+
+        // Compute total recoveries
+        const totalRecoveries = tasks.reduce(
+          (sum, t) => sum + (t.recoveries || 0),
+          0
+        );
+
+        aggregates.set(jobId, {
+          aggregatedStatus,
+          statusTooltip,
+          resourcesDisplay,
+          resourcesTooltip,
+          totalRecoveries,
+        });
+      }
+    });
+    return aggregates;
+  }, [groupedJobs]);
+
+  // Check if there are any job groups (multi-task jobs) in the current view
+  const hasAnyJobGroups = React.useMemo(() => {
+    return Array.from(groupedJobs.values()).some((tasks) => tasks.length > 1);
+  }, [groupedJobs]);
+
+  // Toggle expand/collapse for a job group
+  const toggleJobGroup = (jobId) => {
+    setExpandedJobGroups((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(jobId)) {
+        newSet.delete(jobId);
+      } else {
+        newSet.add(jobId);
+      }
+      return newSet;
+    });
+  };
+
+  // Check if a job group is expanded
+  const isJobGroupExpanded = (jobId) => expandedJobGroups.has(jobId);
 
   // Handle status selection
   const handleStatusClick = (status) => {
@@ -838,11 +1039,6 @@ export function ManagedJobsTable({
     setCurrentPage(1);
   };
 
-  // Update status counts from API data
-  useEffect(() => {
-    setStatusCounts(apiStatusCounts);
-  }, [apiStatusCounts]);
-
   // Page navigation handlers
   const goToPreviousPage = () => {
     setCurrentPage((page) => Math.max(page - 1, 1));
@@ -861,6 +1057,11 @@ export function ManagedJobsTable({
   };
 
   // Define base columns with their order
+  // Each column's renderCell receives a context object:
+  // - item: The task data
+  // - renderMode: 'single' | 'groupParent' | 'groupChild'
+  // - jobId, tasks, taskIndex, aggregates (for job groups)
+  // - isExpanded, toggleJobGroup, hasAnyJobGroups (for job group UI)
   const baseColumns = React.useMemo(
     () => [
       {
@@ -874,13 +1075,65 @@ export function ManagedJobsTable({
             ID{getSortDirection('id')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>
-            <Link href={`/jobs/${item.id}`} className="text-blue-600">
-              {item.id}
-            </Link>
-          </TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const {
+            renderMode,
+            jobId,
+            taskIndex,
+            isExpanded,
+            toggleJobGroup,
+            hasAnyJobGroups,
+          } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                <div className="flex items-center">
+                  <button
+                    onClick={() => toggleJobGroup(jobId)}
+                    className="p-1 hover:bg-gray-200 rounded mr-1"
+                  >
+                    {isExpanded ? (
+                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                    ) : (
+                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                    )}
+                  </button>
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                    {jobId}
+                  </Link>
+                </div>
+              </TableCell>
+            );
+          }
+
+          if (renderMode === 'groupChild') {
+            return (
+              <TableCell className="whitespace-nowrap relative">
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
+                <span className="text-gray-500 pl-6">{taskIndex}</span>
+              </TableCell>
+            );
+          }
+
+          // Single task
+          return (
+            <TableCell>
+              {hasAnyJobGroups ? (
+                <div className="flex items-center">
+                  <span className="w-6 mr-1" aria-hidden="true" />
+                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                    {item.id}
+                  </Link>
+                </div>
+              ) : (
+                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  {item.id}
+                </Link>
+              )}
+            </TableCell>
+          );
+        },
       },
       {
         id: 'name',
@@ -893,13 +1146,59 @@ export function ManagedJobsTable({
             Name{getSortDirection('name')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>
-            <Link href={`/jobs/${item.id}`} className="text-blue-600">
-              {item.name}
-            </Link>
-          </TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
+            ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell className="whitespace-nowrap">
+                <div className="flex items-center">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                    {item.name}
+                  </Link>
+                  <button
+                    onClick={() => toggleJobGroup(jobId)}
+                    className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                  >
+                    JobGroup: {tasks.length} tasks
+                  </button>
+                </div>
+              </TableCell>
+            );
+          }
+
+          if (renderMode === 'groupChild') {
+            // Check if this job group has auxiliary tasks
+            const hasAuxiliaryTasks = tasks.some(
+              (t) => t.is_primary_in_job_group === false
+            );
+            return (
+              <TableCell className="whitespace-nowrap">
+                <Link
+                  href={`/jobs/${item.id}/${taskIndex}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {item.task || `Task ${taskIndex}`}
+                </Link>
+                {hasAuxiliaryTasks && item.is_primary_in_job_group === true && (
+                  <span className="ml-1.5">
+                    <PrimaryBadge />
+                  </span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task
+          return (
+            <TableCell className="whitespace-nowrap">
+              <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                {item.name}
+              </Link>
+            </TableCell>
+          );
+        },
       },
       {
         id: 'user',
@@ -921,7 +1220,7 @@ export function ManagedJobsTable({
       {
         id: 'workspace',
         order: 2.5,
-        conditional: true, // Only show when shouldShowWorkspace is true
+        conditional: true,
         renderHeader: () =>
           shouldShowWorkspace ? (
             <TableHead
@@ -984,20 +1283,40 @@ export function ManagedJobsTable({
             Status{getSortDirection('status')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>
-            <PluginSlot
-              name="jobs.table.status.badge"
-              context={item}
-              fallback={
-                <StatusBadge
-                  status={item.status}
-                  statusTooltip={item.statusTooltip}
-                />
-              }
-            />
-          </TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                <NonCapitalizedTooltip
+                  content={aggregates?.statusTooltip}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span>
+                    <StatusBadge status={aggregates?.aggregatedStatus} />
+                  </span>
+                </NonCapitalizedTooltip>
+              </TableCell>
+            );
+          }
+
+          // Single task or group child
+          return (
+            <TableCell>
+              <PluginSlot
+                name="jobs.table.status.badge"
+                context={item}
+                fallback={
+                  <StatusBadge
+                    status={item.status}
+                    statusTooltip={item.statusTooltip}
+                  />
+                }
+              />
+            </TableCell>
+          );
+        },
       },
       {
         id: 'infra',
@@ -1010,47 +1329,66 @@ export function ManagedJobsTable({
             Infra{getSortDirection('infra')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>
-            {item.infra && item.infra !== '-' ? (
-              <NonCapitalizedTooltip
-                content={item.full_infra || item.infra}
-                className="text-sm text-muted-foreground"
-              >
-                <span>
-                  <Link href="/infra" className="text-blue-600 hover:underline">
-                    {item.cloud || item.infra.split('(')[0].trim()}
-                  </Link>
-                  {item.infra.includes('(') && (
-                    <span>
-                      {' ' +
-                        (() => {
-                          const NAME_TRUNCATE_LENGTH =
-                            UI_CONFIG.NAME_TRUNCATE_LENGTH;
-                          const fullRegionPart = item.infra.substring(
-                            item.infra.indexOf('(')
-                          );
-                          const regionContent = fullRegionPart.substring(
-                            1,
-                            fullRegionPart.length - 1
-                          );
+        renderCell: (item, ctx) => {
+          const { renderMode } = ctx || {};
 
-                          if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
-                            return fullRegionPart;
-                          }
+          // For group parent, show simplified infra (no tooltip with region details)
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                {item.infra && item.infra !== '-' ? (
+                  <span>{item.cloud || item.infra.split('(')[0].trim()}</span>
+                ) : (
+                  <span>-</span>
+                )}
+              </TableCell>
+            );
+          }
 
-                          const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
-                          return `(${truncatedRegion})`;
-                        })()}
-                    </span>
-                  )}
-                </span>
-              </NonCapitalizedTooltip>
-            ) : (
-              <span>{item.infra || '-'}</span>
-            )}
-          </TableCell>
-        ),
+          // Single task or group child - show full infra with tooltip
+          return (
+            <TableCell>
+              {item.infra && item.infra !== '-' ? (
+                <NonCapitalizedTooltip
+                  content={item.full_infra || item.infra}
+                  className="text-sm text-muted-foreground"
+                >
+                  <span>
+                    <Link
+                      href="/infra"
+                      className="text-blue-600 hover:underline"
+                    >
+                      {item.cloud || item.infra.split('(')[0].trim()}
+                    </Link>
+                    {item.infra.includes('(') && (
+                      <span>
+                        {' ' +
+                          (() => {
+                            const NAME_TRUNCATE_LENGTH =
+                              UI_CONFIG.NAME_TRUNCATE_LENGTH;
+                            const fullRegionPart = item.infra.substring(
+                              item.infra.indexOf('(')
+                            );
+                            const regionContent = fullRegionPart.substring(
+                              1,
+                              fullRegionPart.length - 1
+                            );
+                            if (regionContent.length <= NAME_TRUNCATE_LENGTH) {
+                              return fullRegionPart;
+                            }
+                            const truncatedRegion = `${regionContent.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${regionContent.substring(regionContent.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`;
+                            return `(${truncatedRegion})`;
+                          })()}
+                      </span>
+                    )}
+                  </span>
+                </NonCapitalizedTooltip>
+              ) : (
+                <span>{item.infra || '-'}</span>
+              )}
+            </TableCell>
+          );
+        },
       },
       {
         id: 'requested_resources',
@@ -1063,23 +1401,45 @@ export function ManagedJobsTable({
             Requested Resources{getSortDirection('cluster')}
           </TableHead>
         ),
-        renderCell: (item) => (
-          <TableCell>
-            <NonCapitalizedTooltip
-              content={
-                item.requested_resources ||
-                item.resources_str_full ||
-                item.resources_str ||
-                '-'
-              }
-              className="text-sm text-muted-foreground"
-            >
-              <span>
-                {item.requested_resources || item.resources_str || '-'}
-              </span>
-            </NonCapitalizedTooltip>
-          </TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return (
+              <TableCell>
+                {aggregates?.resourcesTooltip ? (
+                  <NonCapitalizedTooltip
+                    content={aggregates.resourcesTooltip}
+                    className="text-sm text-muted-foreground"
+                  >
+                    <span>{aggregates.resourcesDisplay}</span>
+                  </NonCapitalizedTooltip>
+                ) : (
+                  <span>{aggregates?.resourcesDisplay}</span>
+                )}
+              </TableCell>
+            );
+          }
+
+          // Single task or group child
+          return (
+            <TableCell>
+              <NonCapitalizedTooltip
+                content={
+                  item.requested_resources ||
+                  item.resources_str_full ||
+                  item.resources_str ||
+                  '-'
+                }
+                className="text-sm text-muted-foreground"
+              >
+                <span>
+                  {item.requested_resources || item.resources_str || '-'}
+                </span>
+              </NonCapitalizedTooltip>
+            </TableCell>
+          );
+        },
       },
       {
         id: 'recoveries',
@@ -1092,12 +1452,20 @@ export function ManagedJobsTable({
             Recoveries{getSortDirection('recoveries')}
           </TableHead>
         ),
-        renderCell: (item) => <TableCell>{item.recoveries}</TableCell>,
+        renderCell: (item, ctx) => {
+          const { renderMode, aggregates } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return <TableCell>{aggregates?.totalRecoveries}</TableCell>;
+          }
+
+          return <TableCell>{item.recoveries}</TableCell>;
+        },
       },
       {
         id: 'pool',
         order: 9.5,
-        conditional: true, // Only show when shouldShowPool is true
+        conditional: true,
         renderHeader: () =>
           shouldShowPool ? (
             <TableHead
@@ -1126,35 +1494,54 @@ export function ManagedJobsTable({
         id: 'details',
         order: 10,
         renderHeader: () => <TableHead>Details</TableHead>,
-        renderCell: (item) => (
-          <TableCell>
-            {item.details ? (
-              <TruncatedDetails
-                text={item.details}
-                rowId={item.id}
-                expandedRowId={expandedRowId}
-                setExpandedRowId={setExpandedRowId}
-              />
-            ) : (
-              '-'
-            )}
-          </TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode } = ctx || {};
+
+          if (renderMode === 'groupParent') {
+            return <TableCell>-</TableCell>;
+          }
+
+          // Use task_job_id for group children to avoid conflicts
+          const rowId =
+            ctx?.renderMode === 'groupChild' ? item.task_job_id : item.id;
+
+          return (
+            <TableCell>
+              {item.details ? (
+                <TruncatedDetails
+                  text={item.details}
+                  rowId={rowId}
+                  expandedRowId={expandedRowId}
+                  setExpandedRowId={setExpandedRowId}
+                />
+              ) : (
+                '-'
+              )}
+            </TableCell>
+          );
+        },
       },
       {
         id: 'logs',
         order: 11,
         renderHeader: () => <TableHead>Logs</TableHead>,
-        renderCell: (item) => (
-          <TableCell>
-            <Status2Actions
-              jobParent="/jobs"
-              jobId={item.id}
-              managed={true}
-              workspace={item.workspace}
-            />
-          </TableCell>
-        ),
+        renderCell: (item, ctx) => {
+          const { renderMode, jobId } = ctx || {};
+
+          // For group parent, use jobId; otherwise use item.id
+          const logJobId = renderMode === 'groupParent' ? jobId : item.id;
+
+          return (
+            <TableCell>
+              <Status2Actions
+                jobParent="/jobs"
+                jobId={logJobId}
+                managed={true}
+                workspace={item.workspace}
+              />
+            </TableCell>
+          );
+        },
       },
     ],
     [
@@ -1194,7 +1581,8 @@ export function ManagedJobsTable({
           </TableHead>
         );
       },
-      renderCell: (item) => {
+      renderCell: (item, ctx) => {
+        // Merge job group context with plugin context
         const context = {
           item,
           shouldShowWorkspace,
@@ -1202,6 +1590,8 @@ export function ManagedJobsTable({
           expandedRowId,
           setExpandedRowId,
           expandedRowRef,
+          // Forward job group context for plugins that need it
+          ...(ctx || {}),
         };
         const cellContent = col.cell.render(item, context);
         return (
@@ -1401,9 +1791,9 @@ export function ManagedJobsTable({
           </div>
         )}
 
-      <Card>
-        <div className="overflow-x-auto rounded-lg">
-          <Table className="min-w-full">
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <Table className="min-w-full border-collapse">
             <TableHeader>
               <TableRow>
                 {visibleColumns.map((col) =>
@@ -1426,33 +1816,107 @@ export function ManagedJobsTable({
                 </TableRow>
               ) : paginatedData.length > 0 ? (
                 <>
-                  {paginatedData.map((item) => (
-                    <React.Fragment key={item.task_job_id}>
-                      <TableRow>
-                        {visibleColumns.map((col) =>
-                          React.cloneElement(col.renderCell(item), {
-                            key: col.id,
-                          })
-                        )}
-                      </TableRow>
-                      {expandedRowId === item.id && (
-                        <ExpandedDetailsRow
-                          text={item.details}
-                          colSpan={totalColSpan}
-                          innerRef={expandedRowRef}
-                        />
-                      )}
-                    </React.Fragment>
-                  ))}
+                  {Array.from(groupedJobs.entries()).map(([jobId, tasks]) => {
+                    const isMultiTask = tasks.length > 1;
+                    const isExpanded = isJobGroupExpanded(jobId);
+                    const firstTask = tasks[0];
+
+                    // For single-task jobs, render using plugin columns
+                    if (!isMultiTask) {
+                      const item = firstTask;
+                      const singleCtx = {
+                        renderMode: 'single',
+                        hasAnyJobGroups,
+                      };
+                      return (
+                        <React.Fragment key={item.task_job_id}>
+                          <TableRow>
+                            {visibleColumns.map((col) => {
+                              const cell = col.renderCell(item, singleCtx);
+                              return cell
+                                ? React.cloneElement(cell, { key: col.id })
+                                : null;
+                            })}
+                          </TableRow>
+                          {expandedRowId === item.id && (
+                            <ExpandedDetailsRow
+                              text={item.details}
+                              colSpan={totalColSpan}
+                              innerRef={expandedRowRef}
+                            />
+                          )}
+                        </React.Fragment>
+                      );
+                    }
+
+                    // For multi-task jobs, render parent row with expand toggle
+                    // Get pre-computed aggregates for this job group
+                    const aggregates = jobGroupAggregates.get(jobId) || {};
+                    const parentCtx = {
+                      renderMode: 'groupParent',
+                      jobId,
+                      tasks,
+                      aggregates,
+                      isExpanded,
+                      toggleJobGroup,
+                      hasAnyJobGroups,
+                    };
+
+                    return (
+                      <React.Fragment key={`group-${jobId}`}>
+                        {/* Parent row for job group */}
+                        <TableRow className="hover:bg-gray-50">
+                          {visibleColumns.map((col) => {
+                            const cell = col.renderCell(firstTask, parentCtx);
+                            return cell
+                              ? React.cloneElement(cell, { key: col.id })
+                              : null;
+                          })}
+                        </TableRow>
+
+                        {/* Child task rows when expanded */}
+                        {isExpanded &&
+                          tasks.map((task, taskIndex) => {
+                            const childCtx = {
+                              renderMode: 'groupChild',
+                              jobId,
+                              tasks,
+                              taskIndex,
+                              aggregates,
+                              isExpanded,
+                              toggleJobGroup,
+                              hasAnyJobGroups,
+                            };
+                            return (
+                              <React.Fragment key={task.task_job_id}>
+                                <TableRow className="bg-gray-50/50">
+                                  {visibleColumns.map((col) => {
+                                    const cell = col.renderCell(task, childCtx);
+                                    return cell
+                                      ? React.cloneElement(cell, {
+                                          key: col.id,
+                                        })
+                                      : null;
+                                  })}
+                                </TableRow>
+                                {expandedRowId === task.task_job_id && (
+                                  <ExpandedDetailsRow
+                                    text={task.details}
+                                    colSpan={totalColSpan}
+                                    innerRef={expandedRowRef}
+                                  />
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                      </React.Fragment>
+                    );
+                  })}
                 </>
               ) : (
                 <TableRow>
                   <TableCell
-                    colSpan={
-                      11 +
-                      (shouldShowWorkspace ? 1 : 0) +
-                      (shouldShowPool ? 1 : 0)
-                    }
+                    colSpan={totalColSpan}
                     className="text-center py-6"
                   >
                     <div className="flex flex-col items-center space-y-4">
@@ -1512,7 +1976,7 @@ export function ManagedJobsTable({
       <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
         <div className="flex items-center space-x-4">
           <div className="flex items-center">
-            <span className="mr-2">Rows per page:</span>
+            <span className="mr-2">Jobs per page:</span>
             <div className="relative inline-block">
               <select
                 value={pageSize}
@@ -1544,7 +2008,7 @@ export function ManagedJobsTable({
           </div>
           <div>
             {totalCount > 0
-              ? `${startIndex + 1} – ${endIndexDisplay} of ${totalCount}`
+              ? `${startIndex + 1} – ${Math.min(startIndex + groupedJobs.size, totalCount)} of ${totalCount}`
               : '0 – 0 of 0'}
           </div>
           <div className="flex items-center space-x-2">
@@ -1681,7 +2145,7 @@ export function Status2Actions({
       </Tooltip>
       <Tooltip
         key="downloadlogs"
-        content="Download Job Logs"
+        content="Download All Task Logs (zip)"
         className="capitalize text-sm text-muted-foreground"
       >
         <button
@@ -2074,13 +2538,10 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const safeText = text || '';
-  const lines = safeText.split('\n');
-  const isMultiLine = lines.length > 1;
+  const isTruncated = safeText.length > 50;
   const isExpanded = expandedRowId === rowId;
-  // Always show first line in the table cell
-  let displayText = lines[0] || '';
-  const isTruncated = displayText.length > 50;
-  displayText = isTruncated ? `${displayText.substring(0, 50)}` : displayText;
+  // Always show truncated text in the table cell
+  const displayText = isTruncated ? `${safeText.substring(0, 50)}` : safeText;
   const buttonRef = useRef(null);
 
   const handleClick = (e) => {
@@ -2092,7 +2553,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   return (
     <div className="truncated-details relative max-w-full flex items-center">
       <span className="truncate">{displayText}</span>
-      {(isTruncated || isMultiLine) && (
+      {isTruncated && (
         <button
           ref={buttonRef}
           type="button"
@@ -2100,7 +2561,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? '  show less' : '  show more'}
+          {isExpanded ? '... show less' : '... show more'}
         </button>
       )}
     </div>

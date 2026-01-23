@@ -125,6 +125,10 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('skylet_ssh_tunnel_metadata',
                       sqlalchemy.LargeBinary,
                       server_default=None),
+    # Infrastructure columns for efficient filtering
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -200,6 +204,10 @@ cluster_history_table = sqlalchemy.Table(
                       sqlalchemy.Integer,
                       server_default=None,
                       index=True),
+    # Infrastructure columns for efficient filtering
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 
@@ -677,6 +685,17 @@ def add_or_update_cluster(cluster_name: str,
         status = status_lib.ClusterStatus.UP
     status_updated_at = int(time.time())
 
+    # Extract cloud/region/zone from launched_resources for efficient filtering
+    cloud = None
+    region = None
+    zone = None
+    if hasattr(cluster_handle, 'launched_resources'):
+        lr = cluster_handle.launched_resources
+        if lr is not None:
+            cloud = str(lr.cloud) if getattr(lr, 'cloud', None) else None
+            region = str(lr.region) if getattr(lr, 'region', None) else None
+            zone = str(lr.zone) if getattr(lr, 'zone', None) else None
+
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
     # It can be more inaccurate for the multi-node cluster
@@ -766,9 +785,13 @@ def add_or_update_cluster(cluster_name: str,
         if existing_cluster_hash is not None:
             count = session.query(cluster_table).filter_by(
                 name=cluster_name, cluster_hash=existing_cluster_hash).update({
-                    **conditional_values, cluster_table.c.handle: handle,
+                    **conditional_values,
+                    cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
-                    cluster_table.c.status_updated_at: status_updated_at
+                    cluster_table.c.status_updated_at: status_updated_at,
+                    cluster_table.c.cloud: cloud,
+                    cluster_table.c.region: region,
+                    cluster_table.c.zone: zone,
                 })
             assert count <= 1
             if count == 0:
@@ -786,6 +809,9 @@ def add_or_update_cluster(cluster_name: str,
                 # set storage_mounts_metadata to server default (null)
                 status_updated_at=status_updated_at,
                 is_managed=int(is_managed),
+                cloud=cloud,
+                region=region,
+                zone=zone,
             )
             insert_or_update_stmt = insert_stmnt.on_conflict_do_update(
                 index_elements=[cluster_table.c.name],
@@ -799,6 +825,9 @@ def add_or_update_cluster(cluster_name: str,
                     # do not update storage_mounts_metadata
                     cluster_table.c.status_updated_at: status_updated_at,
                     # do not update user_hash
+                    cluster_table.c.cloud: cloud,
+                    cluster_table.c.region: region,
+                    cluster_table.c.zone: zone,
                 })
             session.execute(insert_or_update_stmt)
 
@@ -834,6 +863,9 @@ def add_or_update_cluster(cluster_name: str,
             provision_log_path=provision_log_path,
             last_activity_time=last_activity_time,
             launched_at=launched_at,
+            cloud=cloud,
+            region=region,
+            zone=zone,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -852,6 +884,9 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.provision_log_path: provision_log_path,
                 cluster_history_table.c.last_activity_time: last_activity_time,
                 cluster_history_table.c.launched_at: launched_at,
+                cluster_history_table.c.cloud: cloud,
+                cluster_history_table.c.region: region,
+                cluster_history_table.c.zone: zone,
                 **creation_info,
             })
         session.execute(do_update_stmt)

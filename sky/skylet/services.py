@@ -222,10 +222,12 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 # Add the managed job to job queue database.
                 user_id = managed_job.user_id if managed_job.HasField(
                     'user_id') else None
+                execution = managed_job.execution if managed_job.HasField(
+                    'execution') else None
                 managed_job_state.set_job_info(job_id, managed_job.name,
                                                managed_job.workspace,
                                                managed_job.entrypoint, pool,
-                                               pool_hash, user_id)
+                                               pool_hash, user_id, execution)
                 # Set the managed job to PENDING state to make sure that
                 # this managed job appears in the `sky jobs queue`, even
                 # if it needs to wait to be submitted.
@@ -234,9 +236,13 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 # to wait for the run commands to be scheduled on the job
                 # controller in high-load cases.
                 for task in managed_job.tasks:
+                    is_primary_in_job_group = (
+                        task.is_primary_in_job_group
+                        if task.HasField('is_primary_in_job_group') else None)
                     managed_job_state.set_pending(job_id, task.task_id,
                                                   task.name, task.resources_str,
-                                                  task.metadata_json)
+                                                  task.metadata_json,
+                                                  is_primary_in_job_group)
             return jobsv1_pb2.QueueJobResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
@@ -508,7 +514,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     metadata=converted_metadata,
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'),
-                    links=job.get('links'))
+                    links=job.get('links'),
+                    # Primary/auxiliary task support (None for non-job-groups)
+                    is_primary_in_job_group=job.get('is_primary_in_job_group'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

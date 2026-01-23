@@ -71,8 +71,27 @@ class JobsCacheManager {
   }
 
   /**
+   * Group tasks by job_id and return unique job IDs in order
+   */
+  _groupTasksByJob(tasks) {
+    const jobMap = new Map();
+    const jobOrder = [];
+
+    for (const task of tasks) {
+      const jobId = task.id;
+      if (!jobMap.has(jobId)) {
+        jobMap.set(jobId, []);
+        jobOrder.push(jobId);
+      }
+      jobMap.get(jobId).push(task);
+    }
+
+    return { jobMap, jobOrder };
+  }
+
+  /**
    * Get paginated jobs data with intelligent caching
-   * - If full dataset cache is fresh: slice locally
+   * - If full dataset cache is fresh: slice locally by jobs (not tasks)
    * - Otherwise: fetch only the requested page from server and prefetch full dataset in background
    * @param {Object} options - Query options including pagination
    * @returns {Promise<{jobs: Array, total: number, totalNoFilter: number, controllerStopped: boolean, statusCounts: Object, fromCache: boolean, cacheStatus: string}>}
@@ -106,9 +125,20 @@ class JobsCacheManager {
           }
           // fall through to server fetch below
         } else {
-          const startIndex = (page - 1) * limit;
-          const endIndex = startIndex + limit;
-          const paginatedJobs = cachedData.jobs.slice(startIndex, endIndex);
+          // Group tasks by job_id for proper pagination by jobs
+          const { jobMap, jobOrder } = this._groupTasksByJob(cachedData.jobs);
+          const totalJobs = jobOrder.length;
+
+          // Paginate by jobs, not tasks
+          const startJobIndex = (page - 1) * limit;
+          const endJobIndex = startJobIndex + limit;
+          const paginatedJobIds = jobOrder.slice(startJobIndex, endJobIndex);
+
+          // Get all tasks for the paginated jobs
+          const paginatedJobs = [];
+          for (const jobId of paginatedJobIds) {
+            paginatedJobs.push(...jobMap.get(jobId));
+          }
 
           // Background refresh when stale or older than half TTL
           if (
@@ -127,8 +157,8 @@ class JobsCacheManager {
 
           return {
             jobs: paginatedJobs,
-            total: cachedData.total,
-            totalNoFilter: cachedData.totalNoFilter || cachedData.total,
+            total: totalJobs, // Total unique jobs, not tasks
+            totalNoFilter: cachedData.totalNoFilter || totalJobs,
             controllerStopped: cachedData.controllerStopped,
             statusCounts: cachedData.statusCounts || {},
             fromCache: true,

@@ -144,7 +144,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '30'  # conditional plugin loading for jobs bwcompat
+SKYLET_VERSION = '32'  # new fields in jobs/managed jobs service for job groups
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -602,10 +602,26 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = ('^[0-9]+('
-                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
-                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
-                     ')?$')
+# Time units for seconds-based duration parsing (for termination_delay, etc.)
+# This includes 's' for seconds, which is not in TIME_UNITS (minutes-based).
+TIME_UNITS_SECONDS = {
+    's': 1,
+    'm': 60,
+    'h': 3600,
+    'd': 86400,
+    'w': 604800,
+}
+
+
+def _make_time_pattern(units: dict) -> str:
+    """Create a regex pattern for time duration strings."""
+    unit_pattern = '|'.join([unit.lower() for unit in units] +
+                            [unit.upper() for unit in units])
+    return f'^[0-9]+({unit_pattern})?$'
+
+
+TIME_PATTERN: str = _make_time_pattern(TIME_UNITS)
+TIME_PATTERN_SECONDS: str = _make_time_pattern(TIME_UNITS_SECONDS)
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,

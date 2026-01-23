@@ -121,6 +121,15 @@ class BasePlugin(abc.ABC):
         """Plugin git commit hash."""
         return None
 
+    @property
+    def hidden_from_display(self) -> bool:
+        """Whether this plugin should be hidden from version display.
+
+        Set to True to exclude this plugin from appearing in the version
+        information tooltip. Defaults to False.
+        """
+        return False
+
     @abc.abstractmethod
     def install(self, extension_context: ExtensionContext):
         """Hook called by API server to let the plugin install itself."""

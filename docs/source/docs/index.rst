@@ -306,6 +306,7 @@ Read the research:
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
    Using a Pool of Workers <../examples/pools>
+   Job Groups <../examples/job-groups>
 
 .. toctree::
    :hidden:
