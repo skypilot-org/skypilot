@@ -3,7 +3,6 @@
 These tests specifically cover the is_ephemeral boolean/integer conversion
 that is necessary for PostgreSQL compatibility. See issue #8178 and PR #8179.
 """
-# pylint: disable=line-too-long
 
 import pickle
 from unittest import mock
