@@ -77,6 +77,7 @@ Below is the configuration syntax and some example values. See detailed explanat
         myannotation: myvalue
     :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
     :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
+    :ref:`set_pod_resource_limits <config-yaml-kubernetes-set-pod-resource-limits>`: 1.5
     :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
       metadata:
         labels:
