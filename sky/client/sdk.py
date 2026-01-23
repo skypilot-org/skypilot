@@ -378,7 +378,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
@@ -438,7 +438,7 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
     response = server_common.make_authenticated_request(
@@ -736,7 +736,7 @@ def _launch(
 
     dag = client_common.upload_mounts_to_api_server(dag)
 
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.LaunchBody(
         task=dag_str,
@@ -827,7 +827,7 @@ def exec(  # pylint: disable=redefined-builtin
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
         cluster_name=cluster_name,

@@ -30,6 +30,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.dag import DagExecution
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils.db import db_utils
@@ -105,6 +106,12 @@ spot_table = sqlalchemy.Table(
     sqlalchemy.Column('links', sqlalchemy.JSON, server_default=None),
     sqlalchemy.Column('logs_cleaned_at', sqlalchemy.Float, server_default=None),
     sqlalchemy.Column('full_resources', sqlalchemy.JSON, server_default=None),
+    # Whether this task is a primary task (True) or auxiliary task (False)
+    # within a job group. NULL for non-job-group jobs (single jobs/pipelines).
+    # Auxiliary tasks are terminated when all primary tasks complete.
+    sqlalchemy.Column('is_primary_in_job_group',
+                      sqlalchemy.Boolean,
+                      server_default=None),
 )
 
 job_info_table = sqlalchemy.Table(
@@ -151,6 +158,10 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('controller_logs_cleaned_at',
                       sqlalchemy.Float,
                       server_default=None),
+    # DAG execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
+    sqlalchemy.Column('execution',
+                      sqlalchemy.Text,
+                      server_default=DagExecution.SERIAL.value),
     # Infrastructure columns for efficient filtering/sorting
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
@@ -410,6 +421,11 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'current_cluster_name': r.get('current_cluster_name'),
         'job_id_on_pool_cluster': r.get('job_id_on_pool_cluster'),
         'pool_hash': r.get('pool_hash'),
+        # Whether this task is primary (True) or auxiliary (False) in a job
+        # group. NULL for non-job-group jobs.
+        'is_primary_in_job_group': r.get('is_primary_in_job_group'),
+        # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single)
+        'execution': r.get('execution'),
         # Infrastructure columns for filtering/sorting
         'cloud': r.get('cloud'),
         'region': r.get('region'),
@@ -755,9 +771,13 @@ ControllerPidRecord = collections.namedtuple('ControllerPidRecord', [
 
 # === Status transition functions ===
 @_init_db
-def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
-                                pool: Optional[str], pool_hash: Optional[str],
-                                user_hash: Optional[str]) -> int:
+def set_job_info_without_job_id(name: str,
+                                workspace: str,
+                                entrypoint: str,
+                                pool: Optional[str],
+                                pool_hash: Optional[str],
+                                user_hash: Optional[str],
+                                execution: Optional[str] = None) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -777,6 +797,7 @@ def set_job_info_without_job_id(name: str, workspace: str, entrypoint: str,
             pool=pool,
             pool_hash=pool_hash,
             user_hash=user_hash,
+            execution=execution,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -803,6 +824,7 @@ def set_pending(
     task_name: str,
     resources_str: str,
     metadata: str,
+    is_primary_in_job_group: Optional[bool] = None,
 ):
     """Set the task to pending state."""
     add_job_event(job_id, task_id, ManagedJobStatus.PENDING,
@@ -818,6 +840,7 @@ def set_pending(
                 resources=resources_str,
                 metadata=metadata,
                 status=ManagedJobStatus.PENDING.value,
+                is_primary_in_job_group=is_primary_in_job_group,
             ))
         session.commit()
 
@@ -1398,6 +1421,7 @@ def build_managed_jobs_with_filters_no_status_query(
     user_hashes: Optional[List[Optional[str]]] = None,
     skip_finished: bool = False,
     count_only: bool = False,
+    count_unique_jobs: bool = False,
     status_count: bool = False,
 ) -> sqlalchemy.Select:
     """Build a query to get managed jobs from the database with filters."""
@@ -1409,7 +1433,12 @@ def build_managed_jobs_with_filters_no_status_query(
     # Note: we will get the user_hash here, but don't try to call
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
-    if count_only:
+    if count_unique_jobs:
+        # Count unique jobs (by spot_job_id), not tasks
+        query = sqlalchemy.select(
+            sqlalchemy.func.count(  # pylint: disable=not-callable
+                sqlalchemy.distinct(spot_table.c.spot_job_id)).label('count'))
+    elif count_only:
         query = sqlalchemy.select(sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
     elif status_count:
         query = sqlalchemy.select(spot_table.c.status,
@@ -1470,6 +1499,7 @@ def build_managed_jobs_with_filters_query(
     statuses: Optional[List[str]] = None,
     skip_finished: bool = False,
     count_only: bool = False,
+    count_unique_jobs: bool = False,
 ) -> sqlalchemy.Select:
     """Build a query to get managed jobs from the database with filters."""
     query = build_managed_jobs_with_filters_no_status_query(
@@ -1482,6 +1512,7 @@ def build_managed_jobs_with_filters_query(
         user_hashes=user_hashes,
         skip_finished=skip_finished,
         count_only=count_only,
+        count_unique_jobs=count_unique_jobs,
     )
     if statuses is not None:
         query = query.where(spot_table.c.status.in_(statuses))
@@ -1540,6 +1571,9 @@ def get_managed_jobs_with_filters(
 ) -> Tuple[List[Dict[str, Any]], int]:
     """Get managed jobs from the database with filters.
 
+    Pagination is by unique jobs (spot_job_id), not by tasks. This means
+    if you request page 1 with limit 10, you get all tasks for 10 unique jobs.
+
     Args:
         sort_by: Field to sort by. Valid values: 'job_id', 'id', 'job_name',
             'name', 'submitted_at', 'status', 'job_duration', 'duration',
@@ -1549,8 +1583,8 @@ def get_managed_jobs_with_filters(
 
     Returns:
         A tuple containing
-         - the list of managed jobs
-         - the total number of managed jobs
+         - the list of managed jobs (all tasks for the paginated jobs)
+         - the total number of unique jobs (not tasks)
     """
     # Column mapping for sorting
     sort_field_map = {
@@ -1573,6 +1607,7 @@ def get_managed_jobs_with_filters(
 
     assert _SQLALCHEMY_ENGINE is not None
 
+    # Count unique jobs (by spot_job_id), not tasks
     count_query = build_managed_jobs_with_filters_query(
         fields=None,
         job_ids=job_ids,
@@ -1583,22 +1618,62 @@ def get_managed_jobs_with_filters(
         user_hashes=user_hashes,
         statuses=statuses,
         skip_finished=skip_finished,
-        count_only=True,
+        count_unique_jobs=True,
     )
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         total = session.execute(count_query).fetchone()[0]
 
-    query = build_managed_jobs_with_filters_query(
-        fields=fields,
-        job_ids=job_ids,
-        accessible_workspaces=accessible_workspaces,
-        workspace_match=workspace_match,
-        name_match=name_match,
-        pool_match=pool_match,
-        user_hashes=user_hashes,
-        statuses=statuses,
-        skip_finished=skip_finished,
-    )
+    # For pagination, first get the unique job_ids for the current page,
+    # then fetch all tasks for those jobs
+    if page is not None and limit is not None:
+        # Get paginated unique job IDs with ordering
+        job_ids_subquery = build_managed_jobs_with_filters_query(
+            fields=None,
+            job_ids=job_ids,
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            user_hashes=user_hashes,
+            statuses=statuses,
+            skip_finished=skip_finished,
+        ).with_only_columns(spot_table.c.spot_job_id).distinct().order_by(
+            spot_table.c.spot_job_id.desc()).offset(
+                (page - 1) * limit).limit(limit)
+
+        with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            paginated_job_ids = [
+                row[0] for row in session.execute(job_ids_subquery).fetchall()
+            ]
+
+        if not paginated_job_ids:
+            return [], total
+
+        # Now get all tasks for those job IDs
+        query = build_managed_jobs_with_filters_query(
+            fields=fields,
+            job_ids=paginated_job_ids,  # Filter to only paginated jobs
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            user_hashes=user_hashes,
+            statuses=statuses,
+            skip_finished=skip_finished,
+        )
+    else:
+        # No pagination - get all jobs
+        query = build_managed_jobs_with_filters_query(
+            fields=fields,
+            job_ids=job_ids,
+            accessible_workspaces=accessible_workspaces,
+            workspace_match=workspace_match,
+            name_match=name_match,
+            pool_match=pool_match,
+            user_hashes=user_hashes,
+            statuses=statuses,
+            skip_finished=skip_finished,
+        )
 
     # Apply sorting
     if sort_by and sort_by in sort_field_map:
@@ -1613,8 +1688,6 @@ def get_managed_jobs_with_filters(
         # Default sort: job_id desc, task_id asc
         query = query.order_by(spot_table.c.spot_job_id.desc(),
                                spot_table.c.task_id.asc())
-    if page is not None and limit is not None:
-        query = query.offset((page - 1) * limit).limit(limit)
     rows = None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.execute(query).fetchall()
@@ -2625,7 +2698,8 @@ def set_job_info(job_id: int,
                  entrypoint: str,
                  pool: Optional[str],
                  pool_hash: Optional[str],
-                 user_hash: Optional[str] = None):
+                 user_hash: Optional[str] = None,
+                 execution: Optional[str] = None):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2645,6 +2719,7 @@ def set_job_info(job_id: int,
             pool=pool,
             pool_hash=pool_hash,
             user_hash=user_hash,
+            execution=execution,
         )
         session.execute(insert_stmt)
         session.commit()

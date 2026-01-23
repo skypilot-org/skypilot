@@ -6,6 +6,7 @@ import {
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
@@ -54,8 +55,55 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'user_yaml',
+  'entrypoint',
+  'is_job_group',
+  'execution',
+  'is_primary_in_job_group',
   'links',
 ];
+
+/**
+ * Compute the job group status based on primary tasks.
+ * For job groups with primary/auxiliary tasks, the job status is determined
+ * only by the primary tasks. If all primary tasks succeed, the job is
+ * considered successful even if auxiliary tasks were cancelled.
+ *
+ * Uses is_primary_in_job_group per task:
+ * - null: Non-job-group task (counts for status)
+ * - true: Primary task in job group (counts for status)
+ * - false: Auxiliary task in job group (does not count for status)
+ *
+ * @param {Array} tasks - Array of task objects with status and is_primary_in_job_group fields
+ * @returns {string} - The computed job group status
+ */
+export function computeJobGroupStatus(tasks) {
+  if (!tasks || tasks.length === 0) {
+    return null;
+  }
+
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
+
+  // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
+  for (const task of tasksForStatus) {
+    if (task.status !== 'SUCCEEDED') {
+      return task.status;
+    }
+  }
+  return 'SUCCEEDED';
+}
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -245,6 +293,10 @@ export async function getManagedJobs(options = {}) {
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
+        // JobGroup fields
+        is_job_group: job.is_job_group,
+        execution: job.execution,
+        is_primary_in_job_group: job.is_primary_in_job_group,
       };
     });
 
@@ -456,6 +508,7 @@ export async function getPoolStatus() {
 }
 
 // Hook for individual job details that reuses the main jobs cache
+// Returns all tasks for a given job_id (supports multi-task jobs)
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -469,19 +522,19 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Always get all jobs data (cache handles freshness automatically)
+        // Fetch the specific job by ID with all fields for complete data
         const allJobsData = await dashboardCache.get(getManagedJobs, [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
-        // Filter for the specific job client-side
-        const job = allJobsData?.jobs?.find(
-          (j) => String(j.id) === String(jobId)
-        );
+        // Filter for ALL tasks matching this job_id (supports multi-task jobs)
+        const matchingJobs =
+          allJobsData?.jobs?.filter((j) => String(j.id) === String(jobId)) ||
+          [];
 
-        if (job) {
+        if (matchingJobs.length > 0) {
           setJobData({
-            jobs: [job],
+            jobs: matchingJobs,
             controllerStopped: allJobsData.controllerStopped || false,
           });
         } else {
@@ -507,6 +560,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
 export async function streamManagedJobLogs({
   jobId,
+  task = null,
   controller = false,
   signal,
   onNewLog,
@@ -547,6 +601,7 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
+        task: task,
       };
 
       const response = await apiClient.fetchImmediate(
@@ -934,9 +989,13 @@ export function useJobsData(options = {}) {
   const fetchClientSide = useCallback(async () => {
     console.log('[useJobsData] Using client-side pagination');
 
-    const response = await dashboardCache.get(getManagedJobs, [
-      { allUsers: true },
-    ]);
+    // Use jobsCacheManager which correctly paginates by jobs (not tasks)
+    // and groups tasks by job_id for proper display
+    const response = await jobsCacheManager.getPaginatedJobs({
+      allUsers: true,
+      page,
+      limit,
+    });
 
     // Handle controller stopped
     if (response.controllerStopped) {
@@ -948,20 +1007,16 @@ export function useJobsData(options = {}) {
       return;
     }
 
-    const allJobs = response.jobs || [];
+    const jobs = response.jobs || [];
+    const uniqueJobCount = response.total || 0;
+    const totalPages = Math.ceil(uniqueJobCount / limit) || 1;
 
-    // Client-side pagination
-    const clientTotal = allJobs.length;
-    const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
-    const startIndex = (page - 1) * limit;
-    const paginatedData = allJobs.slice(startIndex, startIndex + limit);
-
-    setData(paginatedData);
-    setFullData(allJobs);
-    setTotal(clientTotal);
-    setTotalNoFilter(response.totalNoFilter || clientTotal);
-    setTotalPages(clientTotalPages);
-    setHasNext(page < clientTotalPages);
+    setData(jobs);
+    setFullData(jobs);
+    setTotal(uniqueJobCount);
+    setTotalNoFilter(response.totalNoFilter || uniqueJobCount);
+    setTotalPages(totalPages);
+    setHasNext(page < totalPages);
     setHasPrev(page > 1);
     setIsServerPagination(false);
     setControllerStopped(false);

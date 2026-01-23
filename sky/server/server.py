@@ -1032,7 +1032,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
             dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
         await asyncio.to_thread(validate_dag, dag)

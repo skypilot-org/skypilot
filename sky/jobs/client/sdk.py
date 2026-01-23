@@ -118,7 +118,7 @@ def launch(
                               show_default=True)
 
         dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        dag_str = dag_utils.dump_dag_to_yaml_str(dag)
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
@@ -195,6 +195,12 @@ def queue_v2(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    # Filter out fields not supported by older servers
+    remote_api_version = versions.get_remote_api_version()
+    if fields is not None and (remote_api_version is None or
+                               remote_api_version < 31):
+        fields = [f for f in fields if f != 'is_primary_in_job_group']
+
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
@@ -342,7 +348,8 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
+              output_stream: Optional['io.TextIOBase'] = None,
+              task: Optional[Union[str, int]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -357,6 +364,9 @@ def tail_logs(name: Optional[str] = None,
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
+        task: Task identifier to view logs for a specific task in a JobGroup.
+            If an int, it is treated as a task ID. If a str, it is treated as
+            a task name. If None, logs for all tasks are shown.
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
@@ -376,6 +386,7 @@ def tail_logs(name: Optional[str] = None,
         controller=controller,
         refresh=refresh,
         tail=tail,
+        task=task,
     )
     response = server_common.make_authenticated_request(
         'POST',

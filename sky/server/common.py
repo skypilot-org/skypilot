@@ -987,7 +987,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
     yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
-    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
+    dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
     return dag
 
 

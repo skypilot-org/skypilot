@@ -210,7 +210,7 @@ class DagRequestBody(RequestBody):
 
         kwargs = super().to_kwargs()
 
-        dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
+        dag = dag_utils.load_dag_from_yaml_str(self.dag)
         # We should not validate the dag here, as the file mounts are not
         # processed yet, but we need to validate the resources during the
         # optimization to make sure the resources are available.
@@ -587,6 +587,8 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Task identifier: int for task_id, str for task_name
+    task: Optional[Union[str, int]] = None
 
 
 class RequestCancelBody(RequestBody):
