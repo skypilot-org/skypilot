@@ -189,7 +189,7 @@ To open the dashboard:
 
     $ sky dashboard
 
-Navigate to the **Infra** tab to see all your Slurm clusters with GPU types and utilization:
+Navigate to the **Infra** tab to see the real-time GPU availability across all your Slurm clusters:
 
 .. image:: /images/slurm-infra-page.png
    :alt: SkyPilot Dashboard showing Slurm GPU availability overview
