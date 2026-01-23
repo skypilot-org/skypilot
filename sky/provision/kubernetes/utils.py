@@ -2857,9 +2857,10 @@ def combine_pod_config_fields(
     def _verify_skypilot_container_name(pod_config):
         containers = pod_config.get('spec', {}).get('containers')
         if containers:
-            if containers[0].get('name') in ALLOWED_SKYPILOT_NODE_NAMES:
+            container_name = containers[0].get('name')
+            if container_name in ALLOWED_SKYPILOT_NODE_NAMES:
                 containers[0]['name'] = SKYPILOT_NODE_NAME
-            else:
+            elif container_name is not None:
                 raise ValueError(
                     '`pod_config.spec.containers[0].name` must '
                     f'be `{SKYPILOT_NODE_NAME}`. It is currently '
