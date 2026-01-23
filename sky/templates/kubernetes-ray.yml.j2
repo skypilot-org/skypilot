@@ -917,6 +917,7 @@ available_node_types:
                   echo "Waiting for curl package to be installed..."
                 done
                 {{ conda_installation_commands }}
+                {{ uv_installation_commands }}
                 {{ ray_installation_commands }}
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.

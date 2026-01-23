@@ -899,6 +899,9 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
+    install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
+                                               True)
+
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
@@ -989,9 +992,11 @@ def write_cluster_config(
                 # syntax.
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}',
-                        conda_auto_activate).replace('{is_custom_docker}',
-                                                     is_custom_docker),
+                        '{conda_auto_activate}', conda_auto_activate).replace(
+                            '{is_custom_docker}', is_custom_docker)
+                    if install_conda else '',
+                # UV setup
+                'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
                 # Currently only used by Slurm. For other clouds, it is
                 # already part of ray_skypilot_installation_commands
                 'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
