@@ -623,8 +623,8 @@ Default: ``10``.
 
 Whether to install conda on the remote cluster (optional).
 
-When set to ``false``, SkyPilot will not install conda on the remote cluster,
-and will only set up the runtime environment using ``uv``.
+Skypilot clusters come with conda preinstalled for convenience.
+When set to ``false``, SkyPilot will not install conda on the cluster.
 
 Default: ``true``.
 
