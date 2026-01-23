@@ -604,7 +604,7 @@ class TestHelperFunctions:
         # Ensure it doesn't contain the problematic float format
         assert '1.0, 2.0, 4.0, 8.0' not in output, f"Found float format in output: {output}"
 
-    def test_env_secret_file_merger(self):
+    def test_env_secret_file_merger_comprehensive(self):
         """"""
         cli = [('hello', 'world'), ('one', 'two')]
         env_file = {
@@ -622,6 +622,85 @@ class TestHelperFunctions:
         assert final_envs['something'] == 'different'
         assert final_envs['secret'] == 'supersecret'
         assert final_envs['secret2'] == 'verysecret'
+
+    def test_env_secret_file_merger_one_file(self):
+        """Test with only file contents provided."""
+        env_file = {'key1': 'value1', 'key2': 'value2'}
+
+        final_envs = command._merge_cli_and_file_vars([env_file], [])
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'value1'
+        assert final_envs['key2'] == 'value2'
+        assert len(final_envs) == 2
+
+    def test_env_secret_file_merger_cli_only(self):
+        """Test with only CLI args provided."""
+        cli = [('key1', 'value1'), ('key2', 'value2')]
+
+        final_envs = command._merge_cli_and_file_vars([], cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'value1'
+        assert final_envs['key2'] == 'value2'
+        assert len(final_envs) == 2
+
+    def test_env_secret_file_merger_duplicate_keys_in_cli(self):
+        """Test that later CLI args override earlier ones for same key."""
+        # While we don't expect users to pass in the same keys into the
+        # cli command, the last key will technically be preferred.
+        cli = [('key1', 'first'), ('key1', 'second'), ('key1', 'third')]
+
+        final_envs = command._merge_cli_and_file_vars([], cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'third'
+        assert len(final_envs) == 1
+
+    def test_env_secret_file_merger_all_none_env_dicts(self):
+        """Test with all None env_dicts."""
+        cli = [('key1', 'value1')]
+
+        final_envs = command._merge_cli_and_file_vars([None, None, None], cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'value1'
+        assert len(final_envs) == 1
+
+    def test_env_secret_file_merger_empty_inputs(self):
+        """Test with completely empty inputs."""
+        final_envs = command._merge_cli_and_file_vars([], [])
+        assert final_envs == []
+
+        final_envs = command._merge_cli_and_file_vars([{}, {}], [])
+        assert final_envs == []
+
+    def test_env_dict_priority_order(self):
+        """Test that higher index env_dicts override lower index ones."""
+        env_dict1 = {'key': 'first', 'unique1': 'value1'}
+        env_dict2 = {'key': 'second', 'unique2': 'value2'}
+        env_dict3 = {'key': 'third', 'unique3': 'value3'}
+
+        final_envs = command._merge_cli_and_file_vars(
+            [env_dict1, env_dict2, env_dict3], [])
+        final_envs = dict(final_envs)
+
+        assert final_envs['key'] == 'third'
+        assert final_envs['unique1'] == 'value1'
+        assert final_envs['unique2'] == 'value2'
+        assert final_envs['unique3'] == 'value3'
+
+    def test_cli_overrides_all_dicts(self):
+        """Test that CLI args override all env_dicts regardless of position."""
+        env_dict1 = {'key': 'dict1'}
+        env_dict2 = {'key': 'dict2'}
+        cli = [('key', 'cli_value')]
+
+        final_envs = command._merge_cli_and_file_vars([env_dict1, env_dict2],
+                                                      cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key'] == 'cli_value'
 
 
 def strip_ansi(s: str) -> str:
