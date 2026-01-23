@@ -1993,7 +1993,7 @@ def test_kubernetes_pod_failure_detection():
 
 
 @pytest.mark.kubernetes
-@pytest.mark.resource_heavy
+@pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
 def test_kubernetes_container_status_unknown_status_refresh():
     """Test sky status --refresh handles ContainerStatusUnknown with null finishedAt.
 
