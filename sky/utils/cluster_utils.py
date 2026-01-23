@@ -3,50 +3,58 @@
 import functools
 import glob
 import os
-import platform
 import re
+import subprocess
 import textwrap
 from typing import Dict, List, Optional, Tuple
 import uuid
 
+from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import lock_events
 from sky.utils import ux_utils
 
+logger = sky_logging.init_logger(__name__)
+
 # The cluster yaml used to create the current cluster where the module is
 # called.
 SKY_CLUSTER_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 
-# Cache for WSL detection result
-_is_wsl_cached: Optional[bool] = None
+# Cache for WSL Windows home directory
 _wsl_windows_home_cached: Optional[str] = None
 
 
-def is_wsl() -> bool:
-    """Detect if running inside Windows Subsystem for Linux (WSL).
+def _convert_windows_path_to_wsl(windows_path: str) -> str:
+    """Convert a Windows path to WSL path format.
+
+    Args:
+        windows_path: A Windows path (e.g., 'C:\\Users\\username')
 
     Returns:
-        True if running in WSL, False otherwise.
+        A WSL-accessible path (e.g., '/mnt/c/Users/username')
     """
-    global _is_wsl_cached
-    if _is_wsl_cached is not None:
-        return _is_wsl_cached
+    path = windows_path.replace('\\', '/')
+    if len(path) >= 2 and path[1] == ':':
+        drive = path[0].lower()
+        return f'/mnt/{drive}{path[2:]}'
+    return path
 
-    _is_wsl_cached = False
-    if platform.system() != 'Linux':
-        return _is_wsl_cached
 
-    # Check /proc/version for Microsoft/WSL indicators
-    try:
-        with open('/proc/version', 'r', encoding='utf-8') as f:
-            version = f.read().lower()
-            _is_wsl_cached = 'microsoft' in version or 'wsl' in version
-    except (FileNotFoundError, PermissionError):
-        pass
+def _convert_wsl_path_to_windows(wsl_path: str) -> str:
+    """Convert a WSL mount path to Windows path format.
 
-    return _is_wsl_cached
+    Args:
+        wsl_path: A WSL path starting with /mnt/ (e.g., '/mnt/c/Users/name')
+
+    Returns:
+        A Windows path (e.g., 'C:/Users/name')
+    """
+    if wsl_path.startswith('/mnt/') and len(wsl_path) > 5:
+        drive = wsl_path[5].upper()
+        return f'{drive}:{wsl_path[6:]}'
+    return wsl_path
 
 
 def get_wsl_windows_home() -> Optional[str]:
@@ -60,26 +68,19 @@ def get_wsl_windows_home() -> Optional[str]:
     if _wsl_windows_home_cached is not None:
         return _wsl_windows_home_cached
 
-    if not is_wsl():
+    if not common_utils.is_wsl():
         return None
 
-    # Try to get Windows username from environment or by running cmd.exe
     windows_home = None
 
-    # Method 1: Check if USERPROFILE is set (sometimes available)
+    # Method 1: Check USERPROFILE environment variable
     userprofile = os.environ.get('USERPROFILE')
     if userprofile:
-        # Convert Windows path to WSL path
-        # e.g., C:\Users\username -> /mnt/c/Users/username
-        windows_home = userprofile.replace('\\', '/')
-        if windows_home[1] == ':':
-            drive = windows_home[0].lower()
-            windows_home = f'/mnt/{drive}{windows_home[2:]}'
+        windows_home = _convert_windows_path_to_wsl(userprofile)
 
-    # Method 2: Try to find the Windows home via /mnt/c/Users
+    # Method 2: Query Windows via cmd.exe
     if not windows_home or not os.path.isdir(windows_home):
         try:
-            import subprocess
             result = subprocess.run(
                 ['cmd.exe', '/c', 'echo', '%USERPROFILE%'],
                 capture_output=True,
@@ -89,19 +90,37 @@ def get_wsl_windows_home() -> Optional[str]:
             if result.returncode == 0:
                 userprofile = result.stdout.strip()
                 if userprofile and userprofile != '%USERPROFILE%':
-                    windows_home = userprofile.replace('\\', '/')
-                    if windows_home[1] == ':':
-                        drive = windows_home[0].lower()
-                        windows_home = f'/mnt/{drive}{windows_home[2:]}'
+                    windows_home = _convert_windows_path_to_wsl(userprofile)
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             pass
 
-    # Verify the path exists
     if windows_home and os.path.isdir(windows_home):
         _wsl_windows_home_cached = windows_home
         return _wsl_windows_home_cached
 
     return None
+
+
+def _get_wsl_distro_name() -> str:
+    """Get the WSL distribution name.
+
+    Returns:
+        The WSL distribution name, defaults to 'Ubuntu' if not detected.
+    """
+    distro_name = os.environ.get('WSL_DISTRO_NAME')
+    if distro_name:
+        return distro_name
+
+    try:
+        with open('/etc/os-release', 'r', encoding='utf-8') as f:
+            for line in f:
+                if line.startswith('NAME='):
+                    name = line.split('=')[1].strip().strip('"')
+                    return name.split()[0]
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    return 'Ubuntu'
 
 
 def get_wsl_path_for_windows(wsl_path: str) -> Optional[str]:
@@ -112,37 +131,15 @@ def get_wsl_path_for_windows(wsl_path: str) -> Optional[str]:
             or '~/.sky/ssh-keys/cluster.key')
 
     Returns:
-        A Windows UNC path (e.g., '\\\\wsl$\\Ubuntu\\home\\user\\.sky\\...')
-        or None if conversion fails.
+        A Windows UNC path (e.g., '//wsl$/Ubuntu/home/user/.sky/...')
+        or None if not in WSL.
     """
-    if not is_wsl():
+    if not common_utils.is_wsl():
         return None
 
-    # Expand ~ to full path
     expanded_path = os.path.expanduser(wsl_path)
-
-    # Get WSL distribution name
-    distro_name = os.environ.get('WSL_DISTRO_NAME')
-    if not distro_name:
-        # Try to detect from /etc/os-release or default to 'Ubuntu'
-        try:
-            with open('/etc/os-release', 'r', encoding='utf-8') as f:
-                for line in f:
-                    if line.startswith('NAME='):
-                        # Extract name, e.g., NAME="Ubuntu" -> Ubuntu
-                        name = line.split('=')[1].strip().strip('"')
-                        # Use first word as distro name
-                        distro_name = name.split()[0]
-                        break
-        except (FileNotFoundError, PermissionError):
-            pass
-        if not distro_name:
-            distro_name = 'Ubuntu'
-
-    # Convert to UNC path: \\wsl$\<distro>\path
-    # Note: We use forward slashes which Windows SSH also accepts
-    unc_path = f'//wsl$/{distro_name}{expanded_path}'
-    return unc_path
+    distro_name = _get_wsl_distro_name()
+    return f'//wsl$/{distro_name}{expanded_path}'
 
 
 def get_provider_name(config: dict) -> str:
@@ -251,7 +248,14 @@ class SSHConfigHelper(object):
 
         This enables VSCode on Windows to connect to SkyPilot clusters
         launched from WSL without additional configuration.
+
+        Note: Clusters with docker or proxy commands are skipped as they
+        reference WSL-specific paths or binaries that Windows SSH cannot use.
         """
+        # Skip clusters with docker or proxy commands
+        if docker_proxy_command_generator is not None or proxy_command is not None:
+            return
+
         windows_paths = cls._get_windows_ssh_paths()
         if not windows_paths:
             return
@@ -264,52 +268,36 @@ class SSHConfigHelper(object):
             return
 
         try:
-            # Ensure Windows .ssh directory exists
-            windows_ssh_dir = os.path.dirname(windows_ssh_config)
-            os.makedirs(windows_ssh_dir, exist_ok=True, mode=0o700)
-
-            # Ensure Windows .sky/ssh directory exists
+            # Ensure Windows .ssh and .sky/ssh directories exist
+            os.makedirs(os.path.dirname(windows_ssh_config),
+                        exist_ok=True,
+                        mode=0o700)
             os.makedirs(windows_sky_ssh_dir, exist_ok=True, mode=0o700)
 
-            # Create/update Windows SSH config to include sky configs
+            # Create Windows SSH config if it doesn't exist
             if not os.path.exists(windows_ssh_config):
                 with open(windows_ssh_config,
                           'w',
                           encoding='utf-8',
-                          opener=functools.partial(os.open,
-                                                   mode=0o644)) as f:
+                          opener=functools.partial(os.open, mode=0o644)) as f:
                     f.write('\n')
 
             with open(windows_ssh_config, 'r', encoding='utf-8') as f:
                 config = f.readlines()
 
             # Add Include directive for SkyPilot configs if not present
-            # Use Windows-style path in the Include directive
-            windows_home = get_wsl_windows_home()
-            # Convert to Windows path format for the Include directive
-            # From /mnt/c/Users/name -> C:/Users/name (Windows SSH accepts /)
-            if windows_home and windows_home.startswith('/mnt/'):
-                drive = windows_home[5].upper()
-                win_path = f'{drive}:{windows_home[6:]}'
-                include_path = f'{win_path}/.sky/ssh/*'
-            else:
-                include_path = f'{windows_sky_ssh_dir}/*'
-
+            include_path = f'{_convert_wsl_path_to_windows(windows_sky_ssh_dir)}/*'
             include_str = f'Include {include_path}'
-            found = False
-            for line in config:
-                if line.strip() == include_str:
-                    found = True
-                    break
-                if line.strip().startswith('Host '):
-                    break
 
-            if not found:
+            include_found = any(line.strip() == include_str
+                                for line in config
+                                if not line.strip().startswith('Host '))
+
+            if not include_found:
+                config.insert(
+                    0, '# Added by SkyPilot for ssh config of all clusters\n'
+                    f'{include_str}\n')
                 with open(windows_ssh_config, 'w', encoding='utf-8') as f:
-                    config.insert(
-                        0,
-                        '# Added by SkyPilot for ssh config of all clusters\n'
-                        f'{include_str}\n')
                     f.write(''.join(config).strip())
                     f.write('\n\n')
 
@@ -319,37 +307,17 @@ class SSHConfigHelper(object):
 
             codegen = ''
             for i, ip in enumerate(ips):
-                node_ip = ip
-                node_port = ports[i]
-                node_proxy = proxy_command
-                docker_proxy = None
-
-                if docker_proxy_command_generator is not None:
-                    docker_proxy = docker_proxy_command_generator(ip, node_port)
-                    # Convert any WSL paths in proxy command to UNC paths
-                    # This is complex and may not work reliably, so we skip
-                    # docker configurations for Windows SSH config
-                    continue
-
-                node_name = (cluster_name
-                             if i == 0 else f'{cluster_name}-worker{i}')
-
-                if node_proxy is not None:
-                    node_proxy = node_proxy.replace('%w', str(i))
-                    # Skip nodes with proxy commands as they likely reference
-                    # WSL-specific paths or binaries
-                    continue
-
+                node_name = cluster_name if i == 0 else f'{cluster_name}-worker{i}'
                 codegen += cls._get_generated_config(
                     sky_autogen_comment,
                     cluster_name_on_cloud,
                     node_name,
-                    node_ip,
+                    ip,
                     username,
                     windows_key_path,
-                    None,  # proxy_command - skip for Windows
-                    node_port,
-                    None,  # docker_proxy_command - skip for Windows
+                    None,
+                    ports[i],
+                    None,
                 ) + '\n'
 
             if codegen:
@@ -358,8 +326,7 @@ class SSHConfigHelper(object):
                 with open(cluster_config_path,
                           'w',
                           encoding='utf-8',
-                          opener=functools.partial(os.open,
-                                                   mode=0o644)) as f:
+                          opener=functools.partial(os.open, mode=0o644)) as f:
                     f.write(codegen)
 
                 if not cls._windows_ssh_setup_warned:
@@ -373,14 +340,10 @@ class SSHConfigHelper(object):
             # Silently ignore errors - Windows SSH config is optional
             if not cls._windows_ssh_setup_attempted:
                 cls._windows_ssh_setup_attempted = True
-                # Log only once to avoid spam
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.debug(f'Could not set up Windows SSH config: {e}')
 
     @classmethod
-    def _remove_cluster_from_windows_ssh_config(cls,
-                                                cluster_name: str) -> None:
+    def _remove_cluster_from_windows_ssh_config(cls, cluster_name: str) -> None:
         """Remove cluster SSH config from Windows when running in WSL."""
         windows_paths = cls._get_windows_ssh_paths()
         if not windows_paths:
@@ -560,7 +523,7 @@ class SSHConfigHelper(object):
 
         # Also add to Windows SSH config if running in WSL
         # This enables VSCode on Windows to connect to clusters launched in WSL
-        if is_wsl():
+        if common_utils.is_wsl():
             cls._add_cluster_to_windows_ssh_config(
                 cluster_name=cluster_name,
                 cluster_name_on_cloud=cluster_name_on_cloud,
@@ -694,7 +657,7 @@ class SSHConfigHelper(object):
             common_utils.remove_file_if_exists(cluster_config_path)
 
             # Also remove from Windows SSH config if running in WSL
-            if is_wsl():
+            if common_utils.is_wsl():
                 cls._remove_cluster_from_windows_ssh_config(cluster_name)
 
     @classmethod
