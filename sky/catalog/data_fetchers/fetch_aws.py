@@ -68,9 +68,21 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 # The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Arch',
-    'LocalDiskType', 'NVMeSupported', 'LocalDiskSize', 'LocalDiskCount',
+    'InstanceType',
+    'AcceleratorName',
+    'AcceleratorCount',
+    'vCPUs',
+    'MemoryGiB',
+    'GpuInfo',
+    'Price',
+    'SpotPrice',
+    'Region',
+    'AvailabilityZone',
+    'Arch',
+    'LocalDiskType',
+    'NVMeSupported',
+    'LocalDiskSize',
+    'LocalDiskCount',
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -272,7 +284,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             return float(row['Memory'].split(' GiB')[0])
 
         def get_local_disk_info(row) -> Dict[str, Any]:
-            info = {}
+            info: Dict[str, Any] = {}
             local_disk_supported = row['InstanceStorageSupported']
             info['LocalDiskType'] = None
             info['NVMeSupported'] = False
@@ -284,9 +296,13 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 info['NVMeSupported'] = raw_info['NvmeSupport'] == 'required'
                 # This is always 1. AWS probably made this as a list
                 # with future changes in consideration.
-                assert len(raw_info['Disks']) == 1
+                assert len(raw_info['Disks']) == 1, (
+                    f'Instance type {row["InstanceType"]} has '
+                    f'{len(raw_info["Disks"])} disk entries, expected 1.')
                 disk_info = raw_info['Disks'][0]
-                assert disk_info['Type'] in constants.LOCAL_DISK_TYPES
+                assert disk_info['Type'] in constants.LOCAL_DISK_TYPES, (
+                    f'Instance type {row["InstanceType"]} has unknown '
+                    f'disk type {disk_info["Type"]}.')
                 info['LocalDiskType'] = disk_info['Type']
                 info['LocalDiskSize'] = disk_info['SizeInGB']
                 info['LocalDiskCount'] = disk_info['Count']
