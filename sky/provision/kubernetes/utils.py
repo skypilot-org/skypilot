@@ -2860,11 +2860,12 @@ def combine_pod_config_fields(
             if containers[0].get('name') in ALLOWED_SKYPILOT_NODE_NAMES:
                 containers[0]['name'] = SKYPILOT_NODE_NAME
             else:
-                raise ValueError('`pod_config.spec.containers[0].name` must '
-                                 f'be `{SKYPILOT_NODE_NAME}`. It is currently '
-                                 f'`{containers[0]["name"]}`. Refer to '
-                                 'https://docs.skypilot.co/en/latest/reference/config.html#config-yaml-kubernetes-autoscaler '  # pylint: disable=line-too-long
-                                 'for more details.')
+                raise ValueError(
+                    '`pod_config.spec.containers[0].name` must '
+                    f'be `{SKYPILOT_NODE_NAME}`. It is currently '
+                    f'`{containers[0]["name"]}`. Refer to '
+                    'https://docs.skypilot.co/en/latest/reference/config.html#config-yaml-kubernetes-autoscaler '  # pylint: disable=line-too-long
+                    'for more details.')
 
     kubernetes_config = skypilot_config.get_effective_region_config(
         cloud=cloud_str,

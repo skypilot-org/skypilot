@@ -966,10 +966,9 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
             # Remove the AppArmor annotation
             annotations = pod_spec.get('metadata', {}).get('annotations', {})
-            if ('container.apparmor.security.beta.kubernetes.io/skypilot-node'
-                    in annotations):
-                del annotations[
-                    'container.apparmor.security.beta.kubernetes.io/skypilot-node']
+            apparmor_annotation = 'container.apparmor.security.beta.kubernetes.io/skypilot-node'  # pylint:disable=line-too-long
+            if apparmor_annotation in annotations:
+                del annotations[apparmor_annotation]
                 pod_spec['metadata']['annotations'] = annotations
                 logger.info('AppArmor annotation removed from Pod spec.')
             else:
