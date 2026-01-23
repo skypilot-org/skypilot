@@ -191,14 +191,14 @@ To open the dashboard:
 
 Navigate to the **Infra** tab to see all your Slurm clusters with GPU types and utilization:
 
-.. image:: https://i.imgur.com/yYwG6Zs.png
+.. image:: /images/slurm-infra-page.png
    :alt: SkyPilot Dashboard showing Slurm GPU availability overview
    :width: 100%
 
 |
 Click on a cluster name to see detailed GPU availability per node:
 
-.. image:: https://i.imgur.com/XWuD2AH.png
+.. image:: /images/slurm-cluster-details-page.png
    :alt: SkyPilot Dashboard showing Slurm cluster GPU details
    :width: 100%
 
