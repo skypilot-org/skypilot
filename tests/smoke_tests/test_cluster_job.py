@@ -1993,6 +1993,40 @@ def test_kubernetes_pod_failure_detection():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_container_status_unknown_status_refresh():
+    """Test sky status --refresh handles ContainerStatusUnknown with null finishedAt.
+
+    When pods are evicted due to ephemeral storage limits, containers enter
+    ContainerStatusUnknown state with terminated.finishedAt=null. This test
+    verifies that SkyPilot handles this edge case without errors.
+
+    Regression test for #PR.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_container_status_unknown_status_refresh',
+        [
+            f'sky launch -y -c {name} --infra kubernetes --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
+            # Poll sky status --refresh, check each iteration for errors immediately
+            # Before the fix, this would log:
+            # "Failed to query Kubernetes cluster ... status: [TypeError] '>' not supported..."
+            f'for i in $(seq 1 20); do '
+            f'echo "=== status refresh attempt $i ===" && '
+            f'OUTPUT=$(SKYPILOT_DEBUG=0 sky status {name} -v --refresh 2>&1) && '
+            f'echo "$OUTPUT" && '
+            f'if echo "$OUTPUT" | grep -q "TypeError"; then echo "FAILED: TypeError found" && exit 1; fi && '
+            f'if echo "$OUTPUT" | grep -q "Failed to refresh status"; then echo "FAILED: Refresh failed" && exit 1; fi && '
+            f'sleep 5; '
+            f'done',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_pod_pending_reason():
     """Ensure pending pod reasons are surfaced in provision logs."""
     name = smoke_tests_utils.get_cluster_name()
