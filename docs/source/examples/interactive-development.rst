@@ -116,64 +116,11 @@ For more details, please refer to the `VSCode documentation <https://code.visual
   :alt: Connect to the cluster with VSCode
 
 
-.. _dev-vscode-wsl:
-
-VSCode on Windows (WSL)
-^^^^^^^^^^^^^^^^^^^^^^^
-
-When running SkyPilot in WSL (Windows Subsystem for Linux), SkyPilot automatically detects
-the WSL environment and creates SSH configuration in both:
-
-- WSL's SSH config (``~/.ssh/config``) for terminal SSH access
-- Windows' SSH config (``C:\Users\<username>\.ssh\config``) for VSCode Remote-SSH
-
-This means you can use VSCode's Remote-SSH extension to connect to SkyPilot clusters
-launched from WSL without any additional configuration. Simply select your cluster
-(e.g., ``dev``) from the list of SSH hosts in VSCode.
-
-.. note::
-
-   The Windows SSH config uses UNC paths (``\\wsl$\...``) to reference SSH keys stored
-   in WSL. This requires Windows 10 version 1903 or later with WSL integration enabled.
-
-**Manual Configuration (Fallback)**
-
-If the automatic setup doesn't work (e.g., due to permission issues or older Windows versions),
-you can configure VSCode to use WSL's SSH directly:
-
-#. **Create a batch file wrapper** that calls WSL's SSH. Create a file named ``ssh.bat``
-   in a convenient location (e.g., ``C:\Users\<username>\bin\ssh.bat``) with the following content:
-
-   .. code-block:: batch
-
-      C:\Windows\system32\wsl.exe ssh %*
-
-#. **Configure VSCode** to use this wrapper. Open VSCode settings (``Ctrl+,``), search for
-   ``remote.SSH.path``, and set it to the full path of your batch file:
-
-   .. code-block:: text
-
-      C:\Users\<username>\bin\ssh.bat
-
-   Alternatively, add this to your ``settings.json``:
-
-   .. code-block:: json
-
-      {
-        "remote.SSH.path": "C:\\Users\\<username>\\bin\\ssh.bat"
-      }
-
-#. **Connect to your cluster**. VSCode's Remote-SSH will now use WSL's SSH, which has
-   access to SkyPilot's SSH configuration.
-
 .. tip::
 
-   If you use SSH keys with passphrases, ensure the SSH agent is running in WSL:
-
-   .. code-block:: bash
-
-      eval "$(ssh-agent -s)"
-      ssh-add ~/.ssh/id_rsa  # or your key path
+   **Windows (WSL) users**: SkyPilot automatically configures both WSL and Windows SSH
+   settings, so VSCode's Remote-SSH extension works out of the box with clusters launched
+   from WSL.
 
 .. _dev-notebooks:
 
