@@ -63,6 +63,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
+    :ref:`install_conda <config-yaml-provision-install-conda>`: false
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -633,6 +634,12 @@ Example:
 
   provision:
     install_conda: false
+
+.. note::
+
+  Default SkyPilot images often come with conda preinstalled.
+  To fully avoid installing conda, use a custom Docker image that does not have conda preinstalled
+  along with ``install_conda: false``.
 
 .. _config-yaml-aws:
 
