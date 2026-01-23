@@ -227,7 +227,7 @@ provider:
               targetPort: 22
       # Service that maps to the head node of the Ray cluster, so that the
       # worker nodes can find the head node using
-      # {{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.cluster.local
+      # {{cluster_name_on_cloud}}-head.{{k8s_namespace}}.svc.gpus.local
       - apiVersion: v1
         kind: Service
         metadata:
