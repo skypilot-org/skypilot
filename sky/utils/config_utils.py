@@ -13,9 +13,9 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # maps the field name to the patch merge key.
 # pylint: disable=line-too-long
 # Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
-# NOTE: field containers and imagePullSecrets are not included deliberately for
-# backward compatibility (we only support one container per pod now).
+# NOTE: field imagePullSecrets are not included deliberately for backward compatibility
 _PATCH_MERGE_KEYS = {
+    'containers': 'name',
     'initContainers': 'name',
     'ephemeralContainers': 'name',
     'volumes': 'name',
@@ -207,9 +207,10 @@ def merge_k8s_configs(
     Updates nested dictionaries instead of replacing them.
     If a list is encountered, it will be appended to the base_config list.
 
-    An exception is when the key is 'containers', in which case the
-    first container in the list will be fetched and merge_dict will be
-    called on it with the first container in the base_config list.
+    For fields with Kubernetes patch merge strategy (containers, volumes, env,
+    etc.), items are merged by their patch merge key (e.g., 'name' for
+    containers). If an item with the same key exists in base_config, it is
+    merged; otherwise, the new item is appended.
     """
     for key, value in override_config.items():
         (next_allowed_override_keys, next_disallowed_override_keys
@@ -222,10 +223,9 @@ def merge_k8s_configs(
         elif isinstance(value, list) and key in base_config:
             assert isinstance(base_config[key], list), \
                 f'Expected {key} to be a list, found {base_config[key]}'
-            if key in ['containers', 'imagePullSecrets']:
-                # If the key is 'containers' or 'imagePullSecrets, we take the
-                # first and only container/secret in the list and merge it, as
-                # we only support one container per pod.
+            if key in ['imagePullSecrets']:
+                # If the key is 'imagePullSecrets, we take the
+                # first and only secret in the list and merge it
                 assert len(value) == 1, \
                     f'Expected only one container, found {value}'
                 merge_k8s_configs(base_config[key][0], value[0],

@@ -2760,6 +2760,8 @@ def test_kubernetes_pod_config_sidecar():
     4. Verifying the sidecar container is running
     """
     name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
 
     template_str = pathlib.Path(
         'tests/test_yamls/test_k8s_pod_config_sidecar.yaml.j2').read_text()
@@ -2782,15 +2784,17 @@ def test_kubernetes_pod_config_sidecar():
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
                 # Verify pod has 2 containers (ray-node and sidecar)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name, f'kubectl get pod -l skypilot-cluster={name} '
-                    f'-o jsonpath="{{.items[0].spec.containers[*].name}}" | '
-                    f'grep -E "ray-node.*sidecar|sidecar.*ray-node"'),
+                    name,
+                    f'kubectl get pod -l skypilot-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[*].name}\' | '
+                    'grep -E "ray-node.*sidecar|sidecar.*ray-node"'),
                 # Verify sky exec runs in ray-node container
                 f'sky exec {name} "echo CONTAINER_CHECK: ray-node is working"',
                 # Verify sidecar is running
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name, f'kubectl logs -l skypilot-cluster={name} '
-                    f'-c sidecar --tail=5 | grep "sidecar running"'),
+                    name,
+                    f'kubectl logs -l skypilot-cluster-name={name_on_cloud} '
+                    '-c sidecar --tail=5 | grep "sidecar running"'),
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',

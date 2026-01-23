@@ -25,6 +25,7 @@ def test_recursive_update_k8s_config():
             'allowed_contexts': ['base1', 'base2'],
             'pod_config': {
                 'containers': [{
+                    'name': 'ray-node',
                     'resources': {
                         'limits': {
                             'cpu': '1',
@@ -43,6 +44,7 @@ def test_recursive_update_k8s_config():
             'allowed_contexts': ['override1', 'override2'],
             'pod_config': {
                 'containers': [{
+                    'name': 'ray-node',
                     'resources': {
                         'limits': {
                             'memory': '2Gi',
@@ -69,6 +71,7 @@ def test_merge_k8s_configs_with_container_resources():
     """Test merging Kubernetes configs with container resource specifications."""
     base_config = {
         'containers': [{
+            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'cpu': '1',
@@ -82,6 +85,7 @@ def test_merge_k8s_configs_with_container_resources():
     }
     override_config = {
         'containers': [{
+            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'memory': '2Gi'
@@ -123,6 +127,7 @@ def test_merge_k8s_configs_with_init_container_resources():
 def test_merge_k8s_configs_with_deeper_override():
     base_config = {
         'containers': [{
+            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'cpu': '1',
@@ -133,6 +138,7 @@ def test_merge_k8s_configs_with_deeper_override():
     }
     override_config = {
         'containers': [{
+            'name': 'ray-node',
             'resources': {
                 'limits': {
                     'memory': '2Gi'
@@ -367,6 +373,7 @@ def test_nested_config_override_precedence():
                 },
                 'spec': {
                     'containers': [{
+                        'name': 'ray-node',
                         'resources': {
                             'limits': {
                                 'cpu': '1',
@@ -390,6 +397,7 @@ def test_nested_config_override_precedence():
                 },
                 'spec': {
                     'containers': [{
+                        'name': 'ray-node',
                         'resources': {
                             'limits': {
                                 'memory': '2Gi'  # Should override
@@ -636,3 +644,111 @@ def test_merge_k8s_configs_with_patch_merge_keys():
     port_9090 = next(
         p for p in base_config['ports'] if p['containerPort'] == 9090)
     assert port_9090['protocol'] == 'TCP'
+
+
+def test_merge_k8s_configs_with_sidecar_containers():
+    """Test merging Kubernetes configs with sidecar containers.
+
+    This test verifies that adding a sidecar container via pod_config
+    correctly adds a new container instead of replacing the primary container.
+    """
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'image': 'rayproject/ray:latest',
+                'command': ['/bin/bash', '-c', '--'],
+                'args': ['echo hello'],
+                'resources': {
+                    'requests': {
+                        'cpu': '2',
+                        'memory': '4Gi'
+                    }
+                }
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [{
+                'name': 'sidecar',
+                'image': 'busybox:latest',
+                'command': ['sh', '-c', 'while true; do sleep 60; done'],
+                'resources': {
+                    'requests': {
+                        'cpu': '100m',
+                        'memory': '64Mi'
+                    }
+                }
+            }]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Verify both containers exist
+    containers = base_config['spec']['containers']
+    assert len(containers) == 2
+
+    # Verify ray-node container is preserved
+    ray_node = next(c for c in containers if c['name'] == 'ray-node')
+    assert ray_node['image'] == 'rayproject/ray:latest'
+    assert ray_node['command'] == ['/bin/bash', '-c', '--']
+    assert ray_node['resources']['requests']['cpu'] == '2'
+
+    # Verify sidecar container is added
+    sidecar = next(c for c in containers if c['name'] == 'sidecar')
+    assert sidecar['image'] == 'busybox:latest'
+    assert sidecar['resources']['requests']['cpu'] == '100m'
+
+
+def test_merge_k8s_configs_with_sidecar_and_primary_container_override():
+    """Test merging configs that override the primary container and add a sidecar."""
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'image': 'rayproject/ray:latest',
+                'resources': {
+                    'requests': {
+                        'cpu': '2',
+                        'memory': '4Gi'
+                    }
+                }
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [
+                {
+                    'name': 'ray-node',  # Override primary container
+                    'resources': {
+                        'limits': {
+                            'cpu': '4',
+                            'memory': '8Gi'
+                        }
+                    }
+                },
+                {
+                    'name': 'sidecar',  # Add sidecar container
+                    'image': 'busybox:latest',
+                }
+            ]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    containers = base_config['spec']['containers']
+    assert len(containers) == 2
+
+    # Verify ray-node container is merged (not replaced)
+    ray_node = next(c for c in containers if c['name'] == 'ray-node')
+    assert ray_node['image'] == 'rayproject/ray:latest'  # Preserved
+    assert ray_node['resources']['requests']['cpu'] == '2'  # Preserved
+    assert ray_node['resources']['limits']['cpu'] == '4'  # Added from override
+
+    # Verify sidecar is added
+    sidecar = next(c for c in containers if c['name'] == 'sidecar')
+    assert sidecar['image'] == 'busybox:latest'
