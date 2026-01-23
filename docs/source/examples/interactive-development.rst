@@ -121,13 +121,25 @@ For more details, please refer to the `VSCode documentation <https://code.visual
 VSCode on Windows (WSL)
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-When running SkyPilot in WSL (Windows Subsystem for Linux), the SSH configuration is created
-inside WSL's filesystem (``~/.ssh/config``). However, VSCode on Windows uses the native Windows
-SSH client, which looks for configuration in ``C:\Users\<username>\.ssh\config`` and cannot
-directly access WSL paths.
+When running SkyPilot in WSL (Windows Subsystem for Linux), SkyPilot automatically detects
+the WSL environment and creates SSH configuration in both:
 
-To enable VSCode's Remote-SSH extension to connect to SkyPilot clusters launched from WSL,
-configure VSCode to use WSL's SSH:
+- WSL's SSH config (``~/.ssh/config``) for terminal SSH access
+- Windows' SSH config (``C:\Users\<username>\.ssh\config``) for VSCode Remote-SSH
+
+This means you can use VSCode's Remote-SSH extension to connect to SkyPilot clusters
+launched from WSL without any additional configuration. Simply select your cluster
+(e.g., ``dev``) from the list of SSH hosts in VSCode.
+
+.. note::
+
+   The Windows SSH config uses UNC paths (``\\wsl$\...``) to reference SSH keys stored
+   in WSL. This requires Windows 10 version 1903 or later with WSL integration enabled.
+
+**Manual Configuration (Fallback)**
+
+If the automatic setup doesn't work (e.g., due to permission issues or older Windows versions),
+you can configure VSCode to use WSL's SSH directly:
 
 #. **Create a batch file wrapper** that calls WSL's SSH. Create a file named ``ssh.bat``
    in a convenient location (e.g., ``C:\Users\<username>\bin\ssh.bat``) with the following content:
@@ -151,14 +163,8 @@ configure VSCode to use WSL's SSH:
         "remote.SSH.path": "C:\\Users\\<username>\\bin\\ssh.bat"
       }
 
-#. **Connect to your cluster**. After this configuration, VSCode's Remote-SSH will use WSL's SSH,
-   which has access to SkyPilot's SSH configuration. You can now connect to your clusters
-   (e.g., ``dev``) as described above.
-
-.. note::
-
-   This configuration allows VSCode to share the same SSH setup as your WSL environment,
-   so any clusters launched via SkyPilot in WSL will automatically be available in VSCode.
+#. **Connect to your cluster**. VSCode's Remote-SSH will now use WSL's SSH, which has
+   access to SkyPilot's SSH configuration.
 
 .. tip::
 
