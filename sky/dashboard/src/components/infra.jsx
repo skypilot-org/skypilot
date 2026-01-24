@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import {
+  AlertTriangleIcon,
   RotateCwIcon,
   SearchIcon,
   XIcon,
@@ -382,24 +383,34 @@ export function InfrastructureSection({
                           }`}
                         >
                           <td className="p-3">
-                            <NonCapitalizedTooltip
-                              content={`${displayName}${workspaceDisplay}`}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span
-                                className="text-blue-600 hover:underline cursor-pointer"
-                                onClick={() => handleContextClick(context)}
+                            <div className="flex items-center gap-1.5">
+                              <NonCapitalizedTooltip
+                                content={`${displayName}${workspaceDisplay}`}
+                                className="text-sm text-muted-foreground"
                               >
-                                {displayName.length > NAME_TRUNCATE_LENGTH
-                                  ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
-                                  : displayName}
-                                {workspaceDisplay && (
-                                  <span className="text-xs text-gray-500 ml-1">
-                                    {workspaceDisplay}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
+                                <span
+                                  className="text-blue-600 hover:underline cursor-pointer"
+                                  onClick={() => handleContextClick(context)}
+                                >
+                                  {displayName.length > NAME_TRUNCATE_LENGTH
+                                    ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+                                    : displayName}
+                                  {workspaceDisplay && (
+                                    <span className="text-xs text-gray-500 ml-1">
+                                      {workspaceDisplay}
+                                    </span>
+                                  )}
+                                </span>
+                              </NonCapitalizedTooltip>
+                              {contextErrors[context] && (
+                                <NonCapitalizedTooltip
+                                  content="Context unreachable"
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                                </NonCapitalizedTooltip>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
                             {isClusterDataLoading ? (
@@ -423,20 +434,8 @@ export function InfrastructureSection({
                             {!hasNodeData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span
-                                className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  contextErrors[context]
-                                    ? 'bg-yellow-100 text-yellow-800'
-                                    : 'bg-gray-100 text-gray-500'
-                                }`}
-                                title={
-                                  contextErrors[context]
-                                    ? contextErrors[context]
-                                    : ''
-                                }
-                              >
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {nodes.length}
-                                {contextErrors[context] ? '*' : ''}
                               </span>
                             )}
                           </td>
