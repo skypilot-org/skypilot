@@ -16,12 +16,15 @@ config:
               requests:
                 ephemeral-storage: "100Mi"
               limits:
-                ephemeral-storage: "500Mi"
+                # Low limit triggers eviction; may produce ContainerStatusUnknown
+                # with null finished_at if kubelet can't track container
+                # See: https://github.com/kubernetes/kubernetes/issues/122160
+                ephemeral-storage: "200Mi"
 
 run: |
+  # Fill storage to trigger eviction
   i=0
   while true; do
     dd if=/dev/zero of=/tmp/fill-$i bs=10M count=10 2>/dev/null
     i=$((i+1))
-    sleep 0.5
   done
