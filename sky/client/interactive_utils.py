@@ -1,24 +1,32 @@
 """Utilities for handling interactive SSH authentication."""
 import asyncio
-import fcntl
 import os
 import re
 import sys
-import termios
 import threading
-import tty
 import typing
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
 from sky.server import common as server_common
+from sky.utils import compat
 from sky.utils import rich_utils
 
 if typing.TYPE_CHECKING:
     import websockets
 else:
     websockets = adaptors_common.LazyImport('websockets')
+
+# Platform-specific imports for terminal handling (Unix only)
+if not compat.IS_WINDOWS:
+    import fcntl
+    import termios
+    import tty
+else:
+    fcntl = None  # type: ignore
+    termios = None  # type: ignore
+    tty = None  # type: ignore
 
 logger = sky_logging.init_logger(__name__)
 
@@ -40,6 +48,12 @@ async def _handle_interactive_auth_websocket(session_id: str) -> None:
     Args:
         session_id: The session identifier from the <sky-interactive> signal.
     """
+    # Interactive auth requires Unix-specific terminal handling
+    if compat.IS_WINDOWS:
+        raise compat.UnsupportedPlatformError(
+            'Interactive SSH authentication is not supported on Windows. '
+            'Please use SSH key-based authentication or run from WSL.')
+
     # Get HTTP server URL and convert to websocket URL
     server_url = server_common.get_server_url()
     server_proto, server_fqdn = server_url.split('://')

@@ -1,17 +1,14 @@
 """Runner for commands to be executed on the cluster."""
 import enum
-import fcntl
 import hashlib
 import os
 import pathlib
-import pty
 import re
 import shlex
 import signal
 import socket
 import sys
 import tempfile
-import termios
 import threading
 import time
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
@@ -26,6 +23,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import auth_utils
 from sky.utils import common_utils
+from sky.utils import compat
 from sky.utils import context_utils
 from sky.utils import control_master_utils
 from sky.utils import env_options
@@ -33,6 +31,16 @@ from sky.utils import git as git_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+
+# Platform-specific imports for PTY/terminal handling (Unix only)
+if not compat.IS_WINDOWS:
+    import fcntl
+    import pty
+    import termios
+else:
+    fcntl = None  # type: ignore
+    pty = None  # type: ignore
+    termios = None  # type: ignore
 
 logger = sky_logging.init_logger(__name__)
 
@@ -85,7 +93,9 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    temp_dir = compat.get_temp_dir()
+    path = os.path.join(temp_dir, f'skypilot_ssh_{user_hash}',
+                        ssh_control_filename)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -949,6 +959,12 @@ class SSHCommandRunner(CommandRunner):
 
         See ssh_options_list for when ControlMaster is not enabled.
         """
+        # Interactive auth with PTY requires Unix-specific features
+        if compat.IS_WINDOWS:
+            raise compat.UnsupportedPlatformError(
+                'Interactive SSH authentication is not supported on Windows. '
+                'Please use SSH key-based authentication or run from WSL.')
+
         with _INTERACTIVE_AUTH_LOCK:
             extra_options = [
                 # Override ControlPersist to reduce frequency of manual user
@@ -1027,11 +1043,12 @@ class SSHCommandRunner(CommandRunner):
                     # "can't open /dev/tty: Device not configured"
                     fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
                     # Ignore SIGHUP so ControlMaster survives when PTY closes.
-                    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    compat.set_signal_handler(compat.SIGHUP, signal.SIG_IGN)
                     # Ignore SIGTERM so ControlMaster survives subprocess_daemon
                     # killing the process group.
                     if self._ssh_proxy_jump is not None:
-                        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                        compat.set_signal_handler(compat.SIGTERM,
+                                                  signal.SIG_IGN)
 
                 return log_lib.run_with_log(' '.join(command),
                                             log_path,

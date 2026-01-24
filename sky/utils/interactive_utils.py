@@ -1,11 +1,19 @@
 """Utilities for server-side interactive SSH functionality."""
 import array
+import os
 import socket
+import sys
+import tempfile
 
 
 def get_pty_socket_path(session_id: str) -> str:
-    """Get the Unix socket path for PTY file descriptor passing."""
-    return f'/tmp/sky_pty_{session_id}.sock'
+    """Get the Unix socket path for PTY file descriptor passing.
+
+    Note: This functionality requires Unix sockets and is only available
+    on Unix-like systems.
+    """
+    temp_dir = tempfile.gettempdir()
+    return os.path.join(temp_dir, f'sky_pty_{session_id}.sock')
 
 
 def send_fd(sock: socket.socket, fd: int) -> None:

@@ -724,7 +724,24 @@ def remove_file_if_exists(path: Optional[str]):
 
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
-    return 'microsoft' in platform.uname()[3].lower()
+    if is_windows():
+        return False
+    return 'microsoft' in platform.uname().release.lower()
+
+
+def is_windows() -> bool:
+    """Detect if running on Windows."""
+    return sys.platform == 'win32'
+
+
+def is_macos() -> bool:
+    """Detect if running on macOS."""
+    return sys.platform == 'darwin'
+
+
+def is_linux() -> bool:
+    """Detect if running on Linux."""
+    return sys.platform.startswith('linux')
 
 
 def find_free_port(start_port: int) -> int:

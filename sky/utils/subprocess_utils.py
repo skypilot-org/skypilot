@@ -3,11 +3,9 @@ import multiprocessing
 from multiprocessing import pool
 import os
 import random
-import resource
 import shlex
 import subprocess
 import sys
-import termios
 import threading
 import time
 import typing
@@ -22,6 +20,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import log_lib
 from sky.skylet import subprocess_daemon
 from sky.utils import common_utils
+from sky.utils import compat
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -29,6 +28,14 @@ if typing.TYPE_CHECKING:
     import psutil
 else:
     psutil = adaptors_common.LazyImport('psutil')
+
+# Platform-specific imports
+if not compat.IS_WINDOWS:
+    import resource
+    import termios
+else:
+    resource = None  # type: ignore
+    termios = None  # type: ignore
 
 logger = sky_logging.init_logger(__name__)
 
@@ -42,7 +49,7 @@ def run(cmd, **kwargs):
     # rid of this problem, use `log_lib.run_with_log`.
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
-    executable = kwargs.pop('executable', '/bin/bash')
+    executable = kwargs.pop('executable', compat.get_shell_executable())
     if not shell:
         executable = None
     return subprocess.run(cmd,
@@ -69,10 +76,15 @@ def _get_thread_multiplier(cloud_str: Optional[str] = None) -> int:
 def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
                                     cloud_str: Optional[str] = None) -> int:
     global _fd_limit_warning_shown
-    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
 
-    # Raise warning for low fd_limit (only once)
-    if fd_limit < 1024 and not _fd_limit_warning_shown:
+    # Get file descriptor limit using cross-platform compat function
+    fd_limit = compat.get_resource_limit('nofile')
+    if fd_limit is None:
+        # Fallback default if we can't get the limit
+        fd_limit = 8192
+
+    # Raise warning for low fd_limit (only once) - Unix only
+    if fd_limit < 1024 and not _fd_limit_warning_shown and not compat.IS_WINDOWS:
         logger.warning(
             f'Open file descriptor limit ({fd_limit}) is low. File sync to '
             'remote clusters may be slow. Consider increasing the limit using '
@@ -279,10 +291,8 @@ def run_with_retries(
     """
     retry_cnt = 0
     while True:
-        returncode, stdout, stderr = log_lib.run_with_log(cmd,
-                                                          '/dev/null',
-                                                          require_outputs=True,
-                                                          shell=True)
+        returncode, stdout, stderr = log_lib.run_with_log(
+            cmd, compat.get_null_device(), require_outputs=True, shell=True)
         if retry_cnt < max_retry:
             if (retry_returncode is not None and
                     returncode in retry_returncode):
@@ -364,7 +374,7 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     )
 
 
-def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
+def launch_new_process_tree(cmd: str, log_output: Optional[str] = None) -> int:
     """Launch a new process that will not be a child of the current process.
 
     This will launch bash in a new session, which will launch the given cmd.
@@ -374,10 +384,37 @@ def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
 
     Returns the pid of the launched cmd.
     """
-    # Use nohup to ensure the job driver process is a separate process tree,
-    # instead of being a child of the current process. This is important to
-    # avoid a chain of driver processes (job driver can call schedule_step() to
-    # submit new jobs, and the new job can also call schedule_step()
+    if log_output is None:
+        log_output = compat.get_null_device()
+
+    if compat.IS_WINDOWS:
+        # On Windows, use subprocess with creationflags for detached process
+        # We need to run the command through cmd.exe
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        DETACHED_PROCESS = 0x00000008
+
+        # Open log file for output redirection
+        if log_output == compat.get_null_device():
+            stdout_file = subprocess.DEVNULL
+            stderr_file = subprocess.DEVNULL
+        else:
+            stdout_file = open(log_output, 'w')  # pylint: disable=consider-using-with
+            stderr_file = stdout_file
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            stdin=subprocess.DEVNULL,
+            creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+            shell=True,
+        )
+        return proc.pid
+
+    # Unix: Use nohup to ensure the job driver process is a separate process
+    # tree, instead of being a child of the current process. This is important
+    # to avoid a chain of driver processes (job driver can call schedule_step()
+    # to submit new jobs, and the new job can also call schedule_step()
     # recursively).
     #
     # echo $! will output the PID of the last background process started in the
@@ -386,8 +423,9 @@ def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
     # TODO(zhwu): A more elegant solution is to use another daemon process to be
     # in charge of starting these driver processes, instead of starting them in
     # the current process.
+    null_device = compat.get_null_device()
     wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
-                   f'</dev/null >{log_output} 2>&1 & echo $!')
+                   f'<{null_device} >{log_output} 2>&1 & echo $!')
     proc = subprocess.run(wrapped_cmd,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
@@ -460,6 +498,10 @@ def is_echo_disabled(fd: int) -> bool:
     This is how pexpect's waitnoecho() works. See:
     https://pexpect.readthedocs.io/en/stable/api/pexpect.html#pexpect.spawn.waitnoecho
     """
+    if compat.IS_WINDOWS:
+        # Windows doesn't have termios; assume ECHO is enabled
+        return False
+
     assert os.isatty(fd), 'fd is not connected to a terminal'
     try:
         attr = termios.tcgetattr(fd)

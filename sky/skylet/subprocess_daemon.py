@@ -14,6 +14,9 @@ import psutil
 # Environment variable to enable kill_pg in subprocess daemon.
 USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
 
+# Platform detection
+IS_WINDOWS = sys.platform == 'win32'
+
 
 def daemonize():
     """Detaches the process from its parent process with double-forking.
@@ -26,6 +29,13 @@ def daemonize():
     Ray job. Daemonization ensures this process survives the 'sky cancel'
     command, allowing it to prevent orphaned processes of Ray job.
     """
+    if IS_WINDOWS:
+        # Windows doesn't support fork-based daemonization.
+        # The process will continue running but won't be fully detached.
+        # This is acceptable because this daemon is typically run on remote
+        # Unix clusters, not on Windows clients.
+        return
+
     # First fork: Creates a child process identical to the parent
     if os.fork() > 0:
         # Parent process exits, allowing the child to run independently
@@ -45,6 +55,10 @@ def daemonize():
 
 def get_pgid_if_leader(pid) -> Optional[int]:
     """Get the process group ID of the target process if it is the leader."""
+    if IS_WINDOWS:
+        # Process groups are not available on Windows in the same way
+        return None
+
     try:
         pgid = os.getpgid(pid)
         # Only use process group if the target process is the leader. This is
@@ -61,6 +75,15 @@ def get_pgid_if_leader(pid) -> Optional[int]:
 
 def kill_process_group(pgid: int) -> bool:
     """Kill the target process group."""
+    if IS_WINDOWS:
+        # Windows doesn't support process groups in the same way
+        # Try to kill the process directly
+        try:
+            os.kill(pgid, signal.SIGTERM)
+            return True
+        except Exception:  # pylint: disable=broad-except
+            return False
+
     try:
         print(f'Terminating process group {pgid}...')
         os.killpg(pgid, signal.SIGTERM)
