@@ -494,6 +494,54 @@ def test_pod_termination_reason_kueue_preemption(monkeypatch):
     assert reason == expected
 
 
+def test_pod_termination_reason_null_finished_at(monkeypatch):
+    """Test _get_pod_termination_reason with null finished_at timestamp.
+
+    When pods are in certain failed states (e.g., Unknown status due to
+    ephemeral storage issues), terminated.finished_at can be None.
+    This should not cause a TypeError.
+
+    Regression test for SKY-4423.
+    """
+    import datetime
+
+    now = datetime.datetime(2025, 1, 1, 0, 0, 0)
+
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.status.start_time = now
+
+    # Ready condition
+    ready_condition = mock.MagicMock()
+    ready_condition.type = 'Ready'
+    ready_condition.reason = 'PodFailed'
+    ready_condition.message = ''
+    ready_condition.last_transition_time = now
+
+    pod.status.conditions = [ready_condition]
+
+    # Container with terminated state but null finished_at
+    container_status = mock.MagicMock()
+    container_status.name = 'ray-node'
+    container_status.state.terminated = mock.MagicMock()
+    container_status.state.terminated.exit_code = 137
+    container_status.state.terminated.reason = 'Unknown'
+    container_status.state.terminated.finished_at = None
+
+    pod.status.container_statuses = [container_status]
+
+    monkeypatch.setattr('sky.provision.kubernetes.instance.global_user_state',
+                        mock.MagicMock())
+
+    # Should not raise TypeError
+    reason = instance._get_pod_termination_reason(pod, 'test-cluster')
+
+    expected = ('Terminated unexpectedly.\n'
+                'Last known state: PodFailed.\n'
+                'Container errors: Unknown')
+    assert reason == expected
+
+
 def test_list_namespaced_pod_success(monkeypatch):
     """Test that list_namespaced_pod returns pods from the API response."""
     mock_pod1 = mock.MagicMock()
