@@ -4,6 +4,7 @@ import functools
 import glob
 import os
 import re
+import shutil
 import subprocess
 import textwrap
 from typing import Dict, List, Optional, Tuple
@@ -232,6 +233,28 @@ class SSHConfigHelper(object):
         return (windows_ssh_config, windows_sky_ssh_dir, windows_home)
 
     @classmethod
+    def _convert_proxy_command_for_windows(cls,
+                                           proxy_command: str) -> Optional[str]:
+        """Convert a WSL proxy command to Windows-compatible format.
+
+        Wraps the proxy command with wsl.exe so Windows SSH can execute it.
+        The command runs inside WSL where the original paths are valid.
+
+        Args:
+            proxy_command: The original proxy command from WSL SSH config.
+
+        Returns:
+            A Windows-compatible proxy command using wsl.exe, or None if
+            conversion is not possible.
+        """
+        if not proxy_command:
+            return None
+        # Escape double quotes for the shell
+        escaped_command = proxy_command.replace('"', '\\"')
+        # Use wsl.exe to run the command inside WSL
+        return f'wsl.exe bash -c "{escaped_command}"'
+
+    @classmethod
     def _add_cluster_to_windows_ssh_config(
         cls,
         cluster_name: str,
@@ -249,23 +272,27 @@ class SSHConfigHelper(object):
         This enables VSCode on Windows to connect to SkyPilot clusters
         launched from WSL without additional configuration.
 
-        Note: Clusters with docker or proxy commands are skipped as they
-        reference WSL-specific paths or binaries that Windows SSH cannot use.
+        Note: Clusters with docker proxy commands are skipped as they have
+        additional complexity. Regular proxy commands (e.g., for Kubernetes)
+        are converted to use wsl.exe wrapper.
         """
-        # Skip clusters with docker or proxy commands
-        if docker_proxy_command_generator is not None or proxy_command is not None:
+        # Skip clusters with docker proxy commands (too complex to convert)
+        if docker_proxy_command_generator is not None:
             return
 
         windows_paths = cls._get_windows_ssh_paths()
         if not windows_paths:
             return
 
-        windows_ssh_config, windows_sky_ssh_dir, _ = windows_paths
+        windows_ssh_config, windows_sky_ssh_dir, windows_home = windows_paths
 
-        # Convert WSL key path to Windows UNC path
-        windows_key_path = get_wsl_path_for_windows(key_path)
-        if not windows_key_path:
-            return
+        # Convert proxy command for Windows if present
+        windows_proxy_command: Optional[str] = None
+        if proxy_command is not None:
+            windows_proxy_command = cls._convert_proxy_command_for_windows(
+                proxy_command)
+            if windows_proxy_command is None:
+                return
 
         try:
             # Ensure Windows .ssh and .sky/ssh directories exist
@@ -273,6 +300,19 @@ class SSHConfigHelper(object):
                         exist_ok=True,
                         mode=0o700)
             os.makedirs(windows_sky_ssh_dir, exist_ok=True, mode=0o700)
+
+            # Copy SSH key to Windows filesystem to avoid UNC path permission
+            # issues. Windows SSH rejects keys accessed via //wsl$/ paths
+            # because it cannot verify Unix file permissions.
+            windows_ssh_keys_dir = os.path.join(windows_home, '.sky', 'ssh-keys')
+            os.makedirs(windows_ssh_keys_dir, exist_ok=True, mode=0o700)
+            key_filename = os.path.basename(key_path)
+            windows_key_dest = os.path.join(windows_ssh_keys_dir, key_filename)
+            # Copy the key file (use copyfile to only copy content, not
+            # metadata/permissions which fail across WSL->Windows boundary)
+            shutil.copyfile(os.path.expanduser(key_path), windows_key_dest)
+            # Convert to Windows path format for SSH config
+            windows_key_path = _convert_wsl_path_to_windows(windows_key_dest)
 
             # Create Windows SSH config if it doesn't exist
             if not os.path.exists(windows_ssh_config):
@@ -315,7 +355,7 @@ class SSHConfigHelper(object):
                     ip,
                     username,
                     windows_key_path,
-                    None,
+                    windows_proxy_command,
                     ports[i],
                     None,
                 ) + '\n'
@@ -349,11 +389,15 @@ class SSHConfigHelper(object):
         if not windows_paths:
             return
 
-        _, windows_sky_ssh_dir, _ = windows_paths
+        _, windows_sky_ssh_dir, windows_home = windows_paths
         cluster_config_path = os.path.join(windows_sky_ssh_dir, cluster_name)
 
         try:
             common_utils.remove_file_if_exists(cluster_config_path)
+            # Also remove the copied SSH key
+            windows_ssh_keys_dir = os.path.join(windows_home, '.sky', 'ssh-keys')
+            key_path = os.path.join(windows_ssh_keys_dir, f'{cluster_name}.key')
+            common_utils.remove_file_if_exists(key_path)
         except (OSError, PermissionError):
             # Silently ignore errors - Windows SSH config is optional
             pass
