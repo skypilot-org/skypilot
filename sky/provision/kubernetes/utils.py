@@ -3700,6 +3700,28 @@ class KubernetesSkyPilotClusterInfoPayload:
         )
 
 
+def get_pod_primary_container(
+    pod: Any,
+    *,
+    primary_name: str = kubernetes_constants.RAY_NODE_CONTAINER_NAME,
+):
+    """Return the primary workload container for a SkyPilot pod.
+
+    Pods may include sidecars (e.g., log shippers). Kubernetes preserves the
+    ordering of the `containers` list as authored, but mutating webhooks can
+    inject additional containers. Callers should not rely on containers[0].
+    """
+    spec = getattr(pod, 'spec', None)
+    containers = getattr(spec, 'containers', None) if spec is not None else None
+    if not containers:
+        pod_name = getattr(getattr(pod, 'metadata', None), 'name', '<unknown>')
+        raise ValueError(f'Pod {pod_name!r} has no containers.')
+    for container in containers:
+        if getattr(container, 'name', None) == primary_name:
+            return container
+    return containers[0]
+
+
 def process_skypilot_pods(
     pods: List[Any],
     context: Optional[str] = None
@@ -3737,14 +3759,18 @@ def process_skypilot_pods(
                 start_time = pod.status.start_time.timestamp()
 
             # Parse resources
+            primary_container = get_pod_primary_container(pod)
+            resources = getattr(primary_container, 'resources', None)
+            requests = getattr(resources, 'requests',
+                               None) if resources else None
             cpu_request = parse_cpu_or_gpu_resource(
-                pod.spec.containers[0].resources.requests.get('cpu', '0'))
+                (requests.get('cpu', '0') if requests is not None else '0'))
             memory_request = parse_memory_resource(
-                pod.spec.containers[0].resources.requests.get('memory', '0'),
+                (requests.get('memory', '0') if requests is not None else '0'),
                 unit='G')
             gpu_count = parse_cpu_or_gpu_resource(
-                pod.spec.containers[0].resources.requests.get(
-                    get_gpu_resource_key(context), '0'))
+                (requests.get(get_gpu_resource_key(context), '0')
+                 if requests is not None else '0'))
             gpu_name = None
             if gpu_count > 0:
                 label_formatter, _ = (detect_gpu_label_formatter(context))

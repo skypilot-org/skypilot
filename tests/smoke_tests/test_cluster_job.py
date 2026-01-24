@@ -2787,6 +2787,62 @@ def test_kubernetes_pod_config_change_detection():
         os.unlink(task_yaml_2_path)
 
 
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_sidecar():
+    """Test Kubernetes pod_config with sidecar container injection.
+
+    This test verifies that SkyPilot correctly handles pods with multiple
+    containers (sidecars) by:
+    1. Launching a cluster with a sidecar container via pod_config
+    2. Verifying the pod has both ray-node and sidecar containers
+    3. Verifying sky exec commands run in the ray-node container
+    4. Verifying the sidecar container is running
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_sidecar.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(task_yaml_content)
+        f.flush()
+        task_yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_sidecar',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch SkyPilot cluster with sidecar
+                f'sky launch -y -c {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Verify pod has 2 containers (ray-node and sidecar)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l skypilot-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[*].name}\' | '
+                    'grep -E "ray-node.*sidecar|sidecar.*ray-node"'),
+                # Verify sky exec runs in ray-node container
+                f'sky exec {name} "echo CONTAINER_CHECK: ray-node is working"',
+                # Verify sidecar is running
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl logs -l skypilot-cluster-name={name_on_cloud} '
+                    '-c sidecar --tail=5 | grep "sidecar running"'),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_path)
+
+
 # ---------- Testing Kubernetes set_pod_resource_limits ----------
 @pytest.mark.kubernetes
 def test_kubernetes_set_pod_resource_limits():
