@@ -14,6 +14,9 @@ import psutil
 # Environment variable to enable kill_pg in subprocess daemon.
 USE_KILL_PG_ENV_VAR = 'SKYPILOT_SUBPROCESS_DAEMON_KILL_PG'
 
+# Platform detection
+IS_WINDOWS = sys.platform == 'win32'
+
 
 def daemonize():
     """Detaches the process from its parent process with double-forking.
@@ -25,7 +28,17 @@ def daemonize():
     process, ray::task or the cancel request for jobs, which is launched with
     Ray job. Daemonization ensures this process survives the 'sky cancel'
     command, allowing it to prevent orphaned processes of Ray job.
+
+    On Windows, this function does nothing as os.fork() and os.setsid() are
+    not available. The caller should use alternative methods like
+    subprocess.CREATE_NEW_PROCESS_GROUP for process detachment on Windows.
     """
+    if IS_WINDOWS:
+        # On Windows, we can't use fork-based daemonization.
+        # The process should be started with CREATE_NEW_PROCESS_GROUP flag
+        # by the caller instead.
+        return
+
     # First fork: Creates a child process identical to the parent
     if os.fork() > 0:
         # Parent process exits, allowing the child to run independently
@@ -44,7 +57,13 @@ def daemonize():
 
 
 def get_pgid_if_leader(pid) -> Optional[int]:
-    """Get the process group ID of the target process if it is the leader."""
+    """Get the process group ID of the target process if it is the leader.
+
+    On Windows, this always returns None as process groups work differently.
+    """
+    if IS_WINDOWS:
+        # Process groups are not used the same way on Windows
+        return None
     try:
         pgid = os.getpgid(pid)
         # Only use process group if the target process is the leader. This is
@@ -60,7 +79,12 @@ def get_pgid_if_leader(pid) -> Optional[int]:
 
 
 def kill_process_group(pgid: int) -> bool:
-    """Kill the target process group."""
+    """Kill the target process group.
+
+    On Windows, this returns False as os.killpg is not available.
+    """
+    if IS_WINDOWS:
+        return False
     try:
         print(f'Terminating process group {pgid}...')
         os.killpg(pgid, signal.SIGTERM)

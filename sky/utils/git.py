@@ -11,6 +11,7 @@ import requests
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.utils import compat
 
 logger = sky_logging.init_logger(__name__)
 
@@ -290,9 +291,10 @@ class GitRepo:
 
                 if ssh_key_info:
                     key_path, key_content = ssh_key_info
+                    null_device = compat.get_null_device()
                     git_ssh_command = f'ssh -F none -i {key_path} ' \
                         '-o StrictHostKeyChecking=no ' \
-                        '-o UserKnownHostsFile=/dev/null ' \
+                        f'-o UserKnownHostsFile={null_device} ' \
                         '-o IdentitiesOnly=yes'
                     ssh_env = {'GIT_SSH_COMMAND': git_ssh_command}
 

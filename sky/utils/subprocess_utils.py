@@ -3,11 +3,9 @@ import multiprocessing
 from multiprocessing import pool
 import os
 import random
-import resource
 import shlex
 import subprocess
 import sys
-import termios
 import threading
 import time
 import typing
@@ -22,8 +20,17 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import log_lib
 from sky.skylet import subprocess_daemon
 from sky.utils import common_utils
+from sky.utils import compat
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+# Platform-specific imports
+if not compat.IS_WINDOWS:
+    import resource
+    import termios
+else:
+    resource = None  # type: ignore
+    termios = None  # type: ignore
 
 if typing.TYPE_CHECKING:
     import psutil
@@ -42,8 +49,12 @@ def run(cmd, **kwargs):
     # rid of this problem, use `log_lib.run_with_log`.
     shell = kwargs.pop('shell', True)
     check = kwargs.pop('check', True)
-    executable = kwargs.pop('executable', '/bin/bash')
+    executable = kwargs.pop('executable', compat.get_shell())
     if not shell:
+        executable = None
+    elif compat.IS_WINDOWS and not compat.has_bash():
+        # On Windows without bash, shell=True uses cmd.exe by default
+        # which is what we want, so set executable to None
         executable = None
     return subprocess.run(cmd,
                           shell=shell,
@@ -69,7 +80,14 @@ def _get_thread_multiplier(cloud_str: Optional[str] = None) -> int:
 def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
                                     cloud_str: Optional[str] = None) -> int:
     global _fd_limit_warning_shown
-    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    # Get file descriptor limit in a cross-platform way
+    fd_limit_result = compat.get_resource_limit('nofile')
+    if fd_limit_result is not None:
+        fd_limit, _ = fd_limit_result
+    else:
+        # Default for platforms without resource limits (e.g., Windows)
+        fd_limit = 8192
 
     # Raise warning for low fd_limit (only once)
     if fd_limit < 1024 and not _fd_limit_warning_shown:
@@ -280,7 +298,7 @@ def run_with_retries(
     retry_cnt = 0
     while True:
         returncode, stdout, stderr = log_lib.run_with_log(cmd,
-                                                          '/dev/null',
+                                                          os.devnull,
                                                           require_outputs=True,
                                                           shell=True)
         if retry_cnt < max_retry:
@@ -364,7 +382,7 @@ def kill_process_daemon(process_pid: int, use_kill_pg: bool = False) -> None:
     )
 
 
-def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
+def launch_new_process_tree(cmd: str, log_output: Optional[str] = None) -> int:
     """Launch a new process that will not be a child of the current process.
 
     This will launch bash in a new session, which will launch the given cmd.
@@ -372,8 +390,40 @@ def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
     will not be an ancestor of the current process. This is useful for job
     launching.
 
+    Args:
+        cmd: The command to run.
+        log_output: The log output file. If None, defaults to os.devnull.
+
     Returns the pid of the launched cmd.
     """
+    if log_output is None:
+        log_output = os.devnull
+
+    if compat.IS_WINDOWS:
+        # On Windows, we use a different approach since nohup and & are not
+        # available. We use subprocess.Popen with CREATE_NEW_PROCESS_GROUP
+        # and DETACHED_PROCESS flags.
+        import subprocess
+
+        # Windows-specific creation flags
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        DETACHED_PROCESS = 0x00000008
+
+        # Wrap command to run through shell
+        shell_cmd = ['cmd', '/c', cmd
+                    ] if not compat.has_bash() else ['bash', '-c', cmd]
+
+        with open(log_output, 'w') as log_file:
+            proc = subprocess.Popen(
+                shell_cmd,
+                stdout=log_file,
+                stderr=log_file,
+                stdin=subprocess.DEVNULL,
+                creationflags=CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS,
+            )
+        return proc.pid
+
+    # Unix implementation using nohup
     # Use nohup to ensure the job driver process is a separate process tree,
     # instead of being a child of the current process. This is important to
     # avoid a chain of driver processes (job driver can call schedule_step() to
@@ -387,7 +437,7 @@ def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
     # in charge of starting these driver processes, instead of starting them in
     # the current process.
     wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
-                   f'</dev/null >{log_output} 2>&1 & echo $!')
+                   f'<{os.devnull} >{log_output} 2>&1 & echo $!')
     proc = subprocess.run(wrapped_cmd,
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
@@ -459,7 +509,13 @@ def is_echo_disabled(fd: int) -> bool:
     When a subprocess wants password/sensitive input, it disables ECHO.
     This is how pexpect's waitnoecho() works. See:
     https://pexpect.readthedocs.io/en/stable/api/pexpect.html#pexpect.spawn.waitnoecho
+
+    On Windows, this always returns False as termios is not available.
     """
+    if compat.IS_WINDOWS or termios is None:
+        # On Windows, we cannot check ECHO status using termios
+        return False
+
     assert os.isatty(fd), 'fd is not connected to a terminal'
     try:
         attr = termios.tcgetattr(fd)

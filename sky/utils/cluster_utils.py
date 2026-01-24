@@ -11,6 +11,7 @@ import uuid
 from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import compat
 from sky.utils import lock_events
 
 # The cluster yaml used to create the current cluster where the module is
@@ -61,14 +62,15 @@ class SSHConfigHelper(object):
         else:
             proxy = ''
         # StrictHostKeyChecking=no skips the host key check for the first
-        # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
-        # prevent the host key from being added to the known_hosts file and
-        # always return an empty file for known hosts, making the ssh think
+        # time. UserKnownHostsFile and GlobalKnownHostsFile set to the null
+        # device prevent the host key from being added to the known_hosts file
+        # and always return an empty file for known hosts, making the ssh think
         # this is a first-time connection, and thus skipping the host key
         # check.
         # Not adding SSH agent forwarding by default here to avoid implicitly
         # using users' SSH keys in their local agent. Plus on sky launch side we
         # are not default adding SSH agent forwarding either.
+        null_device = compat.get_null_device()
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -77,8 +79,8 @@ class SSHConfigHelper(object):
               IdentityFile {ssh_key_path}
               IdentitiesOnly yes
               StrictHostKeyChecking no
-              UserKnownHostsFile=/dev/null
-              GlobalKnownHostsFile=/dev/null
+              UserKnownHostsFile={null_device}
+              GlobalKnownHostsFile={null_device}
               Port {port}
               SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}={cluster_name_on_cloud}
               {proxy}

@@ -126,7 +126,7 @@ def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
                           end='',
                           file=out_stream,
                           flush=True)
-                if args.log_path != '/dev/null':
+                if args.log_path != os.devnull:
                     fout.write(line)
                     fout.flush()
                 line_processor.process_line(line)

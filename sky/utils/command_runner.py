@@ -1,17 +1,14 @@
 """Runner for commands to be executed on the cluster."""
 import enum
-import fcntl
 import hashlib
 import os
 import pathlib
-import pty
 import re
 import shlex
 import signal
 import socket
 import sys
 import tempfile
-import termios
 import threading
 import time
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
@@ -26,6 +23,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import auth_utils
 from sky.utils import common_utils
+from sky.utils import compat
 from sky.utils import context_utils
 from sky.utils import control_master_utils
 from sky.utils import env_options
@@ -33,6 +31,16 @@ from sky.utils import git as git_utils
 from sky.utils import interactive_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+
+# Platform-specific imports
+if not compat.IS_WINDOWS:
+    import fcntl
+    import pty
+    import termios
+else:
+    fcntl = None  # type: ignore
+    pty = None  # type: ignore
+    termios = None  # type: ignore
 
 logger = sky_logging.init_logger(__name__)
 
@@ -85,7 +93,10 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     user_hash = common_utils.get_user_hash()
-    path = f'/tmp/skypilot_ssh_{user_hash}/{ssh_control_filename}'
+    # Use platform-independent temp directory
+    temp_dir = compat.get_temp_dir()
+    path = os.path.join(temp_dir, f'skypilot_ssh_{user_hash}',
+                        ssh_control_filename)
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -186,12 +197,12 @@ def _proxyjump_to_proxycommand(proxy_jump: str,
         cmd += ['-l', user]
     if port is not None:
         cmd += ['-p', str(port)]
-    # Redirect stderr to /dev/null to avoid hanging.
+    # Redirect stderr to null device to avoid hanging.
     # The ProxyCommand inherits the parent ssh's stderr pipe.
     # Without this, the tunnel might hold the pipe open, causing
     # log_lib.process_subprocess_stream() to hang waiting for stderr EOF.
     # Anyways only stdin and stdout is used for -W host:port.
-    cmd += ['-W', '\'[%h]:%p\'', host, '2>/dev/null']
+    cmd += ['-W', '\'[%h]:%p\'', host, f'2>{os.devnull}']
 
     return ' '.join(cmd)
 
@@ -366,11 +377,18 @@ class CommandRunner:
         use_login: bool = True,
         run_in_background: bool = False,
     ) -> str:
-        """Returns the command to run."""
+        """Returns the command to run.
+
+        Note: This method is primarily used for remote SSH commands which always
+        run on Unix systems (Linux VMs). The bash commands are intentionally
+        kept as-is since they execute on the remote Unix host, not locally.
+        """
         if isinstance(cmd, list):
             cmd = ' '.join(cmd)
 
         # We need this to correctly run the cmd, and get the output.
+        # Note: These commands run on the remote Unix system via SSH,
+        # so we use /bin/bash regardless of the local platform.
         command = [
             '/bin/bash',
             '--login',
@@ -948,7 +966,22 @@ class SSHCommandRunner(CommandRunner):
         normal stdout/stderr pipes, which gets printed to log_path.
 
         See ssh_options_list for when ControlMaster is not enabled.
+
+        Note: This feature requires PTY and Unix sockets, which are not
+        available on Windows. On Windows, an error will be raised.
         """
+        # Check platform compatibility for PTY-based interactive auth
+        if compat.IS_WINDOWS or pty is None:
+            raise exceptions.CommandError(
+                returncode=1,
+                command=' '.join(command),
+                error_msg=(
+                    'Interactive SSH authentication (2FA/keyboard-interactive) '
+                    'requires PTY support which is not available on Windows. '
+                    'Please use SSH key-based authentication or run from a '
+                    'Unix-like environment (Linux, macOS, or WSL).'),
+                stderr='')
+
         with _INTERACTIVE_AUTH_LOCK:
             extra_options = [
                 # Override ControlPersist to reduce frequency of manual user
@@ -1025,13 +1058,18 @@ class SSHCommandRunner(CommandRunner):
                     # Set PTY as controlling terminal so SSH can access /dev/tty
                     # for keyboard-interactive auth. Without this:
                     # "can't open /dev/tty: Device not configured"
+                    # Note: This code only runs on Unix systems (checked above).
                     fcntl.ioctl(pty_s_fd, termios.TIOCSCTTY, 0)
                     # Ignore SIGHUP so ControlMaster survives when PTY closes.
-                    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+                    sighup = compat.get_sighup()
+                    if sighup is not None:
+                        signal.signal(sighup, signal.SIG_IGN)
                     # Ignore SIGTERM so ControlMaster survives subprocess_daemon
                     # killing the process group.
                     if self._ssh_proxy_jump is not None:
-                        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+                        sigterm = compat.get_sigterm()
+                        if sigterm is not None:
+                            signal.signal(sigterm, signal.SIG_IGN)
 
                 return log_lib.run_with_log(' '.join(command),
                                             log_path,
@@ -1065,7 +1103,7 @@ class SSHCommandRunner(CommandRunner):
                 # Suppress the `Exit request sent.` output for this command
                 # which would interrupt the CLI spinner.
                 cmd = (f'ssh -O exit -S {control_path}/%C '
-                       f'{self.ssh_user}@{self.ip} > /dev/null 2>&1')
+                       f'{self.ssh_user}@{self.ip} {compat.redirect_to_null()}')
                 logger.debug(f'Closing cached connection {control_path!r} with '
                              f'cmd: {cmd}')
                 log_lib.run_with_log(cmd,
@@ -1718,7 +1756,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap \
             f.write(script_content)
             rsh_script_path = f.name
         try:
-            os.chmod(rsh_script_path, 0o755)
+            compat.set_file_executable(rsh_script_path)
             self._rsync(source,
                         target,
                         node_destination=encoded_info,
