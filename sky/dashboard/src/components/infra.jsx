@@ -799,12 +799,12 @@ export function ContextDetails({
                         node.memory_gb !== null &&
                         node.memory_gb !== undefined
                       ) {
-                        const memoryTotal = node.memory_gb.toFixed(1);
+                        const memoryTotal = Math.round(node.memory_gb);
                         if (
                           node.memory_free_gb !== null &&
                           node.memory_free_gb !== undefined
                         ) {
-                          const memoryFree = node.memory_free_gb.toFixed(1);
+                          const memoryFree = Math.round(node.memory_free_gb);
                           memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
                         } else {
                           memoryDisplay = memoryTotal;
