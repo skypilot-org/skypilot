@@ -1993,6 +1993,45 @@ def test_kubernetes_pod_failure_detection():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
+def test_kubernetes_container_status_unknown_status_refresh():
+    """Test sky status --refresh handles evicted pods without crashing.
+
+    When pods are evicted due to ephemeral storage limits, containers may enter
+    ContainerStatusUnknown state with terminated.finishedAt=null. This test
+    verifies that SkyPilot handles evicted pods without erroring.
+
+    Note: This test is inherently flaky, it may succeed even before the fix.
+    Triggering ContainerStatusUnknown (where finishedAt is null) requires the kubelet
+    to lose contact with the container runtime during eviction, which is racy. The pod
+    may instead get a clean termination with finishedAt set.
+
+    Regression test for #8674.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_container_status_unknown_status_refresh',
+        [
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
+            # Poll sky status --refresh, fail fast if error found.
+            # Before the fix this logged: "Failed to query ... [TypeError]..."
+            (f'for i in $(seq 1 20); do '
+             f'echo "=== status refresh attempt $i ===" && '
+             f'OUT=$(sky status {name} -v --refresh 2>&1) && '
+             f'echo "$OUT" && '
+             f'if echo "$OUT" | grep -q "TypeError"; then '
+             f'echo "FAIL: TypeError found" && exit 1; fi && '
+             f'if echo "$OUT" | grep -q "Failed to refresh status"; then '
+             f'echo "FAIL: Refresh failed" && exit 1; fi; done'),
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_pod_pending_reason():
     """Ensure pending pod reasons are surfaced in provision logs."""
     name = smoke_tests_utils.get_cluster_name()
