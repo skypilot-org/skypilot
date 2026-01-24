@@ -73,18 +73,19 @@ tests:
           value: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
 
 
-  - it: should replace original image registries when global registry override is set
+  - it: should NOT replace images that already have an explicit registry
     set:
       global.imageRegistry: registry.example.com/custom
       apiService.image: gcr.io/skypilot-dev/sky:dev
       apiService.logs.retention.enabled: true
     asserts:
+      # Images with explicit registry (gcr.io) should NOT be modified
       - equal:
           path: spec.template.spec.containers[0].image
-          value: registry.example.com/custom/skypilot-dev/sky:dev
+          value: gcr.io/skypilot-dev/sky:dev
       - equal:
           path: spec.template.spec.containers[1].image
-          value: registry.example.com/custom/skypilot-dev/sky:dev
+          value: gcr.io/skypilot-dev/sky:dev
 
   - it: should inject global extra envs into api containers and init containers
     set:

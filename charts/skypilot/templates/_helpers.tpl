@@ -35,6 +35,8 @@
 
 {{/*
 Resolve the image name, overriding the registry when global.imageRegistry is set.
+Only applies to Docker Hub images (those without an explicit registry prefix).
+Images from other registries (quay.io, gcr.io, etc.) are returned unchanged.
 Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag") }}
 */}}
 {{- define "common.image" -}}
@@ -43,13 +45,18 @@ Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag") }}
 {{- if $registry -}}
   {{- $imagePath := trimPrefix "/" $image -}}
   {{- $parts := splitList "/" $imagePath -}}
+  {{- $hasExplicitRegistry := false -}}
   {{- if gt (len $parts) 1 -}}
     {{- $first := index $parts 0 -}}
     {{- if or (contains "." $first) (contains ":" $first) (eq $first "localhost") -}}
-      {{- $imagePath = join "/" (slice $parts 1) -}}
+      {{- $hasExplicitRegistry = true -}}
     {{- end -}}
   {{- end -}}
-  {{- printf "%s/%s" (trimSuffix "/" $registry) $imagePath -}}
+  {{- if $hasExplicitRegistry -}}
+    {{- $image -}}
+  {{- else -}}
+    {{- printf "%s/%s" (trimSuffix "/" $registry) $imagePath -}}
+  {{- end -}}
 {{- else -}}
   {{- $image -}}
 {{- end -}}

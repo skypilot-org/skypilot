@@ -324,6 +324,28 @@ tests:
         template: templates/oauth2-proxy-redis.yaml
         documentIndex: 0
 
+  - it: should NOT replace oauth2-proxy images that already have an explicit registry
+    set:
+      global.imageRegistry: harbor.example.com/docker-hub-proxy
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      # Use default images which have explicit registries (quay.io)
+      # These should NOT be replaced by global.imageRegistry
+    asserts:
+      # oauth2-proxy image from quay.io should NOT be modified
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: quay.io/oauth2-proxy/oauth2-proxy:v7.9.0
+        template: templates/oauth2-proxy-deployment.yaml
+      # redis image (no explicit registry, Docker Hub) SHOULD be prefixed
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: harbor.example.com/docker-hub-proxy/redis:7-alpine
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+
   - it: should not create oauth2-proxy ingress when using new auth config
     set:
       auth.oauth.enabled: true
