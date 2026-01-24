@@ -5,6 +5,7 @@ Tests verify correct GPU detection from Kubernetes labels.
 import pytest
 
 from sky.provision.kubernetes import constants as kubernetes_constants
+from sky.provision.kubernetes.utils import _accelerator_name_matches
 from sky.provision.kubernetes.utils import GFDLabelFormatter
 
 
@@ -270,3 +271,71 @@ def test_gfd_label_formatter():
     for input_value, expected in test_cases:
         result = GFDLabelFormatter.get_accelerator_from_label_value(input_value)
         assert result == expected, f'Failed for {input_value}'
+
+
+class TestAcceleratorNameMatches:
+    """Tests for backward-compatible accelerator name matching.
+
+    These tests ensure that clusters launched with old fallback GPU names
+    (e.g., H200-XBM-80GB) continue to work after upgrading to versions
+    that use canonical names (e.g., H200).
+    """
+
+    def test_exact_match(self):
+        """Test exact accelerator name matching."""
+        assert _accelerator_name_matches('H200', ['h200'])
+        assert _accelerator_name_matches('H100', ['h100'])
+        assert _accelerator_name_matches('A100-80GB', ['a100-80gb'])
+        assert not _accelerator_name_matches('H200', ['h100'])
+
+    def test_backward_compat_canonical_to_fallback(self):
+        """Test matching canonical name against fallback name.
+
+        Scenario: Cluster launched with fallback name 'H200-XBM-80GB',
+        after upgrade the label maps to canonical 'H200'. The stored
+        launched_resources has 'H200-XBM-80GB', viable list has ['h200'].
+        """
+        # Old acc_type (H200-XBM-80GB) should match new canonical (h200)
+        assert _accelerator_name_matches('H200-XBM-80GB', ['h200'])
+        assert _accelerator_name_matches('H200-XBM-80GB',
+                                         ['nvidia-h200-xbm-80gb', 'h200'])
+        assert _accelerator_name_matches('H100-PCIE-80GB', ['h100'])
+        assert _accelerator_name_matches('L40S-48GB', ['l40s'])
+
+    def test_forward_compat_fallback_to_canonical(self):
+        """Test matching fallback name against canonical name.
+
+        Scenario: User specifies canonical 'H200' but old API server returns
+        fallback 'H200-XBM-80GB' from get_accelerator_from_label_value.
+        """
+        # New acc_type (H200) should match old fallback (h200-xbm-80gb)
+        assert _accelerator_name_matches('H200', ['h200-xbm-80gb'])
+        assert _accelerator_name_matches('H200',
+                                         ['nvidia-h200-xbm-80gb', 'h200-xbm-80gb'])
+        assert _accelerator_name_matches('H100', ['h100-pcie-80gb'])
+        assert _accelerator_name_matches('L40S', ['l40s-48gb'])
+
+    def test_no_false_positive_prefix(self):
+        """Test that partial prefixes don't match incorrectly."""
+        # H2 should not match H200 (no dash separator)
+        assert not _accelerator_name_matches('H2', ['h200'])
+        assert not _accelerator_name_matches('H20', ['h200'])
+        # L4 should not match L40 (different GPU)
+        assert not _accelerator_name_matches('L4', ['l40'])
+        assert not _accelerator_name_matches('L40', ['l4'])
+        # A10 should not match A100
+        assert not _accelerator_name_matches('A10', ['a100'])
+
+    def test_case_insensitive(self):
+        """Test case-insensitive matching."""
+        assert _accelerator_name_matches('H200', ['H200'])
+        assert _accelerator_name_matches('h200', ['H200'])
+        assert _accelerator_name_matches('H200-XBM-80GB', ['h200'])
+        assert _accelerator_name_matches('h200-xbm-80gb', ['H200'])
+
+    def test_multiple_viable_names(self):
+        """Test matching against multiple viable names."""
+        viable = ['nvidia-h200-xbm-80gb', 'h200']
+        assert _accelerator_name_matches('H200', viable)
+        assert _accelerator_name_matches('H200-XBM-80GB', viable)
+        assert not _accelerator_name_matches('H100', viable)

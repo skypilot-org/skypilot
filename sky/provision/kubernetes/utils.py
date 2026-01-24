@@ -715,6 +715,40 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
+def _accelerator_name_matches(requested_acc: str, viable_names: List[str]) -> bool:
+    """Check if requested accelerator matches any viable name.
+
+    For backward compatibility with GPU name changes (e.g., when canonical names
+    like 'H200' are added to replace fallback names like 'H200-XBM-80GB'), this
+    function also matches if one name is a prefix of the other separated by '-'.
+
+    This handles cases where:
+    - Clusters were launched with fallback names (e.g., 'H200-XBM-80GB') but
+      after upgrading, the same label now maps to canonical name (e.g., 'H200').
+    - Users specify canonical names but the cluster uses fallback names.
+
+    Args:
+        requested_acc: The accelerator type requested (e.g., from launched_resources).
+        viable_names: List of viable accelerator names from node labels.
+
+    Returns:
+        True if the requested accelerator matches any viable name.
+    """
+    requested_lower = requested_acc.lower()
+    for viable in viable_names:
+        if requested_lower == viable:
+            return True
+        # Check prefix match with '-' separator for backward compatibility.
+        # E.g., 'H200' matches 'H200-XBM-80GB' and vice versa.
+        shorter, longer = ((requested_lower, viable) if len(requested_lower) <=
+                           len(viable) else (viable, requested_lower))
+        if longer.startswith(shorter):
+            # Ensure it's a proper prefix (followed by '-' or end of string)
+            if len(longer) == len(shorter) or longer[len(shorter)] == '-':
+                return True
+    return False
+
+
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     """Karpeneter label formatter
     Karpenter uses the label `karpenter.k8s.aws/instance-gpu-name` to identify
@@ -1801,11 +1835,13 @@ def get_accelerator_label_key_values(
                     continue
                 for label, value in label_list:
                     if label_formatter.match_label_key(label):
-                        # match either canonicalized name or raw name
+                        # Match either canonicalized name or raw name.
+                        # Use _accelerator_name_matches for backward compatibility
+                        # with GPU name changes (e.g., H200-XBM-80GB -> H200).
                         accelerator = (label_formatter.
                                        get_accelerator_from_label_value(value))
                         viable = [value.lower(), accelerator.lower()]
-                        if acc_type.lower() not in viable:
+                        if not _accelerator_name_matches(acc_type, viable):
                             continue
                         if is_tpu_on_gke(acc_type):
                             assert isinstance(label_formatter,
