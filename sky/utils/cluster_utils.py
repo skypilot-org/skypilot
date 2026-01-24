@@ -15,7 +15,6 @@ from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import lock_events
-from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -58,6 +57,28 @@ def _convert_wsl_path_to_windows(wsl_path: str) -> str:
     return wsl_path
 
 
+def _get_windows_userprofile_via_cmd() -> Optional[str]:
+    """Query Windows USERPROFILE via cmd.exe.
+
+    Returns:
+        The USERPROFILE path as a string, or None if not available.
+    """
+    try:
+        result = subprocess.run(
+            ['cmd.exe', '/c', 'echo', '%USERPROFILE%'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            userprofile = result.stdout.strip()
+            if userprofile and userprofile != '%USERPROFILE%':
+                return userprofile
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return None
+
+
 def get_wsl_windows_home() -> Optional[str]:
     """Get the Windows user's home directory path when running in WSL.
 
@@ -72,75 +93,18 @@ def get_wsl_windows_home() -> Optional[str]:
     if not common_utils.is_wsl():
         return None
 
-    windows_home = None
-
-    # Method 1: Check USERPROFILE environment variable
+    # Try environment variable first, then query Windows via cmd.exe
     userprofile = os.environ.get('USERPROFILE')
+    if not userprofile:
+        userprofile = _get_windows_userprofile_via_cmd()
+
     if userprofile:
         windows_home = _convert_windows_path_to_wsl(userprofile)
-
-    # Method 2: Query Windows via cmd.exe
-    if not windows_home or not os.path.isdir(windows_home):
-        try:
-            result = subprocess.run(
-                ['cmd.exe', '/c', 'echo', '%USERPROFILE%'],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                userprofile = result.stdout.strip()
-                if userprofile and userprofile != '%USERPROFILE%':
-                    windows_home = _convert_windows_path_to_wsl(userprofile)
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            pass
-
-    if windows_home and os.path.isdir(windows_home):
-        _wsl_windows_home_cached = windows_home
-        return _wsl_windows_home_cached
+        if os.path.isdir(windows_home):
+            _wsl_windows_home_cached = windows_home
+            return _wsl_windows_home_cached
 
     return None
-
-
-def _get_wsl_distro_name() -> str:
-    """Get the WSL distribution name.
-
-    Returns:
-        The WSL distribution name, defaults to 'Ubuntu' if not detected.
-    """
-    distro_name = os.environ.get('WSL_DISTRO_NAME')
-    if distro_name:
-        return distro_name
-
-    try:
-        with open('/etc/os-release', 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.startswith('NAME='):
-                    name = line.split('=')[1].strip().strip('"')
-                    return name.split()[0]
-    except (FileNotFoundError, PermissionError):
-        pass
-
-    return 'Ubuntu'
-
-
-def get_wsl_path_for_windows(wsl_path: str) -> Optional[str]:
-    """Convert a WSL path to a Windows-compatible UNC path.
-
-    Args:
-        wsl_path: A path in WSL (e.g., '/home/user/.sky/ssh-keys/cluster.key'
-            or '~/.sky/ssh-keys/cluster.key')
-
-    Returns:
-        A Windows UNC path (e.g., '//wsl$/Ubuntu/home/user/.sky/...')
-        or None if not in WSL.
-    """
-    if not common_utils.is_wsl():
-        return None
-
-    expanded_path = os.path.expanduser(wsl_path)
-    distro_name = _get_wsl_distro_name()
-    return f'//wsl$/{distro_name}{expanded_path}'
 
 
 def get_provider_name(config: dict) -> str:
@@ -160,7 +124,7 @@ def get_provider_name(config: dict) -> str:
     return provider_name
 
 
-class SSHConfigHelper(object):
+class SSHConfigHelper:
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
@@ -234,7 +198,7 @@ class SSHConfigHelper(object):
 
     @classmethod
     def _convert_proxy_command_for_windows(cls,
-                                           proxy_command: str) -> Optional[str]:
+                                           proxy_command: str) -> str:
         """Convert a WSL proxy command to Windows-compatible format.
 
         Wraps the proxy command with wsl.exe so Windows SSH can execute it.
@@ -244,14 +208,9 @@ class SSHConfigHelper(object):
             proxy_command: The original proxy command from WSL SSH config.
 
         Returns:
-            A Windows-compatible proxy command using wsl.exe, or None if
-            conversion is not possible.
+            A Windows-compatible proxy command using wsl.exe.
         """
-        if not proxy_command:
-            return None
-        # Escape double quotes for the shell
         escaped_command = proxy_command.replace('"', '\\"')
-        # Use wsl.exe to run the command inside WSL
         return f'wsl.exe bash -c "{escaped_command}"'
 
     @classmethod
@@ -264,20 +223,19 @@ class SSHConfigHelper(object):
         key_path: str,
         ports: List[int],
         proxy_command: Optional[str],
-        docker_user: Optional[str],
-        docker_proxy_command_generator,
+        uses_docker: bool,
     ) -> None:
         """Add cluster SSH config to Windows SSH config when running in WSL.
 
         This enables VSCode on Windows to connect to SkyPilot clusters
         launched from WSL without additional configuration.
 
-        Note: Clusters with docker proxy commands are skipped as they have
-        additional complexity. Regular proxy commands (e.g., for Kubernetes)
-        are converted to use wsl.exe wrapper.
+        Note: Clusters using Docker are skipped as they require complex proxy
+        commands. Regular proxy commands (e.g., for Kubernetes) are converted
+        to use wsl.exe wrapper.
         """
-        # Skip clusters with docker proxy commands (too complex to convert)
-        if docker_proxy_command_generator is not None:
+        # Skip clusters using Docker (proxy commands are too complex to convert)
+        if uses_docker:
             return
 
         windows_paths = cls._get_windows_ssh_paths()
@@ -291,8 +249,6 @@ class SSHConfigHelper(object):
         if proxy_command is not None:
             windows_proxy_command = cls._convert_proxy_command_for_windows(
                 proxy_command)
-            if windows_proxy_command is None:
-                return
 
         try:
             # Ensure Windows .ssh and .sky/ssh directories exist
@@ -329,9 +285,7 @@ class SSHConfigHelper(object):
             include_path = f'{_convert_wsl_path_to_windows(windows_sky_ssh_dir)}/*'
             include_str = f'Include {include_path}'
 
-            include_found = any(line.strip() == include_str
-                                for line in config
-                                if not line.strip().startswith('Host '))
+            include_found = any(include_str in line for line in config)
 
             if not include_found:
                 config.insert(
@@ -371,10 +325,8 @@ class SSHConfigHelper(object):
 
                 if not cls._windows_ssh_setup_warned:
                     cls._windows_ssh_setup_warned = True
-                    with ux_utils.print_exception_no_traceback():
-                        print(
-                            f'  WSL detected: SSH config also added to Windows '
-                            f'({windows_ssh_config}) for VSCode Remote-SSH.')
+                    print(f'  WSL detected: SSH config also added to Windows '
+                          f'({windows_ssh_config}) for VSCode Remote-SSH.')
 
         except (OSError, PermissionError) as e:
             # Silently ignore errors - Windows SSH config is optional
@@ -576,8 +528,7 @@ class SSHConfigHelper(object):
                 key_path=key_path_for_config,
                 ports=ports,
                 proxy_command=proxy_command,
-                docker_user=docker_user,
-                docker_proxy_command_generator=docker_proxy_command_generator,
+                uses_docker=docker_user is not None,
             )
 
     @classmethod
