@@ -144,17 +144,21 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '30'  # conditional plugin loading for jobs bwcompat
+SKYLET_VERSION = '32'  # new fields in jobs/managed jobs service for job groups
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 4  # add wait_for param to set_autostop
+SKYLET_LIB_VERSION = 5  # add wait_for param to set_autostop
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
 SKYLET_PORT_FILE = '.sky/skylet_port'
 SKYLET_GRPC_PORT = 46590
 SKYLET_GRPC_TIMEOUT_SECONDS = 10
+AUTOSTOP_HOOK_LOG_FILE = '.sky/autostop_hook.log'
+
+# Autostop hook timeout default (1 hour in seconds)
+DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS = 3600
 
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
@@ -230,7 +234,9 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    'fi;'
+    'fi;')
+
+UV_INSTALLATION_COMMANDS = (
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate python environment for SkyPilot dependencies.
@@ -248,7 +254,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
 
 _sky_version = str(version.parse(sky.__version__))
@@ -541,6 +547,11 @@ IS_SKYPILOT_SERVE_CONTROLLER = 'IS_SKYPILOT_SERVE_CONTROLLER'
 # Environment variable that is set to 'true' if rolling update strategy is
 # enabled for the API server deployment.
 SKYPILOT_ROLLING_UPDATE_ENABLED = 'SKYPILOT_ROLLING_UPDATE_ENABLED'
+# Environment variable that is set to 'true' if persistent storage is enabled
+# for the API server deployment (via Helm storage.enabled=true).
+# This enables persistence of managed job logs and file mounts across rolling
+# updates.
+SKYPILOT_API_SERVER_STORAGE_ENABLED = 'SKYPILOT_API_SERVER_STORAGE_ENABLED'
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES')
@@ -593,10 +604,26 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = ('^[0-9]+('
-                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
-                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
-                     ')?$')
+# Time units for seconds-based duration parsing (for termination_delay, etc.)
+# This includes 's' for seconds, which is not in TIME_UNITS (minutes-based).
+TIME_UNITS_SECONDS = {
+    's': 1,
+    'm': 60,
+    'h': 3600,
+    'd': 86400,
+    'w': 604800,
+}
+
+
+def _make_time_pattern(units: dict) -> str:
+    """Create a regex pattern for time duration strings."""
+    unit_pattern = '|'.join([unit.lower() for unit in units] +
+                            [unit.upper() for unit in units])
+    return f'^[0-9]+({unit_pattern})?$'
+
+
+TIME_PATTERN: str = _make_time_pattern(TIME_UNITS)
+TIME_PATTERN_SECONDS: str = _make_time_pattern(TIME_UNITS_SECONDS)
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,
@@ -620,6 +647,7 @@ MEMORY_SIZE_PATTERN = (
 
 LAST_USE_TRUNC_LENGTH = 25
 USED_BY_TRUNC_LENGTH = 25
+ERROR_MESSAGE_TRUNC_LENGTH = 60
 
 MIN_PRIORITY = -1000
 MAX_PRIORITY = 1000

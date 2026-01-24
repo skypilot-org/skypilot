@@ -44,6 +44,7 @@ from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
+from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
@@ -3852,20 +3853,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     for task_id, task in enumerate(managed_job_dag.tasks):
                         resources_str = backend_utils.get_task_resources_str(
                             task, is_managed_job=True)
-                        managed_job_tasks.append(
-                            jobsv1_pb2.ManagedJobTask(
-                                task_id=task_id,
-                                name=task.name,
-                                resources_str=resources_str,
-                                metadata_json=task.metadata_json))
+                        managed_job_task = jobsv1_pb2.ManagedJobTask(
+                            task_id=task_id,
+                            name=task.name,
+                            resources_str=resources_str,
+                            metadata_json=task.metadata_json)
+                        # Only set is_primary_in_job_group for job groups
+                        if managed_job_dag.is_job_group():
+                            # If primary_task_names is None, all tasks are
+                            # primary
+                            managed_job_task.is_primary_in_job_group = (
+                                managed_job_dag.primary_tasks is None or
+                                task.name in managed_job_dag.primary_tasks)
+                        managed_job_tasks.append(managed_job_task)
 
+                    # Execution mode: 'parallel' for job groups, 'serial' for
+                    # pipelines and single jobs
+                    execution = (managed_job_dag.execution.value
+                                 if managed_job_dag.execution else
+                                 DEFAULT_EXECUTION.value)
                     managed_job_info = jobsv1_pb2.ManagedJobInfo(
                         name=managed_job_dag.name,
                         pool=managed_job_dag.pool,
                         workspace=workspace,
                         entrypoint=entrypoint,
                         tasks=managed_job_tasks,
-                        user_id=managed_job_user_id)
+                        user_id=managed_job_user_id,
+                        execution=execution)
 
                 if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
@@ -4457,18 +4471,67 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             final = e.code
         return final
 
+    def tail_autostop_logs(self,
+                           handle: CloudVmRayResourceHandle,
+                           follow: bool = True,
+                           tail: int = 0) -> int:
+        """Tail the autostop hook logs.
+
+        Args:
+            handle: The handle to the cluster.
+            follow: Whether to follow the logs.
+            tail: The number of lines to display from the end of the
+                log file. If 0, print all lines.
+
+        Returns:
+            The exit code of the tail command.
+        """
+        # Construct tail command for the autostop hook log
+        log_path = f'~/{constants.AUTOSTOP_HOOK_LOG_FILE}'
+        tail_cmd_parts = ['tail']
+        if tail > 0:
+            tail_cmd_parts.extend(['-n', str(tail)])
+        if follow:
+            tail_cmd_parts.append('-f')
+        tail_cmd_parts.append(log_path)
+
+        # Add fallback to show helpful message if file doesn't exist
+        tail_cmd = ' '.join(tail_cmd_parts)
+        error_msg = (f'Autostop hook log file not found at {log_path}. '
+                     f'The autostop hook may not have been executed yet.')
+        cmd = (f'if [ -f {log_path} ]; then {tail_cmd}; '
+               f'else echo "{error_msg}"; exit 1; fi')
+
+        # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+        # kill the process, so we need to handle it manually here.
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+            signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        try:
+            returncode = self.run_on_head(
+                handle,
+                cmd,
+                stream_logs=True,
+                # Allocate a pseudo-terminal to disable output buffering.
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+            )
+        except SystemExit as e:
+            returncode = e.code
+        return returncode
+
     def tail_managed_job_logs(self,
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
                               controller: bool = False,
                               follow: bool = True,
-                              tail: Optional[int] = None) -> int:
+                              tail: Optional[int] = None,
+                              task: Optional[Union[str, int]] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail)
+            job_name, job_id, follow, controller, tail, task)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -5144,7 +5207,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      idle_minutes_to_autostop: Optional[int],
                      wait_for: Optional[autostop_lib.AutostopWaitFor],
                      down: bool = False,
-                     stream_logs: bool = True) -> None:
+                     stream_logs: bool = True,
+                     hook: Optional[str] = None,
+                     hook_timeout: Optional[int] = None) -> None:
         # The core.autostop() function should have already checked that the
         # cloud and resources support requested autostop.
         if idle_minutes_to_autostop is not None:
@@ -5197,11 +5262,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     autostopv1_pb2.AUTOSTOP_WAIT_FOR_UNSPECIFIED,
                     down=down,
                 )
+                if hook:
+                    request.hook = hook
+                if hook_timeout is not None:
+                    request.hook_timeout = hook_timeout
+
                 backend_utils.invoke_skylet_with_retries(lambda: SkyletClient(
                     handle.get_grpc_channel()).set_autostop(request))
             else:
                 code = autostop_lib.AutostopCodeGen.set_autostop(
-                    idle_minutes_to_autostop, self.NAME, wait_for, down)
+                    idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
+                    hook_timeout)
                 returncode, _, stderr = self.run_on_head(
                     handle, code, require_outputs=True, stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
@@ -5233,13 +5304,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # The head node of the cluster is not UP or in an abnormal state.
             # We cannot check if the cluster is autostopping.
             return False
+
+        is_autostopping = False
+
         if handle.is_grpc_enabled_with_flag:
             try:
                 request = autostopv1_pb2.IsAutostoppingRequest()
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).is_autostopping(request))
-                return response.is_autostopping
+                is_autostopping = response.is_autostopping
             except Exception as e:  # pylint: disable=broad-except
                 # The cluster may have been terminated, causing the gRPC call
                 # to timeout and fail.
@@ -5250,11 +5324,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             returncode, stdout, stderr = self.run_on_head(
                 handle, code, require_outputs=True, stream_logs=stream_logs)
             if returncode == 0:
-                return message_utils.decode_payload(stdout)
-            logger.debug('Failed to check if cluster is autostopping with '
-                         f'{returncode}: {stdout+stderr}\n'
-                         f'Command: {code}')
-            return False
+                is_autostopping = message_utils.decode_payload(stdout)
+            else:
+                logger.debug('Failed to check if cluster is autostopping with '
+                             f'{returncode}: {stdout+stderr}\n'
+                             f'Command: {code}')
+                return False
+
+        return is_autostopping
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.

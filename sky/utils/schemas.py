@@ -70,6 +70,13 @@ _AUTOSTOP_SCHEMA = {
                     'type': 'string',
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
+                },
+                'hook': {
+                    'type': 'string',
+                },
+                'hook_timeout': {
+                    'type': 'integer',
+                    'minimum': 1,
                 }
             },
         },
@@ -337,7 +344,10 @@ def _get_single_resources_schema():
                     },
                     'tpu_vm': {
                         'type': 'boolean',
-                    }
+                    },
+                    'gcp_queued_resource': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {
@@ -1182,7 +1192,19 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'items': {
             'type': 'string'
         },
-    }
+    },
+    'set_pod_resource_limits': {
+        # Can be:
+        # - false: do not set limits (default)
+        # - true: set limits equal to requests (multiplier of 1)
+        # - number: set limits to requests * multiplier
+        'oneOf': [{
+            'type': 'boolean',
+        }, {
+            'type': 'number',
+            'minimum': 1,
+        }],
+    },
 }
 
 
@@ -1840,6 +1862,9 @@ def get_config_schema():
             'ssh_timeout': {
                 'type': 'integer',
                 'minimum': 1,
+            },
+            'install_conda': {
+                'type': 'boolean',
             },
         }
     }

@@ -210,7 +210,7 @@ class DagRequestBody(RequestBody):
 
         kwargs = super().to_kwargs()
 
-        dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
+        dag = dag_utils.load_dag_from_yaml_str(self.dag)
         # We should not validate the dag here, as the file mounts are not
         # processed yet, but we need to validate the resources during the
         # optimization to make sure the resources are available.
@@ -346,6 +346,8 @@ class AutostopBody(RequestBody):
     idle_minutes: int
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
 
 class QueueBody(RequestBody):
@@ -376,6 +378,13 @@ class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
     worker: Optional[int] = None
+
+
+class AutostopLogsBody(RequestBody):
+    """Autostop logs request body."""
+    cluster_name: str
+    follow: bool = True
+    tail: int = 0
 
 
 class ClusterJobBody(RequestBody):
@@ -487,7 +496,7 @@ class VolumeDeleteBody(RequestBody):
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
-    pass
+    refresh: bool = False
 
 
 class VolumeValidateBody(RequestBody):
@@ -556,6 +565,9 @@ class JobsQueueV2Body(RequestBody):
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
     fields: Optional[List[str]] = None
+    # Sorting parameters, added in ManagedJobsService v14.
+    sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
+    sort_order: Optional[str] = None  # 'asc' or 'desc'
 
 
 class JobsCancelBody(RequestBody):
@@ -575,6 +587,8 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Task identifier: int for task_id, str for task_name
+    task: Optional[Union[str, int]] = None
 
 
 class RequestCancelBody(RequestBody):

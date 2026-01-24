@@ -125,6 +125,10 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('skylet_ssh_tunnel_metadata',
                       sqlalchemy.LargeBinary,
                       server_default=None),
+    # Infrastructure columns for efficient filtering
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -153,6 +157,10 @@ volume_table = sqlalchemy.Table(
     sqlalchemy.Column('last_use', sqlalchemy.Text),
     sqlalchemy.Column('status', sqlalchemy.Text),
     sqlalchemy.Column('is_ephemeral', sqlalchemy.Integer, server_default='0'),
+    sqlalchemy.Column('error_message', sqlalchemy.Text, server_default=None),
+    # JSON-encoded lists of pods/clusters using the volume
+    sqlalchemy.Column('usedby_pods', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('usedby_clusters', sqlalchemy.Text, server_default=None),
 )
 
 # Table for Cluster History
@@ -196,6 +204,10 @@ cluster_history_table = sqlalchemy.Table(
                       sqlalchemy.Integer,
                       server_default=None,
                       index=True),
+    # Infrastructure columns for efficient filtering
+    sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
+    sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
 )
 
 
@@ -365,7 +377,7 @@ def _init_db_async(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            await context_utils.to_thread(initialize_and_get_db_async)
+            await asyncio.to_thread(initialize_and_get_db_async)
 
         return await func(*args, **kwargs)
 
@@ -673,6 +685,17 @@ def add_or_update_cluster(cluster_name: str,
         status = status_lib.ClusterStatus.UP
     status_updated_at = int(time.time())
 
+    # Extract cloud/region/zone from launched_resources for efficient filtering
+    cloud = None
+    region = None
+    zone = None
+    if hasattr(cluster_handle, 'launched_resources'):
+        lr = cluster_handle.launched_resources
+        if lr is not None:
+            cloud = str(lr.cloud) if getattr(lr, 'cloud', None) else None
+            region = str(lr.region) if getattr(lr, 'region', None) else None
+            zone = str(lr.zone) if getattr(lr, 'zone', None) else None
+
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
     # It can be more inaccurate for the multi-node cluster
@@ -762,9 +785,13 @@ def add_or_update_cluster(cluster_name: str,
         if existing_cluster_hash is not None:
             count = session.query(cluster_table).filter_by(
                 name=cluster_name, cluster_hash=existing_cluster_hash).update({
-                    **conditional_values, cluster_table.c.handle: handle,
+                    **conditional_values,
+                    cluster_table.c.handle: handle,
                     cluster_table.c.status: status.value,
-                    cluster_table.c.status_updated_at: status_updated_at
+                    cluster_table.c.status_updated_at: status_updated_at,
+                    cluster_table.c.cloud: cloud,
+                    cluster_table.c.region: region,
+                    cluster_table.c.zone: zone,
                 })
             assert count <= 1
             if count == 0:
@@ -782,6 +809,9 @@ def add_or_update_cluster(cluster_name: str,
                 # set storage_mounts_metadata to server default (null)
                 status_updated_at=status_updated_at,
                 is_managed=int(is_managed),
+                cloud=cloud,
+                region=region,
+                zone=zone,
             )
             insert_or_update_stmt = insert_stmnt.on_conflict_do_update(
                 index_elements=[cluster_table.c.name],
@@ -795,6 +825,9 @@ def add_or_update_cluster(cluster_name: str,
                     # do not update storage_mounts_metadata
                     cluster_table.c.status_updated_at: status_updated_at,
                     # do not update user_hash
+                    cluster_table.c.cloud: cloud,
+                    cluster_table.c.region: region,
+                    cluster_table.c.zone: zone,
                 })
             session.execute(insert_or_update_stmt)
 
@@ -830,6 +863,9 @@ def add_or_update_cluster(cluster_name: str,
             provision_log_path=provision_log_path,
             last_activity_time=last_activity_time,
             launched_at=launched_at,
+            cloud=cloud,
+            region=region,
+            zone=zone,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -848,6 +884,9 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.provision_log_path: provision_log_path,
                 cluster_history_table.c.last_activity_time: last_activity_time,
                 cluster_history_table.c.launched_at: launched_at,
+                cluster_history_table.c.cloud: cloud,
+                cluster_history_table.c.region: region,
+                cluster_history_table.c.zone: zone,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1071,7 +1110,7 @@ def get_cluster_events(
     cluster_name: Optional[str],
     cluster_hash: Optional[str],
     event_type: ClusterEventType,
-    include_timestamps: Literal[False],
+    include_timestamps: Literal[False] = False,
     limit: Optional[int] = ...,
 ) -> List[str]:
     ...
@@ -2386,6 +2425,10 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
                 is_ephemeral=int(is_ephemeral)).all()
     records = []
     for row in rows:
+        # Decode JSON-encoded usedby fields
+        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
+        usedby_clusters = (json.loads(row.usedby_clusters)
+                           if row.usedby_clusters else [])
         records.append({
             'name': row.name,
             'launched_at': row.launched_at,
@@ -2396,6 +2439,9 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
             'is_ephemeral': bool(row.is_ephemeral),
+            'error_message': row.error_message,
+            'usedby_pods': usedby_pods,
+            'usedby_clusters': usedby_clusters,
         })
     return records
 
@@ -2407,6 +2453,10 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
+        # Decode JSON-encoded usedby fields
+        usedby_pods = json.loads(row.usedby_pods) if row.usedby_pods else []
+        usedby_clusters = (json.loads(row.usedby_clusters)
+                           if row.usedby_clusters else [])
         return {
             'name': row.name,
             'launched_at': row.launched_at,
@@ -2416,6 +2466,9 @@ def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
             'last_attached_at': row.last_attached_at,
             'last_use': row.last_use,
             'status': status_lib.VolumeStatus[row.status],
+            'error_message': row.error_message,
+            'usedby_pods': usedby_pods,
+            'usedby_clusters': usedby_clusters,
         }
     return None
 
@@ -2491,12 +2544,34 @@ def update_volume(name: str, last_attached_at: int,
 
 @_init_db
 @metrics_lib.time_me
-def update_volume_status(name: str, status: status_lib.VolumeStatus) -> None:
+def update_volume_status(name: str,
+                         status: status_lib.VolumeStatus,
+                         error_message: Optional[str] = None,
+                         usedby_pods: Optional[List[str]] = None,
+                         usedby_clusters: Optional[List[str]] = None) -> None:
+    """Update volume status and related fields.
+
+    Args:
+        name: Volume name.
+        status: New volume status.
+        error_message: Error message (None clears it).
+        usedby_pods: List of pods using the volume (None keeps existing value).
+        usedby_clusters: List of clusters using the volume (None keeps it).
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(volume_table).filter_by(name=name).update({
+        update_dict: Dict[str, Any] = {
             volume_table.c.status: status.value,
-        })
+        }
+        # Always update error_message (None clears it)
+        update_dict[volume_table.c.error_message] = error_message
+        # Update usedby fields if provided (encode as JSON)
+        if usedby_pods is not None:
+            update_dict[volume_table.c.usedby_pods] = json.dumps(usedby_pods)
+        if usedby_clusters is not None:
+            update_dict[volume_table.c.usedby_clusters] = json.dumps(
+                usedby_clusters)
+        session.query(volume_table).filter_by(name=name).update(update_dict)
         session.commit()
 
 

@@ -719,7 +719,6 @@ def test_get_request_id():
     mock_response = mock.MagicMock()
     mock_response.headers = {
         'X-Skypilot-Request-ID': 'test_request_id',
-        'X-Request-ID': 'test_request_id_2',
     }
     mock_response.status_code = 200
     mock_response.reason = 'OK'

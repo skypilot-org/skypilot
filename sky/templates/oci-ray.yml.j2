@@ -84,6 +84,7 @@ setup_commands:
     {%- endif %}
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
+    {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
     touch ~/.sudo_as_admin_successful;

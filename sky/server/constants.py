@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 27  # add slurm_cluster_name param to GPU availability API
+API_VERSION = 31  # add is_primary_in_job_group field for job groups
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -61,6 +61,10 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
+
+# Timeout for CLI authentication sessions (polling-based auth flow).
+# Used by both client (polling timeout) and server (session expiration).
+AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes
 
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'

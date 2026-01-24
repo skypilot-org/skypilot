@@ -139,7 +139,7 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 # Time that must elapse since the last status check before we should re-check if
 # the cluster has been terminated or autostopped.
-_CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
+CLUSTER_STATUS_CACHE_DURATION_SECONDS = 2
 
 CLUSTER_FILE_MOUNTS_LOCK_TIMEOUT_SECONDS = 10
 WORKSPACE_LOCK_TIMEOUT_SECONDS = 10
@@ -899,6 +899,9 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
+    install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
+                                               True)
+
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
@@ -989,9 +992,11 @@ def write_cluster_config(
                 # syntax.
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}',
-                        conda_auto_activate).replace('{is_custom_docker}',
-                                                     is_custom_docker),
+                        '{conda_auto_activate}', conda_auto_activate).replace(
+                            '{is_custom_docker}', is_custom_docker)
+                    if install_conda else '',
+                # UV setup
+                'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
                 # Currently only used by Slurm. For other clouds, it is
                 # already part of ray_skypilot_installation_commands
                 'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
@@ -2431,6 +2436,42 @@ def _update_cluster_status(
                          exc_info=e)
         return False
 
+    def _handle_autostopping_cluster(
+            print_newline: bool = False) -> Optional[Dict[str, Any]]:
+        """Handle cluster that is autostopping/autodowning.
+
+        Sets the cluster status to AUTOSTOPPING and returns the cluster record.
+
+        Args:
+            print_newline: Whether to print a newline before logging (for UX).
+
+        Returns:
+            Cluster record if autostopping, None otherwise.
+        """
+        # The cluster is autostopping - set to AUTOSTOPPING status
+        if print_newline:
+            ux_utils.console_newline()
+        operation_str = 'autodowning' if record.get('to_down',
+                                                    False) else 'autostopping'
+        logger.info(f'Cluster {cluster_name!r} is {operation_str}.')
+
+        # Set cluster to AUTOSTOPPING status
+        record['status'] = status_lib.ClusterStatus.AUTOSTOPPING
+        global_user_state.add_cluster_event(
+            cluster_name,
+            status_lib.ClusterStatus.AUTOSTOPPING,
+            f'Cluster is {operation_str}.',
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            nop_if_duplicate=True)
+        # Use set_cluster_status() to directly update the status in DB
+        # instead of add_or_update_cluster() which only supports INIT/UP
+        global_user_state.set_cluster_status(
+            cluster_name, status_lib.ClusterStatus.AUTOSTOPPING)
+        return global_user_state.get_cluster_from_name(
+            cluster_name,
+            include_user_info=include_user_info,
+            summary_response=summary_response)
+
     # Determining if the cluster is healthy (UP):
     #
     # For non-spot clusters: If ray status shows all nodes are healthy, it is
@@ -2452,6 +2493,13 @@ def _update_cluster_status(
         # NOTE: all_nodes_up calculation is fast due to calling cloud CLI;
         # run_ray_status_to_check_all_nodes_up() is slow due to calling `ray get
         # head-ip/worker-ips`.
+
+        # Check if the cluster is in the process of autostopping
+        backend = get_backend_from_handle(handle)
+        if isinstance(backend, backends.CloudVmRayBackend):
+            if backend.is_definitely_autostopping(handle, stream_logs=False):
+                return _handle_autostopping_cluster(print_newline=False)
+
         record['status'] = status_lib.ClusterStatus.UP
         # Add cluster event for instance status check.
         global_user_state.add_cluster_event(
@@ -2586,12 +2634,24 @@ def _update_cluster_status(
 
             backend = get_backend_from_handle(handle)
             if isinstance(backend, backends.CloudVmRayBackend):
-                if is_head_node_alive:
+                # Check autostopping first, before head_node_alive check
+                # This ensures we detect AUTOSTOPPING even when Ray becomes
+                # unhealthy during hook execution, or if the actual nodes are
+                # partially autostopped but not completely yet.
+                is_autostopping = backend.is_definitely_autostopping(
+                    handle, stream_logs=False)
+
+                if is_autostopping:
+                    logger.debug(
+                        f'The cluster {cluster_name!r} is abnormal '
+                        f'({init_reason}) but is definitely autostopping. '
+                        'Returning AUTOSTOPPING status.')
+                    return _handle_autostopping_cluster(print_newline=True)
+                elif is_head_node_alive:
                     logger.debug(
                         f'Skipping autostop reset for cluster {cluster_name!r} '
                         'because the head node is alive.')
-                elif not backend.is_definitely_autostopping(handle,
-                                                            stream_logs=False):
+                elif not is_autostopping:
                     # Friendly hint.
                     autostop = record['autostop']
                     maybe_down_str = ' --down' if record['to_down'] else ''
@@ -2642,13 +2702,6 @@ def _update_cluster_status(
                         f'abnormal state. To fix, try running: {reset}{bright}sky '
                         f'start -f -i {autostop}{maybe_down_str} {cluster_name}'
                         f'{reset}')
-                else:
-                    ux_utils.console_newline()
-                    operation_str = 'autodowning' if record[
-                        'to_down'] else 'autostopping'
-                    logger.info(
-                        f'Cluster {cluster_name!r} is {operation_str}. Setting to '
-                        'INIT status; try refresh again in a while.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
@@ -2734,10 +2787,13 @@ def _must_refresh_cluster_status(
     use_spot = record['handle'].launched_resources.use_spot
     has_autostop = (record['status'] != status_lib.ClusterStatus.STOPPED and
                     record['autostop'] >= 0)
+    # If cluster is AUTOSTOPPING, always refresh to check if it transitioned to STOPPED
+    is_autostopping = record['status'] == status_lib.ClusterStatus.AUTOSTOPPING
     recently_refreshed = (record['status_updated_at'] is not None and
                           time.time() - record['status_updated_at'] <
-                          _CLUSTER_STATUS_CACHE_DURATION_SECONDS)
-    is_stale = (use_spot or has_autostop) and not recently_refreshed
+                          CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+    is_stale = (use_spot or has_autostop or
+                is_autostopping) and not recently_refreshed
 
     return force_refresh_for_cluster or is_stale
 
@@ -2764,7 +2820,7 @@ def refresh_cluster_record(
           following conditions will be refreshed no matter the argument is
           specified or not:
             - the most latest available status update is more than
-              _CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
+              CLUSTER_STATUS_CACHE_DURATION_SECONDS old, and one of:
                 1. the cluster is a spot cluster, or
                 2. cluster autostop is set and the cluster is not STOPPED.
         cluster_lock_already_held: Whether the caller is already holding the
@@ -3021,7 +3077,8 @@ def check_cluster_available(
                 f'cluster {cluster_name!r}. It is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}.'
                 f'{reset}')
-    if cluster_status != status_lib.ClusterStatus.UP:
+    if cluster_status not in (status_lib.ClusterStatus.UP,
+                              status_lib.ClusterStatus.AUTOSTOPPING):
         with ux_utils.print_exception_no_traceback():
             hint_for_init = ''
             if cluster_status == status_lib.ClusterStatus.INIT:
@@ -3033,7 +3090,8 @@ def check_cluster_available(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
                 f'cluster {cluster_name!r} (status: {cluster_status.value}). '
                 'It is only allowed for '
-                f'{status_lib.ClusterStatus.UP.value} clusters.'
+                f'{status_lib.ClusterStatus.UP.value} and '
+                f'{status_lib.ClusterStatus.AUTOSTOPPING.value} clusters.'
                 f'{hint_for_init}'
                 f'{reset}',
                 cluster_status=cluster_status,
@@ -3174,7 +3232,9 @@ def is_controller_accessible(
         if not runner.check_connection():
             error_msg = controller.value.connection_error_hint
     else:
-        assert controller_status == status_lib.ClusterStatus.UP, handle
+        assert controller_status in (
+            status_lib.ClusterStatus.UP,
+            status_lib.ClusterStatus.AUTOSTOPPING), handle
 
     if error_msg is not None:
         if exit_if_not_accessible:
@@ -3802,8 +3862,9 @@ def get_endpoints(cluster: str,
                 f'Cluster {cluster!r} not found.', cluster_status=None)
     assert len(cluster_records) == 1, cluster_records
     cluster_record = cluster_records[0]
-    if (not skip_status_check and
-            cluster_record['status'] != status_lib.ClusterStatus.UP):
+    if (not skip_status_check and cluster_record['status']
+            not in (status_lib.ClusterStatus.UP,
+                    status_lib.ClusterStatus.AUTOSTOPPING)):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_record["name"]!r} '

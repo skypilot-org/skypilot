@@ -52,7 +52,7 @@ def test_interactive_auth_websocket_bridge_and_terminal_handling():
 
                 if not self.to_send:
                     # Wait for stdin data before completing
-                    await context_utils.to_thread(self.data_received.wait, 5.0)
+                    await asyncio.to_thread(self.data_received.wait, 5.0)
                     raise StopAsyncIteration
                 return self.to_send.pop(0)
 

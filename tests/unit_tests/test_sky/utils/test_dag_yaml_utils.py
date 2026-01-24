@@ -183,3 +183,152 @@ class TestDumpChainDagToYamlStr:
         assert 'task1-secret-value' not in yaml_str_redacted
         assert 'task2-secret-value' not in yaml_str_redacted
         assert '<redacted>' in yaml_str_redacted
+
+
+class TestJobGroupDetection:
+    """Test job group vs pipeline detection based on execution field."""
+
+    def test_job_group_with_execution_parallel(self):
+        """Test that execution: parallel is detected as job group."""
+        yaml_str = """
+---
+name: my-job-group
+execution: parallel
+---
+name: trainer
+run: echo hello
+---
+name: data-processor
+run: echo world
+"""
+        assert dag_utils.is_job_group_yaml_str(yaml_str) is True
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is True
+        assert dag.execution == dag_lib.DagExecution.PARALLEL
+
+    def test_pipeline_without_execution_field(self):
+        """Test that missing execution field is detected as pipeline."""
+        yaml_str = """
+---
+name: my-pipeline
+---
+name: task1
+run: echo hello
+---
+name: task2
+run: echo world
+"""
+        assert dag_utils.is_job_group_yaml_str(yaml_str) is False
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is False
+        assert dag.execution == dag_lib.DagExecution.SERIAL
+
+    def test_pipeline_with_execution_serial(self):
+        """Test that execution: serial is detected as pipeline."""
+        yaml_str = """
+---
+name: my-pipeline
+execution: serial
+---
+name: task1
+run: echo hello
+---
+name: task2
+run: echo world
+"""
+        assert dag_utils.is_job_group_yaml_str(yaml_str) is False
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is False
+        assert dag.execution == dag_lib.DagExecution.SERIAL
+
+    def test_job_group_with_execution(self):
+        """Test job group with execution field."""
+        yaml_str = """
+---
+name: my-job-group
+execution: parallel
+---
+name: trainer
+run: echo hello
+"""
+        assert dag_utils.is_job_group_yaml_str(yaml_str) is True
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is True
+        assert dag.execution == dag_lib.DagExecution.PARALLEL
+
+    def test_single_task_yaml_is_pipeline(self):
+        """Test that single task YAML is detected as pipeline."""
+        yaml_str = """
+name: my-task
+run: echo hello
+"""
+        assert dag_utils.is_job_group_yaml_str(yaml_str) is False
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is False
+        assert dag.execution == dag_lib.DagExecution.SERIAL
+
+    def test_pipeline_with_invalid_execution_raises_error(self):
+        """Test that invalid execution mode raises ValueError for pipeline."""
+        yaml_str = """
+---
+name: my-pipeline
+execution: invalid_mode
+---
+name: task1
+run: echo hello
+"""
+        with pytest.raises(ValueError) as exc_info:
+            dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert 'Invalid execution mode for pipeline' in str(exc_info.value)
+        assert 'invalid_mode' in str(exc_info.value)
+
+    def test_job_group_round_trip(self):
+        """Test that job group can be serialized and deserialized."""
+        yaml_str = """
+---
+name: my-job-group
+execution: parallel
+primary_tasks:
+  - trainer
+---
+name: trainer
+run: echo hello
+---
+name: data-processor
+run: echo world
+"""
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is True
+
+        # Round-trip
+        dumped = dag_utils.dump_dag_to_yaml_str(dag)
+        dag2 = dag_utils.load_dag_from_yaml_str(dumped)
+
+        assert dag2.is_job_group() is True
+        assert dag2.execution == dag_lib.DagExecution.PARALLEL
+        assert dag2.name == 'my-job-group'
+        assert len(dag2.tasks) == 2
+
+    def test_pipeline_round_trip(self):
+        """Test that pipeline can be serialized and deserialized."""
+        yaml_str = """
+---
+name: my-pipeline
+---
+name: task1
+run: echo hello
+---
+name: task2
+run: echo world
+"""
+        dag = dag_utils.load_dag_from_yaml_str(yaml_str)
+        assert dag.is_job_group() is False
+
+        # Round-trip
+        dumped = dag_utils.dump_dag_to_yaml_str(dag)
+        dag2 = dag_utils.load_dag_from_yaml_str(dumped)
+
+        assert dag2.is_job_group() is False
+        assert dag2.execution == dag_lib.DagExecution.SERIAL
+        assert dag2.name == 'my-pipeline'
+        assert len(dag2.tasks) == 2

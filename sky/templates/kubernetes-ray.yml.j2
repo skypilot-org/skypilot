@@ -523,7 +523,7 @@ available_node_types:
                 resourceFieldRef:
                   containerName: ray-node
                   resource: requests.memory
-            # Disable Ray memory monitor to prevent Ray's memory manager 
+            # Disable Ray memory monitor to prevent Ray's memory manager
             # from interfering with kubernetes resource manager.
             # If ray memory monitor is enabled, the ray memory monitor kills
             # the running job is the job uses more than 95% of allocated memory,
@@ -917,6 +917,7 @@ available_node_types:
                   echo "Waiting for curl package to be installed..."
                 done
                 {{ conda_installation_commands }}
+                {{ uv_installation_commands }}
                 {{ ray_installation_commands }}
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
@@ -1171,14 +1172,31 @@ available_node_types:
               {% if k8s_network_type == 'coreweave' %}
               rdma/ib: 1
               {% endif %}
-            {% if k8s_resource_key is not none %}
+              {% if k8s_network_type == 'together' and k8s_resource_key is not none %}
+              nvidia.com/rdma_ib: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_efa_count is not none %}
+              vpc.amazonaws.com/efa: {{k8s_efa_count}}
+              {% endif %}
+            {% if k8s_resource_key is not none or k8s_cpu_limit is defined %}
             limits:
-              # Limits need to be defined for GPU/TPU requests
+              {% if k8s_cpu_limit is defined %}
+              # CPU/Memory limits set via set_pod_resource_limits config
+              cpu: {{k8s_cpu_limit}}
+              memory: {{k8s_memory_limit}}G
+              {% endif %}
               {% if k8s_resource_key is not none %}
+              # Limits need to be defined for GPU/TPU/EFA requests
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
               {% if k8s_network_type == 'coreweave' %}
               rdma/ib: 1
+              {% endif %}
+              {% if k8s_network_type == 'together' %}
+              nvidia.com/rdma_ib: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_efa_count is not none %}
+              vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
             {% endif %}
           {% if k8s_ipc_lock_capability %}

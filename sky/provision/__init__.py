@@ -192,6 +192,27 @@ def map_all_volumes_usedby(
 
 
 @_route_to_cloud_impl
+def get_all_volumes_errors(
+        provider_name: str,
+        configs: List[models.VolumeConfig]) -> Dict[str, Optional[str]]:
+    """Get error messages for all volumes.
+
+    Checks if volumes have errors (e.g., pending state due to
+    misconfiguration) and returns appropriate error messages.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        Dictionary mapping volume name to error message (None if no error).
+    """
+    # Default implementation returns empty dict (no error checking)
+    del provider_name, configs
+    return {}
+
+
+@_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name: str,
                   cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:

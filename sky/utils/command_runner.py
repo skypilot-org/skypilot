@@ -62,7 +62,6 @@ RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
 GIT_EXCLUDE = '.git/info/exclude'
 RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
-# Owner and group metadata is not needed for downloads.
 RSYNC_NO_OWNER_NO_GROUP_OPTION = '--no-owner --no-group'
 
 _HASH_MAX_LENGTH = 10
@@ -394,10 +393,16 @@ class CommandRunner:
                 shlex.quote('true && export OMP_NUM_THREADS=1 '
                             f'PYTHONWARNINGS=ignore && ({cmd})')
             ]
-        if not separate_stderr:
-            command.append('2>&1')
         if run_in_background:
-            command = ['nohup'] + command + ['&']
+            command = ['nohup'] + command + [
+                '>/dev/null',  # Detach stdout.
+                '2>&1',  # Detach stderr.
+                '</dev/null',  # Detach stdin.
+                '&',  # Run in background.
+            ]
+        else:
+            if not separate_stderr:
+                command.append('2>&1')
         if not process_stream and skip_num_lines:
             assert not run_in_background, (
                 'run_in_background and skip_num_lines cannot be used together')
@@ -454,8 +459,7 @@ class CommandRunner:
         if prefix_command is not None:
             rsync_command.append(prefix_command)
         rsync_command += ['rsync', RSYNC_DISPLAY_OPTION]
-        if not up:
-            rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
+        rsync_command.append(RSYNC_NO_OWNER_NO_GROUP_OPTION)
 
         # --filter
         # The source is a local path, so we need to resolve it.
@@ -1286,6 +1290,7 @@ class KubernetesCommandRunner(CommandRunner):
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
         deployment: Optional[str] = None,
+        container: Optional[str] = None,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -1297,11 +1302,19 @@ class KubernetesCommandRunner(CommandRunner):
 
         Args:
             node: The namespace and pod_name of the remote machine.
+            deployment: If set, run commands against `deployment/<deployment>`
+                instead of `pod/<pod_name>`.
+            container: If set, run commands inside the given container name via
+                `kubectl exec -c <container>`. This is recommended for
+                multi-container pods (e.g., when sidecars are injected) to
+                ensure commands target the primary workload container (such as
+                `ray-node`).
         """
         del kwargs
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
         self.deployment = deployment
+        self.container = container
 
     @property
     def node_id(self) -> str:
@@ -1423,6 +1436,8 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_args += ['--kubeconfig', '/dev/null']
 
         kubectl_args += [self.kube_identifier]
+        if self.container is not None:
+            kubectl_args += ['-c', self.container]
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
@@ -1526,7 +1541,9 @@ class KubernetesCommandRunner(CommandRunner):
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
-            prefix_command=f'chmod +x {helper_path} && ',
+            prefix_command=(f'chmod +x {helper_path} && ' + (
+                '' if self.container is None else
+                f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} ')),
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.
