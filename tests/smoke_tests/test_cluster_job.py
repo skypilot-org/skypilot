@@ -1995,13 +1995,18 @@ def test_kubernetes_pod_failure_detection():
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
 def test_kubernetes_container_status_unknown_status_refresh():
-    """Test sky status --refresh handles ContainerStatusUnknown with null finishedAt.
+    """Test sky status --refresh handles evicted pods without crashing.
 
-    When pods are evicted due to ephemeral storage limits, containers enter
+    When pods are evicted due to ephemeral storage limits, containers may enter
     ContainerStatusUnknown state with terminated.finishedAt=null. This test
-    verifies that SkyPilot handles this edge case without errors.
+    verifies that SkyPilot handles evicted pods without erroring.
 
-    Regression test for #PR.
+    Note: This test is inherently flaky, it may succeed even before the fix.
+    Triggering ContainerStatusUnknown (where finishedAt is null) requires the kubelet
+    to lose contact with the container runtime during eviction, which is racy. The pod
+    may instead get a clean termination with finishedAt set.
+
+    Regression test for #8674.
     """
     name = smoke_tests_utils.get_cluster_name()
 
@@ -2013,13 +2018,12 @@ def test_kubernetes_container_status_unknown_status_refresh():
             # Before the fix this logged: "Failed to query ... [TypeError]..."
             (f'for i in $(seq 1 20); do '
              f'echo "=== status refresh attempt $i ===" && '
-             f'OUT=$(SKYPILOT_DEBUG=0 sky status {name} -v --refresh 2>&1) && '
+             f'OUT=$(sky status {name} -v --refresh 2>&1) && '
              f'echo "$OUT" && '
              f'if echo "$OUT" | grep -q "TypeError"; then '
              f'echo "FAIL: TypeError found" && exit 1; fi && '
              f'if echo "$OUT" | grep -q "Failed to refresh status"; then '
-             f'echo "FAIL: Refresh failed" && exit 1; fi && '
-             f'sleep 1; done'),
+             f'echo "FAIL: Refresh failed" && exit 1; fi; done'),
         ],
         f'sky down -y {name}',
         timeout=10 * 60,
