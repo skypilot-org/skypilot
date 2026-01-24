@@ -1705,7 +1705,9 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
                 container_reasons.append(reason)
-                latest_timestamp = max(latest_timestamp, terminated.finished_at)
+                if terminated.finished_at is not None:
+                    latest_timestamp = max(latest_timestamp,
+                                           terminated.finished_at)
 
             # TODO (kyuds): later, if needed, query `last_state` too.
 
