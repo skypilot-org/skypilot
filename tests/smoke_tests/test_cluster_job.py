@@ -1993,6 +1993,7 @@ def test_kubernetes_pod_failure_detection():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
 def test_kubernetes_container_status_unknown_status_refresh():
     """Test sky status --refresh handles ContainerStatusUnknown with null finishedAt.
 
@@ -2010,7 +2011,7 @@ def test_kubernetes_container_status_unknown_status_refresh():
             f'sky launch -y -c {name} --infra kubernetes --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
             # Poll sky status --refresh, fail fast if error found.
             # Before the fix this logged: "Failed to query ... [TypeError]..."
-            (f'for i in $(seq 1 90); do '
+            (f'for i in $(seq 1 20); do '
              f'echo "=== status refresh attempt $i ===" && '
              f'OUT=$(SKYPILOT_DEBUG=0 sky status {name} -v --refresh 2>&1) && '
              f'echo "$OUT" && '

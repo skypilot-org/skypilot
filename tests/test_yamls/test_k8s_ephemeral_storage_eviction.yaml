@@ -14,16 +14,14 @@ config:
           - name: ray-node
             resources:
               requests:
-                ephemeral-storage: "50Mi"
+                ephemeral-storage: "100Mi"
               limits:
-                ephemeral-storage: "200Mi"
+                ephemeral-storage: "500Mi"
 
 run: |
   i=0
   while true; do
-    # Write 50MB files rapidly to /tmp
-    dd if=/dev/zero of=/tmp/fill-$i bs=10M count=5 2>/dev/null
+    dd if=/dev/zero of=/tmp/fill-$i bs=10M count=10 2>/dev/null
     i=$((i+1))
-    echo "Created file $i (50MB each), total: $((i * 50))MB"
     sleep 0.5
   done
