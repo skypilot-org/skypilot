@@ -96,6 +96,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.kubernetes import config_map_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
@@ -2225,21 +2226,137 @@ async def _run_websocket_proxy(
     return ssh_failed
 
 
+def _get_kubernetes_service_address(
+        handle: 'backends.CloudVmRayResourceHandle'
+) -> Optional[Tuple[str, int]]:
+    """Get direct service address if API server is in same K8s cluster as pod.
+
+    When the API server runs in the same Kubernetes cluster as the target pod,
+    we can connect directly via the headless service DNS instead of using
+    kubectl port-forward. This reduces latency and resource usage.
+
+    Set SKYPILOT_K8S_SSH_PORT_FORWARD_ONLY=1 to disable this optimization and
+    always use port-forward.
+
+    Returns:
+        Tuple of (service_address, port) if direct routing is possible,
+        None otherwise.
+    """
+    # Check if direct routing is disabled via environment variable
+    port_forward_only = os.environ.get('SKYPILOT_K8S_SSH_PORT_FORWARD_ONLY',
+                                       '').lower() in ('1', 'true', 'yes')
+    if port_forward_only:
+        logger.debug('Direct service routing disabled via '
+                     'SKYPILOT_K8S_SSH_PORT_FORWARD_ONLY')
+        return None
+
+    # Check if API server is running inside Kubernetes
+    if not config_map_utils.is_running_in_kubernetes():
+        return None
+
+    # Get the cluster's provider config to check if it's in-cluster
+    cluster_info = handle.cached_cluster_info
+    if cluster_info is None:
+        return None
+
+    provider_config = cluster_info.provider_config
+    if provider_config is None:
+        return None
+
+    # Check if the target cluster is using in-cluster context
+    # When context is None or 'in-cluster', it means the pod is in the same
+    # cluster as the API server
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    if context is not None:
+        # Target cluster is in a different K8s cluster
+        return None
+
+    # Get the head instance's internal service address
+    head_instance = cluster_info.get_head_instance()
+    if head_instance is None or head_instance.internal_svc is None:
+        return None
+
+    return (head_instance.internal_svc, head_instance.ssh_port)
+
+
 @app.websocket('/kubernetes-pod-ssh-proxy')
 async def kubernetes_pod_ssh_proxy(
         websocket: fastapi.WebSocket,
         cluster_name: str,
         client_version: Optional[int] = None) -> None:
-    """Proxies SSH to the Kubernetes pod with websocket."""
+    """Proxies SSH to the Kubernetes pod with websocket.
+
+    This endpoint supports two connection modes:
+    1. Direct service routing: When the API server runs in the same K8s cluster
+       as the target pod, connects directly via the headless service DNS.
+    2. Port-forward routing: Falls back to kubectl port-forward when direct
+       routing is not available.
+    """
     await websocket.accept()
     logger.info(f'WebSocket connection accepted for cluster: {cluster_name}')
 
     timestamps_supported = client_version is not None and client_version > 21
-    logger.info(f'Websocket timestamps supported: {timestamps_supported}, \
-        client_version = {client_version}')
+    logger.info(f'Websocket timestamps supported: {timestamps_supported}, '
+                f'client_version = {client_version}')
 
     handle = await _get_cluster_and_validate(cluster_name, clouds.Kubernetes)
 
+    # Check if we can use direct service routing (same K8s cluster)
+    service_address = _get_kubernetes_service_address(handle)
+
+    if service_address is not None:
+        # Direct service routing - connect to pod via headless service DNS
+        await _kubernetes_ssh_via_service(websocket, service_address,
+                                          timestamps_supported)
+    else:
+        # Fall back to port-forward routing
+        await _kubernetes_ssh_via_port_forward(websocket, handle,
+                                               timestamps_supported)
+
+
+async def _kubernetes_ssh_via_service(websocket: fastapi.WebSocket,
+                                      service_address: Tuple[str, int],
+                                      timestamps_supported: bool) -> None:
+    """Connect to K8s pod SSH via direct service address."""
+    host, port = service_address
+    logger.info(f'Using direct service routing to {host}:{port}')
+
+    conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
+        pid=os.getpid())
+    ssh_failed = False
+    try:
+        conn_gauge.inc()
+        reader, writer = await asyncio.open_connection(host, port)
+
+        async def write_and_drain(data: bytes) -> None:
+            writer.write(data)
+            await writer.drain()
+
+        async def close_writer() -> None:
+            writer.close()
+
+        ssh_failed = await _run_websocket_proxy(
+            websocket,
+            read_from_backend=lambda: reader.read(1024),
+            write_to_backend=write_and_drain,
+            close_backend=close_writer,
+            timestamps_supported=timestamps_supported,
+        )
+    finally:
+        conn_gauge.dec()
+        if ssh_failed:
+            reason = 'SSHToPodDisconnected'
+        else:
+            reason = 'ClientClosed'
+        metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+            pid=os.getpid(), reason=reason).inc()
+
+
+async def _kubernetes_ssh_via_port_forward(
+        websocket: fastapi.WebSocket,
+        handle: 'backends.CloudVmRayResourceHandle',
+        timestamps_supported: bool) -> None:
+    """Connect to K8s pod SSH via kubectl port-forward."""
     kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
         port_forward=[(None, 22)])
     proc = await asyncio.create_subprocess_exec(
