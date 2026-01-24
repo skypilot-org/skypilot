@@ -404,7 +404,7 @@ export function InfrastructureSection({
                               </NonCapitalizedTooltip>
                               {contextErrors[context] && (
                                 <NonCapitalizedTooltip
-                                  content="Context unreachable"
+                                  content={`Context unreachable: ${contextErrors[context]}`}
                                   className="text-sm text-muted-foreground"
                                 >
                                   <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
