@@ -100,7 +100,7 @@ py-spy top -- python -m sky.cli status # Get a live top view
 py-spy -h # For more options
 ```
 
-#### Testing WSL features on Windows VM (Azure)
+#### Testing WSL features on a windows VM (Azure)
 
 To test features that require Windows Subsystem for Linux (WSL), such as the automatic Windows SSH config setup, you can create a Windows VM on Azure:
 
