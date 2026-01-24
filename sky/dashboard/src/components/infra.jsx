@@ -712,9 +712,9 @@ export function ContextDetails({
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-lg font-semibold">Nodes</h4>
           </div>
-          {gpusInContext && gpusInContext.length > 0 && (
+          {gpusInContext.length > 0 && (
             <div className="mb-6">
-              <h4 className="text-md font-semibold mb-3">Available GPUs</h4>
+              <h4 className="text-base font-semibold mb-3">Available GPUs</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {gpusInContext.map((gpu) => {
                   return (
@@ -748,7 +748,7 @@ export function ContextDetails({
             </div>
           )}
 
-          {nodesInContext && nodesInContext.length > 0 && (
+          {nodesInContext.length > 0 && (
             <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-100">
