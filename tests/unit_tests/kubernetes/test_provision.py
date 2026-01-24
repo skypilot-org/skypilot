@@ -522,7 +522,7 @@ def test_pod_termination_reason_null_finished_at(monkeypatch):
 
     # Container with terminated state but null finished_at
     container_status = mock.MagicMock()
-    container_status.name = 'ray-node'
+    container_status.name = 'skypilot-node'
     container_status.state.terminated = mock.MagicMock()
     container_status.state.terminated.exit_code = 137
     container_status.state.terminated.reason = 'Unknown'
