@@ -69,6 +69,7 @@ def _get_windows_userprofile_via_cmd() -> Optional[str]:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if result.returncode == 0:
             userprofile = result.stdout.strip()
@@ -197,8 +198,7 @@ class SSHConfigHelper:
         return (windows_ssh_config, windows_sky_ssh_dir, windows_home)
 
     @classmethod
-    def _convert_proxy_command_for_windows(cls,
-                                           proxy_command: str) -> str:
+    def _convert_proxy_command_for_windows(cls, proxy_command: str) -> str:
         """Convert a WSL proxy command to Windows-compatible format.
 
         Wraps the proxy command with wsl.exe so Windows SSH can execute it.
@@ -260,7 +260,8 @@ class SSHConfigHelper:
             # Copy SSH key to Windows filesystem to avoid UNC path permission
             # issues. Windows SSH rejects keys accessed via //wsl$/ paths
             # because it cannot verify Unix file permissions.
-            windows_ssh_keys_dir = os.path.join(windows_home, '.sky', 'ssh-keys')
+            windows_ssh_keys_dir = os.path.join(windows_home, '.sky',
+                                                'ssh-keys')
             os.makedirs(windows_ssh_keys_dir, exist_ok=True, mode=0o700)
             key_filename = os.path.basename(key_path)
             windows_key_dest = os.path.join(windows_ssh_keys_dir, key_filename)
@@ -282,7 +283,8 @@ class SSHConfigHelper:
                 config = f.readlines()
 
             # Add Include directive for SkyPilot configs if not present
-            include_path = f'{_convert_wsl_path_to_windows(windows_sky_ssh_dir)}/*'
+            win_ssh_dir = _convert_wsl_path_to_windows(windows_sky_ssh_dir)
+            include_path = f'{win_ssh_dir}/*'
             include_str = f'Include {include_path}'
 
             include_found = any(include_str in line for line in config)
@@ -301,7 +303,8 @@ class SSHConfigHelper:
 
             codegen = ''
             for i, ip in enumerate(ips):
-                node_name = cluster_name if i == 0 else f'{cluster_name}-worker{i}'
+                node_name = (cluster_name
+                             if i == 0 else f'{cluster_name}-worker{i}')
                 codegen += cls._get_generated_config(
                     sky_autogen_comment,
                     cluster_name_on_cloud,
@@ -347,7 +350,8 @@ class SSHConfigHelper:
         try:
             common_utils.remove_file_if_exists(cluster_config_path)
             # Also remove the copied SSH key
-            windows_ssh_keys_dir = os.path.join(windows_home, '.sky', 'ssh-keys')
+            windows_ssh_keys_dir = os.path.join(windows_home, '.sky',
+                                                'ssh-keys')
             key_path = os.path.join(windows_ssh_keys_dir, f'{cluster_name}.key')
             common_utils.remove_file_if_exists(key_path)
         except (OSError, PermissionError):
