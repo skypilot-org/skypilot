@@ -167,6 +167,10 @@ For larger models:
 
 For full PPO, add a critic-server component that estimates value functions.
 
+## Related Examples
+
+- [`../verl-jobgroup/`](../verl-jobgroup/) - VeRL-based job group example using production-grade VeRL training with external services. Use this if you want VeRL's optimized training loop.
+
 ## References
 
 - [OpenRLHF](https://github.com/OpenRLHF/OpenRLHF) - Distributed RLHF framework
