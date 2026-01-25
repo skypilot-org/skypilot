@@ -12,6 +12,7 @@ import uuid
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import lock_events
@@ -21,9 +22,6 @@ logger = sky_logging.init_logger(__name__)
 # The cluster yaml used to create the current cluster where the module is
 # called.
 SKY_CLUSTER_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
-
-# Cache for WSL Windows home directory
-_wsl_windows_home_cached: Optional[str] = None
 
 
 def _convert_windows_path_to_wsl(windows_path: str) -> str:
@@ -80,6 +78,7 @@ def _get_windows_userprofile_via_cmd() -> Optional[str]:
     return None
 
 
+@annotations.lru_cache(scope='global', maxsize=1)
 def get_wsl_windows_home() -> Optional[str]:
     """Get the Windows user's home directory path when running in WSL.
 
@@ -87,10 +86,6 @@ def get_wsl_windows_home() -> Optional[str]:
         The path to Windows home directory (e.g., '/mnt/c/Users/username')
         or None if not in WSL or cannot determine.
     """
-    global _wsl_windows_home_cached
-    if _wsl_windows_home_cached is not None:
-        return _wsl_windows_home_cached
-
     if not common_utils.is_wsl():
         return None
 
@@ -102,8 +97,7 @@ def get_wsl_windows_home() -> Optional[str]:
     if userprofile:
         windows_home = _convert_windows_path_to_wsl(userprofile)
         if os.path.isdir(windows_home):
-            _wsl_windows_home_cached = windows_home
-            return _wsl_windows_home_cached
+            return windows_home
 
     return None
 
@@ -136,6 +130,9 @@ class SSHConfigHelper:
     ssh_cluster_key_path = constants.SKY_USER_FILE_PATH + '/ssh-keys/{}.key'
 
     # Windows paths (used when running in WSL)
+    # Note: These flags are best-effort for UX purposes and are not
+    # thread-safe. The worst case is duplicate log messages, which is
+    # acceptable for this non-critical functionality.
     _windows_ssh_setup_attempted = False
     _windows_ssh_setup_warned = False
 
@@ -204,14 +201,21 @@ class SSHConfigHelper:
         Wraps the proxy command with wsl.exe so Windows SSH can execute it.
         The command runs inside WSL where the original paths are valid.
 
+        Uses single quotes to prevent shell expansion of variables and special
+        characters. Single quotes in the original command are escaped using
+        the standard shell technique: end quote, escaped single quote, start
+        quote ('\"'\"').
+
         Args:
             proxy_command: The original proxy command from WSL SSH config.
 
         Returns:
             A Windows-compatible proxy command using wsl.exe.
         """
-        escaped_command = proxy_command.replace('"', '\\"')
-        return f'wsl.exe bash -c "{escaped_command}"'
+        # Escape single quotes for bash single-quoted string
+        # 'foo'bar' -> 'foo'"'"'bar'
+        escaped_command = proxy_command.replace("'", "'\"'\"'")
+        return f"wsl.exe bash -c '{escaped_command}'"
 
     @classmethod
     def _add_cluster_to_windows_ssh_config(
@@ -260,10 +264,12 @@ class SSHConfigHelper:
             # Copy SSH key to Windows filesystem to avoid UNC path permission
             # issues. Windows SSH rejects keys accessed via //wsl$/ paths
             # because it cannot verify Unix file permissions.
+            # Use cluster name as key filename to ensure consistent naming
+            # between add and remove operations.
             windows_ssh_keys_dir = os.path.join(windows_home, '.sky',
                                                 'ssh-keys')
             os.makedirs(windows_ssh_keys_dir, exist_ok=True, mode=0o700)
-            key_filename = os.path.basename(key_path)
+            key_filename = f'{cluster_name}.pem'
             windows_key_dest = os.path.join(windows_ssh_keys_dir, key_filename)
             # Copy the key file (use copyfile to only copy content, not
             # metadata/permissions which fail across WSL->Windows boundary)
@@ -349,10 +355,10 @@ class SSHConfigHelper:
 
         try:
             common_utils.remove_file_if_exists(cluster_config_path)
-            # Also remove the copied SSH key
+            # Also remove the copied SSH key (named as {cluster_name}.pem)
             windows_ssh_keys_dir = os.path.join(windows_home, '.sky',
                                                 'ssh-keys')
-            key_path = os.path.join(windows_ssh_keys_dir, f'{cluster_name}.key')
+            key_path = os.path.join(windows_ssh_keys_dir, f'{cluster_name}.pem')
             common_utils.remove_file_if_exists(key_path)
         except (OSError, PermissionError):
             # Silently ignore errors - Windows SSH config is optional
