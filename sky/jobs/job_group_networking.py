@@ -33,7 +33,6 @@ from sky.utils import command_runner
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
-    from sky.utils import command_runner
 
 logger = sky_logging.init_logger(__name__)
 

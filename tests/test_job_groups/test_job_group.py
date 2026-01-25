@@ -542,8 +542,8 @@ class TestJobGroupNetworking:
         from sky.jobs import job_group_networking
         from sky.utils import command_runner
 
-        dns_mappings = [('trainer-0.ns.svc.cluster.local',
-                         'trainer-0.my-group')]
+        dns_mappings = [('trainer-0.ns.svc.cluster.local', 'trainer-0.my-group')
+                       ]
 
         script = job_group_networking.generate_k8s_dns_updater_script(
             dns_mappings, 'my-group')

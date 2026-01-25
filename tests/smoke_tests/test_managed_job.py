@@ -2139,9 +2139,7 @@ def test_managed_jobs_instance_links(generic_cloud: str):
 # ---------- Testing JobGroups ----------
 
 
-def _render_job_group_yaml(yaml_template_path: str,
-                           name: str,
-                           cloud: str,
+def _render_job_group_yaml(yaml_template_path: str, name: str, cloud: str,
                            **kwargs) -> str:
     """Render a JobGroup YAML template with name, cloud, and extra variables."""
     with open(yaml_template_path, 'r') as f:
