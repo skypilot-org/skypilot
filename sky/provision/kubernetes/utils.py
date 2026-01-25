@@ -715,15 +715,16 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
-def _accelerator_name_matches(requested_acc: str, viable_names: List[str]) -> bool:
+def _accelerator_name_matches(requested_acc: str,
+                              viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
 
     For backward compatibility with GPU name changes (e.g., when canonical names
-    like 'H200' are added to replace fallback names like 'H200-XBM-80GB'), this
+    like 'H200' are added to replace fallback names like 'H200-SXM-80GB'), this
     function also matches if one name is a prefix of the other separated by '-'.
 
     This handles cases where:
-    - Clusters were launched with fallback names (e.g., 'H200-XBM-80GB') but
+    - Clusters were launched with fallback names (e.g., 'H200-SXM-80GB') but
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
 
@@ -736,12 +737,14 @@ def _accelerator_name_matches(requested_acc: str, viable_names: List[str]) -> bo
     """
     requested_lower = requested_acc.lower()
     for viable in viable_names:
-        if requested_lower == viable:
+        viable_lower = viable.lower()
+        if requested_lower == viable_lower:
             return True
         # Check prefix match with '-' separator for backward compatibility.
-        # E.g., 'H200' matches 'H200-XBM-80GB' and vice versa.
-        shorter, longer = ((requested_lower, viable) if len(requested_lower) <=
-                           len(viable) else (viable, requested_lower))
+        # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
+        shorter, longer = ((requested_lower, viable_lower)
+                           if len(requested_lower) <= len(viable_lower) else
+                           (viable_lower, requested_lower))
         if longer.startswith(shorter):
             # Ensure it's a proper prefix (followed by '-' or end of string)
             if len(longer) == len(shorter) or longer[len(shorter)] == '-':
@@ -1132,7 +1135,9 @@ class GKEAutoscaler(Autoscaler):
                 continue
             node_accelerator_count = accelerator['acceleratorCount']
             viable_names = [node_accelerator_type.lower(), raw_value.lower()]
-            if (requested_gpu_type.lower() in viable_names and
+            # Use _accelerator_name_matches for backward compatibility
+            # with GPU name changes (e.g., 'H200' vs 'H200-SXM-80GB').
+            if (_accelerator_name_matches(requested_gpu_type, viable_names) and
                     int(node_accelerator_count) >= requested_gpu_count):
                 return True
         return False
@@ -1837,7 +1842,7 @@ def get_accelerator_label_key_values(
                     if label_formatter.match_label_key(label):
                         # Match either canonicalized name or raw name.
                         # Use _accelerator_name_matches for backward compatibility
-                        # with GPU name changes (e.g., H200-XBM-80GB -> H200).
+                        # with GPU name changes (e.g., H200-SXM-80GB -> H200).
                         accelerator = (label_formatter.
                                        get_accelerator_from_label_value(value))
                         viable = [value.lower(), accelerator.lower()]
