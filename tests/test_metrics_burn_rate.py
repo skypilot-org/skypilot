@@ -16,6 +16,7 @@
 """Unit tests for SkyPilot API server metrics."""
 import unittest
 from unittest import mock
+
 from sky.server import metrics
 
 
@@ -40,7 +41,7 @@ class TestBurnRateMetric(unittest.TestCase):
 
             mock_resources = mock.Mock()
             mock_resources.cloud = mock_cloud
-            mock_resources.accelerators = {'GPU': 1} if gpu_cost > 0 else None
+            mock_resources.accelerators = {'GPU': 1} if gpu_cost > 0.0 else None
 
             mock_handle = mock.Mock()
             mock_handle.launched_resources = mock_resources

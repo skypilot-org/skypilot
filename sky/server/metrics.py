@@ -16,9 +16,9 @@ import starlette.middleware.base
 import uvicorn
 
 from sky import core
+from sky import global_user_state
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
-from sky import global_user_state
 
 logger = sky_logging.init_logger(__name__)
 
@@ -145,7 +145,7 @@ def update_burn_rate_metric() -> None:
         # 6. Update the Prometheus Metric
         SKY_APISERVER_TOTAL_BURN_RATE.set(total_hourly_cost)
 
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         logger.error(f'Failed to update burn rate: {e}')
 
 
@@ -190,7 +190,7 @@ def process_monitor(process_type: str, stop: threading.Event):
     last_bucket_end = time.time()
     bucket_peak = 0
     global peak_rss_bytes
-    last_cost_update = 0
+    last_cost_update = 0.0
     while not stop.is_set():
         if time.time() - last_bucket_end >= 30:
             # Reset peak RSS for the next time bucket.
