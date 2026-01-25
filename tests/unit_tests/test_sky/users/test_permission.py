@@ -996,9 +996,14 @@ class TestPermissionServiceMultiProcess:
                                  ('user2', 'workspace1', '*')}
 
         # Should have one grouping policy call per user (for default role assignment)
+        # plus system users (SERVER_ID and SKYPILOT_SYSTEM_USER_ID) with admin role
+        from sky.utils import common
         expected_grouping_policy_calls = {('user1', rbac.get_default_role()),
                                           ('user2', rbac.get_default_role()),
-                                          ('user3', rbac.get_default_role())}
+                                          ('user3', rbac.get_default_role()),
+                                          (common.SERVER_ID, 'admin'),
+                                          (constants.SKYPILOT_SYSTEM_USER_ID,
+                                           'admin')}
 
         assert unique_policy_calls == expected_policy_calls
         assert unique_grouping_policy_calls == expected_grouping_policy_calls
@@ -1038,10 +1043,14 @@ class TestPermissionServiceMultiProcess:
             if init_call_count <= 1:  # First initialization call
                 return []  # No roles initially
             else:
-                # Users have roles after first call
-                return [
+                # Users have roles after first call (including system users)
+                from sky.utils import common
+                result = [
                     [user.id, rbac.get_default_role()] for user in mock_users
                 ]
+                result.append([common.SERVER_ID, 'admin'])
+                result.append([constants.SKYPILOT_SYSTEM_USER_ID, 'admin'])
+                return result
 
         def get_roles_for_user_side_effect(user_id):
             # This is called by _add_user_if_not_exists_no_lock
@@ -1080,13 +1089,16 @@ class TestPermissionServiceMultiProcess:
         service._maybe_initialize_policies()
         service._maybe_initialize_policies()
 
-        # Each user should only be added once (3 users total)
-        assert len(grouping_policy_calls) == len(mock_users)
-
-        # Verify each user was added exactly once
+        # Each user should only be added once (3 mock users + 2 system users)
+        from sky.utils import common
         expected_calls = {
             (user.id, rbac.get_default_role()) for user in mock_users
         }
+        expected_calls.add((common.SERVER_ID, 'admin'))
+        expected_calls.add((constants.SKYPILOT_SYSTEM_USER_ID, 'admin'))
+        assert len(grouping_policy_calls) == len(expected_calls)
+
+        # Verify each user was added exactly once
         actual_calls = set(grouping_policy_calls)
         assert actual_calls == expected_calls
 

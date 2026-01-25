@@ -23,12 +23,14 @@ import {
   VolumeIcon,
   KueueIcon,
   KeyIcon,
+  ShieldIcon,
 } from '@/components/elements/icons';
 import { Settings, User, Clock } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
   key: KeyIcon,
+  shield: ShieldIcon,
   server: ServerIcon,
   briefcase: BriefcaseIcon,
   chip: ChipIcon,
