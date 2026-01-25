@@ -28,6 +28,7 @@ from typing import List, Tuple
 
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.utils import command_runner
 
 if typing.TYPE_CHECKING:
     from sky import task as task_lib
@@ -219,7 +220,10 @@ async def _inject_hosts_on_node(
     # pylint: disable=invalid-string-quote
     escaped_content = hosts_content.replace("'", "'\\''")  # noqa: Q000
     marker_file = get_network_ready_marker_path(job_group_name)
+    # Use ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD to handle containers without sudo
+    # but running as root (e.g., pytorch/pytorch images)
     cmd = (
+        f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD} && '
         f"echo '{escaped_content}' | "  # noqa: Q000
         f'sudo tee -a /etc/hosts > /dev/null && touch {marker_file}')
     # pylint: enable=invalid-string-quote
@@ -257,9 +261,15 @@ def generate_k8s_dns_updater_script(dns_mappings: List[Tuple[str, str]],
         f'{dns}:{hostname}' for dns, hostname in dns_mappings)
 
     # Note: job_group_name is validated at YAML load time to be shell-safe
+    # Use ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD to handle containers without sudo
+    # but running as root (e.g., pytorch/pytorch images)
     script = textwrap.dedent(f"""\
         #!/bin/bash
         # Background K8s DNS to IP updater for /etc/hosts
+
+        # Disable sudo for root user - handles containers without sudo installed
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
+
         MAPPINGS="{mapping_pairs}"
         MARKER="# SkyPilot JobGroup K8s entries"
 

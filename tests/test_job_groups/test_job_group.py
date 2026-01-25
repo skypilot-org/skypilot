@@ -529,6 +529,34 @@ class TestJobGroupNetworking:
             [], 'my-group')
         assert script == ''
 
+    def test_generate_k8s_dns_updater_script_includes_sudo_alias(self):
+        """Test DNS updater includes sudo alias for root user support.
+
+        This tests the fix for the bug where JobGroup networking fails on
+        container images without sudo installed (e.g., pytorch/pytorch)
+        even when running as root (uid=0).
+
+        The fix adds ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD which creates a
+        function that makes sudo a no-op when running as root.
+        """
+        from sky.jobs import job_group_networking
+        from sky.utils import command_runner
+
+        dns_mappings = [('trainer-0.ns.svc.cluster.local',
+                         'trainer-0.my-group')]
+
+        script = job_group_networking.generate_k8s_dns_updater_script(
+            dns_mappings, 'my-group')
+
+        # Verify the sudo alias is included in the script
+        assert 'function sudo()' in script, (
+            'DNS updater script should include sudo alias for root user')
+        assert '$(whoami)' in script or 'whoami' in script, (
+            'Script should check if running as root')
+        # Verify the script still uses sudo commands (which will be aliased)
+        assert 'sudo grep' in script or 'sudo tee' in script, (
+            'Script should still use sudo commands (to be aliased when root)')
+
 
 class TestOptimizerSelectBestInfra:
     """Tests for Optimizer._select_best_infra logic.
