@@ -11,10 +11,11 @@ class TestCanonicalGPUNames:
     """Tests for the shared CANONICAL_GPU_NAMES constant."""
 
     def test_canonical_gpu_names_order(self):
-        """Test that longer GPU names come before shorter substrings.
+        """Test that names which are prefixes of others come later.
 
         This is critical for correct substring matching in the GPU labeler.
-        For example, 'L40S' must come before 'L40' which must come before 'L4'.
+        For example, 'L40S' must come before 'L40' which must come before 'L4',
+        otherwise 'L4' would incorrectly match 'L40S'.
         """
         names = kubernetes_constants.CANONICAL_GPU_NAMES
 
@@ -30,6 +31,9 @@ class TestCanonicalGPUNames:
 
         # A10G must come before A10
         assert names.index('A10G') < names.index('A10')
+
+        # T4g must come before T4
+        assert names.index('T4g') < names.index('T4')
 
     def test_canonical_gpu_names_contains_latest_gpus(self):
         """Test that all latest generation GPUs are included."""

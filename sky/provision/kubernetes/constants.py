@@ -2,8 +2,12 @@
 
 # Canonical GPU names for GPU detection and labeling.
 # Used by both GFDLabelFormatter and the GPU labeler script.
-# Order matters: longer names must come before shorter substrings
-# (e.g., 'L40S' before 'L40' before 'L4') to ensure correct matching.
+#
+# IMPORTANT: Order matters for the GPU labeler script which uses substring
+# matching (canonical_name in gpu_name). Names that are prefixes of other
+# names must come later (e.g., 'L40S' before 'L40' before 'L4') to prevent
+# 'L4' from matching 'L40S'. GFDLabelFormatter uses word boundary regex
+# and is order-independent.
 CANONICAL_GPU_NAMES = [
     # Blackwell architecture (2024+)
     'GB300',

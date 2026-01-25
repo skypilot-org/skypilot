@@ -709,7 +709,7 @@ class GFDLabelFormatter(GPULabelFormatter):
         # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
         # 3. remove 'RTX-' (e.g. 'RTX-6000' -> 'RTX6000')
         # Same logic, but uppercased, as the Skypilot labeler job found in
-        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml.j2
         return value.upper().replace('NVIDIA-',
                                      '').replace('GEFORCE-',
                                                  '').replace('RTX-', 'RTX')

@@ -84,11 +84,27 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
         rbac_template_path = os.path.join(manifest_dir,
                                           'k8s_gpu_labeler_setup.yaml.j2')
         try:
-            # Render the Jinja2 template with canonical GPU names
             with open(rbac_template_path, 'r', encoding='utf-8') as f:
-                template = jinja2.Template(f.read())
+                template_content = f.read()
+        except FileNotFoundError:
+            print(f'Error: GPU labeler template not found at '
+                  f'{rbac_template_path}. '
+                  'Your SkyPilot installation may be incomplete.')
+            return
+        except IOError as e:
+            print(f'Error reading GPU labeler template: {e}')
+            return
+
+        try:
+            # Render the Jinja2 template with canonical GPU names
+            template = jinja2.Template(template_content)
             manifest_content = template.render(
                 canonical_gpu_names=kubernetes_constants.CANONICAL_GPU_NAMES)
+        except jinja2.TemplateError as e:
+            print(f'Error rendering GPU labeler template: {e}')
+            return
+
+        try:
             # Apply via stdin to use the rendered content
             apply_command = ['kubectl']
             if context:
@@ -101,7 +117,7 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
             stderr = e.stderr.decode('utf-8')
-            print('Error setting up GPU labeling: ' + output + stderr)
+            print('Error applying GPU labeler manifest: ' + output + stderr)
             return
 
     jobs_to_node_names: Dict[str, str] = {}
