@@ -15,6 +15,7 @@ pytest -n 0 --dist no .buildkite/test_buildkite_pipeline_generation.py
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 
 import pytest
@@ -126,6 +127,98 @@ def _extract_test_names_from_pipeline(pipeline_path):
         test_names.add(test_name)
 
     return test_names
+
+
+def _extract_steps_from_pipeline(pipeline_path):
+    """Extract all steps from a pipeline YAML file."""
+    with open(pipeline_path, 'r') as f:
+        pipeline = yaml.safe_load(f)
+
+    all_steps = []
+    for group in pipeline['steps']:
+        if 'steps' in group:
+            all_steps.extend(group['steps'])
+        else:
+            all_steps.append(group)
+    return all_steps
+
+
+def test_no_auto_retry_marker(tmp_path):
+    """Test that @pytest.mark.no_auto_retry disables automatic retries."""
+    # Create a temporary test file with no_auto_retry marker
+    test_content = '''
+import pytest
+
+@pytest.mark.aws
+@pytest.mark.no_auto_retry
+def test_no_retry_example():
+    """Test marked as no_auto_retry should not auto-retry."""
+    pass
+
+@pytest.mark.aws
+def test_normal_example():
+    """Normal test should auto-retry."""
+    pass
+'''
+
+    # Create a temporary directory structure
+    temp_dir = tmp_path / 'tests' / 'smoke_tests'
+    temp_dir.mkdir(parents=True)
+
+    # Write temporary test file
+    test_file = temp_dir / 'test_no_retry_marker.py'
+    test_file.write_text(test_content)
+
+    # Copy conftest.py for markers
+    conftest_src = pathlib.Path('tests/conftest.py')
+    conftest_dst = tmp_path / 'tests' / 'conftest.py'
+    shutil.copy(conftest_src, conftest_dst)
+
+    # Copy smoke_tests_utils if it exists
+    smoke_tests_dir = pathlib.Path('tests/smoke_tests')
+    for f in smoke_tests_dir.glob('*.py'):
+        if f.name != 'test_no_retry_marker.py':
+            shutil.copy(f, temp_dir / f.name)
+
+    # Generate pipeline
+    env = dict(os.environ)
+    env['PYTHONPATH'] = f"{tmp_path / 'tests'}:{pathlib.Path.cwd()}/tests:" \
+                        f"{env.get('PYTHONPATH', '')}"
+
+    subprocess.run([
+        'python', '.buildkite/generate_pipeline.py', '--args', '--aws',
+        '--file_pattern', 'test_no_retry_marker'
+    ],
+                   env=env,
+                   check=True,
+                   cwd=tmp_path)
+
+    # Check the generated pipeline
+    pipeline_path = tmp_path / '.buildkite' / 'pipeline_smoke_tests_release.yaml'
+    if pipeline_path.exists():
+        steps = _extract_steps_from_pipeline(pipeline_path)
+
+        no_retry_step = None
+        normal_step = None
+        for step in steps:
+            if 'test_no_retry_example' in step.get('label', ''):
+                no_retry_step = step
+            if 'test_normal_example' in step.get('label', ''):
+                normal_step = step
+
+        # Verify no_auto_retry step has manual retry only
+        if no_retry_step:
+            retry = no_retry_step.get('retry', {})
+            assert retry.get('automatic') is False, \
+                f"no_auto_retry step should have automatic=False: {retry}"
+            assert retry.get('manual', {}).get('allowed') is True, \
+                f"no_auto_retry step should allow manual retry: {retry}"
+
+        # Verify normal step has automatic retry
+        if normal_step:
+            retry = normal_step.get('retry', {})
+            assert retry.get('automatic') is True, \
+                f"Normal step should have automatic=True: {retry}"
 
 
 @pytest.mark.parametrize('args', [
