@@ -18,10 +18,15 @@ import uvicorn
 from sky import core
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
+from sky import global_user_state
 
 logger = sky_logging.init_logger(__name__)
 
 metrics_app = fastapi.FastAPI()
+
+SKY_APISERVER_TOTAL_BURN_RATE = prom.Gauge(
+    'sky_apiserver_total_burn_rate_dollars',
+    'Total estimated hourly spend across all active clusters (USD/hr)')
 
 
 # Serve /metrics in dedicated thread to avoid blocking the event loop
@@ -102,6 +107,48 @@ def _is_streaming_api(path: str) -> bool:
     return path.endswith('/logs') or path.endswith('/api/stream')
 
 
+def update_burn_rate_metric() -> None:
+    """Calculates real-time burn rate using the Cloud objects."""
+    total_hourly_cost = 0.0
+    try:
+        # 1. Get all clusters from the local database
+        clusters = global_user_state.get_clusters()
+
+        for cluster in clusters:
+            # 2. Only count clusters that are running ('UP')
+            if cluster['status'].name == 'UP':
+                handle = cluster['handle']
+
+                # 3. Access the resources (Cloud, Region, Instance Type)
+                if hasattr(handle,
+                           'launched_resources') and handle.launched_resources:
+                    r = handle.launched_resources
+
+                    # 4. Calculate Base Instance Cost
+                    if r.cloud is not None:
+                        cost = r.cloud.instance_type_to_hourly_cost(
+                            r.instance_type,
+                            r.use_spot,
+                            region=r.region,
+                            zone=r.zone)
+                        total_hourly_cost += cost
+
+                        # 5. Add Accelerator Cost (Critical for GCP)
+                        if r.accelerators:
+                            acc_cost = r.cloud.accelerators_to_hourly_cost(
+                                r.accelerators,
+                                r.use_spot,
+                                region=r.region,
+                                zone=r.zone)
+                            total_hourly_cost += acc_cost
+
+        # 6. Update the Prometheus Metric
+        SKY_APISERVER_TOTAL_BURN_RATE.set(total_hourly_cost)
+
+    except Exception as e:
+        logger.error(f'Failed to update burn rate: {e}')
+
+
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to collect Prometheus metrics for HTTP requests."""
 
@@ -143,6 +190,7 @@ def process_monitor(process_type: str, stop: threading.Event):
     last_bucket_end = time.time()
     bucket_peak = 0
     global peak_rss_bytes
+    last_cost_update = 0
     while not stop.is_set():
         if time.time() - last_bucket_end >= 30:
             # Reset peak RSS for the next time bucket.
@@ -160,4 +208,7 @@ def process_monitor(process_type: str, stop: threading.Event):
                                                              type=process_type,
                                                              mode='system').set(
                                                                  ctimes.system)
+        if time.time() - last_cost_update >= 30:
+            update_burn_rate_metric()
+            last_cost_update = time.time()
         time.sleep(1)
