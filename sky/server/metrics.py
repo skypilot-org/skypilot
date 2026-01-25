@@ -22,6 +22,8 @@ from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
+
 metrics_app = fastapi.FastAPI()
 
 SKY_APISERVER_TOTAL_BURN_RATE = prom.Gauge(
@@ -208,7 +210,7 @@ def process_monitor(process_type: str, stop: threading.Event):
                                                              type=process_type,
                                                              mode='system').set(
                                                                  ctimes.system)
-        if time.time() - last_cost_update >= 30:
+        if time.time() - last_cost_update >= _BURN_RATE_UPDATE_INTERVAL_SECONDS:
             update_burn_rate_metric()
             last_cost_update = time.time()
         time.sleep(1)
