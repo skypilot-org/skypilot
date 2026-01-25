@@ -4,6 +4,7 @@ import functools
 import glob
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import textwrap
@@ -212,10 +213,7 @@ class SSHConfigHelper:
         Returns:
             A Windows-compatible proxy command using wsl.exe.
         """
-        # Escape single quotes for bash single-quoted string
-        # 'foo'bar' -> 'foo'"'"'bar'
-        escaped_command = proxy_command.replace("'", "'\"'\"'")
-        return f"wsl.exe bash -c '{escaped_command}'"
+        return f'wsl.exe bash -c {shlex.quote(proxy_command)}'
 
     @classmethod
     def _add_cluster_to_windows_ssh_config(
