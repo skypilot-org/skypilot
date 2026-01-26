@@ -1574,10 +1574,13 @@ def get_cluster_info(
                                                   namespace, context)
 
     head_pod_name = None
-    primary_container_name = None
+    head_primary_container_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
+        primary_container = kubernetes_utils.get_pod_primary_container(pod)
+        primary_container_name = getattr(primary_container, 'name', None)
+        assert primary_container_name is not None
         pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,
@@ -1588,14 +1591,14 @@ def get_cluster_info(
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
                 internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
+                primary_container_name=primary_container_name,
             )
         ]
         if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
-            primary_container = kubernetes_utils.get_pod_primary_container(pod)
-            primary_container_name = getattr(primary_container, 'name', None)
+            head_primary_container_name = primary_container_name
             resources = getattr(primary_container, 'resources', None)
             requests = (getattr(resources, 'requests', None)
                         if resources else None)
@@ -1614,9 +1617,9 @@ def get_cluster_info(
     # the actual username reliably.
     get_k8s_ssh_user_cmd = 'echo "SKYPILOT_SSH_USER: $(whoami)"'
     assert head_pod_name is not None
-    assert primary_container_name is not None
     runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), head_pod_name), container=primary_container_name)
+        ((namespace, context), head_pod_name),
+        container=head_primary_container_name)
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -1653,8 +1656,7 @@ def get_cluster_info(
             'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
-        provider_config=provider_config,
-        primary_container_name=primary_container_name)
+        provider_config=provider_config)
 
 
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
@@ -2117,22 +2119,26 @@ def get_command_runners(
         head_instance_info = instances[pod_name][0]
         deployment = head_instance_info.tags.get(
             k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME)
+        container = head_instance_info.primary_container_name
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0],
             deployment=deployment,
-            container=cluster_info.primary_container_name,
+            container=container,
             **credentials)
         runners.append(head_runner)
 
     node_list = [((namespace, context), pod_name)
                  for pod_name in instances.keys()
                  if pod_name != cluster_info.head_instance_id]
-    runners.extend(
-        command_runner.KubernetesCommandRunner.make_runner_list(
-            node_list,
-            container=cluster_info.primary_container_name,
-            **credentials))
+    for pod_name, instance_info in instances.items():
+        node_list = [((namespace, context), pod_name)]
+        container = instance_info[0].primary_container_name
+        runner = command_runner.KubernetesCommandRunner(node_list[0],
+                                                        deployment=None,
+                                                        container=container,
+                                                        **credentials)
+        runners.append(runner)
 
     return runners

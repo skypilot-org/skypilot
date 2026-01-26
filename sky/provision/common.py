@@ -121,6 +121,8 @@ class InstanceInfo:
     ssh_port: int = 22
     # The internal service address of the instance on Kubernetes.
     internal_svc: Optional[str] = None
+    # Primary (skypilot-node) container name on Kubernetes.
+    primary_container_name: Optional[str] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -145,8 +147,6 @@ class ClusterInfo:
     # Override the ssh_user from the cluster config.
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
-
-    primary_container_name: Optional[str] = None
 
     @property
     def num_instances(self) -> int:

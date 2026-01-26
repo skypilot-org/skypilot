@@ -2186,7 +2186,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
 
         if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
                 self.cached_cluster_info is not None and
-                self.cached_cluster_info.primary_container_name is None):
+                any(infos[0].primary_container_name is None
+                    for infos in self.cached_cluster_info.instances.values())):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
