@@ -27,6 +27,8 @@ class VolumeType(enum.Enum):
     """Volume type."""
     PVC = 'k8s-pvc'
     RUNPOD_NETWORK_VOLUME = 'runpod-network-volume'
+    MITHRIL_FILE_SHARE = 'mithril-file-share'
+    MITHRIL_BLOCK = 'mithril-block'
 
     @classmethod
     def supported_types(cls) -> list:
@@ -44,6 +46,7 @@ class VolumeInfo:
     path: str
     volume_name_on_cloud: Optional[str] = None
     volume_id_on_cloud: Optional[str] = None
+    volume_type: Optional[str] = None
 
 
 class VolumeMount:

@@ -166,7 +166,7 @@ def run_instances(
         )
 
     if existing_count > 0 and existing_count < desired_count:
-        raise RuntimeError(
+        raise utils.MithrilError(
             f'Cluster {cluster_name_on_cloud} has {existing_count} instances '
             f'but {desired_count} requested. Adding instances to existing '
             f'cluster is not supported.')
@@ -177,12 +177,26 @@ def run_instances(
 
     instance_type = config.node_config.get('InstanceType')
     if not instance_type:
-        raise RuntimeError('InstanceType is not set in node_config. '
-                           'Please specify an instance type for Mithril.')
+        raise utils.MithrilError('InstanceType is not set in node_config. '
+                                 'Please specify an instance type for Mithril.')
 
     _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
+
+    volume_mounts = config.node_config.get('VolumeMounts', [])
+    volume_ids: List[str] = []
+    if volume_mounts:
+        for volume_mount in volume_mounts:
+            volume_fid = volume_mount.get('VolumeIdOnCloud')
+            mount_path = volume_mount.get('MountPath')
+            if mount_path is None:
+                raise utils.MithrilError(
+                    'Mithril volume mount path must be set.')
+            if not volume_fid:
+                raise utils.MithrilError(
+                    'Mithril volume fid not found for volume mount.')
+            volume_ids.append(volume_fid)
 
     bid_id, created_instance_ids = utils.launch_instances(
         instance_type,
@@ -190,6 +204,7 @@ def run_instances(
         region,
         public_key,
         instance_quantity=to_start_count,
+        volume_ids=volume_ids,
     )
     logger.debug(
         f'Submitted bid {bid_id}, created {len(created_instance_ids)} instances'

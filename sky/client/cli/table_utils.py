@@ -306,6 +306,40 @@ class RunPodVolumeTable(VolumeTable):
         return 'RunPod Network Volumes:\n' + str(self.table)
 
 
+class MithrilVolumeTable(VolumeTable):
+    """The Mithril volume table."""
+
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 label: str,
+                 show_all: bool = False):
+        self._label = label
+        super().__init__(volumes, show_all)
+
+    def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
+        """Create the Mithril volume table."""
+        if show_all:
+            columns = _BASIC_COLUMNS + ['NAME_ON_CLOUD']
+        else:
+            columns = _BASIC_COLUMNS
+        table = log_utils.create_table(columns)
+        return table
+
+    def _add_rows(self,
+                  volumes: List[responses.VolumeRecord],
+                  show_all: bool = False) -> None:
+        """Add rows to the Mithril volume table."""
+        for row in volumes:
+            table_row = self._get_row_base_columns(row, show_all)
+            if show_all:
+                table_row.append(row.get('name_on_cloud', ''))
+            self.table.add_row(table_row)
+
+    def format(self) -> str:
+        """Format the Mithril volume table for display."""
+        return f'{self._label}:\n' + str(self.table)
+
+
 def format_volume_table(volumes: List[responses.VolumeRecord],
                         show_all: bool = False) -> str:
     """Format the volume table for display.
@@ -339,6 +373,15 @@ def format_volume_table(volumes: List[responses.VolumeRecord],
         elif volume_type == volume.VolumeType.RUNPOD_NETWORK_VOLUME.value:
             runpod_table = RunPodVolumeTable(volume_list, show_all)
             table_str += runpod_table.format()
+        elif volume_type == volume.VolumeType.MITHRIL_FILE_SHARE.value:
+            mithril_table = MithrilVolumeTable(volume_list,
+                                               'Mithril File Shares', show_all)
+            table_str += mithril_table.format()
+        elif volume_type == volume.VolumeType.MITHRIL_BLOCK.value:
+            mithril_table = MithrilVolumeTable(volume_list,
+                                               'Mithril Block Volumes',
+                                               show_all)
+            table_str += mithril_table.format()
     if table_str:
         return table_str
     else:

@@ -1,4 +1,6 @@
 # Ray cluster config template for Mithril Cloud
+{# QEMU SCSI serial limit is 36 chars; Mithril truncates volume IDs to this length in /dev/disk/by-id #}
+{%- set KUBEVIRT_SERIAL_MAX_LENGTH = 36 -%}
 
 cluster_name: {{cluster_name_on_cloud}}
 
@@ -50,6 +52,14 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       labels: {{labels}}
+      {%- if volume_mounts and volume_mounts|length > 0 %}
+      VolumeMounts:
+      {%- for vm in volume_mounts %}
+        - VolumeNameOnCloud: {{ vm.volume_name_on_cloud }}
+          VolumeIdOnCloud: {{ vm.volume_id_on_cloud }}
+          MountPath: {{ vm.path }}
+      {%- endfor %}
+      {%- endif %}
 
 head_node_type: ray_head_default
 
@@ -99,3 +109,30 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {{ ssh_max_sessions_config }}
+    {%- if volume_mounts and volume_mounts|length > 0 %}
+    {%- for vm in volume_mounts %}
+    {%- if vm.volume_type == 'mithril-block' %}
+    DEVICE_BY_ID=$(ls -1 /dev/disk/by-id/*{{ vm.volume_id_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }}* 2>/dev/null | head -n 1 || true);
+    if [ -z "$DEVICE_BY_ID" ]; then
+      echo "Block volume {{ vm.volume_id_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }} device not found; skipping.";
+    else
+      if ! sudo blkid "$DEVICE_BY_ID" | grep -q 'TYPE="ext4"'; then
+        echo "Formatting block volume {{ vm.volume_name_on_cloud }} ({{ vm.volume_id_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }})...";
+        sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$DEVICE_BY_ID";
+      fi;
+      sudo mkdir -p {{ vm.path }};
+      if ! findmnt -rn -T "{{ vm.path }}" >/dev/null 2>&1; then
+        sudo mount "$DEVICE_BY_ID" "{{ vm.path }}";
+      fi;
+      if ! grep -q " {{ vm.path }} " /etc/fstab; then
+        echo "UUID=$(sudo blkid -s UUID -o value "$DEVICE_BY_ID") {{ vm.path }} ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab;
+      fi;
+    fi;
+    {%- else %}
+    sudo mkdir -p {{ vm.path }};
+    sudo sed -i "s|[[:space:]]/mnt/{{ vm.volume_name_on_cloud }}[[:space:]]| {{ vm.path }} |" /etc/fstab;
+    sudo umount /mnt/{{ vm.volume_name_on_cloud }} || true;
+    {%- endif %}
+    {%- endfor %}
+    sudo mount -a;
+    {%- endif %}

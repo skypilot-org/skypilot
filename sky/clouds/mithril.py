@@ -1,6 +1,7 @@
 """Mithril Cloud provider implementation for SkyPilot."""
 
 import os
+import re
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -160,6 +161,16 @@ class Mithril(clouds.Cloud):
 
     def __repr__(self):
         return self._REPR
+
+    @classmethod
+    def is_volume_name_valid(cls,
+                             volume_name: str) -> Tuple[bool, Optional[str]]:
+        if len(volume_name) > 64:
+            return False, 'Volume name must be at most 64 characters.'
+        if not re.fullmatch(r'^[a-z]([-a-z0-9]*[a-z0-9])?$', volume_name):
+            return False, ('Volume name must match '
+                           '^[a-z]([-a-z0-9]*[a-z0-9])?$.')
+        return True, None
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

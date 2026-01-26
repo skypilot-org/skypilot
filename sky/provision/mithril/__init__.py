@@ -10,3 +10,8 @@ from sky.provision.mithril.instance import run_instances
 from sky.provision.mithril.instance import stop_instances
 from sky.provision.mithril.instance import terminate_instances
 from sky.provision.mithril.instance import wait_instances
+from sky.provision.mithril.volume import apply_volume
+from sky.provision.mithril.volume import delete_volume
+from sky.provision.mithril.volume import get_all_volumes_usedby
+from sky.provision.mithril.volume import get_volume_usedby
+from sky.provision.mithril.volume import map_all_volumes_usedby

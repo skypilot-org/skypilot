@@ -942,6 +942,7 @@ def write_cluster_config(
                     path=vol.path,
                     volume_name_on_cloud=vol.volume_config.name_on_cloud,
                     volume_id_on_cloud=vol.volume_config.id_on_cloud,
+                    volume_type=vol.volume_config.type,
                 )
                 volume_mount_vars.append(volume_info)
 

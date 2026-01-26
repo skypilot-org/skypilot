@@ -12,10 +12,16 @@ from sky.utils import volume as volume_lib
 VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.PVC: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
+    volume_lib.VolumeType.MITHRIL_FILE_SHARE: clouds.Mithril(),
+    volume_lib.VolumeType.MITHRIL_BLOCK: clouds.Mithril(),
 }
 CLOUD_TO_VOLUME_TYPE = {
     clouds.Kubernetes(): [volume_lib.VolumeType.PVC],
     clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
+    clouds.Mithril(): [
+        volume_lib.VolumeType.MITHRIL_FILE_SHARE,
+        volume_lib.VolumeType.MITHRIL_BLOCK,
+    ],
 }
 
 
@@ -85,6 +91,15 @@ class Volume:
                                        labels=config.get('labels'),
                                        use_existing=config.get('use_existing'),
                                        config=config.get('config', {}))
+        if vt in (volume_lib.VolumeType.MITHRIL_FILE_SHARE,
+                  volume_lib.VolumeType.MITHRIL_BLOCK):
+            return MithrilVolume(name=config.get('name'),
+                                 type=vol_type_val,
+                                 infra=config.get('infra'),
+                                 size=config.get('size'),
+                                 labels=config.get('labels'),
+                                 use_existing=config.get('use_existing'),
+                                 config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
@@ -213,3 +228,24 @@ class RunpodNetworkVolume(Volume):
                              'volumes. Set the zone in the infra field.')
 
         return
+
+
+class MithrilVolume(Volume):
+    """Mithril volume."""
+
+    def validate(self, skip_cloud_compatibility: bool = False) -> None:
+        self.validate_name()
+        if self.labels:
+            raise ValueError('Mithril volumes do not support labels.')
+        if not skip_cloud_compatibility:
+            self.validate_cloud_compatibility()
+        self._validate_config_extra()
+
+    def _validate_config_extra(self) -> None:
+        if self.zone:
+            raise ValueError(
+                'Mithril volumes do not support zones. Set only the region in '
+                'the infra field.')
+
+        if not self.region:
+            raise ValueError('Mithril region is required for volumes.')

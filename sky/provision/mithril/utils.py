@@ -206,7 +206,7 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code == 429 or 500 <= status_code < 600
 
 
-def _make_request(
+def make_request(
     method: str,
     endpoint: str,
     payload: Optional[Dict[str, Any]] = None,
@@ -311,9 +311,9 @@ def _get_or_create_ssh_key(public_key: str) -> List[str]:
     params = {'project': config['project_id']}
 
     # Get existing SSH keys
-    key_list: List[Dict[str, Any]] = _make_request('GET',
-                                                   endpoint,
-                                                   params=params)
+    key_list: List[Dict[str, Any]] = make_request('GET',
+                                                  endpoint,
+                                                  params=params)
 
     # Extract key type and key data (ignore comment if present)
     key_parts = public_key.strip().split()
@@ -334,7 +334,7 @@ def _get_or_create_ssh_key(public_key: str) -> List[str]:
     user_name = common_utils.get_current_user_name()[:10]
     key_name = f'sky-{user_name}-{int(time.time())}'
 
-    create_response = _make_request(
+    create_response = make_request(
         'POST',
         endpoint,
         payload={
@@ -368,7 +368,7 @@ def _wait_for_bid_instances(
     while time.time() - start_time < timeout:
         try:
             params = {'project': project_id, 'name': bid_name}
-            response = _make_request('GET', '/v2/spot/bids', params=params)
+            response = make_request('GET', '/v2/spot/bids', params=params)
             bids = response.get('data', [])
 
             if not bids:
@@ -467,7 +467,7 @@ def list_instances(
             if cursor:
                 params['next_cursor'] = cursor
 
-            response = _make_request('GET',
+            response = make_request('GET',
                                      endpoint,
                                      params=params,
                                      config=config)
@@ -513,7 +513,7 @@ def get_spot_availability() -> List[Dict[str, Any]]:
         fid, instance_type (FID), region, capacity,
         last_instance_price, lowest_allocated_price, etc.
     """
-    return _make_request('GET', '/v2/spot/availability')
+    return make_request('GET', '/v2/spot/availability')
 
 
 def get_instance_types() -> Dict[str, Dict[str, Any]]:
@@ -524,8 +524,8 @@ def get_instance_types() -> Dict[str, Dict[str, Any]]:
         Each record contains: fid, name, num_cpus, gpu_type, num_gpus, etc.
         Note: The same name can appear with different FIDs (one per region).
     """
-    instance_types: List[Dict[str,
-                              Any]] = _make_request('GET', '/v2/instance-types')
+    instance_types: List[Dict[str, Any]] = make_request('GET',
+                                                        '/v2/instance-types')
     return {it['fid']: it for it in instance_types}
 
 
@@ -535,6 +535,7 @@ def launch_instances(
     region: Optional[str],
     public_key: str,
     instance_quantity: int = 1,
+    volume_ids: Optional[List[str]] = None,
 ) -> Tuple[str, List[str]]:
     """Launch instances by creating a spot bid and waiting for them to be ready.
 
@@ -586,8 +587,7 @@ def launch_instances(
         'name': name,
         'launch_specification': {
             'ssh_keys': ssh_keys,
-            # TODO(oliviert): Support volumes
-            'volumes': [],
+            'volumes': volume_ids or [],
         },
     }
 
@@ -595,7 +595,7 @@ def launch_instances(
     try:
         logger.debug(
             f'Creating spot bid for {instance_type} ({instance_type_fid})')
-        response = _make_request('POST', endpoint, payload=bid_payload)
+        response = make_request('POST', endpoint, payload=bid_payload)
         logger.debug(f'Spot bid response: {json.dumps(response, indent=2)}')
 
         bid_id = response['fid']
@@ -636,7 +636,7 @@ def get_bid(
         'name': bid_name,
     }
 
-    response = _make_request('GET', endpoint, params=params, config=config)
+    response = make_request('GET', endpoint, params=params, config=config)
     bids = response.get('data', [])
     if not bids:
         logger.debug(f'No bid found with name {bid_name}')
@@ -667,7 +667,7 @@ def cancel_bid(
 
     try:
         logger.debug(f'Canceling bid {bid_id}')
-        _make_request('DELETE', endpoint, params=params, config=config)
+        make_request('DELETE', endpoint, params=params, config=config)
         logger.debug(f'Successfully canceled bid {bid_id}')
         return True
     except MithrilHttpError as e:
@@ -704,7 +704,7 @@ def update_bid(
     payload = {'paused': paused}
 
     logger.debug(f'Updating bid {bid_id}, paused: {paused}')
-    response = _make_request('PATCH',
+    response = make_request('PATCH',
                              endpoint,
                              payload=payload,
                              params=params,
