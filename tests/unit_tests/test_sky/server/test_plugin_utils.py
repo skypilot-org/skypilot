@@ -1,10 +1,7 @@
 """Unit tests for the SkyPilot API server plugin_utils."""
 
 import os
-import sys
 import tempfile
-import types
-from unittest import mock
 
 import pytest
 import yaml
@@ -13,96 +10,10 @@ from sky.server import plugin_utils
 from sky.server import plugins
 
 
-def test_build_plugin_wheels_empty(monkeypatch, tmp_path):
-    """Test that build_plugin_wheels returns empty when no plugins configured."""
-    # Create empty plugins config
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump({'plugins': []}))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-    wheels, combined_hash = plugin_utils._build_plugin_wheels()
-
-    assert wheels == {}
-    assert combined_hash == ''
-
-
-def test_build_plugin_wheels_no_upload_flag(monkeypatch, tmp_path):
-    """Test that plugins without upload_to_controller are skipped."""
-    # Create plugins config without upload_to_controller field
-    config = {
-        'plugins': [{
-            'class': 'some_module.SomePlugin',
-        }]
-    }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-    wheels, combined_hash = plugin_utils._build_plugin_wheels()
-
-    assert wheels == {}
-    assert combined_hash == ''
-
-
-def test_build_plugin_wheels_with_upload_flag(monkeypatch, tmp_path):
-    """Test building wheels for a plugin with upload_to_controller set."""
-    # Create a minimal package structure
-    package_dir = tmp_path / 'test_plugin'
-    package_dir.mkdir()
-
-    # Create pyproject.toml
-    pyproject_content = """
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "test_plugin"
-version = "0.0.1"
-"""
-    (package_dir / 'pyproject.toml').write_text(pyproject_content)
-
-    # Create a minimal Python package
-    plugin_module = package_dir / 'test_plugin'
-    plugin_module.mkdir()
-    (plugin_module / '__init__.py').write_text('# Test plugin')
-
-    # Add the package directory to sys.path so we can import it
-    sys.path.insert(0, str(package_dir.parent))
-
-    try:
-        # Create plugins config with upload_to_controller
-        config = {
-            'plugins': [{
-                'class': 'test_plugin.TestPlugin',
-                'upload_to_controller': True,
-            }]
-        }
-        config_path = tmp_path / 'plugins.yaml'
-        config_path.write_text(yaml.safe_dump(config))
-        monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-        # Set a temporary wheel directory
-        wheel_dir = tmp_path / 'wheels'
-        monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_DIR', wheel_dir)
-        monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_LOCK_PATH',
-                            wheel_dir.parent / '.plugin_wheels_lock')
-
-        wheels, combined_hash = plugin_utils._build_plugin_wheels()
-
-        assert 'test_plugin' in wheels
-        assert wheels['test_plugin'].exists()
-        assert wheels['test_plugin'].suffix == '.whl'
-        assert combined_hash != ''
-    finally:
-        # Clean up sys.path
-        if str(package_dir.parent) in sys.path:
-            sys.path.remove(str(package_dir.parent))
-
-
 def test_get_plugin_packages(monkeypatch, tmp_path):
     """Test get_plugin_packages returns plugin configurations."""
     config = {
+        'controller_wheel_path': 'dist/plugins-0.0.1-py3-none-any.whl',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
@@ -121,82 +32,113 @@ def test_get_plugin_packages(monkeypatch, tmp_path):
     monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
     packages = plugins.get_plugin_packages()
+    wheel_path = plugins.get_controller_wheel_path()
 
     assert len(packages) == 2
     assert packages[0]['class'] == 'module1.Plugin1'
     assert packages[0]['upload_to_controller'] is True
-    # Package path may or may not be determined depending on whether module exists
-    # (it will be added if the module can be imported and has a package root)
     assert packages[1]['class'] == 'module2.Plugin2'
     assert 'upload_to_controller' not in packages[1]
-    assert 'package' not in packages[1]
+    assert wheel_path == 'dist/plugins-0.0.1-py3-none-any.whl'
 
 
 def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     """Test get_plugin_mounts_and_commands returns consistent mounts and cmds."""
-    # Create a minimal package structure
-    package_dir = tmp_path / 'test_plugin'
-    package_dir.mkdir()
+    # Create a prebuilt wheel file
+    wheel_file = tmp_path / 'test_plugin-0.0.1-py3-none-any.whl'
+    wheel_file.write_bytes(b'fake wheel content')
 
-    pyproject_content = """
-[build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+    config = {
+        'controller_wheel_path': str(wheel_file),
+        'plugins': [{
+            'class': 'test_plugin.TestPlugin',
+            'upload_to_controller': True,
+        }]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
-[project]
-name = "test_plugin"
-version = "0.0.1"
-"""
-    (package_dir / 'pyproject.toml').write_text(pyproject_content)
+    file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
-    plugin_module = package_dir / 'test_plugin'
-    plugin_module.mkdir()
-    (plugin_module / '__init__.py').write_text('# Test plugin')
+    # Check file mounts
+    assert len(file_mounts) == 1
+    remote_path = list(file_mounts.keys())[0]
+    assert '~/.sky/plugins/wheels' in remote_path
+    assert 'test_plugin-0.0.1-py3-none-any.whl' in remote_path
+    assert file_mounts[remote_path] == str(wheel_file)
 
-    # Add the package directory to sys.path so we can import it
-    sys.path.insert(0, str(package_dir.parent))
+    # Check commands
+    assert commands != ''
+    assert 'pip install' in commands or 'uv pip install' in commands
+    # Should contain the actual wheel filename
+    assert 'test_plugin-0.0.1-py3-none-any.whl' in commands
+    # Path should use ~ for shell expansion (not quoted)
+    assert '~/.sky/plugins/wheels' in commands
 
-    try:
-        config = {
-            'plugins': [{
-                'class': 'test_plugin.TestPlugin',
-                'upload_to_controller': True,
-            }]
-        }
-        config_path = tmp_path / 'plugins.yaml'
-        config_path.write_text(yaml.safe_dump(config))
-        monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
-        wheel_dir = tmp_path / 'wheels'
-        monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_DIR', wheel_dir)
-        monkeypatch.setattr(plugin_utils, '_PLUGIN_WHEEL_LOCK_PATH',
-                            wheel_dir.parent / '.plugin_wheels_lock')
+def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
+    """Test get_plugin_mounts_and_commands when controller_wheel_path is missing."""
+    config = {
+        'plugins': [{
+            'class': 'test_plugin.TestPlugin',
+            'upload_to_controller': True,
+            # Missing controller_wheel_path
+        }]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
-        file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
+    file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
-        # Check file mounts
-        assert len(file_mounts) == 1
-        remote_path = list(file_mounts.keys())[0]
-        assert '~/.sky/plugins/wheels' in remote_path
+    # Should return empty since controller_wheel_path is missing
+    assert file_mounts == {}
+    assert commands == ''
 
-        # Check commands
-        assert commands != ''
-        assert 'pip install' in commands
-        # Should contain the actual wheel filename with version, not just *.whl
-        assert 'test_plugin-0.0.1' in commands
-        assert '.whl' in commands
-        # Path should use ~ for shell expansion (not quoted)
-        assert '~/.sky/plugins/wheels' in commands
 
-        # Verify that the hash in file mounts matches the hash in commands
-        # Extract the hash from the remote path (format: ~/.sky/plugins/wheels/<hash>)
-        mount_hash = remote_path.split('/')[-1]
-        assert mount_hash in commands, (
-            f'Hash mismatch: mount hash {mount_hash} not found in commands')
-    finally:
-        # Clean up sys.path
-        if str(package_dir.parent) in sys.path:
-            sys.path.remove(str(package_dir.parent))
+def test_get_plugin_mounts_and_commands_invalid_wheel_path(monkeypatch, tmp_path):
+    """Test get_plugin_mounts_and_commands with invalid wheel path."""
+    config = {
+        'controller_wheel_path': str(tmp_path / 'nonexistent.whl'),
+        'plugins': [{
+            'class': 'test_plugin.TestPlugin',
+            'upload_to_controller': True,
+        }]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
+
+    # Should return empty since wheel file doesn't exist
+    assert file_mounts == {}
+    assert commands == ''
+
+
+def test_get_plugin_mounts_and_commands_not_whl_file(monkeypatch, tmp_path):
+    """Test get_plugin_mounts_and_commands with non-.whl file."""
+    # Create a file that's not a .whl
+    non_wheel_file = tmp_path / 'test_plugin.txt'
+    non_wheel_file.write_text('not a wheel')
+
+    config = {
+        'controller_wheel_path': str(non_wheel_file),
+        'plugins': [{
+            'class': 'test_plugin.TestPlugin',
+            'upload_to_controller': True,
+        }]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
+
+    # Should return empty since file doesn't have .whl extension
+    assert file_mounts == {}
+    assert commands == ''
 
 
 def test_get_filtered_plugins_config_path_empty(monkeypatch, tmp_path):
@@ -239,6 +181,7 @@ def test_get_filtered_plugins_config_path_with_upload_flag(
         monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with plugins that have upload_to_controller."""
     config = {
+        'controller_wheel_path': 'dist/test_plugin-0.0.1-py3-none-any.whl',
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
             'upload_to_controller': True,
@@ -259,14 +202,14 @@ def test_get_filtered_plugins_config_path_with_upload_flag(
 
     assert len(filtered_config['plugins']) == 1
     assert filtered_config['plugins'][0]['class'] == 'test_plugin.TestPlugin'
-    # Filtered config should not include upload_to_controller or package
+    # Filtered config should not include upload_to_controller
     assert 'upload_to_controller' not in filtered_config['plugins'][0]
-    assert 'package' not in filtered_config['plugins'][0]
 
 
 def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with mixed plugins."""
     config = {
+        'controller_wheel_path': 'dist/plugins-0.0.1-py3-none-any.whl',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
@@ -302,10 +245,8 @@ def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
     assert len(filtered_config['plugins']) == 2
     assert filtered_config['plugins'][0]['class'] == 'module1.Plugin1'
     assert 'upload_to_controller' not in filtered_config['plugins'][0]
-    assert 'package' not in filtered_config['plugins'][0]
     assert filtered_config['plugins'][1]['class'] == 'module3.Plugin3'
     assert 'upload_to_controller' not in filtered_config['plugins'][1]
-    assert 'package' not in filtered_config['plugins'][1]
     assert filtered_config['plugins'][1]['parameters'] == {'key': 'value'}
 
     # Verify Plugin2 (without upload_to_controller) is NOT in the filtered config

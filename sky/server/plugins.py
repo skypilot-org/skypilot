@@ -154,11 +154,9 @@ def _config_schema():
                 'type': 'string',
             },
             'upload_to_controller': {
-                # If True, the plugin package will be built as a wheel
-                # and automatically uploaded to remote clusters
+                # If True, the plugin will be uploaded to remote clusters
                 # (jobs controller, serve controller).
-                # The package path is automatically determined
-                # from the plugin module's location.
+                # Requires 'controller_wheel_path' to be specified at the top level.
                 # Defaults to False if not specified.
                 'type': 'boolean',
                 'default': False,
@@ -175,6 +173,13 @@ def _config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'controller_wheel_path': {
+                # Path to a prebuilt plugin wheel file (.whl) containing all
+                # plugins that should be uploaded to controllers.
+                # Required when any plugin has 'upload_to_controller: true'.
+                # The wheel will be uploaded to remote clusters and installed.
+                'type': 'string',
+            },
             'plugins': {
                 'type': 'array',
                 'items': plugin_schema,
@@ -198,55 +203,12 @@ def _load_plugin_config() -> Optional[config_utils.Config]:
     return config_utils.Config.from_dict(config)
 
 
-def _find_package_root_from_module(module) -> Optional[str]:
-    """Find the package root directory from a module.
-
-    The package root is the directory containing pyproject.toml or setup.py.
-    Walks up from the module file's directory until it finds one of these files.
-    Also handles namespace packages
-    (where __file__ is None but __path__ exists).
-
-    Args:
-        module: The Python module object.
-
-    Returns:
-        Path to the package root directory, or None if not found.
-    """
-    # Handle namespace packages (where __file__ is None)
-    if not hasattr(module, '__file__') or module.__file__ is None:
-        if hasattr(module, '__path__') and module.__path__:
-            # For namespace packages, use the first path in __path__
-            start_dir = os.path.abspath(module.__path__[0])
-        else:
-            return None
-    else:
-        module_file = os.path.abspath(module.__file__)
-        start_dir = os.path.dirname(module_file)
-
-    current_dir = start_dir
-
-    # Walk up the directory tree looking for pyproject.toml or setup.py
-    while current_dir != os.path.dirname(
-            current_dir):  # Stop at filesystem root
-        if (os.path.exists(os.path.join(current_dir, 'pyproject.toml')) or
-                os.path.exists(os.path.join(current_dir, 'setup.py'))):
-            return current_dir
-        current_dir = os.path.dirname(current_dir)
-
-    return None
-
-
 def get_plugin_packages() -> List[Dict[str, Any]]:
     """Get the list of plugin packages with their configurations.
 
-    For plugins with upload_to_controller=True, automatically determines
-    the package path from the module's location.
-
     Returns:
         A list of dictionaries containing plugin configurations, each with
-        at least 'class' and optionally 'package' (path to the package
-        directory, automatically determined), 'upload_to_controller',
-        and 'parameters'.
+        at least 'class' and optionally 'upload_to_controller' and 'parameters'.
     """
     config = _load_plugin_config()
     if not config:
@@ -257,30 +219,21 @@ def get_plugin_packages() -> List[Dict[str, Any]]:
 
     for plugin_config in plugin_configs:
         plugin_dict = dict(plugin_config)  # Make a copy
-
-        # If upload_to_controller is True, determine package path from module
-        if plugin_config.get('upload_to_controller', False):
-            class_path = plugin_config['class']
-            module_path, _ = class_path.rsplit('.', 1)
-            try:
-                module = importlib.import_module(module_path)
-                package_path = _find_package_root_from_module(module)
-                if package_path:
-                    plugin_dict['package'] = package_path
-                else:
-                    logger.warning(
-                        'Could not determine package path for plugin '
-                        f'{class_path}. '
-                        'Make sure the plugin module is in a directory '
-                        'with pyproject.toml or setup.py.')
-            except ImportError as e:
-                logger.warning(
-                    f'Could not import module {module_path} to determine '
-                    f'package path for plugin {class_path}: {e}')
-
         result.append(plugin_dict)
 
     return result
+
+
+def get_controller_wheel_path() -> Optional[str]:
+    """Get the controller wheel path from the plugin config.
+
+    Returns:
+        The controller_wheel_path if specified in the config, None otherwise.
+    """
+    config = _load_plugin_config()
+    if not config:
+        return None
+    return config.get('controller_wheel_path')
 
 
 _PLUGINS: Dict[str, BasePlugin] = {}

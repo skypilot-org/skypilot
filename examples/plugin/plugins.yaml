@@ -1,9 +1,15 @@
+# Path to a prebuilt wheel file containing all plugins that will be uploaded
+# to remote clusters (jobs controller, serve controller).
+# Required when any plugin has 'upload_to_controller: true'.
+controller_wheel_path: dist/example_plugin-0.0.1-py3-none-any.whl
+
 plugins:
-# When 'upload_to_controller' is set to True, the plugin package will be
-# built as a wheel and automatically uploaded to remote clusters (jobs controller,
-# serve controller). The package path is automatically determined from the plugin
-# module's location. If 'upload_to_controller' is not set or False, the
-# plugin must be installed manually on the cluster.
+# When 'upload_to_controller' is set to True, the plugin will be
+# automatically uploaded to remote clusters (jobs controller, serve controller).
+# The wheel file specified in 'controller_wheel_path' (above) will be uploaded
+# and installed, containing all plugins with upload_to_controller=true.
+# If 'upload_to_controller' is not set or False, the plugin must be installed
+# manually on the cluster.
 - class: example_plugin.ExamplePlugin
   upload_to_controller: true
 - class: example_plugin.ExampleParameterizedPlugin
