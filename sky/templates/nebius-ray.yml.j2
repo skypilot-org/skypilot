@@ -151,16 +151,14 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     sudo apt install -y ufw;
-    sudo ufw default deny incoming;
+    sudo ufw default allow incoming;
     sudo ufw default allow outgoing;
-    sudo ufw allow 22/tcp;
-    sudo ufw allow 10022/tcp;
-    sudo ufw allow from 10.0.0.0/8;
-    sudo ufw allow from 172.16.0.0/12;
-    sudo ufw deny 6379:6390/tcp;
-    sudo ufw deny 8265:8270/tcp;
+    sudo ufw deny 6379/tcp;
+    sudo ufw deny 8265/tcp;
     sudo ufw deny 10001/tcp;
     sudo ufw deny 11000:20000/tcp;
+    sudo ufw deny 6379:6390/tcp;
+    sudo ufw deny 8265:8270/tcp;
     sudo ufw --force enable;
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
