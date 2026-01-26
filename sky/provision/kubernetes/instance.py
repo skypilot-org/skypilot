@@ -1595,8 +1595,7 @@ def get_cluster_info(
             head_spec = pod.spec
             assert head_spec is not None, pod
             primary_container = kubernetes_utils.get_pod_primary_container(pod)
-            primary_container_name = getattr(primary_container_name, 'name',
-                                             None)
+            primary_container_name = getattr(primary_container, 'name', None)
             resources = getattr(primary_container, 'resources', None)
             requests = (getattr(resources, 'requests', None)
                         if resources else None)
