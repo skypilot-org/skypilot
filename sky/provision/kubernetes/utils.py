@@ -2893,15 +2893,16 @@ def combine_pod_config_fields(
         context_str = context[len('ssh-'):]
 
     def _modify_skypilot_container_name(pod_config):
+        skypilot_container = kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME
+
         containers = pod_config.get('spec', {}).get('containers', [])
         found_primary_container_names = 0
         for container in containers:
             name = container.get('name')
             if name == kubernetes_constants.LEGACY_NODE_CONTAINER_NAME:
-                container[
-                    'name'] = kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME
+                container['name'] = skypilot_container
                 found_primary_container_names += 1
-            elif name == kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME:
+            elif name == skypilot_container:
                 found_primary_container_names += 1
         if found_primary_container_names > 1:
             with ux_utils.print_exception_no_traceback():
