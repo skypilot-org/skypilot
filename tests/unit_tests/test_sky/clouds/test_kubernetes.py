@@ -907,6 +907,119 @@ class TestKubernetesMakeDeployResourcesVariables(unittest.TestCase):
         self.assertIn('timeout', deploy_vars)
         self.assertEqual(deploy_vars['timeout'], '5400')
 
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    @patch('sky.provision.kubernetes.utils.get_current_kube_config_context_name'
+          )
+    @patch('sky.provision.kubernetes.utils.get_kube_config_context_namespace')
+    @patch('sky.provision.kubernetes.utils.get_accelerator_label_keys')
+    @patch('sky.provision.kubernetes.utils.is_kubeconfig_exec_auth')
+    @patch('sky.skypilot_config.get_effective_region_config')
+    @patch('sky.skypilot_config.get_workspace_cloud')
+    @patch('sky.provision.kubernetes.network_utils.get_port_mode')
+    @patch('sky.catalog.get_image_id_from_tag')
+    @patch('sky.clouds.kubernetes.Kubernetes._detect_network_type')
+    def test_remote_identity_with_cluster_overrides(
+            self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
+            mock_get_workspace_cloud, mock_get_cloud_config_value,
+            mock_is_exec_auth, mock_get_accelerator_label_keys,
+            mock_get_namespace, mock_get_current_context, mock_get_k8s_nodes):
+        """Test that remote_identity override from task config is passed correctly."""
+
+        # Setup mocks
+        from sky.provision.kubernetes.utils import (
+            KubernetesHighPerformanceNetworkType)
+        mock_detect_network_type.return_value = (
+            KubernetesHighPerformanceNetworkType.NONE, None)
+
+        mock_get_current_context.return_value = "my-k8s-cluster"
+        mock_get_namespace.return_value = "default"
+        mock_get_accelerator_label_keys.return_value = []
+        mock_get_workspace_cloud.return_value.get.return_value = None
+        mock_is_exec_auth.return_value = (False, None)
+
+        # Track calls to get_effective_region_config
+        config_calls = []
+
+        def config_side_effect(cloud,
+                               keys,
+                               region,
+                               default_value=None,
+                               override_configs=None):
+            config_calls.append({
+                'cloud': cloud,
+                'keys': keys,
+                'region': region,
+                'override_configs': override_configs
+            })
+            if keys == ('remote_identity',):
+                # Return NO_UPLOAD when override is provided
+                if override_configs and override_configs.get(
+                        'kubernetes', {}).get('remote_identity') == 'NO_UPLOAD':
+                    return 'NO_UPLOAD'
+                return 'SERVICE_ACCOUNT'
+            elif keys == ('provision_timeout',):
+                return 3600
+            elif keys == ('high_availability', 'storage_class_name'):
+                return None
+            return default_value
+
+        mock_get_cloud_config_value.side_effect = config_side_effect
+
+        # Mock networking
+        mock_port_mode = mock.MagicMock()
+        mock_port_mode.value = "portforward"
+        mock_get_port_mode.return_value = mock_port_mode
+
+        # Mock image
+        mock_get_image.return_value = "test-image:latest"
+
+        # Create Kubernetes cloud instance
+        k8s_cloud = kubernetes.Kubernetes()
+
+        # Set up resources with cluster_config_overrides
+        override_resources = mock.MagicMock()
+        override_resources.instance_type = "2CPU--4GB"
+        override_resources.accelerators = None
+        override_resources.use_spot = False
+        override_resources.region = "my-k8s-cluster"
+        override_resources.zone = None
+        override_resources.cluster_config_overrides = {
+            'kubernetes': {
+                'remote_identity': 'NO_UPLOAD'
+            }
+        }
+        override_resources.image_id = None
+        setattr(override_resources, 'assert_launchable',
+                lambda: override_resources)
+        override_resources.network_tier = resources_utils.NetworkTier.BEST
+
+        # Call make_deploy_resources_variables
+        k8s_cloud.make_deploy_resources_variables(
+            resources=override_resources,
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-cluster", name_on_cloud="test-cluster"),
+            region=self.region,
+            zones=None,
+            num_nodes=1,
+            dryrun=False)
+
+        # Find the call for remote_identity
+        remote_identity_calls = [
+            c for c in config_calls if c['keys'] == ('remote_identity',)
+        ]
+        self.assertTrue(
+            len(remote_identity_calls) > 0,
+            "remote_identity config should be fetched")
+
+        # Verify override_configs was passed
+        remote_identity_call = remote_identity_calls[0]
+        self.assertEqual(
+            remote_identity_call['override_configs'],
+            {'kubernetes': {
+                'remote_identity': 'NO_UPLOAD'
+            }},
+            "override_configs should be passed to get_effective_region_config")
+
     def _setup_mocks_for_pod_resource_limits_test(
             self, mock_detect_network_type, mock_get_image, mock_get_port_mode,
             mock_get_workspace_cloud, mock_get_workspace_region_config,
