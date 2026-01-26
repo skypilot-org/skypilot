@@ -285,6 +285,11 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 # Both p5e.48xlarge and p5en.48xlarge have 8x H200 GPUs.
                 acc_name = 'H200'
                 acc_count = 8
+            elif row['InstanceType'].startswith('g7e.'):
+                # G7e instances use NVIDIA RTX PRO 6000 Blackwell Server Edition
+                # GPUs. The AWS API may return a non-standard name, so we
+                # override it to the canonical SkyPilot name.
+                acc_name = 'RTX-PRO-6000'
             elif (row['InstanceType'].startswith('g6f') or
                   row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
