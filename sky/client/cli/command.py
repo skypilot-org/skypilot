@@ -4645,7 +4645,7 @@ def label_gpus(context: Optional[str], cleanup: bool, async_mode: bool):
       # Start labeling without waiting for completion
       sky label-gpus --async
     """
-    request_id = sdk.label_gpus(
+    request_id = sdk.kubernetes_label_gpus(
         context=context,
         cleanup_only=cleanup,
         wait_for_completion=not async_mode,

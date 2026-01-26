@@ -966,14 +966,15 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     )
 
 
-@app.post('/label_gpus')
-async def label_gpus(request: fastapi.Request,
-                     label_gpus_body: payloads.LabelGpusBody) -> None:
+@app.post('/kubernetes_label_gpus')
+async def kubernetes_label_gpus(
+        request: fastapi.Request,
+        kubernetes_label_gpus_body: payloads.KubernetesLabelGpusBody) -> None:
     """Labels GPU nodes in a Kubernetes cluster."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.KUBERNETES_LABEL_GPUS,
-        request_body=label_gpus_body,
+        request_body=kubernetes_label_gpus_body,
         func=gpu_labeler.label_gpus_server,
         schedule_type=requests_lib.ScheduleType.LONG,  # Can take 10+ min
         auth_user=request.state.auth_user,

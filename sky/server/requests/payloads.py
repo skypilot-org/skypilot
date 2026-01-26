@@ -198,7 +198,7 @@ class EnabledCloudsBody(RequestBody):
     expand: bool = False
 
 
-class LabelGpusBody(RequestBody):
+class KubernetesLabelGpusBody(RequestBody):
     """The request body for the GPU labeling endpoint."""
     context: Optional[str] = None
     cleanup_only: bool = False

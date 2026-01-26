@@ -354,7 +354,7 @@ def list_accelerator_counts(
 @server_common.check_server_healthy_or_start
 @versions.minimal_api_version(32)
 @annotations.client_api
-def label_gpus(
+def kubernetes_label_gpus(
     context: Optional[str] = None,
     cleanup_only: bool = False,
     wait_for_completion: bool = True,
@@ -372,13 +372,15 @@ def label_gpus(
     Returns:
         RequestId for the labeling operation.
     """
-    body = payloads.LabelGpusBody(
+    body = payloads.KubernetesLabelGpusBody(
         context=context,
         cleanup_only=cleanup_only,
         wait_for_completion=wait_for_completion,
     )
     response = server_common.make_authenticated_request(
-        'POST', '/label_gpus', json=json.loads(body.model_dump_json()))
+        'POST',
+        '/kubernetes_label_gpus',
+        json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
 
 
