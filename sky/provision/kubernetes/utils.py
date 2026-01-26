@@ -2905,9 +2905,9 @@ def combine_pod_config_fields(
                 found_primary_container_names += 1
         if found_primary_container_names > 1:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError('Kubernetes `pod_config` should only modify '
-                                 'the SkyPilot container using either '
-                                 '`skypilot-node` or `ray-node`. Refer to '
+                raise ValueError('Invalid Kubernetes `pod_config`: container '
+                                 'names `skypilot-node` and ray-node are '
+                                 'mutually exclusive. Refer to '
                                  'https://docs.skypilot.co/en/latest/reference/config.html#kubernetes-pod-config for more details.')  # pylint: disable=line-too-long
 
     kubernetes_config = skypilot_config.get_effective_region_config(
@@ -3766,7 +3766,10 @@ class KubernetesSkyPilotClusterInfoPayload:
 def get_pod_primary_container(
     pod: Any,
     *,
-    primary_name_candidates: Optional[List[str]] = None,
+    primary_name_candidates: List[str] = [
+        kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME,
+        kubernetes_constants.LEGACY_NODE_CONTAINER_NAME
+    ],
 ):
     """Return the primary workload container for a SkyPilot pod.
 
@@ -3774,13 +3777,8 @@ def get_pod_primary_container(
     ordering of the `containers` list as authored, but mutating webhooks can
     inject additional containers. Callers should not rely on containers[0].
     """
-    if not primary_name_candidates:
-        # For backwards compatibility, SkyPilot pod can be named either
-        # skypilot-node or ray-node (legacy).
-        primary_name_candidates = [
-            kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME,
-            kubernetes_constants.LEGACY_NODE_CONTAINER_NAME
-        ]
+    # For backwards compatibility, SkyPilot pod can be named either
+    # skypilot-node or ray-node (legacy).
 
     spec = getattr(pod, 'spec', None)
     containers = getattr(spec, 'containers', None) if spec is not None else None
