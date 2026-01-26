@@ -204,7 +204,7 @@ def _parse_args(args: Optional[str] = None):
 
 
 def _extract_marked_tests(
-        file_path: str, args: str
+    file_path: str, args: str
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[str],
                      List[bool]]]:
     """Extract test functions and filter clouds using pytest.mark
