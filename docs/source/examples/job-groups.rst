@@ -39,8 +39,6 @@ Job Groups are ideal for workloads where multiple components with different requ
 
 - **RL post-training**: Separate tasks for trainer, reward modeling, rollout server, and data serving
 - **Parallel train-eval**: Training and evaluation running in parallel with shared storage
-- **Distributed inference pipelines**: Multiple model servers with different GPU requirements
-- **Data processing architectures**: Producers and consumers with heterogeneous compute needs
 
 .. tip::
 
