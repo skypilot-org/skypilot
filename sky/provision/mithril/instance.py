@@ -241,7 +241,7 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=ssh_destination,
+                internal_ip=instance_info['private_ip'],
                 external_ip=ssh_destination,
                 ssh_port=22,
                 tags={},
