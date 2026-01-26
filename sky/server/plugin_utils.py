@@ -123,11 +123,10 @@ def get_filtered_plugins_config_path() -> Optional[str]:
     # on the controller (upload_to_controller)
     filtered_plugins = []
     for plugin_config in plugins_to_upload:
-        filtered_plugin = {
-            'class': plugin_config['class'],
-        }
-        if 'parameters' in plugin_config:
-            filtered_plugin['parameters'] = plugin_config['parameters']
+        filtered_plugin = plugin_config.copy()
+        # Pop 'upload_to_controller'
+        # as it's not needed on the remote controller.
+        filtered_plugin.pop('upload_to_controller', None)
         filtered_plugins.append(filtered_plugin)
 
     filtered_config = {'plugins': filtered_plugins}

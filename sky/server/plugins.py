@@ -218,13 +218,7 @@ def get_plugin_packages() -> List[Dict[str, Any]]:
         return []
 
     plugin_configs = config.get('plugins', [])
-    result = []
-
-    for plugin_config in plugin_configs:
-        plugin_dict = dict(plugin_config)  # Make a copy
-        result.append(plugin_dict)
-
-    return result
+    return [dict(p) for p in plugin_configs]
 
 
 def get_controller_wheel_path() -> Optional[str]:

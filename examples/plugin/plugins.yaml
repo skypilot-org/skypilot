@@ -5,21 +5,15 @@
 controller_wheel_path: dist
 
 plugins:
+- class: example_plugin.ExamplePlugin
+- class: example_plugin.ExampleParameterizedPlugin
+  parameters:
+    message: "Message from parameters"
+- class: example_plugin.ExampleMiddlewarePlugin
+- class: example_plugin.ExampleBackgroundTaskPlugin
 # When 'upload_to_controller' is set to True, the plugin will be
 # automatically uploaded to remote clusters (jobs controller, serve controller).
 # All .whl files in the directory specified in 'controller_wheel_path' (above)
 # will be uploaded and installed.
-# If 'upload_to_controller' is not set or False, the plugin must be installed
-# manually on the cluster.
-- class: example_plugin.ExamplePlugin
-  upload_to_controller: true
-- class: example_plugin.ExampleParameterizedPlugin
-  upload_to_controller: true
-  parameters:
-    message: "Message from parameters"
-- class: example_plugin.ExampleMiddlewarePlugin
-  upload_to_controller: true
-- class: example_plugin.ExampleBackgroundTaskPlugin
-  upload_to_controller: true
 - class: example_plugin.ExamplePatchPlugin
   upload_to_controller: true
