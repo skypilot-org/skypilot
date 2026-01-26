@@ -578,6 +578,7 @@ export function ContextDetails({
   gpusInContext,
   nodesInContext,
   gpuMetricsRefreshTrigger = 0,
+  isSlurm = false,
 }) {
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
@@ -751,15 +752,21 @@ export function ContextDetails({
                       <th className="p-3 text-left font-medium text-gray-600">
                         Node
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        IP Address
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        vCPU
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Memory (GB)
-                      </th>
+                      {!isSlurm && (
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          IP Address
+                        </th>
+                      )}
+                      {!isSlurm && (
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          vCPU
+                        </th>
+                      )}
+                      {!isSlurm && (
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Memory (GB)
+                        </th>
+                      )}
                       <th className="p-3 text-left font-medium text-gray-600">
                         GPU
                       </th>
@@ -863,15 +870,21 @@ export function ContextDetails({
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.node_name}
                           </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.ip_address || '-'}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {cpuDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {memoryDisplay}
-                          </td>
+                          {!isSlurm && (
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {node.ip_address || '-'}
+                            </td>
+                          )}
+                          {!isSlurm && (
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {cpuDisplay}
+                            </td>
+                          )}
+                          {!isSlurm && (
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {memoryDisplay}
+                            </td>
+                          )}
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.gpu_name}
                           </td>
@@ -907,11 +920,12 @@ export function ContextDetails({
             </>
           )}
 
-          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools */}
+          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools or Slurm */}
           {isGrafanaAvailable &&
             gpusInContext &&
             gpusInContext.length > 0 &&
-            !isSSHContext && (
+            !isSSHContext &&
+            !isSlurm && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
 
@@ -2785,6 +2799,7 @@ export function GPUs() {
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+        isSlurm={isSlurmCluster}
       />
     );
   };
@@ -3121,6 +3136,13 @@ export function GPUs() {
                   className="text-sky-blue hover:underline cursor-pointer"
                 >
                   SSH Node Pool
+                </Link>
+              ) : slurmClusters.includes(selectedContext) ? (
+                <Link
+                  href="/infra"
+                  className="text-sky-blue hover:underline cursor-pointer"
+                >
+                  Slurm
                 </Link>
               ) : (
                 <Link

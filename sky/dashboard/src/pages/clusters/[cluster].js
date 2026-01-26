@@ -760,13 +760,26 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Jobs Table - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ClusterJobs
+            clusterName={clusterData.cluster}
+            clusterJobData={clusterJobData}
+            loading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
+          />
+        </div>
+      )}
+
       {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
         clusterData.full_infra &&
         clusterData.full_infra.includes('Kubernetes') &&
         !clusterData.full_infra.includes('SSH') &&
         !clusterData.full_infra.includes('ssh') &&
-        isGrafanaAvailable && (
+        !isGrafanaAvailable && (
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div
@@ -887,19 +900,6 @@ function ActiveTab({
             </div>
           </div>
         )}
-
-      {/* Jobs Table - Only show for active clusters */}
-      {!isHistoricalCluster && (
-        <div className="mb-8">
-          <ClusterJobs
-            clusterName={clusterData.cluster}
-            clusterJobData={clusterJobData}
-            loading={clusterJobsLoading}
-            refreshClusterJobsOnly={refreshClusterJobsOnly}
-            workspace={clusterData.workspace}
-          />
-        </div>
-      )}
 
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot
