@@ -2129,10 +2129,9 @@ def get_command_runners(
             **credentials)
         runners.append(head_runner)
 
-    node_list = [((namespace, context), pod_name)
-                 for pod_name in instances.keys()
-                 if pod_name != cluster_info.head_instance_id]
     for pod_name, instance_info in instances.items():
+        if pod_name == cluster_info.head_instance_id:
+            continue
         node_list = [((namespace, context), pod_name)]
         container = instance_info[0].primary_container_name
         runner = command_runner.KubernetesCommandRunner(node_list[0],
