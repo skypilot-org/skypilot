@@ -2184,6 +2184,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     self.cluster_name)):
             self._update_cluster_info()
 
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                self.cached_cluster_info is not None and
+                self.cached_cluster_info.primary_container_name is None):
+            self._update_cluster_info()
+
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
