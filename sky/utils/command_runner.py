@@ -1308,7 +1308,7 @@ class KubernetesCommandRunner(CommandRunner):
                 `kubectl exec -c <container>`. This is recommended for
                 multi-container pods (e.g., when sidecars are injected) to
                 ensure commands target the primary workload container (such as
-                `ray-node`).
+                `skypilot-node`).
         """
         del kwargs
         super().__init__(node)

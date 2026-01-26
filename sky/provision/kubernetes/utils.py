@@ -2882,6 +2882,7 @@ def combine_pod_config_fields(
                     - name: my-secret
         ```
     """
+
     merged_cluster_yaml_obj = copy.deepcopy(cluster_yaml_obj)
     # We don't use override_configs in `get_effective_region_config`, as merging
     # the pod config requires special handling.
@@ -2890,17 +2891,36 @@ def combine_pod_config_fields(
     if isinstance(cloud, clouds.SSH) and context is not None:
         assert context.startswith('ssh-'), 'SSH context must start with "ssh-"'
         context_str = context[len('ssh-'):]
+
+    def _modify_skypilot_container_name(pod_config):
+        containers = pod_config.get('spec', {}).get('containers', [])
+        found_primary_container_names = 0
+        for container in containers:
+            name = container.get('name')
+            if name == kubernetes_constants.LEGACY_NODE_CONTAINER_NAME:
+                container[
+                    'name'] = kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME
+                found_primary_container_names += 1
+            elif name == kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME:
+                found_primary_container_names += 1
+        if found_primary_container_names > 1:
+            raise ValueError('Kubernetes `pod_config` should only modify the SkyPilot '
+                             'container using either the name `skypilot-node` or '
+                             '`ray-node`. Refer to https://docs.skypilot.co/en/latest/reference/config.html#kubernetes-pod-config for more details.')  # pylint: disable=line-too-long
+
     kubernetes_config = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context_str,
         keys=('pod_config',),
         default_value={})
+    _modify_skypilot_container_name(kubernetes_config)
     override_pod_config = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
         cloud=cloud_str,
         region=context_str,
         keys=('pod_config',),
         default_value={})
+    _modify_skypilot_container_name(override_pod_config)
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
@@ -3744,7 +3764,7 @@ class KubernetesSkyPilotClusterInfoPayload:
 def get_pod_primary_container(
     pod: Any,
     *,
-    primary_name: str = kubernetes_constants.RAY_NODE_CONTAINER_NAME,
+    primary_name_candidates: Optional[List[str]] = None,
 ):
     """Return the primary workload container for a SkyPilot pod.
 
@@ -3752,14 +3772,23 @@ def get_pod_primary_container(
     ordering of the `containers` list as authored, but mutating webhooks can
     inject additional containers. Callers should not rely on containers[0].
     """
+    if not primary_name_candidates:
+        # For backwards compatibility, SkyPilot pod can be named either
+        # skypilot-node or ray-node (legacy).
+        primary_name_candidates = [
+            kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME,
+            kubernetes_constants.LEGACY_NODE_CONTAINER_NAME
+        ]
+
     spec = getattr(pod, 'spec', None)
     containers = getattr(spec, 'containers', None) if spec is not None else None
     if not containers:
         pod_name = getattr(getattr(pod, 'metadata', None), 'name', '<unknown>')
         raise ValueError(f'Pod {pod_name!r} has no containers.')
-    for container in containers:
-        if getattr(container, 'name', None) == primary_name:
-            return container
+    for primary_name in primary_name_candidates:
+        for container in containers:
+            if getattr(container, 'name', None) == primary_name:
+                return container
     return containers[0]
 
 

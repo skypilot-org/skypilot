@@ -896,7 +896,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         logger.info(f'{"-"*20}Start: Pre-init in pod {pod_name!r} {"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name),
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME)
+            container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME)
 
         # Run the combined pre-init command
         rc, stdout, _ = runner.run(pre_init_cmd,
@@ -968,7 +968,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # Remove the AppArmor annotation
             annotations = pod_spec.get('metadata', {}).get('annotations', {})
             apparmor_key = ('container.apparmor.security.beta.kubernetes.io/'
-                            f'{k8s_constants.RAY_NODE_CONTAINER_NAME}')
+                            f'{k8s_constants.SKYPILOT_NODE_CONTAINER_NAME}')
             if apparmor_key in annotations:
                 del annotations[apparmor_key]
                 pod_spec['metadata']['annotations'] = annotations
@@ -1615,7 +1615,7 @@ def get_cluster_info(
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name),
-        container=k8s_constants.RAY_NODE_CONTAINER_NAME)
+        container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME)
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -2120,7 +2120,7 @@ def get_command_runners(
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0],
             deployment=deployment,
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
+            container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME,
             **credentials)
         runners.append(head_runner)
 
@@ -2130,7 +2130,7 @@ def get_command_runners(
     runners.extend(
         command_runner.KubernetesCommandRunner.make_runner_list(
             node_list,
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
+            container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME,
             **credentials))
 
     return runners
