@@ -352,6 +352,7 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(32)
 @annotations.client_api
 def label_gpus(
     context: Optional[str] = None,
