@@ -46,25 +46,22 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     # Get the controller wheel path from the top-level config
     wheel_path_str = plugins.get_controller_wheel_path()
     if not wheel_path_str:
-        logger.warning(
-            'Some plugins have upload_to_controller=True but '
-            'controller_wheel_path is not specified in the config. '
-            'Skipping wheel upload.')
+        logger.warning('Some plugins have upload_to_controller=True but '
+                       'controller_wheel_path is not specified in the config. '
+                       'Skipping wheel upload.')
         return {}, ''
 
     # Expand user path and validate
     wheel_path = pathlib.Path(os.path.expanduser(wheel_path_str))
     if not wheel_path.exists():
-        logger.warning(
-            f'Controller wheel path does not exist: {wheel_path}')
+        logger.warning(f'Controller wheel path does not exist: {wheel_path}')
         return {}, ''
 
     if not wheel_path.is_file():
-        logger.warning(
-            f'Controller wheel path is not a file: {wheel_path}')
+        logger.warning(f'Controller wheel path is not a file: {wheel_path}')
         return {}, ''
 
-    if not wheel_path.suffix == '.whl':
+    if wheel_path.suffix != '.whl':
         logger.warning(
             f'Controller wheel path does not have .whl extension: {wheel_path}')
         return {}, ''
@@ -72,7 +69,7 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     # File mount: upload the wheel file directly to the remote cluster
     # Use the wheel filename as the remote path
     remote_wheel_path = (f'{_REMOTE_PLUGINS_WHEEL_DIR}/'
-                        f'{wheel_path.name}')
+                         f'{wheel_path.name}')
     file_mounts = {remote_wheel_path: str(wheel_path)}
 
     # Installation command: install the wheel on the remote cluster

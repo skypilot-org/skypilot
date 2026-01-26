@@ -156,7 +156,8 @@ def _config_schema():
             'upload_to_controller': {
                 # If True, the plugin will be uploaded to remote clusters
                 # (jobs controller, serve controller).
-                # Requires 'controller_wheel_path' to be specified at the top level.
+                # Requires 'controller_wheel_path' to be
+                # specified at the top level.
                 # Defaults to False if not specified.
                 'type': 'boolean',
                 'default': False,

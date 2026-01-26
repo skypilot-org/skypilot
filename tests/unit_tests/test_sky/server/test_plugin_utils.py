@@ -97,7 +97,8 @@ def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
     assert commands == ''
 
 
-def test_get_plugin_mounts_and_commands_invalid_wheel_path(monkeypatch, tmp_path):
+def test_get_plugin_mounts_and_commands_invalid_wheel_path(
+        monkeypatch, tmp_path):
     """Test get_plugin_mounts_and_commands with invalid wheel path."""
     config = {
         'controller_wheel_path': str(tmp_path / 'nonexistent.whl'),
