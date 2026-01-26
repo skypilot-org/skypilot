@@ -11,6 +11,15 @@ Job Groups allow you to run multiple related tasks in parallel as a single manag
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
 Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
 
+.. figure:: ../images/job-groups-dashboard.png
+   :width: 100%
+   :align: center
+   :alt: Job Groups in SkyPilot Dashboard
+
+   A Job Group with 4 tasks (data-server, rollout-server, reward-server, ppo-trainer)
+   running in parallel on Kubernetes. Each task has different resource requirements
+   and can be monitored independently through the dashboard.
+
 Overview
 --------
 
