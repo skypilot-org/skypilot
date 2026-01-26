@@ -12,6 +12,7 @@ from sky import models
 from sky.skylet import constants
 from sky.users import permission
 from sky.users import rbac
+from sky.utils import common
 
 
 @pytest.fixture
@@ -997,7 +998,6 @@ class TestPermissionServiceMultiProcess:
 
         # Should have one grouping policy call per user (for default role assignment)
         # plus system users (SERVER_ID and SKYPILOT_SYSTEM_USER_ID) with admin role
-        from sky.utils import common
         expected_grouping_policy_calls = {('user1', rbac.get_default_role()),
                                           ('user2', rbac.get_default_role()),
                                           ('user3', rbac.get_default_role()),
@@ -1044,7 +1044,6 @@ class TestPermissionServiceMultiProcess:
                 return []  # No roles initially
             else:
                 # Users have roles after first call (including system users)
-                from sky.utils import common
                 result = [
                     [user.id, rbac.get_default_role()] for user in mock_users
                 ]
@@ -1090,7 +1089,6 @@ class TestPermissionServiceMultiProcess:
         service._maybe_initialize_policies()
 
         # Each user should only be added once (3 mock users + 2 system users)
-        from sky.utils import common
         expected_calls = {
             (user.id, rbac.get_default_role()) for user in mock_users
         }
