@@ -28,7 +28,7 @@ Overview
 - **Parallel execution**: Launch multiple tasks simultaneously as a single managed unit, with each task running independently
 - **Heterogeneous resources**: Each task can have different resource requirements (e.g., GPUs for training, CPUs for data serving)
 - **Independent environment setup**: Tasks can have different Docker images, dependencies, and setup commands
-- **Automatic service discovery**: Tasks can discover and communicate with each other via hostnames (on Kubernetes)
+- **Automatic service discovery**: Tasks can discover and communicate with each other via hostnames
 - **Independent recovery**: Each task recovers independently from preemptions or failures without affecting other tasks
 - **Lifecycle management**: Designate primary vs auxiliary tasks to automatically terminate supporting services when main tasks complete
 - **Unified management**: Monitor, log, and manage all tasks through a single job ID
