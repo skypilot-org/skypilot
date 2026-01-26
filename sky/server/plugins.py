@@ -130,6 +130,30 @@ class BasePlugin(abc.ABC):
         """
         return False
 
+    @property
+    def rbac_rules(self) -> List[Tuple[str, 'RBACRule']]:
+        """RBAC rules for this plugin.
+
+        Override this property to declare RBAC rules that should be
+        enforced for plugin endpoints. Rules are collected during
+        server initialization before plugins are fully installed.
+
+        Returns:
+            List of (role, RBACRule) tuples. Rules added to 'user' role
+            block regular users but allow admins.
+
+        Example:
+            @property
+            def rbac_rules(self):
+                return [
+                    ('user', RBACRule(path='/plugins/api/foo/*',
+                      method='POST')),
+                    ('user', RBACRule(path='/plugins/api/foo/*',
+                      method='DELETE')),
+                ]
+        """
+        return []
+
     @abc.abstractmethod
     def install(self, extension_context: ExtensionContext):
         """Hook called by API server to let the plugin install itself."""
@@ -228,10 +252,61 @@ def get_plugins() -> List[BasePlugin]:
     return list(_PLUGINS.values())
 
 
+_PLUGIN_RBAC_RULES: Dict[str, List[Dict[str, str]]] = {}
+
+
+def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
+    """Load RBAC rules from plugins without calling install().
+
+    This is called in the main process before permission service
+    initialization to collect plugin RBAC rules. It instantiates
+    plugins and reads their rbac_rules property without calling
+    install(), avoiding side effects.
+
+    Returns:
+        Dictionary mapping role names to lists of blocklist rules.
+    """
+    global _PLUGIN_RBAC_RULES
+
+    config = _load_plugin_config()
+    if not config:
+        return {}
+
+    rules_by_role: Dict[str, List[Dict[str, str]]] = {}
+
+    for plugin_config in config.get('plugins', []):
+        class_path = plugin_config['class']
+        module_path, class_name = class_path.rsplit('.', 1)
+        try:
+            module = importlib.import_module(module_path)
+            plugin_cls = getattr(module, class_name)
+            if not issubclass(plugin_cls, BasePlugin):
+                continue
+            parameters = plugin_config.get('parameters') or {}
+            plugin = plugin_cls(**parameters)
+
+            # Collect rules from the rbac_rules property
+            for role, rule in plugin.rbac_rules:
+                if role not in rules_by_role:
+                    rules_by_role[role] = []
+                rules_by_role[role].append({
+                    'path': rule.path,
+                    'method': rule.method,
+                })
+                logger.debug(f'Collected RBAC rule from {class_path}: '
+                             f'{role} {rule.method} {rule.path}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to load RBAC rules from {class_path}: {e}')
+
+    _PLUGIN_RBAC_RULES = rules_by_role
+    return rules_by_role
+
+
 def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
     """Collect RBAC rules from all loaded plugins.
 
-    Collects rules from the ExtensionContext.
+    Returns rules collected by load_plugin_rbac_rules() which runs in the
+    main process before permission service initialization.
 
     Returns:
         Dictionary mapping role names to lists of blocklist rules.
@@ -243,16 +318,4 @@ def get_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
             ]
         }
     """
-    rules_by_role: Dict[str, List[Dict[str, str]]] = {}
-
-    # Collect rules registered via ExtensionContext
-    if _EXTENSION_CONTEXT:
-        for role, rule in _EXTENSION_CONTEXT.rbac_rules:
-            if role not in rules_by_role:
-                rules_by_role[role] = []
-            rules_by_role[role].append({
-                'path': rule.path,
-                'method': rule.method,
-            })
-
-    return rules_by_role
+    return _PLUGIN_RBAC_RULES

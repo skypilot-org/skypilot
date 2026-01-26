@@ -2709,6 +2709,10 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Pre-load plugin RBAC rules before initializing permission service.
+    # This ensures plugin RBAC rules are available when policies are created.
+    logger.info('Pre-loading plugin RBAC rules')
+    plugins.load_plugin_rbac_rules()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')
