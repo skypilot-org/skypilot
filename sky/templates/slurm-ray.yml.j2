@@ -26,15 +26,7 @@ provider:
 
 auth:
   ssh_user: {{ssh_user}}
-  # TODO(jwj,kevin): Modify this tmp workaround.
-  # Right now there's a chicken-and-egg problem:
-  # 1. ssh_credential_from_yaml reads from the auth.ssh_private_key: ~/.sky/clients/.../ssh/sky-key
-  # 2. This is SkyPilot's generated key, not the Slurm cluster's key
-  # 3. The internal_file_mounts stage tries to rsync using sky-key, but its public key isn't on the remote yet
-  # 4. The public key only gets added by setup_commands, which runs AFTER file_mounts
-  # ssh_private_key: {{ssh_private_key}}
-  ssh_private_key: {{slurm_private_key}}
-  ssh_proxy_command: {{slurm_proxy_command | tojson }}
+  ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
   ray_head_default:
