@@ -160,6 +160,7 @@ setup_commands:
     sudo ufw deny 6379:6390/tcp;
     sudo ufw deny 8265:8270/tcp;
     sudo ufw --force enable;
+    {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
   {%- if env_vars is defined %}

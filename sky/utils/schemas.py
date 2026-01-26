@@ -1192,7 +1192,19 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'items': {
             'type': 'string'
         },
-    }
+    },
+    'set_pod_resource_limits': {
+        # Can be:
+        # - false: do not set limits (default)
+        # - true: set limits equal to requests (multiplier of 1)
+        # - number: set limits to requests * multiplier
+        'oneOf': [{
+            'type': 'boolean',
+        }, {
+            'type': 'number',
+            'minimum': 1,
+        }],
+    },
 }
 
 
@@ -1850,6 +1862,9 @@ def get_config_schema():
             'ssh_timeout': {
                 'type': 'integer',
                 'minimum': 1,
+            },
+            'install_conda': {
+                'type': 'boolean',
             },
         }
     }
