@@ -82,7 +82,7 @@ spec:
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
           value: {{ $fullName | quote }}
-        {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
+        {{- if and (eq (include "skypilot.enableBasicAuthInAPIServer" . | trim) "true") (ne (include "skypilot.initialBasicAuthSecretName" . | trim) "") }}
         - name: SKYPILOT_INITIAL_BASIC_AUTH
           valueFrom:
             secretKeyRef:
