@@ -1978,8 +1978,7 @@ def check_credentials(context: Optional[str],
         gpu_msg = (f'Cluster has {len(unlabeled_nodes)} nodes with '
                    f'accelerators that are not labeled. '
                    f'To label the nodes, run '
-                   f'`python -m sky.utils.kubernetes.gpu_labeler '
-                   f'--context {context}`')
+                   f'`sky label-gpus --context {context}`')
     else:
         try:
             # This function raises a ResourcesUnavailableError in three cases:

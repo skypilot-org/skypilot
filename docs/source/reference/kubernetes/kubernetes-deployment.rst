@@ -179,14 +179,14 @@ Deploying on Amazon EKS
      # Example:
      # aws eks update-kubeconfig --name testcluster --region us-west-2
 
-3. [If using GPUs] EKS clusters already come with Nvidia drivers set up. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling tool to do so:
+3. [If using GPUs] EKS clusters already come with Nvidia drivers set up. However, you will need to label the nodes with the GPU type. Use the SkyPilot node labelling command to do so:
 
    .. code-block:: console
 
-     python -m sky.utils.kubernetes.gpu_labeler
+     sky label-gpus
 
 
-   This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. You can check the status of these jobs by running:
+   This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. Note: This command currently only supports NVIDIA GPUs. You can check the status of these jobs by running:
 
    .. code-block:: console
 

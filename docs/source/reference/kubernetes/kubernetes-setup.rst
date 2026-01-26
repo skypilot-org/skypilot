@@ -171,11 +171,11 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
 Automatically labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If none of the above labels are present on your cluster, we provide a convenience script that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
+If none of the above labels are present on your cluster, we provide a convenience command that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
 
 .. code-block:: console
 
- $ python -m sky.utils.kubernetes.gpu_labeler
+ $ sky label-gpus
 
  Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
  Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
@@ -185,11 +185,11 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. note::
 
-    Automatically labelling AMD GPUs is not supported at this moment. Please follow the instructions in "Manually labelling nodes" section below.
+    This command currently only supports NVIDIA GPUs. AMD GPUs must be labeled manually. Please follow the instructions in "Manually labelling nodes" section below.
 
 .. note::
 
-    If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
+    If the GPU labelling process fails, you can run ``sky label-gpus --cleanup`` to clean up the failed jobs.
 
 Manually labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~

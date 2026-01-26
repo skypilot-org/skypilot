@@ -4603,6 +4603,62 @@ def show_gpus(
         click.echo()
 
 
+@cli.command('label-gpus', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('--context',
+              '-c',
+              type=str,
+              default=None,
+              help='Kubernetes context to use. If not specified, uses the '
+              'current context from the API server.')
+@click.option('--cleanup',
+              is_flag=True,
+              default=False,
+              help='Only cleanup existing GPU labeler resources.')
+@click.option('--async',
+              'async_mode',
+              is_flag=True,
+              default=False,
+              help='Do not wait for GPU labeling to complete.')
+@usage_lib.entrypoint
+def label_gpus(context: Optional[str], cleanup: bool, async_mode: bool):
+    """Label GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    This command runs on the API server to label GPU nodes with
+    skypilot.co/accelerator labels. This is required for SkyPilot to
+    identify GPU types on nodes that don't have pre-configured labels.
+
+    Note: This command currently only supports NVIDIA GPUs. AMD GPUs
+    must be labeled manually.
+
+    Example usage:
+
+      # Label GPUs in the current Kubernetes context
+      sky label-gpus
+
+      # Label GPUs in a specific context
+      sky label-gpus --context my-k8s-cluster
+
+      # Cleanup labeling resources
+      sky label-gpus --cleanup
+
+      # Start labeling without waiting for completion
+      sky label-gpus --async
+    """
+    request_id = sdk.label_gpus(
+        context=context,
+        cleanup_only=cleanup,
+        wait_for_completion=not async_mode,
+    )
+    # Stream logs to show progress (spinners, node info, etc.)
+    # The actual output is in the streamed logs, not just the return value
+    result = sdk.stream_and_get(request_id)
+
+    # Exit with appropriate code based on success
+    if not result.get('success', False):
+        sys.exit(1)
+
+
 @cli.group(cls=_NaturalOrderGroup)
 def storage():
     """SkyPilot Storage CLI."""

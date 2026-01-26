@@ -96,6 +96,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
@@ -961,6 +962,20 @@ async def status_kubernetes(request: fastapi.Request) -> None:
         request_body=payloads.RequestBody(),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/label_gpus')
+async def label_gpus(request: fastapi.Request,
+                     label_gpus_body: payloads.LabelGpusBody) -> None:
+    """Labels GPU nodes in a Kubernetes cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.KUBERNETES_LABEL_GPUS,
+        request_body=label_gpus_body,
+        func=gpu_labeler.label_gpus_server,
+        schedule_type=requests_lib.ScheduleType.LONG,  # Can take 10+ min
         auth_user=request.state.auth_user,
     )
 

@@ -353,6 +353,37 @@ def list_accelerator_counts(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def label_gpus(
+    context: Optional[str] = None,
+    cleanup_only: bool = False,
+    wait_for_completion: bool = True,
+) -> server_common.RequestId[Dict[str, Any]]:
+    """Labels GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    Note: Currently only supports NVIDIA GPUs. AMD GPUs must be labeled
+    manually.
+
+    Args:
+        context: Kubernetes context to use. If None, uses current context.
+        cleanup_only: If True, only cleanup existing labeling resources.
+        wait_for_completion: If True, wait for labeling jobs to complete.
+
+    Returns:
+        RequestId for the labeling operation.
+    """
+    body = payloads.LabelGpusBody(
+        context=context,
+        cleanup_only=cleanup_only,
+        wait_for_completion=wait_for_completion,
+    )
+    response = server_common.make_authenticated_request(
+        'POST', '/label_gpus', json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def optimize(
     dag: 'sky.Dag',
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
