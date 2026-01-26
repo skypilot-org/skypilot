@@ -36,24 +36,19 @@ run: |
   sleep 10
   SERVER_HOST="server-0.${SKYPILOT_JOBGROUP_NAME}"
   echo "Testing connection to $SERVER_HOST"
-  
+
   # First verify /etc/hosts was updated (DNS updater worked without sudo)
   echo "Checking /etc/hosts entries:"
   grep -E "SkyPilot|server-0|client-0" /etc/hosts || echo "No JobGroup entries yet"
-  
+
   # Try to connect to server using Python (available in all test images)
-  python3 -c "
-import urllib.request
-import sys
-for i in range(10):
-    try:
-        urllib.request.urlopen('http://${SERVER_HOST}:8080/', timeout=5)
-        print('SUCCESS: Connected to server on custom image without sudo')
-        sys.exit(0)
-    except Exception as e:
-        print(f'Attempt {i+1} failed: {e}')
-        import time
-        time.sleep(3)
-print('FAILED: Could not connect to server')
-sys.exit(1)
-"
+  for i in $(seq 1 10); do
+    if python3 -c "import urllib.request; urllib.request.urlopen('http://$SERVER_HOST:8080/', timeout=5)" 2>/dev/null; then
+      echo "SUCCESS: Connected to server on custom image without sudo"
+      exit 0
+    fi
+    echo "Attempt $i failed, retrying..."
+    sleep 3
+  done
+  echo "FAILED: Could not connect to server"
+  exit 1
