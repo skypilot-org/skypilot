@@ -27,6 +27,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.server import config as server_config
+from sky.server import plugins
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -518,6 +519,10 @@ def download_and_stream_job_log(
 def shared_controller_vars_to_fill(
         controller: Controllers, remote_user_config_path: str,
         local_user_config: Dict[str, Any]) -> Dict[str, str]:
+    # Import here to avoid circular imports
+    # pylint: disable-next=import-outside-toplevel
+    from sky.server import plugin_utils
+
     if not local_user_config:
         local_user_config_path = None
     else:
@@ -542,6 +547,14 @@ def shared_controller_vars_to_fill(
             yaml_utils.dump_yaml(temp_file.name, dict(**local_user_config))
         local_user_config_path = temp_file.name
 
+    # Get plugins config and wheel file mounts/commands together to ensure
+    # consistency between the uploaded wheel paths and installation commands.
+    # Only upload plugins that have upload_to_controller=True - plugins
+    # without this flag are intended for local API server use only.
+    local_plugins_config_path = plugin_utils.get_filtered_plugins_config_path()
+    plugin_wheel_file_mounts, plugins_wheel_install_commands = (
+        plugin_utils.get_plugin_mounts_and_commands())
+
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
             _get_cloud_dependencies_installation_commands(controller),
@@ -551,6 +564,11 @@ def shared_controller_vars_to_fill(
         'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
         'sky_python_cmd': constants.SKY_PYTHON_CMD,
         'local_user_config_path': local_user_config_path,
+        # Plugin-related template variables
+        'local_plugins_config_path': local_plugins_config_path,
+        'remote_plugins_config_path': plugins.REMOTE_PLUGINS_CONFIG_PATH,
+        'plugin_wheel_file_mounts': plugin_wheel_file_mounts,
+        'plugins_wheel_install_commands': plugins_wheel_install_commands,
     }
     env_vars: Dict[str, str] = {
         env.env_key: str(int(env.get())) for env in env_options.Options
