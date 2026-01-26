@@ -115,6 +115,13 @@ For more details, please refer to the `VSCode documentation <https://code.visual
   :align: center
   :alt: Connect to the cluster with VSCode
 
+
+.. tip::
+
+   **Windows (WSL) users**: SkyPilot automatically configures both WSL and Windows SSH
+   settings, so VSCode's Remote-SSH extension works out of the box with clusters launched
+   from WSL.
+
 .. _dev-notebooks:
 
 Jupyter notebooks

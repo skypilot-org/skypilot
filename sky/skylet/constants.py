@@ -478,6 +478,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'remote_identity'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),

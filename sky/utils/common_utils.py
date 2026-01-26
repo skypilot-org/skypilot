@@ -724,7 +724,7 @@ def remove_file_if_exists(path: Optional[str]):
 
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
-    return 'microsoft' in platform.uname()[3].lower()
+    return 'microsoft' in platform.uname().release.lower()
 
 
 def find_free_port(start_port: int) -> int:

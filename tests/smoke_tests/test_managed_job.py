@@ -2139,14 +2139,14 @@ def test_managed_jobs_instance_links(generic_cloud: str):
 # ---------- Testing JobGroups ----------
 
 
-def _render_job_group_yaml(yaml_template_path: str, name: str,
-                           cloud: str) -> str:
-    """Render a JobGroup YAML template with name and cloud substitution."""
+def _render_job_group_yaml(yaml_template_path: str, name: str, cloud: str,
+                           **kwargs) -> str:
+    """Render a JobGroup YAML template with name, cloud, and extra variables."""
     with open(yaml_template_path, 'r') as f:
         template_content = f.read()
 
     template = jinja2.Template(template_content)
-    rendered = template.render(name=name, cloud=cloud)
+    rendered = template.render(name=name, cloud=cloud, **kwargs)
 
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
                                      delete=False) as f:
@@ -2205,6 +2205,54 @@ def test_job_group_networking(generic_cloud: str):
                 timeout=360),
             f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
             f'grep "SUCCESS: Connected to server"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        # Ubuntu base image - no sudo installed by default
+        'docker:ubuntu:22.04',
+        # Miniconda image - commonly used, has Python, no sudo
+        'docker:continuumio/miniconda3:24.1.2-0',
+    ])
+def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
+    """Test JobGroup networking with custom images that have no sudo installed.
+
+    This tests the fix for containers running as root but without sudo binary.
+    The DNS updater script must handle this case by aliasing sudo to empty
+    when running as root (using ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD).
+    """
+    # Include image name in cluster name for uniqueness across parametrized runs
+    image_suffix = image_id.split(':')[-1].replace('.', '-')[:8]
+    name = smoke_tests_utils.get_cluster_name() + f'-{image_suffix}'
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking_custom_image.yaml',
+        name,
+        generic_cloud,
+        image_id=image_id)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        f'job_group_networking_custom_image_{image_suffix}',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            # Verify the client connected successfully (proves networking worked)
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "SUCCESS: Connected to server on custom image without sudo"',
         ],
         f'sky jobs cancel -y -n {name}',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,

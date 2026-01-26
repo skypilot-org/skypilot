@@ -1993,6 +1993,45 @@ def test_kubernetes_pod_failure_detection():
 
 
 @pytest.mark.kubernetes
+@pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
+def test_kubernetes_container_status_unknown_status_refresh():
+    """Test sky status --refresh handles evicted pods without crashing.
+
+    When pods are evicted due to ephemeral storage limits, containers may enter
+    ContainerStatusUnknown state with terminated.finishedAt=null. This test
+    verifies that SkyPilot handles evicted pods without erroring.
+
+    Note: This test is inherently flaky, it may succeed even before the fix.
+    Triggering ContainerStatusUnknown (where finishedAt is null) requires the kubelet
+    to lose contact with the container runtime during eviction, which is racy. The pod
+    may instead get a clean termination with finishedAt set.
+
+    Regression test for #8674.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_container_status_unknown_status_refresh',
+        [
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
+            # Poll sky status --refresh, fail fast if error found.
+            # Before the fix this logged: "Failed to query ... [TypeError]..."
+            (f'for i in $(seq 1 20); do '
+             f'echo "=== status refresh attempt $i ===" && '
+             f'OUT=$(sky status {name} -v --refresh 2>&1) && '
+             f'echo "$OUT" && '
+             f'if echo "$OUT" | grep -q "TypeError"; then '
+             f'echo "FAIL: TypeError found" && exit 1; fi && '
+             f'if echo "$OUT" | grep -q "Failed to refresh status"; then '
+             f'echo "FAIL: Refresh failed" && exit 1; fi; done'),
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_pod_pending_reason():
     """Ensure pending pod reasons are surfaced in provision logs."""
     name = smoke_tests_utils.get_cluster_name()
@@ -2746,6 +2785,97 @@ def test_kubernetes_pod_config_change_detection():
         smoke_tests_utils.run_one_test(test)
         os.unlink(task_yaml_1_path)
         os.unlink(task_yaml_2_path)
+
+
+# ---------- Testing Kubernetes remote_identity override ----------
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_override():
+    """Test that config.kubernetes.remote_identity can be overridden in task YAML.
+
+    This test verifies that:
+    1. With remote_identity: LOCAL_CREDENTIALS, kubeconfig is uploaded
+    2. With remote_identity: NO_UPLOAD, kubeconfig is NOT uploaded
+
+    This is important for users running SkyPilot from within a SkyPilot pod,
+    where the auto-mounted service account should be used instead of uploading
+    kubeconfig which may have exec auth or unreachable IPs.
+
+    Fixes: https://github.com/skypilot-org/skypilot/issues/8321
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_override',
+        [
+            # First, launch with LOCAL_CREDENTIALS - kubeconfig should be uploaded
+            f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/test_k8s_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+            # Down the cluster
+            f'sky down -y {name}',
+            # Launch with NO_UPLOAD - kubeconfig should NOT be uploaded
+            f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/test_k8s_remote_identity_no_upload.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_sidecar():
+    """Test Kubernetes pod_config with sidecar container injection.
+
+    This test verifies that SkyPilot correctly handles pods with multiple
+    containers (sidecars) by:
+    1. Launching a cluster with a sidecar container via pod_config
+    2. Verifying the pod has both ray-node and sidecar containers
+    3. Verifying sky exec commands run in the ray-node container
+    4. Verifying the sidecar container is running
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_sidecar.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(task_yaml_content)
+        f.flush()
+        task_yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_sidecar',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch SkyPilot cluster with sidecar
+                f'sky launch -y -c {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Verify pod has 2 containers (ray-node and sidecar)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l skypilot-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[*].name}\' | '
+                    'grep -E "ray-node.*sidecar|sidecar.*ray-node"'),
+                # Verify sky exec runs in ray-node container
+                f'sky exec {name} "echo CONTAINER_CHECK: ray-node is working"',
+                # Verify sidecar is running
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl logs -l skypilot-cluster-name={name_on_cloud} '
+                    '-c sidecar --tail=5 | grep "sidecar running"'),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_path)
 
 
 # ---------- Testing Kubernetes set_pod_resource_limits ----------
