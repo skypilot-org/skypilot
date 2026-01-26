@@ -1567,7 +1567,6 @@ def get_cluster_info(
     logger.debug(f'Running pods: {list(running_pods.keys())}')
 
     pods: Dict[str, List[common.InstanceInfo]] = {}
-    head_pod_name = None
 
     port = 22
     if not provider_config.get('use_internal_ips', False):
@@ -1575,6 +1574,7 @@ def get_cluster_info(
                                                   namespace, context)
 
     head_pod_name = None
+    primary_container_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
@@ -1595,6 +1595,7 @@ def get_cluster_info(
             head_spec = pod.spec
             assert head_spec is not None, pod
             primary_container = kubernetes_utils.get_pod_primary_container(pod)
+            primary_container_name = primary_container_name.name
             resources = getattr(primary_container, 'resources', None)
             requests = (getattr(resources, 'requests', None)
                         if resources else None)
@@ -1613,9 +1614,10 @@ def get_cluster_info(
     # the actual username reliably.
     get_k8s_ssh_user_cmd = 'echo "SKYPILOT_SSH_USER: $(whoami)"'
     assert head_pod_name is not None
+    assert primary_container_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name),
-        container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME)
+        container=primary_container_name)
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
