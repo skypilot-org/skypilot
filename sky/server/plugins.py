@@ -287,9 +287,7 @@ def load_plugin_rbac_rules() -> Dict[str, List[Dict[str, str]]]:
 
             # Collect rules from the rbac_rules property
             for role, rule in plugin.rbac_rules:
-                if role not in rules_by_role:
-                    rules_by_role[role] = []
-                rules_by_role[role].append({
+                rules_by_role.setdefault(role, []).append({
                     'path': rule.path,
                     'method': rule.method,
                 })
