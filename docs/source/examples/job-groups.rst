@@ -27,7 +27,7 @@ Overview
 
 - **Parallel execution**: Launch multiple tasks simultaneously, each running independently
 - **Heterogeneous resources**: Different resource requirements per task (e.g., GPUs for training, CPUs for data serving)
-- **Automatic service discovery**: Tasks discover and communicate via hostnames
+- **Automatic service discovery**: Tasks discover each other and communicate via hostnames
 - **Independent recovery**: Each task recovers from preemptions without affecting other tasks
 
 **When to Use Job Groups:**
