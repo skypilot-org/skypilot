@@ -1595,7 +1595,8 @@ def get_cluster_info(
             head_spec = pod.spec
             assert head_spec is not None, pod
             primary_container = kubernetes_utils.get_pod_primary_container(pod)
-            primary_container_name = primary_container_name.name
+            primary_container_name = getattr(primary_container_name, 'name',
+                                             None)
             resources = getattr(primary_container, 'resources', None)
             requests = (getattr(resources, 'requests', None)
                         if resources else None)
@@ -1616,8 +1617,7 @@ def get_cluster_info(
     assert head_pod_name is not None
     assert primary_container_name is not None
     runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), head_pod_name),
-        container=primary_container_name)
+        ((namespace, context), head_pod_name), container=primary_container_name)
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -1654,7 +1654,8 @@ def get_cluster_info(
             'num-cpus': str_cpus,
         },
         provider_name='kubernetes',
-        provider_config=provider_config)
+        provider_config=provider_config,
+        primary_container_name=primary_container_name)
 
 
 def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
@@ -2122,7 +2123,7 @@ def get_command_runners(
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0],
             deployment=deployment,
-            container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME,
+            container=cluster_info.primary_container_name,
             **credentials)
         runners.append(head_runner)
 
@@ -2132,7 +2133,7 @@ def get_command_runners(
     runners.extend(
         command_runner.KubernetesCommandRunner.make_runner_list(
             node_list,
-            container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME,
+            container=cluster_info.primary_container_name,
             **credentials))
 
     return runners

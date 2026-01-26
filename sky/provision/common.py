@@ -146,6 +146,8 @@ class ClusterInfo:
     ssh_user: Optional[str] = None
     custom_ray_options: Optional[Dict[str, Any]] = None
 
+    primary_container_name: Optional[str] = None
+
     @property
     def num_instances(self) -> int:
         """Get the number of instances in the cluster."""
