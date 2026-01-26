@@ -20,14 +20,15 @@ _REMOTE_PLUGINS_WHEEL_DIR = '~/.sky/plugins/wheels'
 def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     """Get file mounts and installation commands for plugin wheels.
 
-    This function reads the controller wheel path from the plugin config and
-    returns both the file mount for uploading it to remote clusters and the
-    shell command for installing it.
+    This function reads the controller wheel directory path from the plugin
+    config, finds all .whl files in that directory, and returns both the file
+    mounts for uploading them to remote clusters and the shell commands for
+    installing them.
 
     Returns:
         A tuple of:
-        - Dictionary mapping remote path to local path for the plugin wheel
-        - Shell command to install the plugin wheel
+        - Dictionary mapping remote paths to local paths for plugin wheels
+        - Shell commands to install all plugin wheels
     """
     # pylint: disable-next=import-outside-toplevel
     from sky.skylet import constants
@@ -43,42 +44,54 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     if not should_upload:
         return {}, ''
 
-    # Get the controller wheel path from the top-level config
-    wheel_path_str = plugins.get_controller_wheel_path()
-    if not wheel_path_str:
+    # Get the controller wheel directory path from the top-level config
+    wheel_dir_str = plugins.get_controller_wheel_path()
+    if not wheel_dir_str:
         logger.warning('Some plugins have upload_to_controller=True but '
                        'controller_wheel_path is not specified in the config. '
                        'Skipping wheel upload.')
         return {}, ''
 
     # Expand user path and validate
-    wheel_path = pathlib.Path(os.path.expanduser(wheel_path_str))
-    if not wheel_path.exists():
-        logger.warning(f'Controller wheel path does not exist: {wheel_path}')
-        return {}, ''
-
-    if not wheel_path.is_file():
-        logger.warning(f'Controller wheel path is not a file: {wheel_path}')
-        return {}, ''
-
-    if wheel_path.suffix != '.whl':
+    wheel_dir = pathlib.Path(os.path.expanduser(wheel_dir_str))
+    if not wheel_dir.exists():
         logger.warning(
-            f'Controller wheel path does not have .whl extension: {wheel_path}')
+            f'Controller wheel directory does not exist: {wheel_dir}')
         return {}, ''
 
-    # File mount: upload the wheel file directly to the remote cluster
-    # Use the wheel filename as the remote path
-    remote_wheel_path = (f'{_REMOTE_PLUGINS_WHEEL_DIR}/'
-                         f'{wheel_path.name}')
-    file_mounts = {remote_wheel_path: str(wheel_path)}
+    if not wheel_dir.is_dir():
+        logger.warning(
+            f'Controller wheel path is not a directory: {wheel_dir}')
+        return {}, ''
 
-    # Installation command: install the wheel on the remote cluster
-    # Use ~ which will be expanded by the shell when the command runs.
-    # Note: We don't quote the path so that ~ gets expanded by the shell
-    install_cmd = (f'{constants.SKY_UV_PIP_CMD} install '
-                   f'{remote_wheel_path}')
+    # Find all .whl files in the directory
+    wheel_files = list(wheel_dir.glob('*.whl'))
+    if not wheel_files:
+        logger.debug(
+            f'No .whl files found in controller wheel directory: {wheel_dir}')
+        return {}, ''
 
-    return file_mounts, install_cmd
+    file_mounts: Dict[str, str] = {}
+    commands = []
+
+    for wheel_path in wheel_files:
+        # File mount: upload the wheel file directly to the remote cluster
+        # Use the wheel filename as the remote path
+        remote_wheel_path = (f'{_REMOTE_PLUGINS_WHEEL_DIR}/'
+                             f'{wheel_path.name}')
+        file_mounts[remote_wheel_path] = str(wheel_path)
+
+        # Installation command: install the wheel on the remote cluster
+        # Use ~ which will be expanded by the shell when the command runs.
+        # Note: We don't quote the path so that ~ gets expanded by the shell
+        install_cmd = (f'{constants.SKY_UV_PIP_CMD} install '
+                       f'{remote_wheel_path}')
+        commands.append(install_cmd)
+
+    logger.info(
+        f'Found {len(wheel_files)} wheel file(s) in {wheel_dir}, '
+        f'uploading and installing them on controller.')
+    return file_mounts, ' && '.join(commands)
 
 
 def get_filtered_plugins_config_path() -> Optional[str]:

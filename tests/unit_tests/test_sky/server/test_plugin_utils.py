@@ -13,7 +13,7 @@ from sky.server import plugins
 def test_get_plugin_packages(monkeypatch, tmp_path):
     """Test get_plugin_packages returns plugin configurations."""
     config = {
-        'controller_wheel_path': 'dist/plugins-0.0.1-py3-none-any.whl',
+        'controller_wheel_path': 'dist',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
@@ -39,17 +39,21 @@ def test_get_plugin_packages(monkeypatch, tmp_path):
     assert packages[0]['upload_to_controller'] is True
     assert packages[1]['class'] == 'module2.Plugin2'
     assert 'upload_to_controller' not in packages[1]
-    assert wheel_path == 'dist/plugins-0.0.1-py3-none-any.whl'
+    assert wheel_path == 'dist'
 
 
 def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     """Test get_plugin_mounts_and_commands returns consistent mounts and cmds."""
-    # Create a prebuilt wheel file
-    wheel_file = tmp_path / 'test_plugin-0.0.1-py3-none-any.whl'
-    wheel_file.write_bytes(b'fake wheel content')
+    # Create a directory with wheel files
+    wheel_dir = tmp_path / 'wheels'
+    wheel_dir.mkdir()
+    wheel_file1 = wheel_dir / 'test_plugin-0.0.1-py3-none-any.whl'
+    wheel_file1.write_bytes(b'fake wheel content 1')
+    wheel_file2 = wheel_dir / 'another_plugin-0.0.2-py3-none-any.whl'
+    wheel_file2.write_bytes(b'fake wheel content 2')
 
     config = {
-        'controller_wheel_path': str(wheel_file),
+        'controller_wheel_path': str(wheel_dir),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
             'upload_to_controller': True,
@@ -61,20 +65,27 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
-    # Check file mounts
-    assert len(file_mounts) == 1
-    remote_path = list(file_mounts.keys())[0]
-    assert '~/.sky/plugins/wheels' in remote_path
-    assert 'test_plugin-0.0.1-py3-none-any.whl' in remote_path
-    assert file_mounts[remote_path] == str(wheel_file)
+    # Check file mounts - should have both wheel files
+    assert len(file_mounts) == 2
+    remote_paths = list(file_mounts.keys())
+    assert all('~/.sky/plugins/wheels' in path for path in remote_paths)
+    assert any('test_plugin-0.0.1-py3-none-any.whl' in path
+               for path in remote_paths)
+    assert any('another_plugin-0.0.2-py3-none-any.whl' in path
+               for path in remote_paths)
+    assert str(wheel_file1) in file_mounts.values()
+    assert str(wheel_file2) in file_mounts.values()
 
     # Check commands
     assert commands != ''
     assert 'pip install' in commands or 'uv pip install' in commands
-    # Should contain the actual wheel filename
+    # Should contain both wheel filenames
     assert 'test_plugin-0.0.1-py3-none-any.whl' in commands
+    assert 'another_plugin-0.0.2-py3-none-any.whl' in commands
     # Path should use ~ for shell expansion (not quoted)
     assert '~/.sky/plugins/wheels' in commands
+    # Should have && between commands
+    assert ' && ' in commands
 
 
 def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
@@ -99,9 +110,9 @@ def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
 
 def test_get_plugin_mounts_and_commands_invalid_wheel_path(
         monkeypatch, tmp_path):
-    """Test get_plugin_mounts_and_commands with invalid wheel path."""
+    """Test get_plugin_mounts_and_commands with invalid wheel directory path."""
     config = {
-        'controller_wheel_path': str(tmp_path / 'nonexistent.whl'),
+        'controller_wheel_path': str(tmp_path / 'nonexistent_dir'),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
             'upload_to_controller': True,
@@ -113,19 +124,19 @@ def test_get_plugin_mounts_and_commands_invalid_wheel_path(
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
-    # Should return empty since wheel file doesn't exist
+    # Should return empty since directory doesn't exist
     assert file_mounts == {}
     assert commands == ''
 
 
-def test_get_plugin_mounts_and_commands_not_whl_file(monkeypatch, tmp_path):
-    """Test get_plugin_mounts_and_commands with non-.whl file."""
-    # Create a file that's not a .whl
-    non_wheel_file = tmp_path / 'test_plugin.txt'
-    non_wheel_file.write_text('not a wheel')
+def test_get_plugin_mounts_and_commands_not_directory(monkeypatch, tmp_path):
+    """Test get_plugin_mounts_and_commands when path is not a directory."""
+    # Create a file instead of a directory
+    wheel_file = tmp_path / 'test_plugin.whl'
+    wheel_file.write_bytes(b'fake wheel content')
 
     config = {
-        'controller_wheel_path': str(non_wheel_file),
+        'controller_wheel_path': str(wheel_file),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
             'upload_to_controller': True,
@@ -137,7 +148,33 @@ def test_get_plugin_mounts_and_commands_not_whl_file(monkeypatch, tmp_path):
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
-    # Should return empty since file doesn't have .whl extension
+    # Should return empty since path is not a directory
+    assert file_mounts == {}
+    assert commands == ''
+
+
+def test_get_plugin_mounts_and_commands_no_whl_files(monkeypatch, tmp_path):
+    """Test get_plugin_mounts_and_commands when directory has no .whl files."""
+    # Create a directory with no .whl files
+    wheel_dir = tmp_path / 'wheels'
+    wheel_dir.mkdir()
+    # Create a non-wheel file
+    (wheel_dir / 'test_plugin.txt').write_text('not a wheel')
+
+    config = {
+        'controller_wheel_path': str(wheel_dir),
+        'plugins': [{
+            'class': 'test_plugin.TestPlugin',
+            'upload_to_controller': True,
+        }]
+    }
+    config_path = tmp_path / 'plugins.yaml'
+    config_path.write_text(yaml.safe_dump(config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+
+    file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
+
+    # Should return empty since no .whl files found
     assert file_mounts == {}
     assert commands == ''
 
@@ -182,7 +219,7 @@ def test_get_filtered_plugins_config_path_with_upload_flag(
         monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with plugins that have upload_to_controller."""
     config = {
-        'controller_wheel_path': 'dist/test_plugin-0.0.1-py3-none-any.whl',
+        'controller_wheel_path': 'dist',
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
             'upload_to_controller': True,
@@ -210,7 +247,7 @@ def test_get_filtered_plugins_config_path_with_upload_flag(
 def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with mixed plugins."""
     config = {
-        'controller_wheel_path': 'dist/plugins-0.0.1-py3-none-any.whl',
+        'controller_wheel_path': 'dist',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
