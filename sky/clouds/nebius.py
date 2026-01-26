@@ -232,7 +232,12 @@ class Nebius(clouds.Cloud):
         if platform.startswith('cpu'):
             image_family = 'ubuntu24.04-driverless'
         elif platform.startswith('gpu'):
-            image_family = 'ubuntu24.04-cuda12'
+            # Use recommended version ubuntu
+            # https://docs.nebius.com/compute/virtual-machines/cuda-init-error
+            if 'h100' in platform or 'h200' in platform or 'l40s' in platform:
+                image_family = 'ubuntu22.04-cuda12'
+            else:
+                image_family = 'ubuntu24.04-cuda12'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
