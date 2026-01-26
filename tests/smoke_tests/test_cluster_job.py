@@ -2787,6 +2787,41 @@ def test_kubernetes_pod_config_change_detection():
         os.unlink(task_yaml_2_path)
 
 
+# ---------- Testing Kubernetes remote_identity override ----------
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_override():
+    """Test that config.kubernetes.remote_identity can be overridden in task YAML.
+
+    This test verifies that:
+    1. With remote_identity: LOCAL_CREDENTIALS, kubeconfig is uploaded
+    2. With remote_identity: NO_UPLOAD, kubeconfig is NOT uploaded
+
+    This is important for users running SkyPilot from within a SkyPilot pod,
+    where the auto-mounted service account should be used instead of uploading
+    kubeconfig which may have exec auth or unreachable IPs.
+
+    Fixes: https://github.com/skypilot-org/skypilot/issues/8321
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_override',
+        [
+            # First, launch with LOCAL_CREDENTIALS - kubeconfig should be uploaded
+            f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/test_k8s_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+            # Down the cluster
+            f'sky down -y {name}',
+            # Launch with NO_UPLOAD - kubeconfig should NOT be uploaded
+            f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/test_k8s_remote_identity_no_upload.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 def test_kubernetes_pod_config_sidecar():
     """Test Kubernetes pod_config with sidecar container injection.
