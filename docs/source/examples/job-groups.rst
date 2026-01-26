@@ -7,29 +7,42 @@ Job Groups
 
   **This is an experimental feature.** The interface may change in future versions.
 
-.. tip::
-
-  Job Groups are ideal for heterogeneous parallel workloads where multiple tasks
-  with different resource requirements need to run together and communicate
-  with each other.
-
 Job Groups allow you to run multiple related tasks in parallel as a single managed unit.
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
 Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
 
-Common use cases include:
+.. figure:: ../images/job-groups-dashboard.png
+   :width: 100%
+   :align: center
+   :alt: Job Groups in SkyPilot Dashboard
+
+   A Job Group with 4 tasks (data-server, rollout-server, reward-server, ppo-trainer)
+   running in parallel on Kubernetes. Each task has different resource requirements
+   and can be monitored independently through the dashboard.
+
+Overview
+--------
+
+**Key Features:**
+
+- **Parallel execution**: Launch multiple tasks simultaneously, each running independently
+- **Heterogeneous resources**: Different resource requirements per task (e.g., GPUs for training, CPUs for data serving)
+- **Automatic service discovery**: Tasks discover each other and communicate via hostnames
+- **Independent recovery**: Each task recovers from preemptions without affecting other tasks
+
+**When to Use Job Groups:**
+
+Job Groups are ideal for workloads where multiple components with different requirements need to run together and communicate. Common use cases include:
 
 - **RL post-training**: Separate tasks for trainer, reward modeling, rollout server, and data serving
 - **Parallel train-eval**: Training and evaluation running in parallel with shared storage
 
-.. figure:: ../images/job-groups-rl-architecture.jpg
-   :width: 90%
-   :align: center
-   :alt: RL Post-Training Architecture with Job Groups
+.. tip::
 
-   Example: RL post-training architecture where each component (ppo-trainer, rollout-server,
-   reward-server, replay-buffer, data-server) runs as a separate task within a single Job Group.
-   Tasks can have different resource requirements and communicate via service discovery.
+   Use Job Groups when your workload has **heterogeneous tasks** that need to run
+   **in parallel** and **communicate with each other**. For homogeneous multi-node
+   training within a single task, use :ref:`distributed jobs <dist-jobs>` instead.
+   For sequential task execution, use :ref:`managed job pipelines <pipeline>`.
 
 .. contents:: Contents
    :local:
