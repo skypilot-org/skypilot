@@ -7,20 +7,38 @@ Job Groups
 
   **This is an experimental feature.** The interface may change in future versions.
 
-.. tip::
-
-  Job Groups are ideal for heterogeneous parallel workloads where multiple tasks
-  with different resource requirements need to run together and communicate
-  with each other.
-
 Job Groups allow you to run multiple related tasks in parallel as a single managed unit.
 Unlike :ref:`managed jobs <managed-jobs>` which run tasks sequentially (pipelines),
 Job Groups launch all tasks simultaneously, enabling complex distributed architectures.
 
-Common use cases include:
+Overview
+--------
+
+**Key Features:**
+
+- **Parallel execution**: Launch multiple tasks simultaneously as a single managed unit, with each task running independently
+- **Heterogeneous resources**: Each task can have different resource requirements (e.g., GPUs for training, CPUs for data serving)
+- **Independent environment setup**: Tasks can have different Docker images, dependencies, and setup commands
+- **Automatic service discovery**: Tasks can discover and communicate with each other via hostnames (on Kubernetes)
+- **Independent recovery**: Each task recovers independently from preemptions or failures without affecting other tasks
+- **Lifecycle management**: Designate primary vs auxiliary tasks to automatically terminate supporting services when main tasks complete
+- **Unified management**: Monitor, log, and manage all tasks through a single job ID
+
+**When to Use Job Groups:**
+
+Job Groups are ideal for workloads where multiple components with different requirements need to run together and communicate. Common use cases include:
 
 - **RL post-training**: Separate tasks for trainer, reward modeling, rollout server, and data serving
 - **Parallel train-eval**: Training and evaluation running in parallel with shared storage
+- **Distributed inference pipelines**: Multiple model servers with different GPU requirements
+- **Data processing architectures**: Producers and consumers with heterogeneous compute needs
+
+.. tip::
+
+   Use Job Groups when your workload has **heterogeneous tasks** that need to run
+   **in parallel** and **communicate with each other**. For homogeneous multi-node
+   training within a single task, use :ref:`distributed jobs <dist-jobs>` instead.
+   For sequential task execution, use :ref:`managed job pipelines <pipeline>`.
 
 .. figure:: ../images/job-groups-rl-architecture.jpg
    :width: 90%
