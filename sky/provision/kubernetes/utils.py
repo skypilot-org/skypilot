@@ -3764,7 +3764,7 @@ class KubernetesSkyPilotClusterInfoPayload:
         )
 
 
-def get_pod_primary_container(
+def get_pod_primary_container(  # pylint: disable=dangerous-default-value
     pod: Any,
     *,
     primary_name_candidates: List[str] = [
