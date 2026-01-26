@@ -529,6 +529,9 @@ def get_instance_types() -> Dict[str, Dict[str, Any]]:
     return {it['fid']: it for it in instance_types}
 
 
+DEFAULT_LIMIT_PRICE = 32.00
+
+
 def launch_instances(
     instance_type: str,
     name: str,
@@ -536,8 +539,19 @@ def launch_instances(
     public_key: str,
     instance_quantity: int = 1,
     volume_ids: Optional[List[str]] = None,
+    limit_price: Optional[float] = None,
 ) -> Tuple[str, List[str]]:
     """Launch instances by creating a spot bid and waiting for them to be ready.
+
+    Args:
+        instance_type: The instance type name to launch.
+        name: Name for the bid/cluster.
+        region: Region to launch in, or None to auto-select.
+        public_key: SSH public key to add to instances.
+        instance_quantity: Number of instances to launch.
+        volume_ids: Optional list of volume FIDs to attach.
+        limit_price: Maximum price per instance per hour in USD (e.g., 32.00).
+            If not specified, uses the default of $32.00.
 
     Returns:
         Tuple of (bid_id, list of instance_ids)
@@ -577,12 +591,13 @@ def launch_instances(
     logger.debug(
         f'Using {instance_type} (FID: {instance_type_fid}) in {region}')
 
+    effective_limit_price = (limit_price if limit_price is not None else
+                             DEFAULT_LIMIT_PRICE)
     bid_payload = {
         'project': config['project_id'],
         'region': region,
         'instance_type': instance_type_fid,
-        # TODO(oliviert): Support configurable limit price
-        'limit_price': '$32.00',
+        'limit_price': f'${effective_limit_price:.2f}',
         'instance_quantity': instance_quantity,
         'name': name,
         'launch_specification': {

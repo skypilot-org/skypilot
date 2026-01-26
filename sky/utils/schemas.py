@@ -1554,6 +1554,17 @@ def get_config_schema():
                 },
             }
         },
+        'mithril': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'limit_price': {
+                    'type': 'number',
+                    'minimum': 0,
+                },
+            }
+        },
         'nebius': {
             'type': 'object',
             'required': [],

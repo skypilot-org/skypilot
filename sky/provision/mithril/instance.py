@@ -198,6 +198,8 @@ def run_instances(
                     'Mithril volume fid not found for volume mount.')
             volume_ids.append(volume_fid)
 
+    limit_price = config.node_config.get('LimitPrice')
+
     bid_id, created_instance_ids = utils.launch_instances(
         instance_type,
         cluster_name_on_cloud,
@@ -205,6 +207,7 @@ def run_instances(
         public_key,
         instance_quantity=to_start_count,
         volume_ids=volume_ids,
+        limit_price=limit_price,
     )
     logger.debug(
         f'Submitted bid {bid_id}, created {len(created_instance_ids)} instances'

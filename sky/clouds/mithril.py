@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
 from sky.provision.mithril import utils as mithril_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -296,6 +297,11 @@ class Mithril(clouds.Cloud):
         # even if the user switches profiles later.
         config = mithril_utils.resolve_current_config()
         profile = mithril_utils.get_current_profile()
+        limit_price = skypilot_config.get_nested(
+            ('mithril', 'limit_price'),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides,
+        )
 
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
@@ -303,6 +309,7 @@ class Mithril(clouds.Cloud):
             'region': region.name,
             'mithril_profile': profile or '',
             'mithril_project_id': config['project_id'],
+            'limit_price': limit_price,
         }
 
         docker_run_options = []

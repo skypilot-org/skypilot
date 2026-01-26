@@ -52,6 +52,9 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       labels: {{labels}}
+      {%- if limit_price is not none %}
+      LimitPrice: {{limit_price}}
+      {%- endif %}
       {%- if volume_mounts and volume_mounts|length > 0 %}
       VolumeMounts:
       {%- for vm in volume_mounts %}
