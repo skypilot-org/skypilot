@@ -1,7 +1,9 @@
 {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
 {{- $oauth2 := .Values.auth.oauth -}}
+{{- $oauth2Registry := .Values.auth.oauth.imageRegistry -}}
 {{- if not .Values.auth.oauth.enabled -}}
 {{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
+{{- $oauth2Registry = index .Values.ingress "oauth2-proxy" "imageRegistry" -}}
 {{- end -}}
 {{- if not (index $oauth2 "oidc-issuer-url") -}}
 {{- fail "ingress.oauth2-proxy.oidc-issuer-url is required when OAuth2 proxy is enabled" -}}
@@ -65,7 +67,7 @@ spec:
       {{- end }}
       containers:
       - name: oauth2-proxy
-        image: {{ include "common.image" (dict "root" . "image" (default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" (index $oauth2 "image"))) }}
+        image: {{ include "common.image" (dict "root" . "image" (default "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0" (index $oauth2 "image")) "componentRegistry" $oauth2Registry) }}
         imagePullPolicy: IfNotPresent
         args:
         - --provider=oidc

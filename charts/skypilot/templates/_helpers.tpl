@@ -34,12 +34,18 @@
 {{- end -}}
 
 {{/*
-Resolve the image name, overriding the registry when global.imageRegistry is set.
-Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag") }}
+Resolve the image name, overriding the registry when global.imageRegistry or component imageRegistry is set.
+Priority: global.imageRegistry > component imageRegistry > default registry
+Usage: {{ include "common.image" (dict "root" . "image" "repo/name:tag" "componentRegistry" .Values.component.imageRegistry) }}
 */}}
 {{- define "common.image" -}}
 {{- $image := default "" .image -}}
-{{- $registry := default "" .root.Values.global.imageRegistry -}}
+{{- $globalRegistry := default "" .root.Values.global.imageRegistry -}}
+{{- $componentRegistry := default "" .componentRegistry -}}
+{{- $registry := $globalRegistry -}}
+{{- if and (not $globalRegistry) $componentRegistry -}}
+  {{- $registry = $componentRegistry -}}
+{{- end -}}
 {{- if $registry -}}
   {{- $imagePath := trimPrefix "/" $image -}}
   {{- $parts := splitList "/" $imagePath -}}
