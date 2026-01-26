@@ -69,8 +69,8 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     assert len(file_mounts) == 2
     remote_paths = list(file_mounts.keys())
     assert all('~/.sky/plugins/wheels' in path for path in remote_paths)
-    assert any('test_plugin-0.0.1-py3-none-any.whl' in path
-               for path in remote_paths)
+    assert any(
+        'test_plugin-0.0.1-py3-none-any.whl' in path for path in remote_paths)
     assert any('another_plugin-0.0.2-py3-none-any.whl' in path
                for path in remote_paths)
     assert str(wheel_file1) in file_mounts.values()

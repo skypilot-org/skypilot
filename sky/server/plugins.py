@@ -175,8 +175,10 @@ def _config_schema():
         'additionalProperties': False,
         'properties': {
             'controller_wheel_path': {
-                # Path to a directory containing prebuilt plugin wheel files (.whl).
-                # All .whl files in this directory will be uploaded to controllers.
+                # Path to a directory containing prebuilt
+                # plugin wheel files (.whl).
+                # All .whl files in this directory will be uploaded
+                # to controllers.
                 # Required when any plugin has 'upload_to_controller: true'.
                 # The wheels will be uploaded to remote clusters and installed.
                 'type': 'string',

@@ -60,8 +60,7 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
         return {}, ''
 
     if not wheel_dir.is_dir():
-        logger.warning(
-            f'Controller wheel path is not a directory: {wheel_dir}')
+        logger.warning(f'Controller wheel path is not a directory: {wheel_dir}')
         return {}, ''
 
     # Find all .whl files in the directory
@@ -88,9 +87,8 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
                        f'{remote_wheel_path}')
         commands.append(install_cmd)
 
-    logger.info(
-        f'Found {len(wheel_files)} wheel file(s) in {wheel_dir}, '
-        f'uploading and installing them on controller.')
+    logger.info(f'Found {len(wheel_files)} wheel file(s) in {wheel_dir}, '
+                f'uploading and installing them on controller.')
     return file_mounts, ' && '.join(commands)
 
 

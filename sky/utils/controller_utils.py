@@ -555,7 +555,8 @@ def shared_controller_vars_to_fill(
     plugin_wheel_file_mounts, plugins_wheel_install_commands = (
         plugin_utils.get_plugin_mounts_and_commands())
     if plugin_wheel_file_mounts and plugins_wheel_install_commands:
-        local_plugins_config_path = plugin_utils.get_filtered_plugins_config_path()
+        local_plugins_config_path = (
+            plugin_utils.get_filtered_plugins_config_path())
 
     vars_to_fill: Dict[str, Any] = {
         'cloud_dependencies_installation_commands':
