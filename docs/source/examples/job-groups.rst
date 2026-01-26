@@ -25,13 +25,10 @@ Overview
 
 **Key Features:**
 
-- **Parallel execution**: Launch multiple tasks simultaneously as a single managed unit, with each task running independently
-- **Heterogeneous resources**: Each task can have different resource requirements (e.g., GPUs for training, CPUs for data serving)
-- **Independent environment setup**: Tasks can have different Docker images, dependencies, and setup commands
-- **Automatic service discovery**: Tasks can discover and communicate with each other via hostnames
-- **Independent recovery**: Each task recovers independently from preemptions or failures without affecting other tasks
-- **Lifecycle management**: Designate primary vs auxiliary tasks to automatically terminate supporting services when main tasks complete
-- **Unified management**: Monitor, log, and manage all tasks through a single job ID
+- **Parallel execution**: Launch multiple tasks simultaneously, each running independently
+- **Heterogeneous resources**: Different resource requirements per task (e.g., GPUs for training, CPUs for data serving)
+- **Automatic service discovery**: Tasks discover and communicate via hostnames
+- **Independent recovery**: Each task recovers from preemptions without affecting other tasks
 
 **When to Use Job Groups:**
 
@@ -46,15 +43,6 @@ Job Groups are ideal for workloads where multiple components with different requ
    **in parallel** and **communicate with each other**. For homogeneous multi-node
    training within a single task, use :ref:`distributed jobs <dist-jobs>` instead.
    For sequential task execution, use :ref:`managed job pipelines <pipeline>`.
-
-.. figure:: ../images/job-groups-rl-architecture.jpg
-   :width: 90%
-   :align: center
-   :alt: RL Post-Training Architecture with Job Groups
-
-   Example: RL post-training architecture where each component (ppo-trainer, rollout-server,
-   reward-server, replay-buffer, data-server) runs as a separate task within a single Job Group.
-   Tasks can have different resource requirements and communicate via service discovery.
 
 .. contents:: Contents
    :local:
