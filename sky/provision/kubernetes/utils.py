@@ -2904,9 +2904,11 @@ def combine_pod_config_fields(
             elif name == kubernetes_constants.SKYPILOT_NODE_CONTAINER_NAME:
                 found_primary_container_names += 1
         if found_primary_container_names > 1:
-            raise ValueError('Kubernetes `pod_config` should only modify the SkyPilot '
-                             'container using either the name `skypilot-node` or '
-                             '`ray-node`. Refer to https://docs.skypilot.co/en/latest/reference/config.html#kubernetes-pod-config for more details.')  # pylint: disable=line-too-long
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Kubernetes `pod_config` should only modify '
+                                 'the SkyPilot container using either '
+                                 '`skypilot-node` or `ray-node`. Refer to '
+                                 'https://docs.skypilot.co/en/latest/reference/config.html#kubernetes-pod-config for more details.')  # pylint: disable=line-too-long
 
     kubernetes_config = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
