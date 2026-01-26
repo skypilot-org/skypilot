@@ -753,19 +753,17 @@ export function ContextDetails({
                         Node
                       </th>
                       {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          IP Address
-                        </th>
-                      )}
-                      {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          vCPU
-                        </th>
-                      )}
-                      {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600">
-                          Memory (GB)
-                        </th>
+                        <>
+                          <th className="p-3 text-left font-medium text-gray-600">
+                            IP Address
+                          </th>
+                          <th className="p-3 text-left font-medium text-gray-600">
+                            vCPU
+                          </th>
+                          <th className="p-3 text-left font-medium text-gray-600">
+                            Memory (GB)
+                          </th>
+                        </>
                       )}
                       <th className="p-3 text-left font-medium text-gray-600">
                         GPU
@@ -871,19 +869,17 @@ export function ContextDetails({
                             {node.node_name}
                           </td>
                           {!isSlurm && (
-                            <td className="p-3 whitespace-nowrap text-gray-700">
-                              {node.ip_address || '-'}
-                            </td>
-                          )}
-                          {!isSlurm && (
-                            <td className="p-3 whitespace-nowrap text-gray-700">
-                              {cpuDisplay}
-                            </td>
-                          )}
-                          {!isSlurm && (
-                            <td className="p-3 whitespace-nowrap text-gray-700">
-                              {memoryDisplay}
-                            </td>
+                            <>
+                              <td className="p-3 whitespace-nowrap text-gray-700">
+                                {node.ip_address || '-'}
+                              </td>
+                              <td className="p-3 whitespace-nowrap text-gray-700">
+                                {cpuDisplay}
+                              </td>
+                              <td className="p-3 whitespace-nowrap text-gray-700">
+                                {memoryDisplay}
+                              </td>
+                            </>
                           )}
                           <td className="p-3 whitespace-nowrap text-gray-700">
                             {node.gpu_name}

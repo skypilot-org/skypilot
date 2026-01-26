@@ -779,7 +779,7 @@ function ActiveTab({
         clusterData.full_infra.includes('Kubernetes') &&
         !clusterData.full_infra.includes('SSH') &&
         !clusterData.full_infra.includes('ssh') &&
-        !isGrafanaAvailable && (
+        isGrafanaAvailable && (
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div
