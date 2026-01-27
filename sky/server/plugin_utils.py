@@ -9,6 +9,7 @@ from typing import Dict, Optional, Tuple
 
 from sky import sky_logging
 from sky.server import plugins
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
@@ -29,8 +30,6 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
         - Dictionary mapping remote paths to local paths for plugin wheels
         - Shell commands to install all plugin wheels
     """
-    # pylint: disable-next=import-outside-toplevel
-    from sky.skylet import constants
 
     remote_plugin_packages = plugins.get_remote_plugin_packages()
 
@@ -81,8 +80,6 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
                        f'{remote_wheel_path}')
         commands.append(install_cmd)
 
-    logger.info(f'Found {len(wheel_files)} wheel file(s) in {wheel_dir}, '
-                f'uploading and installing them on controller.')
     return file_mounts, ' && '.join(commands)
 
 

@@ -20,11 +20,6 @@ setup: |
   grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
 
-  # Install plugin wheels if any
-  {%- if plugins_wheel_install_commands %}
-  {{plugins_wheel_install_commands}}
-  {%- endif %}
-
   # Install serve dependencies.
   # TODO(tian): Gather those into serve constants.
   pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
@@ -58,6 +53,10 @@ run: |
   # PATH.
   {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}
+  # Install plugin wheels if any
+  {%- if plugins_wheel_install_commands %}
+  {{plugins_wheel_install_commands}}
+  {%- endif %}
   {%- endif %}
   # Start sky serve service.
   {%- if consolidation_mode_job_id is not none %}
