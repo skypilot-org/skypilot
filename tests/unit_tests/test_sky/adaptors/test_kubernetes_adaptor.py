@@ -25,12 +25,14 @@ from sky.utils import annotations
 )
 def test_typed_clients_cleanup(monkeypatch, ctor_name, api_func):
     """Verify typed client api_client.close() is called on GC."""
-    monkeypatch.setattr(kubernetes, '_load_config', lambda context=None: None)
     api_client_mock = MagicMock()
+    monkeypatch.setattr(kubernetes,
+                        '_get_api_client',
+                        lambda context=None: api_client_mock)
     monkeypatch.setattr(
         kubernetes.kubernetes.client,
         ctor_name,
-        lambda: SimpleNamespace(api_client=api_client_mock),
+        lambda api_client=None: SimpleNamespace(api_client=api_client),
     )
     obj = api_func()
     del obj
@@ -42,8 +44,6 @@ def test_typed_clients_cleanup(monkeypatch, ctor_name, api_func):
 
 def test_api_client_cleanup(monkeypatch):
     """Verify ApiClient.close() is called on GC."""
-    monkeypatch.setattr(kubernetes, '_load_config', lambda context=None: None)
-
     instances = []
 
     class FakeApiClient:
@@ -52,6 +52,11 @@ def test_api_client_cleanup(monkeypatch):
             self.close = MagicMock()
             instances.append(self)
 
+    # Mock _get_api_client to return a FakeApiClient instance
+    monkeypatch.setattr(kubernetes,
+                        '_get_api_client',
+                        lambda context=None: FakeApiClient())
+    # Also mock the ApiClient class so isinstance checks work
     monkeypatch.setattr(kubernetes.kubernetes.client, 'ApiClient',
                         FakeApiClient)
 
@@ -66,13 +71,15 @@ def test_api_client_cleanup(monkeypatch):
 
 def test_watch_cleanup(monkeypatch):
     """Verify Watch.stop() and underlying api_client.close() are called."""
-    monkeypatch.setattr(kubernetes, '_load_config', lambda context=None: None)
     api_client_mock = MagicMock()
+    monkeypatch.setattr(kubernetes,
+                        '_get_api_client',
+                        lambda context=None: api_client_mock)
 
     class FakeWatch:
 
-        def __init__(self):
-            self._api_client = api_client_mock()
+        def __init__(self, api_client=None):
+            self._api_client = api_client
 
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 

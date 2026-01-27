@@ -1,9 +1,16 @@
-"""Kubernetes adaptors"""
+"""Kubernetes adaptors
+
+Thread safety notes:
+
+The API functions (core_api, batch_api, etc.) return cached clients that are
+created with context-specific ApiClient instances.
+"""
 import functools
 import logging
 import os
 import platform
 from typing import Any, Callable, Optional, Set
+import typing
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -11,16 +18,17 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
-_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
-                         'Try running: pip install "skypilot[kubernetes]"')
-kubernetes = common.LazyImport('kubernetes',
-                               import_error_message=_IMPORT_ERROR_MESSAGE)
-models = common.LazyImport('kubernetes.client.models',
-                           import_error_message=_IMPORT_ERROR_MESSAGE)
-urllib3 = common.LazyImport('urllib3',
-                            import_error_message=_IMPORT_ERROR_MESSAGE)
-dateutil_parser = common.LazyImport('dateutil.parser',
-                                    import_error_message=_IMPORT_ERROR_MESSAGE)
+if typing.TYPE_CHECKING:
+    import kubernetes
+    import urllib3
+    import urllib3.exceptions
+else:
+    _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
+                            'Try running: pip install "skypilot[kubernetes]"')
+    kubernetes = common.LazyImport('kubernetes',
+                                   import_error_message=_IMPORT_ERROR_MESSAGE)
+    urllib3 = common.LazyImport('urllib3',
+                                import_error_message=_IMPORT_ERROR_MESSAGE)
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -86,13 +94,33 @@ def _get_config_file() -> str:
     return os.environ.get('KUBECONFIG', '~/.kube/config')
 
 
-def _load_config(context: Optional[str] = None):
+def _get_api_client(context: Optional[str] = None) -> Any:
+    """Get an ApiClient for the given context without modifying global config.
+
+    This is fully thread-safe because it creates isolated Configuration
+    objects for each client rather than modifying the global
+    kubernetes.client.configuration.
+
+    Args:
+        context: The Kubernetes context to use. If None, tries in-cluster config
+            first, then falls back to kubeconfig current-context.
+
+    Returns:
+        A kubernetes.client.ApiClient configured for the specified context.
+
+    Raises:
+        ValueError: If the configuration cannot be loaded.
+    """
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-    def _load_config_from_kubeconfig(context: Optional[str] = None):
+    def _get_api_client_from_kubeconfig(context: Optional[str] = None) -> Any:
+        """Load kubeconfig, return ApiClient without modifying global state."""
         try:
-            kubernetes.config.load_kube_config(config_file=_get_config_file(),
-                                               context=context)
+            # new_client_from_config returns an ApiClient configured for the
+            # specified context WITHOUT modifying the global configuration.
+            # This is the key to thread-safety.
+            return kubernetes.config.new_client_from_config(
+                config_file=_get_config_file(), context=context)
         except kubernetes.config.config_exception.ConfigException as e:
             suffix = common_utils.format_exception(e, use_bracket=True)
             context_name = '(current-context)' if context is None else context
@@ -143,20 +171,27 @@ def _load_config(context: Optional[str] = None):
     if context == in_cluster_context_name() or context is None:
         try:
             # Load in-cluster config if running in a pod and context is None.
-            # Kubernetes set environment variables for service discovery do not
-            # show up in SkyPilot tasks. For now, we work around by using
-            # DNS name instead of environment variables.
-            # See issue: https://github.com/skypilot-org/skypilot/issues/2287
-            # Only set if not already present (preserving existing values)
+            # Use InClusterConfigLoader with an explicit Configuration object
+            # to avoid modifying global state (thread-safe).
+            #
+            # Workaround: Kubernetes service discovery environment variables
+            # may not show up in SkyPilot tasks. We set them to DNS names as
+            # a fallback. See: github.com/skypilot-org/skypilot/issues/2287
             if 'KUBERNETES_SERVICE_HOST' not in os.environ:
                 os.environ['KUBERNETES_SERVICE_HOST'] = 'kubernetes.default.svc'
             if 'KUBERNETES_SERVICE_PORT' not in os.environ:
                 os.environ['KUBERNETES_SERVICE_PORT'] = '443'
-            kubernetes.config.load_incluster_config()
+
+            config = kubernetes.client.Configuration()
+            kubernetes.config.load_incluster_config(config)
+            return kubernetes.client.ApiClient(configuration=config)
         except kubernetes.config.config_exception.ConfigException:
-            _load_config_from_kubeconfig()
-    else:
-        _load_config_from_kubeconfig(context)
+            if context == in_cluster_context_name():
+                # Explicitly requested in-cluster context but not in a cluster
+                raise
+            # Otherwise, if context is None, fall through to kubeconfig
+
+    return _get_api_client_from_kubeconfig(context)
 
 
 def list_kube_config_contexts():
@@ -219,88 +254,81 @@ def wrap_kubernetes_client(func):
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def core_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.CoreV1Api()
+    return kubernetes.client.CoreV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def storage_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.StorageV1Api()
+    return kubernetes.client.StorageV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def auth_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.RbacAuthorizationV1Api()
+    return kubernetes.client.RbacAuthorizationV1Api(
+        api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def networking_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.NetworkingV1Api()
+    return kubernetes.client.NetworkingV1Api(
+        api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def custom_objects_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.CustomObjectsApi()
+    return kubernetes.client.CustomObjectsApi(
+        api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='global')
 @wrap_kubernetes_client
 def node_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.NodeV1Api()
+    return kubernetes.client.NodeV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def apps_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.AppsV1Api()
+    return kubernetes.client.AppsV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def batch_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.BatchV1Api()
+    return kubernetes.client.BatchV1Api(api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def api_client(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.ApiClient()
+    return _get_api_client(context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def custom_resources_api(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.client.CustomObjectsApi()
+    return kubernetes.client.CustomObjectsApi(
+        api_client=_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def watch(context: Optional[str] = None):
-    _load_config(context)
-    return kubernetes.watch.Watch()
+    return kubernetes.watch.Watch(api_client=_get_api_client(context))
 
 
 def api_exception():
