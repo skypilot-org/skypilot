@@ -1207,6 +1207,57 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     },
 }
 
+# Schema for context-configs only available on a per-context level.
+_CONTEXT_ONLY_CONFIG_SCHEMA_KUBERNETES = {
+    'disk_tiers': {
+        'type': 'object',
+        'required': ['low', 'medium', 'high', 'ultra'],
+        'additionalProperties': False,
+        'properties': {
+            'low': {
+                'type': 'object',
+                'required': ['storage_class_name'],
+                'additionalProperties': False,
+                'properties': {
+                    'storage_class_name': {
+                        'type': 'string',
+                    }
+                }
+            },
+            'medium': {
+                'type': 'object',
+                'required': ['storage_class_name'],
+                'additionalProperties': False,
+                'properties': {
+                    'storage_class_name': {
+                        'type': 'string',
+                    }
+                }
+            },
+            'high': {
+                'type': 'object',
+                'required': ['storage_class_name'],
+                'additionalProperties': False,
+                'properties': {
+                    'storage_class_name': {
+                        'type': 'string',
+                    }
+                }
+            },
+            'ultra': {
+                'type': 'object',
+                'required': ['storage_class_name'],
+                'additionalProperties': False,
+                'properties': {
+                    'storage_class_name': {
+                        'type': 'string',
+                    }
+                }
+            },
+        }
+    }
+}
+
 
 def get_config_schema():
     # pylint: disable=import-outside-toplevel
@@ -1411,6 +1462,7 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             **_CONTEXT_CONFIG_SCHEMA_KUBERNETES,
+                            **_CONTEXT_ONLY_CONFIG_SCHEMA_KUBERNETES,
                         },
                     },
                 },

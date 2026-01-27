@@ -77,16 +77,17 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances are '
                                                           'not supported in '
                                                           'Kubernetes.',
-        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER: 'Custom disk '
-                                                             'tiers are not '
-                                                             'supported in '
-                                                             'Kubernetes.',
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            ('Custom disk tiers are only supported in Kubernetes by '
+             'specifying storage classes in `~/.sky/config.yaml`.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported in '
              'Kubernetes.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is not supported in this Kubernetes '
              'cluster.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            ('Auto-stop is not supported on Kubernetes.'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -114,10 +115,7 @@ class Kubernetes(clouds.Cloud):
             contexts = cls.existing_allowed_contexts()
         else:
             contexts = [context]
-        unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
-            'Stopping clusters is not supported on Kubernetes.')
-        unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
-            'Auto-stop is not supported on Kubernetes.')
+
         for context in contexts:
             # Allow spot instances if supported by the cluster
             try:
@@ -146,6 +144,10 @@ class Kubernetes(clouds.Cloud):
                             CUSTOM_NETWORK_TIER, None)
             except exceptions.KubeAPIUnreachableError as e:
                 cls._log_unreachable_context(context, str(e))
+            # Check if disk tiers are specified in `config.yaml`.
+            if cls._get_disk_tier_storage_class_configs(context) is not None:
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
         return unsupported_features
 
     @classmethod
@@ -1376,3 +1378,22 @@ class Kubernetes(clouds.Cloud):
             })
 
         return KubernetesHighPerformanceNetworkType.NONE, None
+
+    @classmethod
+    def _get_disk_tier_storage_class_configs(
+            cls, context: str) -> Optional[Dict[resources_utils.DiskTier, str]]:
+        """Get the per-context `disk_tier` settings from `config.yaml`.
+        Note that `disk_tier` can only be set on a per-context level
+        because StorageClasses are technically unique to a single context."""
+        config = skypilot_config.get_effective_region_config(
+            cls._REPR, region=context, keys=('disk_tiers',), default_value=None)
+        if config is None:
+            return None
+        return {
+            resources_utils.DiskTier.LOW: config['low']['storage_class_name'],
+            resources_utils.DiskTier.MEDIUM: config['medium']
+                                             ['storage_class_name'],
+            resources_utils.DiskTier.HIGH: config['high']['storage_class_name'],
+            resources_utils.DiskTier.ULTRA: config['ultra']
+                                            ['storage_class_name'],
+        }
