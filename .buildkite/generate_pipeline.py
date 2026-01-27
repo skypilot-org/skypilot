@@ -143,6 +143,7 @@ def _parse_args(args: Optional[str] = None):
     parser.add_argument('--helm-version')
     parser.add_argument('--helm-package')
     parser.add_argument('--jobs-consolidation', action="store_true")
+    parser.add_argument('--serve-consolidation', action="store_true")
     parser.add_argument('--grpc', action="store_true")
     parser.add_argument('--env-file')
     parser.add_argument('--plugin-yaml')
@@ -187,6 +188,8 @@ def _parse_args(args: Optional[str] = None):
         extra_args.append(f'--helm-package {parsed_args.helm_package}')
     if parsed_args.jobs_consolidation:
         extra_args.append('--jobs-consolidation')
+    if parsed_args.serve_consolidation:
+        extra_args.append('--serve-consolidation')
     if parsed_args.grpc:
         extra_args.append('--grpc')
     if parsed_args.env_file:
@@ -455,6 +458,8 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
         latest_pypi_version = _get_latest_pypi_version()
         print(f'latest_pypi_version: {latest_pypi_version}')
         base_branches = ['master', f'v{latest_pypi_version}']
+    # For quicktest-core, base_branches will always be set
+    assert base_branches, 'base_branches must be set for quicktest-core'
     print(f'base_branches: {base_branches}')
     output_file_pipelines = []
     for test_file in test_files:
@@ -462,18 +467,24 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        if base_branches:
-            for branch in base_branches:
-                if ('test_quick_tests_core.py' in test_file and
-                        branch != 'master'):
-                    continue
-                pipeline = _generate_pipeline(test_file,
-                                              args + f' --base-branch {branch}',
-                                              auto_retry=True)
-                output_file_pipelines.append(pipeline)
-        else:
-            pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+        for i, branch in enumerate(base_branches):
+            if ('test_quick_tests_core.py' in test_file and branch != 'master'):
+                continue
+            pipeline = _generate_pipeline(test_file,
+                                          args + f' --base-branch {branch}',
+                                          auto_retry=True)
             output_file_pipelines.append(pipeline)
+
+            # Add jobs-consolidation variant for backward compat tests
+            # only for the first branch
+            if (i == 0 and 'test_backward_compat' in test_file):
+                print(f'Adding jobs-consolidation variant for {test_file}')
+                consolidation_pipeline = _generate_pipeline(
+                    test_file,
+                    args + f' --base-branch {branch} --jobs-consolidation',
+                    auto_retry=True)
+                output_file_pipelines.append(consolidation_pipeline)
+
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
                            output_file_pipelines,

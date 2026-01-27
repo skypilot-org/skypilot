@@ -47,6 +47,10 @@ from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
 
+# Global path to consolidation setup script
+CONSOLIDATION_SETUP_SCRIPT = pathlib.Path(__file__).parent.joinpath(
+    'scripts', 'setup_consolidation_mode.sh')
+
 
 @pytest.fixture(autouse=True)
 def _clear_request_level_cache():
@@ -210,9 +214,13 @@ def pytest_addoption(parser):
         '--jobs-consolidation',
         action='store_true',
         default=False,
-        help=('If set, the tests will be run in jobs consolidation mode '
-              '(The config change is made in buildkite so this is a flag to '
-              'ensure the tests will not be skipped but no actual effect)'),
+        help=('If set, the tests will be run in jobs consolidation mode.'),
+    )
+    parser.addoption(
+        '--serve-consolidation',
+        action='store_true',
+        default=False,
+        help=('If set, the tests will be run in serve consolidation mode.'),
     )
     parser.addoption(
         '--grpc',
@@ -858,3 +866,20 @@ def prepare_env_file(request):
     if has_api_server:
         os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
     yield local_file_path
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_consolidation_mode(request):
+    """Setup consolidation mode if --jobs-consolidation or --serve-consolidation is set."""
+    jobs_consolidation = request.config.getoption('--jobs-consolidation')
+    serve_consolidation = request.config.getoption('--serve-consolidation')
+
+    if jobs_consolidation or serve_consolidation:
+        cmd = [str(CONSOLIDATION_SETUP_SCRIPT)]
+        if jobs_consolidation:
+            cmd.append('--jobs')
+        if serve_consolidation:
+            cmd.append('--serve')
+        cmd.append('--skip-if-backward-compat')
+        subprocess.run(cmd, check=True)
+    yield
