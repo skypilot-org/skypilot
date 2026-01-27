@@ -36,6 +36,7 @@ import {
   CopyIcon,
   CheckIcon,
   Download,
+  ExternalLinkIcon,
 } from 'lucide-react';
 import {
   CustomTooltip as Tooltip,
@@ -59,6 +60,11 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import {
+  checkGrafanaAvailability,
+  getGrafanaUrl,
+  buildGrafanaUrl,
+} from '@/utils/grafana';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -82,6 +88,20 @@ function JobDetails() {
   const [logNodes, setLogNodes] = useState([]);
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
+
+  // GPU metrics state
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+  const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
+  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
+  const [isGpuMetricsExpanded, setIsGpuMetricsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(GPU_METRICS_EXPANDED_KEY);
+      return saved === 'true';
+    }
+    return false;
+  });
+
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
     if (!loading && isInitialLoad) {
@@ -101,6 +121,18 @@ function JobDetails() {
       }
     }
     fetchPoolsData();
+  }, []);
+
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+
+    if (typeof window !== 'undefined') {
+      checkGrafana();
+    }
   }, []);
 
   // Function to scroll to a specific section
@@ -178,6 +210,8 @@ function JobDetails() {
       setRefreshLogsFlag((prev) => prev + 1);
       // Trigger controller logs refresh
       setRefreshControllerLogsFlag((prev) => prev + 1);
+      // Trigger GPU metrics refresh
+      setGpuMetricsRefreshTrigger((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -193,6 +227,36 @@ function JobDetails() {
   const handleControllerLogsRefresh = () => {
     setRefreshControllerLogsFlag((prev) => prev + 1);
   };
+
+  // GPU metrics helper functions
+  const handleTimeRangePreset = (preset) => {
+    setTimeRange({
+      from: `now-${preset}`,
+      to: 'now',
+    });
+  };
+
+  const toggleGpuMetricsExpanded = () => {
+    const newValue = !isGpuMetricsExpanded;
+    setIsGpuMetricsExpanded(newValue);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(GPU_METRICS_EXPANDED_KEY, String(newValue));
+    }
+  };
+
+  // Build Grafana panel URL with filters for managed jobs
+  const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud) => {
+    const grafanaUrl = getGrafanaUrl();
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterNameOnCloud)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
+  };
+
+  // GPU panels configuration
+  const gpuPanels = [
+    { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
+    { id: '2', title: 'GPU Memory Utilization', keyPrefix: 'gpu-memory' },
+    { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
+    { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
+  ];
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -467,20 +531,129 @@ function JobDetails() {
               </div>
             )}
 
-            {/* GPU Metrics Plugin Slot */}
-            <PluginSlot
-              name="jobs.detail.gpu-metrics"
-              context={{
-                jobId: detailJobData.id,
-                jobName: detailJobData.name,
-                jobData: detailJobData,
-                pool: detailJobData.pool,
-                userHash: detailJobData.user_hash,
-                infra: detailJobData.full_infra || detailJobData.infra,
-                refreshTrigger: refreshTrigger,
-              }}
-              wrapperClassName="mt-6"
-            />
+            {/* GPU Metrics Section - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
+            {isGrafanaAvailable &&
+              detailJobData.full_infra?.includes('Kubernetes') &&
+              !detailJobData.pool &&
+              detailJobData.cluster_name_on_cloud && (
+                <div className="mt-6">
+                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+                    <div
+                      className={`flex items-center justify-between px-4 ${isGpuMetricsExpanded ? 'pt-4' : 'py-4'}`}
+                    >
+                      <button
+                        onClick={toggleGpuMetricsExpanded}
+                        className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+                      >
+                        {isGpuMetricsExpanded ? (
+                          <ChevronDownIcon className="w-5 h-5 mr-2" />
+                        ) : (
+                          <ChevronRightIcon className="w-5 h-5 mr-2" />
+                        )}
+                        <h3 className="text-lg font-semibold">GPU Metrics</h3>
+                      </button>
+                      <Tooltip content="Open in Grafana">
+                        <button
+                          onClick={() => {
+                            const dashboardPath =
+                              '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+                            const queryParams = new URLSearchParams({
+                              orgId: '1',
+                              from: timeRange.from,
+                              to: timeRange.to,
+                              timezone: 'browser',
+                              'var-cluster':
+                                detailJobData.cluster_name_on_cloud,
+                              'var-node': '$__all',
+                              'var-gpu': '$__all',
+                            });
+                            window.open(
+                              buildGrafanaUrl(
+                                `${dashboardPath}?${queryParams.toString()}`
+                              ),
+                              '_blank'
+                            );
+                          }}
+                          className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                          aria-label="Open in Grafana"
+                        >
+                          <ExternalLinkIcon className="w-4 h-4" />
+                        </button>
+                      </Tooltip>
+                    </div>
+                    {isGpuMetricsExpanded && (
+                      <div className="p-5">
+                        {/* Filtering Controls */}
+                        <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                            {/* Time Range Selection */}
+                            <div className="flex items-center gap-2">
+                              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                                Time Range:
+                              </label>
+                              <div className="flex gap-1">
+                                {[
+                                  { label: '15m', value: '15m' },
+                                  { label: '1h', value: '1h' },
+                                  { label: '6h', value: '6h' },
+                                  { label: '24h', value: '24h' },
+                                  { label: '7d', value: '7d' },
+                                ].map((preset) => (
+                                  <button
+                                    key={preset.value}
+                                    onClick={() =>
+                                      handleTimeRangePreset(preset.value)
+                                    }
+                                    className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                                      timeRange.from ===
+                                        `now-${preset.value}` &&
+                                      timeRange.to === 'now'
+                                        ? 'bg-sky-blue text-white border-sky-blue'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                    }`}
+                                  >
+                                    {preset.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Show current selection info */}
+                          <div className="mt-2 text-xs text-gray-500">
+                            Showing: {detailJobData.name} • Time:{' '}
+                            {timeRange.from} to {timeRange.to}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
+                          {gpuPanels.map((panel) => (
+                            <div
+                              key={panel.id}
+                              className="bg-white rounded-md border border-gray-200 shadow-sm"
+                            >
+                              <div className="p-2">
+                                <iframe
+                                  src={buildGrafanaMetricsUrl(
+                                    panel.id,
+                                    detailJobData.cluster_name_on_cloud
+                                  )}
+                                  width="100%"
+                                  height="400"
+                                  frameBorder="0"
+                                  title={panel.title}
+                                  className="rounded"
+                                  key={`${panel.keyPrefix}-${detailJobData.cluster_name_on_cloud}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}`}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">

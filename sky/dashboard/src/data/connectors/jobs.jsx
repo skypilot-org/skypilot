@@ -50,6 +50,7 @@ const DEFAULT_FIELDS = [
   'accelerators',
   'cluster_resources',
   'cluster_resources_full',
+  'cluster_name_on_cloud',
   'recovery_count',
   'pool',
   'pool_hash',
@@ -290,6 +291,7 @@ export async function getManagedJobs(options = {}) {
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
+        cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field

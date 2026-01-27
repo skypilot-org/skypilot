@@ -116,6 +116,7 @@ _CLUSTER_HANDLE_FIELDS = [
     'zone',
     'infra',
     'accelerators',
+    'cluster_name_on_cloud',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -1591,6 +1592,7 @@ def _populate_job_record_from_handle(
         handle.launched_resources.zone).formatted_str()
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
+    job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
 
 
 def get_managed_job_queue(
@@ -1727,6 +1729,7 @@ def get_managed_job_queue(
                 job['zone'] = '-'
                 job['infra'] = '-'
                 job['labels'] = None
+                job['cluster_name_on_cloud'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
 
