@@ -1627,6 +1627,9 @@ def get_managed_jobs_with_filters(
     # then fetch all tasks for those jobs
     if page is not None and limit is not None:
         # Get paginated unique job IDs with ordering
+        # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
+        # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
+        # when using DISTINCT).
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
@@ -1637,12 +1640,17 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
-        ).with_only_columns(spot_table.c.spot_job_id).distinct()
+        ).with_only_columns(spot_table.c.spot_job_id).group_by(
+            spot_table.c.spot_job_id)
 
         # Apply sorting to pagination query - this determines which jobs appear
-        # on each page.
+        # on each page. Use MAX aggregate for columns not in GROUP BY to ensure
+        # PostgreSQL compatibility.
         if sort_by and sort_by in sort_field_map:
             sort_column = sort_field_map[sort_by]
+            # Use MAX aggregate for columns that aren't the grouped column
+            if sort_column != spot_table.c.spot_job_id:
+                sort_column = sqlalchemy.func.max(sort_column)
             if sort_order == 'asc':
                 job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
             else:
