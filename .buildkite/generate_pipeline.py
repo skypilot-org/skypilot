@@ -275,9 +275,18 @@ def _extract_marked_tests(
         # Check for run_multiple(N) marker to run test N times
         run_multiple_count = 1
         for mark in marks:
-            match = re.match(r'run_multiple\((\d+)\)', mark)
-            if match:
-                run_multiple_count = int(match.group(1))
+            if mark.startswith('run_multiple('):
+                match = re.match(r'run_multiple\((\d+)\)', mark)
+                if match:
+                    run_multiple_count = int(match.group(1))
+                    if run_multiple_count < 1:
+                        print(f'Warning: {function_name} has run_multiple('
+                              f'{run_multiple_count}) < 1. Defaulting to 1.')
+                        run_multiple_count = 1
+                else:
+                    print(f'Warning: {function_name} has invalid run_multiple '
+                          f'marker: {mark}. Expected run_multiple(N) where N '
+                          f'is a positive integer. Defaulting to 1.')
                 break
 
         for mark in marks:
