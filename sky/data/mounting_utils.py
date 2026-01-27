@@ -475,11 +475,28 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
 
-    # Check if sequential upload is enabled via config.
-    # Default is False (parallel uploads for better performance).
+    # Read rclone configuration options with defaults.
+    buffer_size = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'buffer_size'), '16M')
+    vfs_read_ahead = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'vfs_read_ahead'), '0')
+    vfs_cache_max_size = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'vfs_cache_max_size'), '10G')
+
+    # Handle transfers with backward compatibility for sequential_upload.
+    # If 'transfers' is explicitly set, it takes precedence.
+    # Otherwise, fall back to sequential_upload behavior for compatibility.
+    transfers = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'transfers'), None)
     sequential_upload = skypilot_config.get_nested(
         ('data', 'mount_cached', 'sequential_upload'), False)
-    transfers_flag = '--transfers 1 ' if sequential_upload else ''
+
+    if transfers is not None:
+        transfers_value = transfers
+    elif sequential_upload:
+        transfers_value = 1
+    else:
+        transfers_value = 4  # rclone default
 
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
@@ -503,12 +520,16 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
-        f'{transfers_flag}--vfs-cache-poll-interval 10s --vfs-write-back 1s '
-        # Have rclone evict files if the cache size exceeds 10G.
-        # This is to prevent cache from growing too large and
+        f'--transfers {transfers_value} '
+        '--vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        # '--buffer-size' sets the in-memory buffer size per open file.
+        # '--vfs-read-ahead' sets the amount of data to pre-fetch during reads.
+        f'--buffer-size {buffer_size} --vfs-read-ahead {vfs_read_ahead} '
+        # Have rclone evict files if the cache size exceeds the configured
+        # value. This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
         # by a process is not evicted from the cache.
-        '--vfs-cache-max-size 10G '
+        f'--vfs-cache-max-size {vfs_cache_max_size} '
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
         # Use a faster fingerprint algorithm to detect changes in files.

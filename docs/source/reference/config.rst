@@ -1985,6 +1985,10 @@ Data storage configuration (optional).
   data:
     mount_cached:
       sequential_upload: false
+      buffer_size: "16M"
+      vfs_read_ahead: "0"
+      vfs_cache_max_size: "10G"
+      transfers: 4
 
 .. _config-yaml-data-mount-cached:
 
@@ -2012,6 +2016,90 @@ The upload order is not guaranteed, but throughput is significantly higher.
   data:
     mount_cached:
       sequential_upload: true
+
+.. _config-yaml-data-mount-cached-buffer-size:
+
+``data.mount_cached.buffer_size``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Size of the in-memory buffer used for each open file (default: ``"16M"``).
+
+This corresponds to rclone's ``--buffer-size`` flag. Larger buffers can improve
+read performance, especially for sequential reads, but consume more memory per
+open file.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      buffer_size: "64M"
+
+.. _config-yaml-data-mount-cached-vfs-read-ahead:
+
+``data.mount_cached.vfs_read_ahead``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Amount of data to pre-fetch during read operations (default: ``"0"``).
+
+This corresponds to rclone's ``--vfs-read-ahead`` flag. Setting this to a
+non-zero value (e.g., ``"128M"``) enables read-ahead, which can significantly
+improve performance for streaming or sequential reads by downloading data before
+it's requested.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      vfs_read_ahead: "128M"
+
+.. _config-yaml-data-mount-cached-vfs-cache-max-size:
+
+``data.mount_cached.vfs_cache_max_size``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum size of the local VFS cache (default: ``"10G"``).
+
+This corresponds to rclone's ``--vfs-cache-max-size`` flag. When the cache
+exceeds this size, rclone will evict files that are not currently in use.
+Increase this value if you have disk space available and want to cache more
+data locally.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      vfs_cache_max_size: "50G"
+
+.. _config-yaml-data-mount-cached-transfers:
+
+``data.mount_cached.transfers``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Number of parallel file transfers (default: ``4``).
+
+This corresponds to rclone's ``--transfers`` flag. Higher values allow more
+files to be uploaded/downloaded in parallel, which can improve throughput.
+
+If this option is set, it takes precedence over ``sequential_upload``.
+For backward compatibility, ``sequential_upload: true`` is equivalent to
+``transfers: 1``.
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      transfers: 8
+
+**Example configuration for faster reads:**
+
+.. code-block:: yaml
+
+  data:
+    mount_cached:
+      buffer_size: "64M"       # Larger in-memory buffer per file
+      vfs_read_ahead: "128M"   # Pre-fetch data for streaming reads
+      vfs_cache_max_size: "50G"  # Larger local cache
+      transfers: 8             # More parallel transfers
 
 .. _config-yaml-daemons:
 
