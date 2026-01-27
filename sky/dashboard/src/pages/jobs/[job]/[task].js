@@ -372,7 +372,7 @@ function TaskLogsContent({
   const logStreamArgs = React.useMemo(
     () => ({
       jobId: taskData.id,
-      task: String(taskIndex),
+      task: taskIndex,
       controller: false,
     }),
     [taskData.id, taskIndex]
