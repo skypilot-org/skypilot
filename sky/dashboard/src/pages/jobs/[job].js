@@ -864,8 +864,8 @@ function JobDetailsContent({
     () => ({
       jobId: jobData.id,
       controller: false,
-      // Pass task index when viewing a specific task in a multi-task job
-      task: selectedTaskIndex !== null ? String(selectedTaskIndex) : null,
+      // Pass task index (as int) when viewing a specific task in a multi-task job
+      task: selectedTaskIndex,
     }),
     [jobData.id, selectedTaskIndex]
   );

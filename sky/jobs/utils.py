@@ -956,14 +956,22 @@ def stream_logs_by_id(
         """Check if a task matches the task filter.
 
         If task_filter is an int, it is matched against task_id.
-        If task_filter is a str, it is matched against task_name.
+        If task_filter is a str that can be parsed as an int, it is matched
+        against task_id (this handles JSON deserialization from the dashboard
+        which sends task IDs as strings).
+        Otherwise, the str is matched against task_name.
         """
         if task_filter is None:
             return True
         if isinstance(task_filter, int):
             return task_id == task_filter
-        # task_filter is a str, match by task name
-        return task_name == task_filter
+        # task_filter is a str - try to match as task_id first (handles JSON
+        # deserialization which sends integers as strings), then task_name
+        try:
+            return task_id == int(task_filter)
+        except ValueError:
+            # Not a valid integer, match by task name
+            return task_name == task_filter
 
     msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
     status_display = rich_utils.safe_status(msg)
