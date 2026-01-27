@@ -908,11 +908,8 @@ class TestStreamLogsByIdTaskFiltering:
         assert exit_code == exceptions.JobExitCode.NOT_FOUND
         assert 'No task found matching 99' in msg
 
-    def test_task_filter_str_numeric_matches_task_id(self, monkeypatch):
-        """Test that str task filter that can be parsed as int matches task_id.
-
-        This supports JSON deserialization where integers may arrive as strings.
-        """
+    def test_task_filter_str_does_not_match_task_id(self, monkeypatch):
+        """Test that str task filter does NOT match task_id even if numeric."""
         job_id = 1
         tasks = [(0, 'train'), (1, 'eval')]
         task_info = self._create_task_info(tasks)
@@ -924,21 +921,16 @@ class TestStreamLogsByIdTaskFiltering:
             'get_all_task_ids_names_statuses_logs',
             lambda jid: task_info,
         )
-        monkeypatch.setattr(
-            jobs_utils.managed_job_state, 'get_status',
-            lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
 
-        # Task filter is str '1', should match task_id=1 because '1' can be
-        # parsed as an integer. This handles JSON deserialization where
-        # integers may be sent as strings (e.g., from the dashboard).
+        # Task filter is str '1', should NOT match task_id=1,
+        # should only try to match task_name
         msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
                                                       follow=False,
                                                       task='1')
 
-        # Should NOT return NOT_FOUND because '1' is parsed as int and
-        # matches task_id=1
-        assert exit_code != exceptions.JobExitCode.NOT_FOUND
-        assert 'No task found matching' not in msg
+        # Should return NOT_FOUND because no task_name='1' exists
+        assert exit_code == exceptions.JobExitCode.NOT_FOUND
+        assert "No task found matching '1'" in msg
 
     def test_task_filter_none_does_not_filter(self, monkeypatch):
         """Test that None task filter shows all tasks (no filtering)."""
