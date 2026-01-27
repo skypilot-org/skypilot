@@ -270,7 +270,7 @@ class GetJobExitCodesResponse(_message.Message):
     def __init__(self, exit_codes: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class SetJobInfoWithoutJobIdRequest(_message.Message):
-    __slots__ = ("name", "workspace", "entrypoint", "pool", "pool_hash", "user_hash", "task_ids", "task_names", "resources_str", "metadata_jsons", "num_jobs")
+    __slots__ = ("name", "workspace", "entrypoint", "pool", "pool_hash", "user_hash", "task_ids", "task_names", "resources_str", "metadata_jsons", "num_jobs", "execution")
     NAME_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     ENTRYPOINT_FIELD_NUMBER: _ClassVar[int]
@@ -282,6 +282,7 @@ class SetJobInfoWithoutJobIdRequest(_message.Message):
     RESOURCES_STR_FIELD_NUMBER: _ClassVar[int]
     METADATA_JSONS_FIELD_NUMBER: _ClassVar[int]
     NUM_JOBS_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_FIELD_NUMBER: _ClassVar[int]
     name: str
     workspace: str
     entrypoint: str
@@ -293,7 +294,8 @@ class SetJobInfoWithoutJobIdRequest(_message.Message):
     resources_str: str
     metadata_jsons: _containers.RepeatedScalarFieldContainer[str]
     num_jobs: int
-    def __init__(self, name: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ..., user_hash: _Optional[str] = ..., task_ids: _Optional[_Iterable[int]] = ..., task_names: _Optional[_Iterable[str]] = ..., resources_str: _Optional[str] = ..., metadata_jsons: _Optional[_Iterable[str]] = ..., num_jobs: _Optional[int] = ...) -> None: ...
+    execution: str
+    def __init__(self, name: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., pool: _Optional[str] = ..., pool_hash: _Optional[str] = ..., user_hash: _Optional[str] = ..., task_ids: _Optional[_Iterable[int]] = ..., task_names: _Optional[_Iterable[str]] = ..., resources_str: _Optional[str] = ..., metadata_jsons: _Optional[_Iterable[str]] = ..., num_jobs: _Optional[int] = ..., execution: _Optional[str] = ...) -> None: ...
 
 class SetJobInfoWithoutJobIdResponse(_message.Message):
     __slots__ = ("job_ids",)

@@ -431,6 +431,8 @@ def _submit_remotely(controller: controller_utils.Controllers,
                                                          is_managed_job=True)
 
     assert dag.name is not None, 'dag name is not set'
+    execution_mode = (dag.execution.value
+                      if dag.execution else DEFAULT_EXECUTION.value)
     job_ids = backend.set_job_info_without_job_id(handle=local_handle,
                                                   name=dag.name,
                                                   workspace=workspace,
@@ -442,7 +444,8 @@ def _submit_remotely(controller: controller_utils.Controllers,
                                                   task_names=task_names,
                                                   resources_str=resources_str,
                                                   metadata_jsons=metadata_jsons,
-                                                  num_jobs=num_jobs)
+                                                  num_jobs=num_jobs,
+                                                  execution=execution_mode)
     return job_ids
 
 

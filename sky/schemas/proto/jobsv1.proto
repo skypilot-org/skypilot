@@ -195,6 +195,7 @@ message SetJobInfoWithoutJobIdRequest {
   string resources_str = 9;
   repeated string metadata_jsons = 10;
   int32 num_jobs = 11;
+  string execution = 12;
 }
 
 message SetJobInfoWithoutJobIdResponse {

@@ -1221,6 +1221,7 @@ class JobLibCodeGen:
                                     task_names: List[str],
                                     resources_str: str,
                                     metadata_jsons: List[str],
+                                    execution: str,
                                     num_jobs: int = 1) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
         pool_hash_str = f'{pool_hash!r}' if pool_hash is not None else 'None'
@@ -1247,7 +1248,8 @@ class JobLibCodeGen:
             f'entrypoint={entrypoint!r},'
             f'pool={pool_str},'
             f'pool_hash={pool_hash_str},'
-            f'user_hash={user_hash_str})',
+            f'user_hash={user_hash_str},'
+            f'execution={execution!r})',
             '\n  job_ids.append(job_id)',
             '\n  # Set pending state for all tasks',
             '\n  for task_id, task_name, metadata_json in zip('

@@ -4029,19 +4029,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f'Returncode: {returncode}') from e
         return job_id, log_dir
 
-    def set_job_info_without_job_id(self,
-                                    handle: CloudVmRayResourceHandle,
-                                    name: str,
-                                    workspace: str,
-                                    entrypoint: str,
-                                    pool: Optional[str],
-                                    pool_hash: Optional[str],
-                                    user_hash: Optional[str],
-                                    task_ids: List[int],
-                                    task_names: List[str],
-                                    resources_str: str,
-                                    metadata_jsons: List[str],
-                                    num_jobs: int = 1) -> List[int]:
+    def set_job_info_without_job_id(
+            self,
+            handle: CloudVmRayResourceHandle,
+            name: str,
+            workspace: str,
+            entrypoint: str,
+            pool: Optional[str],
+            pool_hash: Optional[str],
+            user_hash: Optional[str],
+            task_ids: List[int],
+            task_names: List[str],
+            resources_str: str,
+            metadata_jsons: List[str],
+            num_jobs: int = 1,
+            execution: str = DEFAULT_EXECUTION.value) -> List[int]:
         """Set job info without creating entries in the jobs table.
 
         This creates entries in job_info_table and spot_table without creating
@@ -4063,7 +4065,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     task_names=task_names,
                     resources_str=resources_str,
                     metadata_jsons=metadata_jsons,
-                    num_jobs=num_jobs)
+                    num_jobs=num_jobs,
+                    execution=execution)
                 response = backend_utils.invoke_skylet_with_retries(
                     lambda: SkyletClient(handle.get_grpc_channel()
                                         ).set_job_info_without_job_id(request))
@@ -4083,7 +4086,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 task_names=task_names,
                 resources_str=resources_str,
                 metadata_jsons=metadata_jsons,
-                num_jobs=num_jobs)
+                num_jobs=num_jobs,
+                execution=execution)
             returncode, result_str, stderr = self.run_on_head(
                 handle,
                 code,
