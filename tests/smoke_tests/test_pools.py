@@ -293,6 +293,7 @@ def check_for_recovery_message_on_controller(job_name: str):
     return (f's=$(sky jobs logs --controller -n {job_name} --no-follow); '
             f'echo "$s"; echo; echo; echo "$s" | grep "RECOVERING"')
 
+
 def wait_for_message_in_pool_logs(pool_name: str,
                                   message: str,
                                   timeout: int = 300,
@@ -319,7 +320,6 @@ def wait_for_message_in_pool_logs(pool_name: str,
         'done; '
         f'echo "ERROR: {message} not found in logs after timeout"; '
         'exit 1')
-
 
 
 def wait_for_message_in_pool_logs(pool_name: str,
@@ -2392,6 +2392,7 @@ def test_pools_num_jobs_speed(generic_cloud: str):
                 teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
             )
             smoke_tests_utils.run_one_test(test)
+
 
 def autoscaling_pool_conf(
     num_workers: int,

@@ -248,10 +248,10 @@ class SkyServiceSpec:
             pool_upscale_delay = pool_config.get('upscale_delay_seconds', None)
             pool_downscale_delay = pool_config.get('downscale_delay_seconds',
                                                    None)
-            # Validate: one of workers or max_workers and min_workers must be 
+            # Validate: one of workers or max_workers and min_workers must be
             # set.
             if (pool_min_workers is None and pool_max_workers is None and
-                workers_config is None):
+                    workers_config is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'One of workers, or both min_workers and max_workers'
