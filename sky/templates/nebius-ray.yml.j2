@@ -153,6 +153,8 @@ setup_commands:
     sudo apt install -y ufw;
     sudo ufw default allow incoming;
     sudo ufw default allow outgoing;
+    sudo ufw allow from 10.0.0.0/8;
+    sudo ufw allow from 172.16.0.0/12;
     sudo ufw deny 6379/tcp;
     sudo ufw deny 8265/tcp;
     sudo ufw deny 10001/tcp;
