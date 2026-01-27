@@ -23,13 +23,9 @@ from sky.server import metrics
 class TestBurnRateMetric(unittest.TestCase):
     """Tests for the burn rate metric calculation."""
 
-    def setUp(self):
-        if hasattr(metrics, 'SKY_APISERVER_TOTAL_BURN_RATE'):
-            metrics.SKY_APISERVER_TOTAL_BURN_RATE.set(0.0)
-
     @mock.patch('sky.server.metrics.global_user_state.get_clusters')
     def test_burn_rate_logic(self, mock_get_clusters):
-        """Test burn rate calculation with mixed cluster states."""
+        """Test burn rate calculation using the Collector pattern."""
 
         def create_mock_cluster(status_str, instance_cost=0.0, gpu_cost=0.0):
             mock_status = mock.Mock()
@@ -48,25 +44,40 @@ class TestBurnRateMetric(unittest.TestCase):
 
             return {'status': mock_status, 'handle': mock_handle}
 
+        # 1. Setup Data
         cluster_a = create_mock_cluster('UP', instance_cost=1.50)
-
         cluster_b = create_mock_cluster('UP', instance_cost=2.00, gpu_cost=3.50)
-
         cluster_c = create_mock_cluster('STOPPED', instance_cost=10.00)
-
         cluster_d = create_mock_cluster('INIT', instance_cost=5.00)
 
         mock_get_clusters.return_value = [
             cluster_a, cluster_b, cluster_c, cluster_d
         ]
 
-        metrics.update_burn_rate_metric()
+        # 2. Instantiate the Collector (The new way)
+        collector = metrics.BurnRateCollector()
 
-        metric_value = metrics.SKY_APISERVER_TOTAL_BURN_RATE.collect(
-        )[0].samples[0].value
+        # 3. Manually trigger collection
+        # collect() returns a generator, so we convert to list
+        collected_metrics = list(collector.collect())
 
-        print(f'\nTest Result: Expected 7.0, Got {metric_value}')
-        self.assertEqual(metric_value, 7.0)
+        # 4. Verify Results
+        # We expect 1 metric family returned
+        self.assertEqual(len(collected_metrics), 1)
+
+        family = collected_metrics[0]
+        self.assertEqual(family.name, 'sky_apiserver_total_burn_rate_dollars')
+
+        # We expect 1 sample inside that family
+        self.assertEqual(len(family.samples), 1)
+        sample = family.samples[0]
+
+        # Check the Value (Should be 1.5 + 2.0 + 3.5 = 7.0)
+        print(f'\nTest Result: Expected 7.0, Got {sample.value}')
+        self.assertEqual(sample.value, 7.0)
+
+        # Check the Label (The reviewer asked for this!)
+        self.assertEqual(sample.labels['type'], 'local_clusters')
 
 
 if __name__ == '__main__':
