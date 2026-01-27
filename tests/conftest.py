@@ -440,9 +440,15 @@ def pytest_collection_modifyitems(config, items):
             full_name = item.nodeid
             marks = []
             for mark in item.iter_markers():
-                # Include arguments for markers like run_multiple(3)
+                # Serialize marker with all args and kwargs for pipeline generator
+                parts = []
                 if mark.args:
-                    marks.append(f'{mark.name}({mark.args[0]})')
+                    parts.extend(repr(arg) for arg in mark.args)
+                if mark.kwargs:
+                    parts.extend(
+                        f'{k}={repr(v)}' for k, v in mark.kwargs.items())
+                if parts:
+                    marks.append(f'{mark.name}({", ".join(parts)})')
                 else:
                     marks.append(mark.name)
             print(f"Collected {full_name} with marks: {marks}")
