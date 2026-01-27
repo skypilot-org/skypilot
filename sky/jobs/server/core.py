@@ -700,7 +700,7 @@ def launch(
         for task_ in dag.tasks:
             task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
+        dag_utils.dump_dag_to_yaml(dag, f.name)
 
         vars_to_fill: Dict[str, Any] = {
             'remote_original_user_yaml_path': remote_orig_user_yaml_path,
