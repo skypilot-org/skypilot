@@ -243,9 +243,11 @@ def _create_virtual_instance(
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
     skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
-    sky_home_dir = _sky_cluster_home_dir(remote_home_dir, cluster_name_on_cloud)
-    ready_signal = f'{sky_home_dir}/.sky_sbatch_ready'
-    slurm_marker_file = f'{sky_home_dir}/{slurm_utils.SLURM_MARKER_FILE}'
+    sky_cluster_home_dir = _sky_cluster_home_dir(remote_home_dir,
+                                                 cluster_name_on_cloud)
+    ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
+    slurm_marker_file = (
+        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
 
     # For non-Docker Hub registries, pyxis/enroot requires '#' separator
     # between registry and path. See:
@@ -296,9 +298,10 @@ apt-get update
 apt-get install -y ca-certificates rsync curl git wget fuse
 echo 'alias sudo=""' >> ~/.bashrc
 """
-        container_marker_file = (f'{sky_home_dir}/'
+        container_marker_file = (f'{sky_cluster_home_dir}/'
                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-        container_init_done_dir = f'{sky_home_dir}/.sky_container_init_done'
+        container_init_done_dir = (
+            f'{sky_cluster_home_dir}/.sky_container_init_done')
         # Run container init, touch per-node "done" marker, then sleep infinity
         # to keep container running. Use --overlap so subsequent sruns can share
         # the allocation. Background with & so sbatch continues.
@@ -367,19 +370,19 @@ cleanup() {{
     # that this srun will run on the same subset of nodes as the srun
     # that created the sky directories.
     srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
-    rm -rf {sky_home_dir}
+    rm -rf {sky_cluster_home_dir}
     exit 0
 }}
 trap cleanup TERM
 
 # Create sky home directory and subdirectories for the cluster.
-mkdir -p {sky_home_dir}/sky_logs {sky_home_dir}/sky_workdir {sky_home_dir}/.sky
+mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
 # Create sky runtime directory on each node.
 srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
 # Marker file to indicate we're in a Slurm cluster.
 touch {slurm_marker_file}
 # Suppress login messages.
-touch {sky_home_dir}/.hushlogin
+touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
 {f'touch {ready_signal}' if container_image is None else ''}
 {'sleep infinity' if container_image is None else 'wait'}
@@ -814,8 +817,10 @@ def get_command_runners(
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
-    sky_dir = _sky_cluster_home_dir(remote_home_dir, cluster_name_on_cloud)
-    container_marker = f'{sky_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}'
+    sky_cluster_home_dir = _sky_cluster_home_dir(remote_home_dir,
+                                                 cluster_name_on_cloud)
+    container_marker = (
+        f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
     rc, stdout, stderr = login_node_runner.run(f'test -f {container_marker}',
                                                require_outputs=True,
                                                stream_logs=False)
@@ -835,7 +840,7 @@ def get_command_runners(
             (instance_info.external_ip or '', instance_info.ssh_port),
             login_node_ssh_user,
             login_node_ssh_private_key,
-            sky_dir=sky_dir,
+            sky_dir=sky_cluster_home_dir,
             skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],

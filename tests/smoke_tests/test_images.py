@@ -613,7 +613,7 @@ def private_docker_registry_setup(request):
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
 @pytest.mark.no_shadeform
-@pytest.mark.no_slurm
+@pytest.mark.no_slurm  # Slurm does not support private docker registries yet
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
