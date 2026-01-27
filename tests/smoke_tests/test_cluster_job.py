@@ -174,9 +174,9 @@ def test_lambda_job_queue():
         'lambda_job_queue',
         [
             f'sky launch -y -c {name} {smoke_tests_utils.LAMBDA_TYPE} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 --gpus A10:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 --gpus A10:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 --gpus A10:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-1 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
