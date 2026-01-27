@@ -7,6 +7,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -21,6 +22,9 @@ def instance_type_exists(instance_type: str) -> bool:
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Yotta does not support zones.')
     return common.validate_region_zone_impl('yotta', _df, region, zone)
 
 
