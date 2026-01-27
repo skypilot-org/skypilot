@@ -9,8 +9,8 @@ import functools
 import logging
 import os
 import platform
-from typing import Any, Callable, Optional, Set
 import typing
+from typing import Any, Callable, Optional, Set
 
 from sky import sky_logging
 from sky.adaptors import common
@@ -24,7 +24,7 @@ if typing.TYPE_CHECKING:
     import urllib3.exceptions
 else:
     _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
-                            'Try running: pip install "skypilot[kubernetes]"')
+                             'Try running: pip install "skypilot[kubernetes]"')
     kubernetes = common.LazyImport('kubernetes',
                                    import_error_message=_IMPORT_ERROR_MESSAGE)
     urllib3 = common.LazyImport('urllib3',

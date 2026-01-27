@@ -199,7 +199,8 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
         list_empty_reservations)
 
     # Kubernetes mocks
-    monkeypatch.setattr('sky.adaptors.kubernetes._load_config', dummy_function)
+    monkeypatch.setattr('sky.adaptors.kubernetes._get_api_client',
+                        dummy_function)
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
         get_kubernetes_label_formatter)
