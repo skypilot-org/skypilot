@@ -68,6 +68,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data
             delete_body = {'names': ['test-volume-1', 'test-volume-2']}
@@ -112,6 +113,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for PVC volume
             apply_body = {
@@ -167,6 +169,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for PVC volume without access_mode
             apply_body = {
@@ -218,6 +221,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for PVC volume with None config
             apply_body = {
@@ -248,6 +252,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data with invalid volume type
             apply_body = {
@@ -283,6 +288,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data with invalid cloud
             apply_body = {
@@ -319,6 +325,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for PVC volume on non-Kubernetes cloud
             apply_body = {
@@ -356,6 +363,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for PVC volume with invalid access mode
             apply_body = {
@@ -399,6 +407,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for non-PVC volume type (assuming there's another type)
             # Note: This test assumes there are other volume types besides PVC
@@ -434,6 +443,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data with empty volume names
             delete_body = {'names': []}
@@ -560,6 +570,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for RunPod network volume
             apply_body = {
@@ -607,6 +618,7 @@ class TestVolumeServer:
         # Mock request state
         with mock.patch.object(fastapi.Request, 'state') as mock_state:
             mock_state.request_id = 'test-request-id'
+            mock_state.auth_user = None
 
             # Test data for RunPod network volume on non-RunPod cloud
             apply_body = {

@@ -36,6 +36,7 @@ from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
@@ -65,6 +66,7 @@ if typing.TYPE_CHECKING:
     import binascii
     import io
     import pathlib
+    import secrets
     import time
     import webbrowser
 
@@ -82,6 +84,8 @@ else:
     base64 = adaptors_common.LazyImport('base64')
     binascii = adaptors_common.LazyImport('binascii')
     pathlib = adaptors_common.LazyImport('pathlib')
+    requests = adaptors_common.LazyImport('requests')
+    secrets = adaptors_common.LazyImport('secrets')
     time = adaptors_common.LazyImport('time')
     # only used in dashboard() and api_login()
     webbrowser = adaptors_common.LazyImport('webbrowser')
@@ -374,7 +378,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
@@ -434,7 +438,7 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
     response = server_common.make_authenticated_request(
@@ -732,7 +736,7 @@ def _launch(
 
     dag = client_common.upload_mounts_to_api_server(dag)
 
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.LaunchBody(
         task=dag_str,
@@ -823,7 +827,7 @@ def exec(  # pylint: disable=redefined-builtin
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
         cluster_name=cluster_name,
@@ -1015,6 +1019,44 @@ def tail_provision_logs(cluster_name: str,
                     resumable=(tail == 0),
                     get_result=False)
     return 0
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Returns:
+        Exit code 0 on streaming success; non-zero on failure.
+
+    Request Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+    """
+    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
+                                     follow=follow,
+                                     tail=tail)
+
+    response = server_common.make_authenticated_request(
+        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    return stream_and_get(request_id)
 
 
 @usage_lib.entrypoint
@@ -1243,10 +1285,12 @@ def stop(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1287,6 +1331,13 @@ def autostop(
             3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+            The script runs before the cluster is stopped or torn down. If the
+            hook fails, autostop will still proceed but a warning will be
+            logged.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            be terminated if it exceeds this timeout.
 
     Returns:
         The request ID of the autostop request.
@@ -1295,6 +1346,7 @@ def autostop(
         None
 
     Request Raises:
+        ValueError: if arguments are invalid.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -1304,10 +1356,19 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    if hook_timeout is not None and hook is None:
+        raise ValueError('hook_timeout can only be set if hook is set.')
+
     remote_api_version = versions.get_remote_api_version()
     if wait_for is not None and (remote_api_version is None or
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
+    # Hook support requires API version 28 or higher
+    if hook is not None and (remote_api_version is None or
+                             remote_api_version < 28):
+        logger.warning('Autostop hook is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
     body = payloads.AutostopBody(
@@ -1315,6 +1376,8 @@ def autostop(
         idle_minutes=idle_minutes,
         wait_for=wait_for,
         down=down,
+        hook=hook,
+        hook_timeout=hook_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)
@@ -2479,6 +2542,117 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
                                'clear the environment variable.')
 
 
+def _try_polling_auth(endpoint: str) -> Optional[str]:
+    """Try the polling-based authentication flow."""
+    try:
+        # Generate code verifier (random secret) and challenge (hash)
+        code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
+
+        # Open browser to authorization page
+        auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
+        if not webbrowser.open(auth_url):
+            logger.debug('Failed to open browser.')
+            return None
+
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
+                   f'{colorama.Style.RESET_ALL}\n'
+                   f'Please click "Authorize" to complete login.\n'
+                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
+                   f'auth method.{colorama.Style.RESET_ALL}')
+
+        # Poll for token
+        start_time = time.time()
+        while time.time(
+        ) - start_time < server_constants.AUTH_SESSION_TIMEOUT_SECONDS:
+            time.sleep(1)
+            resp = requests.get(f'{endpoint}/api/v1/auth/token',
+                                params={'code_verifier': code_verifier},
+                                timeout=10)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if 'token' in data:
+                    return data['token']
+            elif resp.status_code != 404:
+                # 404 means user hasn't clicked Authorize yet, keep polling
+                logger.debug(f'Poll failed: {resp.status_code}')
+                return None
+
+        click.echo(f'{colorama.Fore.YELLOW}Authentication timed out.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+
+    except KeyboardInterrupt:
+        click.echo(f'\n{colorama.Style.DIM}Interrupted.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Polling auth failed: {e}')
+        return None
+
+
+def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
+    """Try the localhost callback authentication flow (legacy)."""
+    server: Optional[oauth_lib.HTTPServer] = None
+    try:
+        callback_port = common_utils.find_free_port(8000)
+        token_container: Dict[str, Optional[str]] = {'token': None}
+        server = oauth_lib.start_local_auth_server(callback_port,
+                                                   token_container, endpoint)
+
+        token_url = f'{endpoint}/token?local_port={callback_port}'
+        if not webbrowser.open(token_url):
+            return None
+
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {token_url}'
+                   f'{colorama.Style.RESET_ALL}\n'
+                   f'{colorama.Style.DIM}Press ctrl+c to enter token manually.'
+                   f'{colorama.Style.RESET_ALL}')
+
+        start_time = time.time()
+        while (token_container['token'] is None and time.time() - start_time <
+               server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
+            time.sleep(1)
+
+        if token_container['token'] is None:
+            click.echo(f'{colorama.Fore.YELLOW}Authentication timed out.'
+                       f'{colorama.Style.RESET_ALL}')
+            return None
+        return token_container['token']
+
+    except KeyboardInterrupt:
+        click.echo(f'\n{colorama.Style.DIM}Interrupted.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Localhost callback failed: {e}')
+        return None
+    finally:
+        if server is not None:
+            try:
+                server.server_close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+
+def _try_manual_token_entry(endpoint: str) -> Optional[str]:
+    """Fall back to manual token entry."""
+    try:
+        token_url = f'{endpoint}/token'
+        click.echo(
+            f'Visit this URL to get the token:\n\n'
+            f'{colorama.Style.BRIGHT}{token_url}{colorama.Style.RESET_ALL}\n')
+        return click.prompt('Paste the token') or None
+    except (KeyboardInterrupt, click.Abort):
+        click.echo(
+            f'\n{colorama.Style.DIM}Cancelled.{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Manual token entry failed: {e}')
+        return None
+
+
 @usage_lib.entrypoint
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
@@ -2581,59 +2755,26 @@ def api_login(endpoint: Optional[str] = None,
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
-        server: Optional[oauth_lib.HTTPServer] = None
-        try:
-            callback_port = common_utils.find_free_port(8000)
 
-            token_container: Dict[str, Optional[str]] = {'token': None}
-            logger.debug('Starting local authentication server...')
-            server = oauth_lib.start_local_auth_server(callback_port,
-                                                       token_container,
-                                                       endpoint)
+        # Try methods in order:
+        # 1. New polling-based flow - only on servers >= API v30
+        # 2. Old localhost callback flow
+        # 3. Manual token entry
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 30:
+            token = _try_polling_auth(endpoint)
 
-            token_url = (f'{endpoint}/token?local_port={callback_port}')
-            if webbrowser.open(token_url):
-                click.echo(f'{colorama.Fore.GREEN}A web browser has been '
-                           f'opened at {token_url}. Please continue the login '
-                           f'in the web browser.{colorama.Style.RESET_ALL}\n'
-                           f'{colorama.Style.DIM}To manually copy the token, '
-                           f'press ctrl+c.{colorama.Style.RESET_ALL}')
-            else:
-                raise ValueError('Failed to open browser.')
+        if token is None:
+            # Polling auth not available or failed, try localhost callback
+            token = _try_localhost_callback_auth(endpoint)
 
-            start_time = time.time()
+        if token is None:
+            # All automatic methods failed, fall back to manual entry
+            token = _try_manual_token_entry(endpoint)
 
-            while (token_container['token'] is None and
-                   time.time() - start_time < oauth_lib.AUTH_TIMEOUT):
-                time.sleep(1)
-
-            if token_container['token'] is None:
-                click.echo(f'{colorama.Fore.YELLOW}Authentication timed out '
-                           f'after {oauth_lib.AUTH_TIMEOUT} seconds.')
-            else:
-                token = token_container['token']
-
-        except (Exception, KeyboardInterrupt) as e:  # pylint: disable=broad-except
-            logger.debug(f'Automatic authentication failed: {e}, '
-                         'falling back to manual token entry.')
-            if isinstance(e, KeyboardInterrupt):
-                click.echo(f'\n{colorama.Style.DIM}Interrupted. Press ctrl+c '
-                           f'again to exit.{colorama.Style.RESET_ALL}')
-            # Fall back to manual token entry
-            token_url = f'{endpoint}/token'
-            click.echo('Authentication is needed. Please visit this URL '
-                       f'to set up the token:{colorama.Style.BRIGHT}\n\n'
-                       f'{token_url}\n{colorama.Style.RESET_ALL}')
-            token = click.prompt('Paste the token')
-        finally:
-            if server is not None:
-                try:
-                    server.server_close()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-            if not token:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Authentication failed.')
+        if not token:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Authentication failed.')
 
         # Parse the token.
         # b64decode will ignore invalid characters, but does some length and
@@ -2642,7 +2783,6 @@ def api_login(endpoint: Optional[str] = None,
             data = base64.b64decode(token)
         except binascii.Error as e:
             raise ValueError(f'Malformed token: {token}') from e
-        logger.debug(f'Token data: {data!r}')
         try:
             json_data = json.loads(data)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:

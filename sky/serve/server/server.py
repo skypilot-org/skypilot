@@ -31,6 +31,7 @@ async def up(
         func=core.up,
         schedule_type=api_requests.ScheduleType.LONG,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -46,6 +47,7 @@ async def update(
         func=core.update,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -61,6 +63,7 @@ async def down(
         func=core.down,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -76,6 +79,7 @@ async def terminate_replica(
         func=core.terminate_replica,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -91,6 +95,7 @@ async def status(
         func=core.status,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -107,6 +112,7 @@ async def tail_logs(
         func=core.tail_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
     # Cancel the coroutine after the request is done or client disconnects
@@ -140,4 +146,5 @@ async def download_logs(
         func=core.sync_down_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )

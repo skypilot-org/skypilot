@@ -206,6 +206,13 @@ def _list_accelerators(
     for node in nodes:
         # Check if node is ready
         node_is_ready = node.is_ready()
+        node_is_cordoned = node.is_cordoned()
+        node_taints = node.get_taints(
+            exclude_cordon=True,
+            exclude_not_ready=True,
+            exclude_effects=['PreferNoSchedule'],
+            exclude_keys=kubernetes_utils.get_handled_taint_keys())
+        node_is_tainted = len(node_taints) > 0
 
         for key in keys:
             if key in node.metadata.labels:
@@ -268,8 +275,9 @@ def _list_accelerators(
                 total_accelerators_available[accelerator_name] = (
                     total_accelerators_available.get(accelerator_name, 0))
 
-                # Skip availability counting for not-ready nodes
-                if not node_is_ready:
+                # Skip availability counting for not-ready, cordoned,
+                # or tainted nodes
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
                     continue
 
                 if error_on_get_allocated_gpu_qty_by_node:

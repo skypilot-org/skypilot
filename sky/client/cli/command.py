@@ -123,7 +123,8 @@ _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
 ]
 _DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
     'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status', 'pool'
+    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
+    'pool', 'is_primary_in_job_group'
 ]
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
@@ -317,14 +318,21 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{colorama.Style.RESET_ALL}\n')
 
 
-def _merge_env_vars(env_dict: Optional[Dict[str, str]],
-                    env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    """Merges all values from env_list into env_dict."""
-    if not env_dict:
-        return env_list
-    for (key, value) in env_list:
-        env_dict[key] = value
-    return list(env_dict.items())
+def _merge_cli_and_file_vars(
+        env_dicts: List[Optional[Dict[str, str]]],
+        env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    """Merges all values from env_list and env_dicts. Priority is
+    as follows: env_list has highest priority, and env_dict with
+    higher index has more priority than that of lower index."""
+    final_env_dict = {}
+    for env_dict in env_dicts:
+        if env_dict is None:
+            continue
+        for k, v in env_dict.items():
+            final_env_dict[k] = v
+    for k, v in env_list:
+        final_env_dict[k] = v
+    return list(final_env_dict.items())
 
 
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
@@ -801,6 +809,20 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+
+        # Check if this is a JobGroup YAML
+        if dag_utils.is_job_group_yaml(entrypoint):
+            click.secho('Detected JobGroup YAML', fg='cyan')
+            dag = dag_utils.load_job_group_from_yaml(entrypoint,
+                                                     env_overrides=env,
+                                                     secrets_overrides=secret)
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored '
+                    'for JobGroup YAML.',
+                    fg='yellow')
+            return dag
+
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
                                                  env_overrides=env,
                                                  secret_overrides=secret)
@@ -1058,6 +1080,7 @@ def launch(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
@@ -1093,7 +1116,8 @@ def launch(
     # job can take up resources on the API server. When there are a lot of
     # `launch` submitted asynchronously, the log tailing may overwhelm the API
     # server, if the jobs are long running.
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1247,6 +1271,7 @@ def exec(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     cpus: Optional[str],
     memory: Optional[str],
@@ -1327,7 +1352,8 @@ def exec(
         raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
@@ -1568,12 +1594,15 @@ def _handle_services_request(
             # print the original error.
             pass
         if not msg:
-            msg = (f'Failed to fetch {noun} statuses due to connection issues. '
-                   'Please try again later. Details: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:  # pylint: disable=broad-except
-        msg = (f'Failed to fetch {noun} statuses: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+            # This is an actual error (connection issues), not a normal state.
+            # Format the error message and raise a new exception.
+            # Use 'from None' to suppress the exception chain and only show
+            # the formatted message.
+            error_msg = (
+                f'Failed to fetch {noun} statuses due to connection issues. '
+                'Please try again later. Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            raise RuntimeError(error_msg) from None
     else:
         if show_endpoint:
             if len(service_records) != 1:
@@ -1630,7 +1659,8 @@ def _show_endpoint(query_clusters: Optional[List[str]],
                     ('endpoint port' if show_single_endpoint else 'endpoints')))
 
     cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+    if cluster_record['status'] not in (status_lib.ClusterStatus.UP,
+                                        status_lib.ClusterStatus.AUTOSTOPPING):
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
                                'is not in UP status.')
@@ -2023,6 +2053,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(pool_status_request_id, silent=True)
                     num_pools = -1
                     msg = 'KeyboardInterrupt'
+                except Exception as e:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # printing the error message instead of crashing.
+                    num_pools = None
+                    msg = str(e)
         if num_pools is not None:
             if num_pools > 0:
                 click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -2051,6 +2086,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(service_status_request_id, silent=True)
                     num_services = -1
                     msg = 'KeyboardInterrupt'
+                except Exception as e:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # printing the error message instead of crashing.
+                    num_services = None
+                    msg = str(e)
         click.echo(msg)
         if num_services is not None:
             hints.append(
@@ -2248,6 +2288,10 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
               is_flag=True,
               default=False,
               help='Stream the cluster provisioning logs (provision.log).')
+@click.option('--autostop',
+              is_flag=True,
+              default=False,
+              help='Stream the autostop hook logs from the cluster.')
 @click.option('--worker',
               '-w',
               default=None,
@@ -2291,6 +2335,7 @@ def logs(
     cluster: str,
     job_ids: Tuple[str, ...],
     provision: bool,
+    autostop: bool,  # pylint: disable=redefined-outer-name
     worker: Optional[int],
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
@@ -2320,6 +2365,9 @@ def logs(
 
     4. If the job fails or fetching the logs fails, the command will exit with
     a non-zero return code.
+
+    5. If ``--autostop`` is specified, stream the autostop hook logs from the
+    cluster. This shows the output of the autostop hook script.
     """
     if worker is not None:
         if not provision:
@@ -2328,10 +2376,19 @@ def logs(
         if worker < 1:
             raise click.UsageError('--worker must be a positive integer.')
 
+    if provision and autostop:
+        raise click.UsageError(
+            '--provision and --autostop cannot be used together.')
+
     if provision and (sync_down or status or job_ids):
         raise click.UsageError(
             '--provision cannot be combined with job log options '
             '(--sync-down/--status/job IDs).')
+
+    if autostop and (sync_down or status or job_ids or worker is not None):
+        raise click.UsageError(
+            '--autostop cannot be combined with job log options '
+            '(--sync-down/--status/--worker/job IDs).')
 
     if sync_down and status:
         raise click.UsageError(
@@ -2352,6 +2409,13 @@ def logs(
                                     worker=worker,
                                     follow=follow,
                                     tail=tail))
+
+    if autostop:
+        # Stream autostop hook logs
+        sys.exit(
+            sdk.tail_autostop_logs(cluster_name=cluster,
+                                   follow=follow,
+                                   tail=tail))
 
     if sync_down:
         with rich_utils.client_status(
@@ -3735,7 +3799,10 @@ def show_gpus(
                     continue
 
                 node_is_ready = getattr(node_info, 'is_ready', True)
-                if not node_is_ready:
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                node_taints = getattr(node_info, 'taints', None) or []
+                node_is_tainted = len(node_taints) > 0
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
                     not_ready_counts[accelerator_type] += accelerator_count
             return not_ready_counts
 
@@ -3891,7 +3958,7 @@ def show_gpus(
             context_title_str: str = 'CONTEXT') -> str:
         node_table = log_utils.create_table([
             context_title_str, 'NODE', 'vCPU', 'Memory (GB)', 'GPU',
-            'GPU UTILIZATION'
+            'GPU UTILIZATION', 'NODE STATUS'
         ])
 
         no_permissions_str = '<no permissions>'
@@ -3950,15 +4017,41 @@ def show_gpus(
                 utilization_str = (
                     f'{available} of '
                     f'{node_info.total["accelerator_count"]} free')
+
+                # Build node status string
+                status_info = []
                 # Check if node is ready (defaults to True for backward
                 # compatibility with older server versions)
                 node_is_ready = getattr(node_info, 'is_ready', True)
                 if not node_is_ready:
-                    utilization_str += ' (Node NotReady)'
+                    status_info.append('NotReady')
+                node_is_cordoned = getattr(node_info, 'is_cordoned', False)
+                if node_is_cordoned:
+                    status_info.append('Cordoned')
+                # Add taint info grouped by effect
+                taints = getattr(node_info, 'taints', None)
+                if taints:
+                    # Group taints by effect: 'NoSchedule Taint [key1, key2],
+                    # NoExecute Taint [key3]'
+                    taints_by_effect: Dict[str, List[str]] = {}
+                    for taint in taints:
+                        effect = taint['effect']
+                        key = taint['key']
+                        if effect not in taints_by_effect:
+                            taints_by_effect[effect] = []
+                        taints_by_effect[effect].append(key)
+                    taints_strs = []
+                    for effect, keys in taints_by_effect.items():
+                        taints_strs.append(
+                            f'{effect} Taint [{", ".join(keys)}]')
+                    if taints_strs:
+                        status_info.append(', '.join(taints_strs))
 
+                status_str = ', '.join(
+                    status_info) if status_info else 'Healthy'
                 node_table.add_row([
                     context_name, node_name, cpu_str, memory_str, acc_type,
-                    utilization_str
+                    utilization_str, status_str
                 ])
 
         k8s_per_node_acc_message = (f'{cloud_str} per-node GPU availability')
@@ -4005,6 +4098,30 @@ def show_gpus(
                 f'{slurm_per_node_msg}'
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
+
+    def _get_labeled_zero_gpu_hint(
+            all_nodes_info: List[Tuple[str,
+                                       'models.KubernetesNodesInfo']]) -> str:
+        """Returns a hint if any nodes have GPU labels but 0 GPU resources."""
+        # Collect nodes with GPU labels but 0 GPU resources
+        labeled_zero_gpu_nodes = [
+            (context, node_name)
+            for context, nodes_info in all_nodes_info
+            for node_name, node_info in nodes_info.node_info_dict.items()
+            if (node_info.accelerator_type is not None and
+                node_info.total.get('accelerator_count', 0) == 0)
+        ]
+
+        if not labeled_zero_gpu_nodes:
+            return ''
+
+        num_affected_nodes = len(labeled_zero_gpu_nodes)
+        node_list = ', '.join(
+            f'{ctx}/{name}' for ctx, name in labeled_zero_gpu_nodes[:3])
+        ellipsis = '...' if len(labeled_zero_gpu_nodes) > 3 else ''
+        return (f'Note: Some Kubernetes nodes have GPU labels but report 0 GPU '
+                f'resources. Please check the node labels and configuration. '
+                f'Affected {num_affected_nodes} node(s): {node_list}{ellipsis}')
 
     def _format_kubernetes_realtime_gpu(
             total_table: Optional['prettytable.PrettyTable'],
@@ -4071,6 +4188,11 @@ def show_gpus(
                                                            show_node_info=True,
                                                            is_ssh=is_ssh)
 
+                # Check for nodes with GPU labels but 0 GPU resources
+                labeled_zero_hint = _get_labeled_zero_gpu_hint(all_nodes_info)
+                if labeled_zero_hint:
+                    k8s_messages += labeled_zero_hint
+
             if kubernetes_autoscaling:
                 k8s_messages += ('\n' +
                                  kubernetes_utils.KUBERNETES_AUTOSCALER_NOTE)
@@ -4079,6 +4201,8 @@ def show_gpus(
                 if not ssh_is_enabled:
                     yield ('SSH Node Pools are not enabled. To fix, run: '
                            'sky check ssh ')
+                if k8s_messages and print_section_titles:
+                    yield '\n\n'
                 yield k8s_messages
                 return True, print_section_titles, ''
         else:
@@ -4086,6 +4210,8 @@ def show_gpus(
                 if not kubernetes_is_enabled:
                     yield ('Kubernetes is not enabled. To fix, run: '
                            'sky check kubernetes ')
+                if k8s_messages and print_section_titles:
+                    yield '\n\n'
                 yield k8s_messages
                 return True, print_section_titles, ''
         return False, print_section_titles, k8s_messages
@@ -4113,6 +4239,11 @@ def show_gpus(
                                                            all_nodes_info,
                                                            show_node_info=False,
                                                            is_ssh=is_ssh)
+
+                # Check for nodes with GPU labels but 0 GPU resources
+                labeled_zero_hint = _get_labeled_zero_gpu_hint(all_nodes_info)
+                if labeled_zero_hint:
+                    k8s_messages += labeled_zero_hint
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources H100 not found ...")
@@ -4196,6 +4327,8 @@ def show_gpus(
                 stop_iter = stop_iter or stop_iter_one
                 print_section_titles = (print_section_titles or
                                         print_section_titles_one)
+                if k8s_messages and k8s_messages_one:
+                    k8s_messages += '\n'
                 k8s_messages += k8s_messages_one
                 prev_print_section_titles = print_section_titles_one
             if stop_iter:
@@ -4382,11 +4515,8 @@ def show_gpus(
                                                    min_spot_price=('spot_price',
                                                                    'min'))
             df = df.merge(min_price_df, on='cloud')
-            # Sort within each cloud by price.
-            df = df.groupby('cloud', group_keys=False).apply(
-                lambda x: x.sort_values(by=['price', 'spot_price']))
-            # Sort across groups (clouds).
-            df = df.sort_values(by=['min_price', 'min_spot_price'])
+            df = df.sort_values(
+                by=['min_price', 'min_spot_price', 'price', 'spot_price'])
             df = df.drop(columns=['min_price', 'min_spot_price'])
             sorted_dataclasses = [
                 catalog_common.InstanceTypeInfo(*row)
@@ -4890,6 +5020,7 @@ def jobs_launch(
     job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
@@ -4926,7 +5057,8 @@ def jobs_launch(
             raise click.UsageError('Cannot specify both --name and --cluster. '
                                    'Use one of the flags as they are alias.')
         name = cluster
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -5300,10 +5432,31 @@ def jobs_cancel(
               required=False,
               help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
+@click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool):
-    """Tail or sync down the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool,
+              task: Optional[str]):
+    """Tail or sync down the log of a managed job.
+
+    TASK can be a task ID (integer) or task name. Numeric values are treated
+    as task IDs. If not specified, logs for all tasks are shown.
+
+
+    Examples:
+
+    \b
+    # View logs for job ID 1, task 0
+    sky jobs logs 1 0
+
+    \b
+    # View logs for job named 'my-job', task 'train'
+    sky jobs logs -n my-job train
+
+    \b
+    # View logs for job named 'my-job', task 'eval'
+    sky jobs logs -n my-job eval
+    """
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -5320,11 +5473,17 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
+            # Parse task argument: if numeric, treat as task ID (int),
+            # otherwise treat as task name (str)
+            parsed_task: Optional[Union[str, int]] = None
+            if task is not None:
+                parsed_task = int(task) if task.isdigit() else task
             returncode = managed_jobs.tail_logs(name=name,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
-                                                refresh=refresh)
+                                                refresh=refresh,
+                                                task=parsed_task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
@@ -5393,6 +5552,7 @@ def jobs_pool_apply(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -5453,6 +5613,7 @@ def jobs_pool_apply(
             image_id=image_id,
             env_file=env_file,
             env=env,
+            secret_file=secret_file,
             secret=secret,
             disk_size=disk_size,
             disk_tier=disk_tier,
@@ -5894,7 +6055,8 @@ def _generate_task_with_service(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
-    secret: Optional[List[Tuple[str, str]]],
+    secret_file: Optional[Dict[str, str]],
+    secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Optional[Tuple[str]],
@@ -5913,7 +6075,8 @@ def _generate_task_with_service(
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
     if not is_yaml:
         raise click.UsageError(f'{yaml_name} must be a valid YAML file.')
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,
@@ -6051,6 +6214,7 @@ def serve_up(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -6114,6 +6278,7 @@ def serve_up(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret_file=secret_file,
         secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
@@ -6165,12 +6330,12 @@ def serve_up(
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(
-        service_name: str, service_yaml: Tuple[str,
-                                               ...], workdir: Optional[str],
-        infra: Optional[str], cloud: Optional[str], region: Optional[str],
-        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
-        image_id: Optional[str], env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
+        service_name: str, service_yaml: Tuple[str, ...],
+        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
+        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
+        use_spot: Optional[bool], image_id: Optional[str],
+        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        secret_file: Optional[Dict[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
@@ -6224,6 +6389,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret_file=secret_file,
         secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,

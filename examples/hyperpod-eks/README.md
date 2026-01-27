@@ -5,7 +5,7 @@ This example shows how to run SkyPilot on AWS SageMaker HyperPod with EKS.
 ## Prerequisites
 
 - An existing SageMaker HyperPod with EKS (or you can create one with AWS [doc](https://catalog.workshops.aws/sagemaker-hyperpod-eks/en-US/00-setup/own-account/01-workshop-infra-script))
-- SkyPilot installed: [installation doc](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)
+- SkyPilot installed: [installation doc](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 ```bash
 pip install skypilot-nightly[kubernetes]
 ```

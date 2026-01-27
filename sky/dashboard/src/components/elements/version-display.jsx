@@ -71,7 +71,7 @@ export function useVersionInfo() {
   return useContext(VersionContext);
 }
 
-function VersionTooltip({
+export function VersionTooltip({
   children,
   version,
   latestVersion,
@@ -95,17 +95,19 @@ function VersionTooltip({
           {plugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
         </div>
       )}
-      {plugins.map((plugin, index) => {
-        const pluginName = plugin.name || 'Unknown Plugin';
-        const parts = [];
-        if (plugin.version) parts.push(plugin.version);
-        if (showCommit && plugin.commit) parts.push(plugin.commit);
-        return parts.length > 0 ? (
-          <div key={index}>
-            {pluginName}: {parts.join(' - ')}
-          </div>
-        ) : null;
-      })}
+      {plugins
+        .filter((plugin) => !plugin.hidden_from_display)
+        .map((plugin, index) => {
+          const pluginName = plugin.name || 'Unknown Plugin';
+          const parts = [];
+          if (plugin.version) parts.push(plugin.version);
+          if (showCommit && plugin.commit) parts.push(plugin.commit);
+          return parts.length > 0 ? (
+            <div key={index}>
+              {pluginName}: {parts.join(' - ')}
+            </div>
+          ) : null;
+        })}
       {!commit &&
         plugins.length === 0 &&
         (!latestVersion || !showUpdateInfo) && (

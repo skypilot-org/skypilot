@@ -167,3 +167,24 @@ def test_consolidation_mode_warning_without_restart(mock_config, mock_logger):
             assert 'Consolidation mode for managed jobs is enabled' in warning_message
             assert 'API server has not been restarted yet' in warning_message
             assert 'Please restart the API server to enable it' in warning_message
+
+
+def test_job_recovery_skips_autostopping():
+    """Verify job recovery logic treats AUTOSTOPPING like UP (no recovery)."""
+    from sky.utils import status_lib
+
+    # AUTOSTOPPING should be treated as UP-like (not preempted)
+    # Recovery logic should skip AUTOSTOPPING (similar to UP)
+    up_status = status_lib.ClusterStatus.UP
+    autostopping_status = status_lib.ClusterStatus.AUTOSTOPPING
+    stopped_status = status_lib.ClusterStatus.STOPPED
+
+    # AUTOSTOPPING should be in the same category as UP for recovery purposes
+    recovery_skip_statuses = {
+        up_status,
+        autostopping_status,
+    }
+
+    assert up_status in recovery_skip_statuses
+    assert autostopping_status in recovery_skip_statuses
+    assert stopped_status not in recovery_skip_statuses

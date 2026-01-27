@@ -23,6 +23,8 @@ export const getStatusStyle = (status) => {
       return 'bg-green-50 text-green-700';
     case 'STOPPED':
       return 'bg-yellow-100 text-yellow-800';
+    case 'AUTOSTOPPING':
+      return 'bg-purple-100 text-purple-800';
     case 'TERMINATED':
       return 'bg-gray-100 text-gray-800';
 
@@ -103,6 +105,8 @@ export const getStatusIcon = (status) => {
       return <FilledCircleIcon className="w-3 h-3 mr-1" />;
     case 'STOPPED':
       return <PauseIcon className="w-3 h-3 mr-1" />;
+    case 'AUTOSTOPPING':
+      return <CircularProgress size={12} className="w-3 h-3 mr-1" />;
     case 'TERMINATED':
     case 'FAILED':
     case 'CANCELLED':

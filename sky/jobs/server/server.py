@@ -43,6 +43,7 @@ async def launch(request: fastapi.Request,
         func=core.launch,
         schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -59,6 +60,7 @@ async def queue(request: fastapi.Request,
         schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
                        else api_requests.ScheduleType.SHORT),
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -74,6 +76,7 @@ async def queue_v2(request: fastapi.Request,
                        if jobs_queue_body_v2.refresh else
                        api_requests.ScheduleType.SHORT),
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -87,6 +90,7 @@ async def cancel(request: fastapi.Request,
         func=core.cancel,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -109,6 +113,7 @@ async def logs(
         func=core.tail_logs,
         schedule_type=schedule_type,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
     kill_request_on_disconnect = False
     if schedule_type == api_requests.ScheduleType.SHORT:
@@ -150,6 +155,7 @@ async def download_logs(
         schedule_type=api_requests.ScheduleType.LONG
         if jobs_download_logs_body.refresh else api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -163,6 +169,7 @@ async def pool_apply(request: fastapi.Request,
         func=core.pool_apply,
         schedule_type=api_requests.ScheduleType.LONG,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -176,6 +183,7 @@ async def pool_down(request: fastapi.Request,
         func=core.pool_down,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -190,6 +198,7 @@ async def pool_status(
         func=core.pool_status,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -205,6 +214,7 @@ async def pool_tail_logs(
         func=core.pool_tail_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
     request_task = await api_requests.get_request_async(
@@ -241,6 +251,7 @@ async def pool_download_logs(
         func=core.pool_sync_down_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -255,4 +266,5 @@ async def events(request: fastapi.Request,
         func=core.get_job_events,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
