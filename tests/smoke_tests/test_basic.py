@@ -850,7 +850,22 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Note: We retry this command because the background status refresh
+            # daemon may cause lock contention, resulting in cached status being
+            # returned instead of the expected warning message.
+            (f'start_time=$SECONDS; '
+             f'while true; do '
+             f'if (( $SECONDS - $start_time > 120 )); then '
+             f'  echo "Timeout after 120 seconds waiting for Failed getting cluster status message"; exit 1; '
+             f'fi; '
+             f's=$(sky status -r {name}); '
+             f'echo "$s"; '
+             f'if echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."; then '
+             f'  echo "Got expected warning message"; break; '
+             f'fi; '
+             f'echo "Retrying sky status -r in 10 seconds..."; '
+             f'sleep 10; '
+             f'done'),
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
