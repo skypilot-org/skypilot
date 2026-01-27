@@ -93,8 +93,8 @@ function JobDetails() {
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
-  // GPU metrics task selection for job groups
-  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState(0);
+  // GPU metrics task selection for job groups ('all' or task index)
+  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState('all');
   const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
   const [isGpuMetricsExpanded, setIsGpuMetricsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -283,12 +283,17 @@ function JobDetails() {
     (t) => t.hasMetrics
   );
 
-  // Get the currently selected task for GPU metrics
+  // Get the currently selected task for GPU metrics (null when 'all' is selected)
   const gpuMetricsTask =
-    allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
+    gpuMetricsTaskIndex === 'all'
+      ? null
+      : allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
+  // Use '$__all' for Grafana when showing all tasks, otherwise use specific cluster name
   const gpuMetricsClusterName =
-    gpuMetricsTask?.cluster_name_on_cloud ||
-    allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
+    gpuMetricsTaskIndex === 'all'
+      ? '$__all'
+      : gpuMetricsTask?.cluster_name_on_cloud ||
+        allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -586,7 +591,9 @@ function JobDetails() {
                       {isMultiTask && (
                         <Select
                           onValueChange={(value) =>
-                            setGpuMetricsTaskIndex(parseInt(value, 10))
+                            setGpuMetricsTaskIndex(
+                              value === 'all' ? 'all' : parseInt(value, 10)
+                            )
                           }
                           value={String(gpuMetricsTaskIndex)}
                         >
@@ -598,6 +605,7 @@ function JobDetails() {
                             <SelectValue placeholder="Select Task" />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="all">All Tasks</SelectItem>
                             {tasksWithGpuMetrics.map(
                               ({ index, task, hasMetrics }) => (
                                 <SelectItem
@@ -683,10 +691,14 @@ function JobDetails() {
                         {/* Show current selection info */}
                         <div className="mt-2 text-xs text-gray-500">
                           Showing:{' '}
-                          {gpuMetricsTask?.task ||
-                            gpuMetricsTask?.name ||
-                            detailJobData.name}
-                          {isMultiTask ? ` (Task ${gpuMetricsTaskIndex})` : ''}{' '}
+                          {gpuMetricsTaskIndex === 'all'
+                            ? 'All Tasks'
+                            : gpuMetricsTask?.task ||
+                              gpuMetricsTask?.name ||
+                              detailJobData.name}
+                          {isMultiTask && gpuMetricsTaskIndex !== 'all'
+                            ? ` (Task ${gpuMetricsTaskIndex})`
+                            : ''}{' '}
                           • Time: {timeRange.from} to {timeRange.to}
                         </div>
                       </div>
@@ -746,10 +758,10 @@ function JobDetails() {
                         value={String(selectedTaskIndex)}
                       >
                         <SelectTrigger
-                          aria-label="Job"
+                          aria-label="Task"
                           className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm"
                         >
-                          <SelectValue placeholder="Select Job" />
+                          <SelectValue placeholder="Select Task" />
                         </SelectTrigger>
                         <SelectContent>
                           {allTasks.map((task, index) => (
@@ -757,7 +769,7 @@ function JobDetails() {
                               key={task.task_job_id || index}
                               value={String(index)}
                             >
-                              Job {index}
+                              Task {index}
                               {task.task ? `: ${task.task}` : ''}
                             </SelectItem>
                           ))}
