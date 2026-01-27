@@ -31,18 +31,20 @@ file_mounts:
   {%- if local_user_config_path is not none %}
   {{remote_user_config_path}}: {{local_user_config_path}}
   {%- endif %}
-  {%- if local_plugins_config_path is not none %}
-  {{remote_plugins_config_path}}: {{local_plugins_config_path}}
-  {%- endif %}
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
   {%- for controller_file_mount_path, local_file_mount_path in local_to_controller_file_mounts.items() %}
   {{controller_file_mount_path}}: {{local_file_mount_path}}
   {%- endfor %}
+  {%- if consolidation_mode_job_id is none %}
+  {%- if local_plugins_config_path is not none %}
+  {{remote_plugins_config_path}}: {{local_plugins_config_path}}
+  {%- endif %}
   {%- for remote_plugin_wheel_path, local_plugin_wheel_path in plugin_wheel_file_mounts.items() %}
   {{remote_plugin_wheel_path}}: {{local_plugin_wheel_path}}
   {%- endfor %}
+  {%- endif %}
 {%- if use_tls %}
   {{remote_tls_keyfile}}: {{local_tls_keyfile}}
   {{remote_tls_certfile}}: {{local_tls_certfile}}
