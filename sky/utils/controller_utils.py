@@ -27,6 +27,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.server import config as server_config
+from sky.server import plugin_utils
 from sky.server import plugins
 from sky.setup_files import dependencies
 from sky.skylet import constants
@@ -519,10 +520,6 @@ def download_and_stream_job_log(
 def shared_controller_vars_to_fill(
         controller: Controllers, remote_user_config_path: str,
         local_user_config: Dict[str, Any]) -> Dict[str, str]:
-    # Import here to avoid circular imports
-    # pylint: disable-next=import-outside-toplevel
-    from sky.server import plugin_utils
-
     if not local_user_config:
         local_user_config_path = None
     else:

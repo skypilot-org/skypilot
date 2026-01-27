@@ -276,6 +276,21 @@ def get_remote_controller_wheel_path() -> Optional[str]:
     return config.get('controller_wheel_path')
 
 
+def get_remote_plugins_config_path() -> Optional[str]:
+    """Get the path to the remote plugins config file.
+
+    Returns:
+        The expanded path to remote_plugins.yaml if it exists,
+        None otherwise.
+    """
+    config_path = os.getenv(_REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                            _DEFAULT_REMOTE_PLUGINS_CONFIG_PATH)
+    config_path = os.path.expanduser(config_path)
+    if not os.path.exists(config_path):
+        return None
+    return config_path
+
+
 _PLUGINS: Dict[str, BasePlugin] = {}
 _EXTENSION_CONTEXT: Optional[ExtensionContext] = None
 

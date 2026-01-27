@@ -102,12 +102,4 @@ def get_filtered_plugins_config_path() -> Optional[str]:
         return None
 
     # Get the path to remote_plugins.yaml
-    config_path = os.getenv(
-        plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
-        plugins._DEFAULT_REMOTE_PLUGINS_CONFIG_PATH)
-    config_path = os.path.expanduser(config_path)
-    
-    if not os.path.exists(config_path):
-        return None
-    
-    return config_path
+    return plugins.get_remote_plugins_config_path()

@@ -30,14 +30,10 @@ def test_get_remote_plugin_packages(monkeypatch, tmp_path):
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
 
-    plugin_config = {
-        'controller_wheel_path': 'dist',
-        'plugins': []
-    }
+    plugin_config = {'controller_wheel_path': 'dist', 'plugins': []}
     plugin_config_path = tmp_path / 'plugins.yaml'
     plugin_config_path.write_text(yaml.safe_dump(plugin_config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
-                       str(plugin_config_path))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(plugin_config_path))
 
     packages = plugins.get_remote_plugin_packages()
     wheel_path = plugins.get_remote_controller_wheel_path()
@@ -70,14 +66,10 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
 
-    plugin_config = {
-        'controller_wheel_path': str(wheel_dir),
-        'plugins': []
-    }
+    plugin_config = {'controller_wheel_path': str(wheel_dir), 'plugins': []}
     plugin_config_path = tmp_path / 'plugins.yaml'
     plugin_config_path.write_text(yaml.safe_dump(plugin_config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
-                       str(plugin_config_path))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -117,13 +109,10 @@ def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
                        str(remote_config_path))
 
     # plugins.yaml without controller_wheel_path
-    plugin_config = {
-        'plugins': []
-    }
+    plugin_config = {'plugins': []}
     plugin_config_path = tmp_path / 'plugins.yaml'
     plugin_config_path.write_text(yaml.safe_dump(plugin_config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
-                       str(plugin_config_path))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -151,8 +140,7 @@ def test_get_plugin_mounts_and_commands_invalid_wheel_path(
     }
     plugin_config_path = tmp_path / 'plugins.yaml'
     plugin_config_path.write_text(yaml.safe_dump(plugin_config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
-                       str(plugin_config_path))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -177,14 +165,10 @@ def test_get_plugin_mounts_and_commands_not_directory(monkeypatch, tmp_path):
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
 
-    plugin_config = {
-        'controller_wheel_path': str(wheel_file),
-        'plugins': []
-    }
+    plugin_config = {'controller_wheel_path': str(wheel_file), 'plugins': []}
     plugin_config_path = tmp_path / 'plugins.yaml'
     plugin_config_path.write_text(yaml.safe_dump(plugin_config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
-                       str(plugin_config_path))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -211,14 +195,10 @@ def test_get_plugin_mounts_and_commands_no_whl_files(monkeypatch, tmp_path):
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
 
-    plugin_config = {
-        'controller_wheel_path': str(wheel_dir),
-        'plugins': []
-    }
+    plugin_config = {'controller_wheel_path': str(wheel_dir), 'plugins': []}
     plugin_config_path = tmp_path / 'plugins.yaml'
     plugin_config_path.write_text(yaml.safe_dump(plugin_config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
-                       str(plugin_config_path))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
