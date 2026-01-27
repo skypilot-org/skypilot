@@ -311,6 +311,8 @@ function JobDetails() {
                     refreshFlag={0}
                     poolsData={poolsData}
                     links={enhancedJobData?.links}
+                    logExtractedLinks={logExtractedLinks}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
@@ -587,6 +589,7 @@ function JobDetails() {
                     selectedTaskIndex={isMultiTask ? selectedTaskIndex : null}
                     selectedNode={selectedNode}
                     onNodesExtracted={setLogNodes}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
