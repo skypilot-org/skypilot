@@ -50,11 +50,7 @@ mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
 srun --overlap --label --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 apt-get update
 apt-get install -y ca-certificates rsync curl git wget fuse
-cat > /usr/local/bin/sudo << '"'"'SUDO_EOF'"'"'
-#!/bin/bash
-exec "$@"
-SUDO_EOF
-chmod +x /usr/local/bin/sudo
+echo '"'"'alias sudo=""'"'"' >> ~/.bashrc
 touch /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &
 while true; do
   num_ready=$(ls -1 /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done 2>/dev/null | wc -l)
