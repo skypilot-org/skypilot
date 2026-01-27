@@ -6,6 +6,7 @@ from sky import sky_logging
 from sky.provision import common
 from sky.provision.mithril import utils
 from sky.provision.mithril.utils import MithrilStatus
+from sky.utils import auth_utils
 from sky.utils import status_lib
 
 PROVIDER_NAME = 'mithril'
@@ -148,8 +149,7 @@ def run_instances(
         raise RuntimeError('InstanceType is not set in node_config. '
                            'Please specify an instance type for Mithril.')
 
-    # Get SSH public key
-    public_key_path = config.authentication_config['ssh_public_key']
+    _, public_key_path = auth_utils.get_or_generate_keys()
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
 
