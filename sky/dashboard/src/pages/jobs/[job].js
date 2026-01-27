@@ -93,6 +93,8 @@ function JobDetails() {
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
+  // GPU metrics task selection for job groups
+  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState(0);
   const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
   const [isGpuMetricsExpanded, setIsGpuMetricsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -257,6 +259,36 @@ function JobDetails() {
     { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
     { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
   ];
+
+  // Get all tasks for this job (supports multi-task jobs) - computed early for GPU metrics
+  const allTasksForGpuMetrics = useMemo(() => {
+    return (
+      jobData?.jobs?.filter((item) => String(item.id) === String(jobId)) || []
+    );
+  }, [jobData, jobId]);
+
+  // Determine which tasks have GPU metrics (Kubernetes, not pool, has cluster_name_on_cloud)
+  const tasksWithGpuMetrics = useMemo(() => {
+    return allTasksForGpuMetrics.map((task, index) => ({
+      index,
+      task,
+      hasMetrics:
+        task.full_infra?.includes('Kubernetes') &&
+        !task.pool &&
+        task.cluster_name_on_cloud,
+    }));
+  }, [allTasksForGpuMetrics]);
+
+  const hasAnyTaskWithGpuMetrics = tasksWithGpuMetrics.some(
+    (t) => t.hasMetrics
+  );
+
+  // Get the currently selected task for GPU metrics
+  const gpuMetricsTask =
+    allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
+  const gpuMetricsClusterName =
+    gpuMetricsTask?.cluster_name_on_cloud ||
+    allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -532,15 +564,13 @@ function JobDetails() {
             )}
 
             {/* GPU Metrics Section - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
-            {isGrafanaAvailable &&
-              detailJobData.full_infra?.includes('Kubernetes') &&
-              !detailJobData.pool &&
-              detailJobData.cluster_name_on_cloud && (
-                <div className="mt-6">
-                  <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-                    <div
-                      className={`flex items-center justify-between px-4 ${isGpuMetricsExpanded ? 'pt-4' : 'py-4'}`}
-                    >
+            {isGrafanaAvailable && hasAnyTaskWithGpuMetrics && (
+              <div className="mt-6">
+                <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
+                  <div
+                    className={`flex items-center justify-between px-4 ${isGpuMetricsExpanded ? 'pt-4' : 'py-4'}`}
+                  >
+                    <div className="flex items-center">
                       <button
                         onClick={toggleGpuMetricsExpanded}
                         className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
@@ -552,80 +582,116 @@ function JobDetails() {
                         )}
                         <h3 className="text-lg font-semibold">GPU Metrics</h3>
                       </button>
-                      <Tooltip content="Open in Grafana">
-                        <button
-                          onClick={() => {
-                            const dashboardPath =
-                              '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
-                            const queryParams = new URLSearchParams({
-                              orgId: '1',
-                              from: timeRange.from,
-                              to: timeRange.to,
-                              timezone: 'browser',
-                              'var-cluster':
-                                detailJobData.cluster_name_on_cloud,
-                              'var-node': '$__all',
-                              'var-gpu': '$__all',
-                            });
-                            window.open(
-                              buildGrafanaUrl(
-                                `${dashboardPath}?${queryParams.toString()}`
-                              ),
-                              '_blank'
-                            );
-                          }}
-                          className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                          aria-label="Open in Grafana"
+                      {/* Task selector for job groups */}
+                      {isMultiTask && (
+                        <Select
+                          onValueChange={(value) =>
+                            setGpuMetricsTaskIndex(parseInt(value, 10))
+                          }
+                          value={String(gpuMetricsTaskIndex)}
                         >
-                          <ExternalLinkIcon className="w-4 h-4" />
-                        </button>
-                      </Tooltip>
+                          <SelectTrigger
+                            onClick={(e) => e.stopPropagation()}
+                            aria-label="Task"
+                            className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm ml-4"
+                          >
+                            <SelectValue placeholder="Select Task" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {tasksWithGpuMetrics.map(
+                              ({ index, task, hasMetrics }) => (
+                                <SelectItem
+                                  key={index}
+                                  value={String(index)}
+                                  disabled={!hasMetrics}
+                                >
+                                  Task {index}
+                                  {task.task ? `: ${task.task}` : ''}
+                                  {!hasMetrics ? ' (no metrics)' : ''}
+                                </SelectItem>
+                              )
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
                     </div>
-                    {isGpuMetricsExpanded && (
-                      <div className="p-5">
-                        {/* Filtering Controls */}
-                        <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
-                          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-                            {/* Time Range Selection */}
-                            <div className="flex items-center gap-2">
-                              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                                Time Range:
-                              </label>
-                              <div className="flex gap-1">
-                                {[
-                                  { label: '15m', value: '15m' },
-                                  { label: '1h', value: '1h' },
-                                  { label: '6h', value: '6h' },
-                                  { label: '24h', value: '24h' },
-                                  { label: '7d', value: '7d' },
-                                ].map((preset) => (
-                                  <button
-                                    key={preset.value}
-                                    onClick={() =>
-                                      handleTimeRangePreset(preset.value)
-                                    }
-                                    className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
-                                      timeRange.from ===
-                                        `now-${preset.value}` &&
-                                      timeRange.to === 'now'
-                                        ? 'bg-sky-blue text-white border-sky-blue'
-                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                                    }`}
-                                  >
-                                    {preset.label}
-                                  </button>
-                                ))}
-                              </div>
+                    <Tooltip content="Open in Grafana">
+                      <button
+                        onClick={() => {
+                          const dashboardPath =
+                            '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+                          const queryParams = new URLSearchParams({
+                            orgId: '1',
+                            from: timeRange.from,
+                            to: timeRange.to,
+                            timezone: 'browser',
+                            'var-cluster': gpuMetricsClusterName,
+                            'var-node': '$__all',
+                            'var-gpu': '$__all',
+                          });
+                          window.open(
+                            buildGrafanaUrl(
+                              `${dashboardPath}?${queryParams.toString()}`
+                            ),
+                            '_blank'
+                          );
+                        }}
+                        className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                        aria-label="Open in Grafana"
+                      >
+                        <ExternalLinkIcon className="w-4 h-4" />
+                      </button>
+                    </Tooltip>
+                  </div>
+                  {isGpuMetricsExpanded && (
+                    <div className="p-5">
+                      {/* Filtering Controls */}
+                      <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                          {/* Time Range Selection */}
+                          <div className="flex items-center gap-2">
+                            <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                              Time Range:
+                            </label>
+                            <div className="flex gap-1">
+                              {[
+                                { label: '15m', value: '15m' },
+                                { label: '1h', value: '1h' },
+                                { label: '6h', value: '6h' },
+                                { label: '24h', value: '24h' },
+                                { label: '7d', value: '7d' },
+                              ].map((preset) => (
+                                <button
+                                  key={preset.value}
+                                  onClick={() =>
+                                    handleTimeRangePreset(preset.value)
+                                  }
+                                  className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
+                                    timeRange.from === `now-${preset.value}` &&
+                                    timeRange.to === 'now'
+                                      ? 'bg-sky-blue text-white border-sky-blue'
+                                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                  }`}
+                                >
+                                  {preset.label}
+                                </button>
+                              ))}
                             </div>
-                          </div>
-
-                          {/* Show current selection info */}
-                          <div className="mt-2 text-xs text-gray-500">
-                            Showing: {detailJobData.name} • Time:{' '}
-                            {timeRange.from} to {timeRange.to}
                           </div>
                         </div>
 
+                        {/* Show current selection info */}
+                        <div className="mt-2 text-xs text-gray-500">
+                          Showing:{' '}
+                          {gpuMetricsTask?.task ||
+                            gpuMetricsTask?.name ||
+                            detailJobData.name}
+                          {isMultiTask ? ` (Task ${gpuMetricsTaskIndex})` : ''}{' '}
+                          • Time: {timeRange.from} to {timeRange.to}
+                        </div>
+                      </div>
+
+                      {gpuMetricsClusterName ? (
                         <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
                           {gpuPanels.map((panel) => (
                             <div
@@ -636,24 +702,35 @@ function JobDetails() {
                                 <iframe
                                   src={buildGrafanaMetricsUrl(
                                     panel.id,
-                                    detailJobData.cluster_name_on_cloud
+                                    gpuMetricsClusterName
                                   )}
                                   width="100%"
                                   height="400"
                                   frameBorder="0"
                                   title={panel.title}
                                   className="rounded"
-                                  key={`${panel.keyPrefix}-${detailJobData.cluster_name_on_cloud}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}`}
+                                  key={`${panel.keyPrefix}-${gpuMetricsClusterName}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}-task-${gpuMetricsTaskIndex}`}
                                 />
                               </div>
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
-                  </div>
+                      ) : (
+                        <div className="p-4 text-center text-gray-500 bg-gray-50 rounded-md">
+                          {gpuMetricsTask?.pool
+                            ? 'GPU metrics are not available for pool jobs.'
+                            : !gpuMetricsTask?.full_infra?.includes(
+                                  'Kubernetes'
+                                )
+                              ? 'GPU metrics are only available for Kubernetes tasks.'
+                              : 'No GPU metrics available for this task.'}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+            )}
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
