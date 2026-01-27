@@ -36,24 +36,33 @@ runs:
     - name: Set branch name and commit message
       id: set_env
       shell: bash
+      # Use environment variables to safely pass values that may contain special characters
+      # (backticks, parentheses, etc.) that would break bash if directly interpolated
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        HEAD_REF: ${{ github.head_ref }}
+        REF_NAME: ${{ github.ref_name }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        MERGE_GROUP_MESSAGE: ${{ github.event.merge_group.head_commit.message }}
+        HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
       run: |
-        if [ "${{ github.event_name }}" == "pull_request" ]; then
-          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+        if [ "$EVENT_NAME" == "pull_request" ]; then
+          echo "branch=$HEAD_REF" >> $GITHUB_OUTPUT
           {
             echo "message<<EOF"
-            echo "${{ github.event.pull_request.title }}"
+            printf '%s\n' "$PR_TITLE"
             echo "EOF"
           } >> $GITHUB_OUTPUT
         else
-          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "branch=$REF_NAME" >> $GITHUB_OUTPUT
           # For push events after merge, head_commit.message contains the merge commit message
           # which includes the PR title. For merge_group events, use merge_group.head_commit.message
           {
             echo "message<<EOF"
-            if [ "${{ github.event_name }}" == "merge_group" ]; then
-              echo "${{ github.event.merge_group.head_commit.message }}"
+            if [ "$EVENT_NAME" == "merge_group" ]; then
+              printf '%s\n' "$MERGE_GROUP_MESSAGE"
             else
-              echo "${{ github.event.head_commit.message }}"
+              printf '%s\n' "$HEAD_COMMIT_MESSAGE"
             fi
             echo "EOF"
           } >> $GITHUB_OUTPUT
