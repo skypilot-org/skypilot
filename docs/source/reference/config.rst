@@ -694,6 +694,9 @@ If this is set, SkyPilot will only provision in regions that contain a VPC
 with this name (provisioner automatically looks for such regions).
 Regions without a VPC with this name will not be used to launch nodes.
 
+``vpc_name`` can either be set as a single string value, or a list of VPC
+names, in which all specified VPCs will be attempted.
+
 Default: ``null`` (use the default VPC in each region).
 
 .. _config-yaml-aws-use-internal-ips:

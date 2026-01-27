@@ -1289,6 +1289,11 @@ def get_config_schema():
                         'type': 'string',
                     }, {
                         'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
                     }],
                 },
                 'use_ssm': {
