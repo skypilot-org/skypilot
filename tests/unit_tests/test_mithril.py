@@ -4,7 +4,9 @@ import os
 
 import pytest
 
+from sky import clouds
 from sky.clouds import mithril
+from sky.provision.mithril import utils as mithril_utils
 
 
 class TestMithrilCredentialsPath:
@@ -40,7 +42,8 @@ class TestMithrilCredentials:
         monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
         monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
 
-        valid, msg = mithril.Mithril._check_credentials()
+        valid, msg = mithril.Mithril.check_credentials(
+            clouds.CloudCapability.COMPUTE)
 
         assert not valid
         assert 'Mithril credentials not found' in msg
@@ -54,7 +57,8 @@ class TestMithrilCredentials:
         monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
         monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
 
-        valid, msg = mithril.Mithril._check_credentials()
+        valid, msg = mithril.Mithril.check_credentials(
+            clouds.CloudCapability.COMPUTE)
 
         assert valid
         assert msg is None
@@ -69,7 +73,8 @@ class TestMithrilCredentials:
         monkeypatch.setenv('MITHRIL_API_KEY', 'test-api-key')
         monkeypatch.setenv('MITHRIL_PROJECT', 'test-project')
 
-        valid, msg = mithril.Mithril._check_credentials()
+        valid, msg = mithril.Mithril.check_credentials(
+            clouds.CloudCapability.COMPUTE)
 
         assert valid
         assert msg is None
@@ -84,7 +89,8 @@ class TestMithrilCredentials:
         monkeypatch.setenv('MITHRIL_API_KEY', 'test-api-key')
         monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
 
-        valid, msg = mithril.Mithril._check_credentials()
+        valid, msg = mithril.Mithril.check_credentials(
+            clouds.CloudCapability.COMPUTE)
 
         assert not valid
         assert 'Mithril credentials not found' in msg
@@ -131,3 +137,222 @@ class TestMithrilValidation:
         cloud = mithril.Mithril()
         with pytest.raises(ValueError, match='does not support zones'):
             cloud.validate_region_zone('some-region', 'zone-1')
+
+
+class TestGetConfig:
+    """Test cases for get_config function with profile-based schema."""
+
+    def test_config_from_profile_file(self, monkeypatch, tmp_path):
+        """Test config is loaded from profile-based config file."""
+        monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_API_URL', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        config_content = '''
+current_profile: default
+profiles:
+  default:
+    api_key: file-api-key
+    project_id: file-project-id
+    api_url: https://custom.api.mithril.ai
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+
+        config = mithril_utils.get_config()
+
+        assert config['api_key'] == 'file-api-key'
+        assert config['project_id'] == 'file-project-id'
+        assert config['api_url'] == 'https://custom.api.mithril.ai'
+
+    def test_env_vars_override_profile(self, monkeypatch, tmp_path):
+        """Test environment variables override profile config."""
+        config_content = '''
+current_profile: default
+profiles:
+  default:
+    api_key: file-api-key
+    project_id: file-project-id
+    api_url: https://file.api.mithril.ai
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+
+        # Set env vars to override
+        monkeypatch.setenv('MITHRIL_API_KEY', 'env-api-key')
+        monkeypatch.setenv('MITHRIL_PROJECT', 'env-project-id')
+        monkeypatch.setenv('MITHRIL_API_URL', 'https://env.api.mithril.ai')
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        config = mithril_utils.get_config()
+
+        assert config['api_key'] == 'env-api-key'
+        assert config['project_id'] == 'env-project-id'
+        assert config['api_url'] == 'https://env.api.mithril.ai'
+
+    def test_partial_env_vars_with_profile(self, monkeypatch, tmp_path):
+        """Test partial env vars combine with profile config."""
+        config_content = '''
+current_profile: default
+profiles:
+  default:
+    api_key: file-api-key
+    project_id: file-project-id
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+
+        # Only override API key, keep project_id from file
+        monkeypatch.setenv('MITHRIL_API_KEY', 'env-api-key')
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_API_URL', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        config = mithril_utils.get_config()
+
+        assert config['api_key'] == 'env-api-key'
+        assert config['project_id'] == 'file-project-id'
+        # Default API URL when not specified
+        assert config['api_url'] == 'https://api.mithril.ai'
+
+    def test_mithril_profile_env_selects_profile(self, monkeypatch, tmp_path):
+        """Test MITHRIL_PROFILE env var selects different profile."""
+        config_content = '''
+current_profile: default
+profiles:
+  default:
+    api_key: default-key
+    project_id: default-proj
+  staging:
+    api_key: staging-key
+    project_id: staging-proj
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+
+        monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_API_URL', raising=False)
+        monkeypatch.setenv('MITHRIL_PROFILE', 'staging')
+
+        config = mithril_utils.get_config()
+
+        assert config['api_key'] == 'staging-key'
+        assert config['project_id'] == 'staging-proj'
+
+    def test_missing_api_key_raises_error(self, monkeypatch, tmp_path):
+        """Test error is raised when API key is not found."""
+        config_content = '''
+current_profile: default
+profiles:
+  default:
+    project_id: file-project-id
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+        monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        with pytest.raises(mithril_utils.MithrilError,
+                           match='API key not found'):
+            mithril_utils.get_config()
+
+    def test_missing_project_id_raises_error(self, monkeypatch, tmp_path):
+        """Test error is raised when project ID is not found."""
+        config_content = '''
+current_profile: default
+profiles:
+  default:
+    api_key: file-api-key
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+        monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        with pytest.raises(mithril_utils.MithrilError,
+                           match='project ID not found'):
+            mithril_utils.get_config()
+
+    def test_config_only_from_env_vars_no_file(self, monkeypatch, tmp_path):
+        """Test config works with only env vars when no config file exists."""
+        fake_path = tmp_path / 'nonexistent.yaml'
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(fake_path)))
+
+        monkeypatch.setenv('MITHRIL_API_KEY', 'env-api-key')
+        monkeypatch.setenv('MITHRIL_PROJECT', 'env-project-id')
+        monkeypatch.delenv('MITHRIL_API_URL', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        config = mithril_utils.get_config()
+
+        assert config['api_key'] == 'env-api-key'
+        assert config['project_id'] == 'env-project-id'
+        assert config['api_url'] == 'https://api.mithril.ai'
+
+    def test_missing_current_profile_raises_error(self, monkeypatch, tmp_path):
+        """Test error is raised when current_profile is not set in config."""
+        monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        config_content = '''
+profiles:
+  default:
+    api_key: key
+    project_id: proj
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+
+        with pytest.raises(mithril_utils.MithrilError,
+                           match='current_profile.*is required'):
+            mithril_utils.get_config()
+
+    def test_profile_not_found_raises_error(self, monkeypatch, tmp_path):
+        """Test error is raised when specified profile doesn't exist."""
+        monkeypatch.delenv('MITHRIL_API_KEY', raising=False)
+        monkeypatch.delenv('MITHRIL_PROJECT', raising=False)
+        monkeypatch.delenv('MITHRIL_PROFILE', raising=False)
+
+        config_content = '''
+current_profile: nonexistent
+profiles:
+  default:
+    api_key: key
+    project_id: proj
+'''
+        cred_path = tmp_path / 'config.yaml'
+        cred_path.write_text(config_content)
+
+        monkeypatch.setattr(mithril.Mithril, 'get_credentials_path',
+                            classmethod(lambda cls: str(cred_path)))
+
+        with pytest.raises(mithril_utils.MithrilError,
+                           match="profile 'nonexistent' not found"):
+            mithril_utils.get_config()
