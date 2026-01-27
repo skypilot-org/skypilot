@@ -360,11 +360,11 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
                 }
             else:
                 step['retry'] = {
-                    # Automatically retry 2 times on any failure.
+                    # Automatically retry 2 times on any failure by default.
                     'automatic': True
                 }
-            steps.append(step)
             generated_steps_set.add(label)
+            steps.append(step)
     return {'steps': steps}
 
 
