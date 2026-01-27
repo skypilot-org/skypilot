@@ -270,9 +270,6 @@ def pytest_configure(config):
     config.addinivalue_line(
         'markers', 'no_auto_retry: mark test to disable automatic retries '
         'in Buildkite CI (manual retries still allowed)')
-    config.addinivalue_line(
-        'markers', 'run_multiple(n): mark test to run n times as separate '
-        'Buildkite steps (useful for flakiness detection)')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -438,19 +435,7 @@ def pytest_collection_modifyitems(config, items):
     if config.option.collectonly:
         for item in items:
             full_name = item.nodeid
-            marks = []
-            for mark in item.iter_markers():
-                # Serialize marker with all args and kwargs for pipeline generator
-                parts = []
-                if mark.args:
-                    parts.extend(repr(arg) for arg in mark.args)
-                if mark.kwargs:
-                    parts.extend(
-                        f'{k}={repr(v)}' for k, v in mark.kwargs.items())
-                if parts:
-                    marks.append(f'{mark.name}({", ".join(parts)})')
-                else:
-                    marks.append(mark.name)
+            marks = [mark.name for mark in item.iter_markers()]
             print(f"Collected {full_name} with marks: {marks}")
 
 

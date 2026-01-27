@@ -142,11 +142,11 @@ def _extract_steps_from_pipeline(pipeline_path):
     return all_steps
 
 
-def test_run_multiple_and_no_auto_retry_markers():
-    """Test that run_multiple(N) and no_auto_retry markers work correctly.
+def test_no_auto_retry_marker():
+    """Test that no_auto_retry marker works correctly.
 
     This test uses the actual test_kubernetes_container_status_unknown_status_refresh
-    test which has both markers applied.
+    test which has the marker applied.
     """
     # Generate pipeline for the specific test
     env = dict(os.environ)
@@ -170,26 +170,17 @@ def test_run_multiple_and_no_auto_retry_markers():
             'label', '')
     ]
 
-    # Should have 3 steps due to run_multiple(3)
-    assert len(target_steps) == 3, \
-        f"Expected 3 steps for run_multiple(3), got {len(target_steps)}"
+    # Should have exactly 1 step
+    assert len(target_steps) == 1, \
+        f"Expected 1 step, got {len(target_steps)}"
 
-    # Verify labels have run numbers
-    labels = [s['label'] for s in target_steps]
-    assert any('(run 1/3)' in label for label in labels), \
-        f"Missing '(run 1/3)' in labels: {labels}"
-    assert any('(run 2/3)' in label for label in labels), \
-        f"Missing '(run 2/3)' in labels: {labels}"
-    assert any('(run 3/3)' in label for label in labels), \
-        f"Missing '(run 3/3)' in labels: {labels}"
-
-    # Verify no_auto_retry is applied to all steps
-    for step in target_steps:
-        retry = step.get('retry', {})
-        assert retry.get('automatic') is False, \
-            f"no_auto_retry step should have automatic=False: {retry}"
-        assert retry.get('manual', {}).get('allowed') is True, \
-            f"no_auto_retry step should allow manual retry: {retry}"
+    # Verify no_auto_retry is applied
+    step = target_steps[0]
+    retry = step.get('retry', {})
+    assert retry.get('automatic') is False, \
+        f"no_auto_retry step should have automatic=False: {retry}"
+    assert retry.get('manual', {}).get('allowed') is True, \
+        f"no_auto_retry step should allow manual retry: {retry}"
 
 
 @pytest.mark.parametrize('args', [

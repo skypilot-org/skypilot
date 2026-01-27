@@ -206,7 +206,7 @@ def _parse_args(args: Optional[str] = None):
 def _extract_marked_tests(
     file_path: str, args: str
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[str],
-                     List[bool], List[int]]]:
+                     List[bool]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -222,7 +222,7 @@ def _extract_marked_tests(
 
     Returns:
         Dict mapping function_name to tuple of:
-        (clouds, queues, params, extra_args, no_auto_retry_flags, run_multiple_counts)
+        (clouds, queues, params, extra_args, no_auto_retry_flags)
     """
     # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
@@ -272,23 +272,6 @@ def _extract_marked_tests(
         benchmark_test = 'benchmark' in marks
         no_auto_retry = 'no_auto_retry' in marks
 
-        # Check for run_multiple(N) marker to run test N times
-        run_multiple_count = 1
-        for mark in marks:
-            if mark.startswith('run_multiple('):
-                match = re.match(r'run_multiple\((\d+)\)', mark)
-                if match:
-                    run_multiple_count = int(match.group(1))
-                    if run_multiple_count < 1:
-                        print(f'Warning: {function_name} has run_multiple('
-                              f'{run_multiple_count}) < 1. Defaulting to 1.')
-                        run_multiple_count = 1
-                else:
-                    print(f'Warning: {function_name} has invalid run_multiple '
-                          f'marker: {mark}. Expected run_multiple(N) where N '
-                          f'is a positive integer. Defaulting to 1.')
-                break
-
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
                 # This mark does not specify a cloud, so we skip it.
@@ -331,8 +314,7 @@ def _extract_marked_tests(
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
-        ], [no_auto_retry for _ in range(len(final_clouds_to_include))
-           ], [run_multiple_count for _ in range(len(final_clouds_to_include))])
+        ], [no_auto_retry for _ in range(len(final_clouds_to_include))])
 
     return function_cloud_map
 
@@ -343,54 +325,46 @@ def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     generated_steps_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param, extra_args, no_auto_retry, run_count in zip(
+        for cloud, queue, param, extra_args, no_auto_retry in zip(
                 *clouds_queues_param):
-            base_label = f'{test_function} on {cloud}'
+            label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
-                base_label += f' with param {param}'
+                label += f' with param {param}'
                 command += f' -k {param}'
             if extra_args:
                 command += f' {" ".join(extra_args)}'
-            if base_label in generated_steps_set:
+            if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue
             if 'PYTHON_VERSION' in os.environ:
                 command = f'PYTHONPATH="$PWD:$PYTHONPATH" {command}'
 
-            # Generate multiple steps if run_multiple(N) marker is present
-            for run_idx in range(run_count):
-                if run_count > 1:
-                    label = f'{base_label} (run {run_idx + 1}/{run_count})'
-                else:
-                    label = base_label
-
-                step = {
-                    'label': label,
-                    'command': command,
-                    'agents': {
-                        # Separate agent pool for each cloud.
-                        # Since they require different amount of resources and
-                        # concurrency control.
-                        'queue': queue
+            step = {
+                'label': label,
+                'command': command,
+                'agents': {
+                    # Separate agent pool for each cloud.
+                    # Since they require different amount of resources and
+                    # concurrency control.
+                    'queue': queue
+                }
+            }
+            if no_auto_retry:
+                # Disable automatic retries but allow manual retries.
+                step['retry'] = {
+                    'automatic': False,
+                    'manual': {
+                        'allowed': True
                     }
                 }
-                if no_auto_retry:
-                    # Disable automatic retries but allow manual retries.
-                    step['retry'] = {
-                        'automatic': False,
-                        'manual': {
-                            'allowed': True
-                        }
-                    }
-                else:
-                    step['retry'] = {
-                        # Automatically retry 2 times on any failure.
-                        'automatic': True
-                    }
-                steps.append(step)
-
-            generated_steps_set.add(base_label)
+            else:
+                step['retry'] = {
+                    # Automatically retry 2 times on any failure.
+                    'automatic': True
+                }
+            steps.append(step)
+            generated_steps_set.add(label)
     return {'steps': steps}
 
 
