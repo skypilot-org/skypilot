@@ -337,9 +337,7 @@ def _extract_marked_tests(
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str,
-                       args: str,
-                       auto_retry: bool = False) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
@@ -377,21 +375,19 @@ def _generate_pipeline(test_file: str,
                         'queue': queue
                     }
                 }
-                if auto_retry:
-                    if no_auto_retry:
-                        # Test is marked with @pytest.mark.no_auto_retry:
-                        # Disable automatic retries but allow manual retries.
-                        step['retry'] = {
-                            'automatic': False,
-                            'manual': {
-                                'allowed': True
-                            }
+                if no_auto_retry:
+                    # Disable automatic retries but allow manual retries.
+                    step['retry'] = {
+                        'automatic': False,
+                        'manual': {
+                            'allowed': True
                         }
-                    else:
-                        step['retry'] = {
-                            # Automatically retry 2 times on any failure.
-                            'automatic': True
-                        }
+                    }
+                else:
+                    step['retry'] = {
+                        # Automatically retry 2 times on any failure.
+                        'automatic': True
+                    }
                 steps.append(step)
 
             generated_steps_set.add(base_label)
@@ -441,7 +437,7 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+        pipeline = _generate_pipeline(test_file, args)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
@@ -512,11 +508,10 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
                         branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
-                                              args + f' --base-branch {branch}',
-                                              auto_retry=True)
+                                              args + f' --base-branch {branch}')
                 output_file_pipelines.append(pipeline)
         else:
-            pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+            pipeline = _generate_pipeline(test_file, args)
             output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
