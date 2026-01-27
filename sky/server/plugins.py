@@ -232,21 +232,6 @@ def _load_plugin_config() -> Optional[config_utils.Config]:
     return config_utils.Config.from_dict(config)
 
 
-def get_plugin_packages() -> List[Dict[str, Any]]:
-    """Get the list of plugin packages with their configurations.
-
-    Returns:
-        A list of dictionaries containing plugin configurations, each with
-        at least 'class' and optionally 'parameters'.
-    """
-    config = _load_plugin_config()
-    if not config:
-        return []
-
-    plugin_configs = config.get('plugins', [])
-    return [dict(p) for p in plugin_configs]
-
-
 def _load_remote_plugin_config() -> Optional[config_utils.Config]:
     """Load remote plugin config from remote_plugins.yaml."""
     config_path = os.getenv(_REMOTE_PLUGINS_CONFIG_ENV_VAR,

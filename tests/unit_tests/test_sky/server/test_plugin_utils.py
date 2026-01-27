@@ -10,34 +10,6 @@ from sky.server import plugin_utils
 from sky.server import plugins
 
 
-def test_get_plugin_packages(monkeypatch, tmp_path):
-    """Test get_plugin_packages returns plugin configurations."""
-    config = {
-        'plugins': [
-            {
-                'class': 'module1.Plugin1',
-            },
-            {
-                'class': 'module2.Plugin2',
-                'parameters': {
-                    'param': 'value'
-                },
-            },
-        ]
-    }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-    packages = plugins.get_plugin_packages()
-
-    assert len(packages) == 2
-    assert packages[0]['class'] == 'module1.Plugin1'
-    assert 'upload_to_controller' not in packages[0]
-    assert packages[1]['class'] == 'module2.Plugin2'
-    assert 'upload_to_controller' not in packages[1]
-
-
 def test_get_remote_plugin_packages(monkeypatch, tmp_path):
     """Test get_remote_plugin_packages returns remote plugin configurations."""
     remote_config = {

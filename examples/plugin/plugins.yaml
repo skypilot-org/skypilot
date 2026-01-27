@@ -1,7 +1,3 @@
-# Plugins for the API server only.
-# Plugins specified here will only be loaded on the API server.
-# To upload plugins to remote controllers (jobs controller, serve controller),
-# use remote_plugins.yaml instead.
 plugins:
 - class: example_plugin.ExamplePlugin
 - class: example_plugin.ExampleParameterizedPlugin
@@ -9,3 +5,4 @@ plugins:
     message: "Message from parameters"
 - class: example_plugin.ExampleMiddlewarePlugin
 - class: example_plugin.ExampleBackgroundTaskPlugin
+- class: example_plugin.ExamplePatchPlugin
