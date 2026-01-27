@@ -18,6 +18,7 @@ const PluginContext = createContext({
   components: {},
   dataEnhancements: {},
   tableColumns: {},
+  dataProviders: {},
 });
 
 const initialState = {
@@ -26,6 +27,7 @@ const initialState = {
   components: {}, // Map of slot name → array of component configs
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
+  dataProviders: {}, // Map of provider id → provider config (with useHook)
 };
 
 const actions = {
@@ -34,6 +36,7 @@ const actions = {
   REGISTER_COMPONENT: 'REGISTER_COMPONENT',
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
+  REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
 };
 
 function pluginReducer(state, action) {
@@ -108,6 +111,14 @@ function pluginReducer(state, action) {
         },
       };
     }
+    case actions.REGISTER_DATA_PROVIDER:
+      return {
+        ...state,
+        dataProviders: {
+          ...state.dataProviders,
+          [action.payload.id]: action.payload,
+        },
+      };
     default:
       return state;
   }
@@ -395,6 +406,114 @@ function normalizeTableColumn(config) {
   };
 }
 
+/**
+ * Normalizes a URL by stripping credentials and ensuring it's safe for history API.
+ * This prevents SecurityError when the current URL has credentials but the target URL doesn't.
+ * Relative URLs are returned as-is since they're safe for history API.
+ * @param {string} url - The URL to normalize
+ * @returns {string} Normalized URL without credentials, or the original URL if it's relative or invalid
+ */
+function normalizeUrlForHistory(url) {
+  if (!url || typeof url !== 'string') {
+    return url;
+  }
+
+  // If it's a relative URL (starts with / or is a path), keep it relative
+  // Relative URLs are safe for history API and don't need normalization
+  if (
+    url.startsWith('/') ||
+    (!url.startsWith('http://') && !url.startsWith('https://'))
+  ) {
+    return url;
+  }
+
+  try {
+    // Parse the absolute URL
+    const urlObj = new URL(url);
+
+    // Strip credentials from the URL
+    urlObj.username = '';
+    urlObj.password = '';
+
+    // Return the normalized URL
+    return urlObj.toString();
+  } catch (error) {
+    // If URL parsing fails, return the original URL
+    console.warn('[SkyDashboardPlugin] Failed to normalize URL:', url, error);
+    return url;
+  }
+}
+
+/**
+ * Intercepts history.pushState and history.replaceState to normalize URLs.
+ * This prevents SecurityError when URLs contain credentials.
+ */
+function interceptHistoryApi() {
+  if (typeof window === 'undefined' || !window.history) {
+    return;
+  }
+
+  // Store original methods
+  const originalPushState = window.history.pushState;
+  const originalReplaceState = window.history.replaceState;
+
+  // Override pushState
+  window.history.pushState = function (state, title, url) {
+    let normalizedUrl = url;
+    if (url && typeof url === 'string') {
+      normalizedUrl = normalizeUrlForHistory(url);
+    }
+    try {
+      return originalPushState.call(this, state, title, normalizedUrl);
+    } catch (error) {
+      // If pushState still fails (e.g., due to origin mismatch), try with a relative URL
+      if (
+        error.name === 'SecurityError' &&
+        normalizedUrl &&
+        typeof normalizedUrl === 'string'
+      ) {
+        try {
+          const urlObj = new URL(normalizedUrl, window.location.href);
+          const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
+          return originalPushState.call(this, state, title, relativeUrl);
+        } catch {
+          // If that also fails, rethrow the original error
+          throw error;
+        }
+      }
+      throw error;
+    }
+  };
+
+  // Override replaceState
+  window.history.replaceState = function (state, title, url) {
+    let normalizedUrl = url;
+    if (url && typeof url === 'string') {
+      normalizedUrl = normalizeUrlForHistory(url);
+    }
+    try {
+      return originalReplaceState.call(this, state, title, normalizedUrl);
+    } catch (error) {
+      // If replaceState still fails (e.g., due to origin mismatch), try with a relative URL
+      if (
+        error.name === 'SecurityError' &&
+        normalizedUrl &&
+        typeof normalizedUrl === 'string'
+      ) {
+        try {
+          const urlObj = new URL(normalizedUrl, window.location.href);
+          const relativeUrl = urlObj.pathname + urlObj.search + urlObj.hash;
+          return originalReplaceState.call(this, state, title, relativeUrl);
+        } catch {
+          // If that also fails, rethrow the original error
+          throw error;
+        }
+      }
+      throw error;
+    }
+  };
+}
+
 function createPluginApi(dispatch) {
   return {
     registerTopNavLink(link) {
@@ -485,7 +604,29 @@ function createPluginApi(dispatch) {
           checkGrafanaAvailability,
           getGrafanaUrl,
         },
+        // Provide URL normalization utility for plugins
+        normalizeUrl: normalizeUrlForHistory,
       };
+    },
+    registerDataProvider(config) {
+      if (!config?.id) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid data provider: missing id',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        name: config.name || config.id,
+        useHook: config.useHook,
+      };
+      dispatch({
+        type: actions.REGISTER_DATA_PROVIDER,
+        payload: normalized,
+      });
+      console.log('[SkyDashboardPlugin] Registered data provider:', config.id);
+      return config.id;
     },
   };
 }
@@ -509,6 +650,10 @@ export function PluginProvider({ children }) {
     if (typeof window === 'undefined') {
       return;
     }
+
+    // Intercept history API to normalize URLs and prevent SecurityError
+    // when URLs contain credentials
+    interceptHistoryApi();
 
     let cancelled = false;
     const api = createPluginApi(dispatch);
@@ -660,7 +805,12 @@ export function useTableColumns(tableName, context = {}) {
       }
       return true;
     });
-  }, [tableName, tableColumns, JSON.stringify(context)]);
+  }, [tableName, tableColumns, context]);
+}
+
+export function useDataProvider(id) {
+  const { dataProviders } = usePluginState();
+  return dataProviders[id] || null;
 }
 
 /**
@@ -726,11 +876,5 @@ export function useMergedTableColumns(
     });
 
     return visibleColumns;
-  }, [
-    tableName,
-    baseColumns,
-    pluginColumns,
-    transformPluginColumn,
-    JSON.stringify(context),
-  ]);
+  }, [baseColumns, pluginColumns, transformPluginColumn, context]);
 }

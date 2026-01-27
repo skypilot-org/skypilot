@@ -155,7 +155,11 @@ TASK_OPTIONS = [
         node.
 
         If any values from ``--env-file`` conflict with values set by
-        ``--env``, the ``--env`` value will be preferred."""),
+        ``--env``, the ``--env`` value will be preferred.
+
+        Values from ``--env-file`` will also load to secrets with lower
+        preference compared to ``--secret`` or ``--secret-file``.
+        """),
     click.option(
         '--env',
         required=False,
@@ -175,6 +179,16 @@ TASK_OPTIONS = [
 
         3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
         same value of ``$MY_ENV3`` in the local environment.""",
+    ),
+    click.option(
+        '--secret-file',
+        required=False,
+        type=dotenv.dotenv_values,
+        help="""\
+        Path to a dotenv file with secret variables to set on the remote node.
+
+        If any values from ``--secret-file`` conflict with values set by
+        ``--secret``, the ``--secret`` value will be preferred.""",
     ),
     click.option(
         '--secret',
