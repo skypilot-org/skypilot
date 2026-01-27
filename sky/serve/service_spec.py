@@ -399,8 +399,6 @@ class SkyServiceSpec:
         add_if_not_none('pool', None, self._pool)
 
         if self.pool:
-            # For pool, serialize workers and autoscaling config
-            add_if_not_none('pool', 'workers', self.min_replicas)
             if self.max_replicas is not None:
                 add_if_not_none('pool', 'max_workers', self.max_replicas)
                 add_if_not_none('pool', 'queue_length_threshold',
@@ -410,6 +408,8 @@ class SkyServiceSpec:
                                 self.upscale_delay_seconds)
                 add_if_not_none('pool', 'downscale_delay_seconds',
                                 self.downscale_delay_seconds)
+            else:
+                add_if_not_none('pool', 'workers', self.min_replicas)
             return config
 
         add_if_not_none('readiness_probe', 'path', self.readiness_path)
