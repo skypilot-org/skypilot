@@ -1,3 +1,4 @@
+"""Tests for loopback detection functionality."""
 import unittest.mock as mock
 
 import fastapi
@@ -45,46 +46,66 @@ class TestLoopbackDetection:
         request.client.host = '192.168.1.100'
         assert not is_loopback_request(request)
 
-    def test_is_loopback_request_rejects_proxy_headers(self):
-        """Test that requests with proxy headers are rejected (security)."""
+    def test_is_loopback_request_with_forwarded_headers(self):
+        """Test loopback detection with forwarding headers."""
         request = mock.Mock(spec=fastapi.Request)
         request.client = mock.Mock()
         request.client.host = '127.0.0.1'
 
-        # Even with loopback client, should reject if proxy headers present
-        request.headers = Headers({'X-Forwarded-For': '127.0.0.1, 192.168.1.1'})
-        assert not is_loopback_request(request)
+        # Loopback client with loopback forwarded IP should pass
+        request.headers = Headers({'X-Forwarded-For': '127.0.0.1'})
+        assert is_loopback_request(request)
 
-        # Different proxy header
+        # Loopback client with external forwarded IP should be rejected
         request.headers = Headers({'X-Real-IP': '1.2.3.4'})
         assert not is_loopback_request(request)
 
-    @pytest.mark.parametrize("headers_dict", [
-        {
-            'X-Forwarded-Proto': 'https'
-        },
-        {
-            'Forwarded': 'for=127.0.0.1'
-        },
-        {
-            'X-Client-IP': '127.0.0.1'
-        },
-        {
-            'X-Forwarded-Host': 'example.com'
-        },
-    ])
-    def test_is_loopback_request_rejects_all_proxy_traffic(self, headers_dict):
-        """Test that any proxy headers cause rejection (security feature)."""
+        # X-Forwarded-For with multiple IPs - first IP is original client
+        # If first IP is loopback, should pass
+        request.headers = Headers({'X-Forwarded-For': '127.0.0.1, 192.168.1.1'})
+        assert is_loopback_request(request)
+
+        # If first IP is external, should be rejected
+        request.headers = Headers({'X-Forwarded-For': '192.168.1.1, 127.0.0.1'})
+        assert not is_loopback_request(request)
+
+    @pytest.mark.parametrize(
+        'headers_dict,should_pass',
+        [
+            # Headers without client IP info don't affect loopback decision
+            ({
+                'X-Forwarded-Proto': 'https'
+            }, True),
+            ({
+                'X-Forwarded-Host': 'example.com'
+            }, True),
+            # Forwarded header (RFC 7239) - not parsed, treated as no IP info
+            ({
+                'Forwarded': 'for=127.0.0.1'
+            }, True),
+            # X-Client-IP with loopback should pass
+            ({
+                'X-Client-IP': '127.0.0.1'
+            }, True),
+            # X-Client-IP with external IP should be rejected
+            ({
+                'X-Client-IP': '192.168.1.1'
+            }, False),
+        ])
+    def test_is_loopback_request_with_various_headers(self, headers_dict,
+                                                      should_pass):
+        """Test loopback detection with various header combinations."""
         request = mock.Mock(spec=fastapi.Request)
         request.client = mock.Mock()
         request.client.host = '127.0.0.1'
 
         request.headers = Headers(headers_dict)
 
-        assert not is_loopback_request(
-            request), f"Should reject request with proxy headers {headers_dict}"
+        result = is_loopback_request(request)
+        assert result == should_pass, (
+            f'Headers {headers_dict}: expected {should_pass}, got {result}')
 
-    @pytest.mark.parametrize("headers_dict", [
+    @pytest.mark.parametrize('headers_dict', [
         {
             'x-forwarded-for': '203.0.113.1'
         },
@@ -101,15 +122,16 @@ class TestLoopbackDetection:
             'X-Real-IP': '203.0.113.1'
         },
     ])
-    def test_is_loopback_request_case_insensitive_headers(self, headers_dict):
-        """Test that proxy header detection is case-insensitive."""
+    def test_is_loopback_request_rejects_external_forwarded_ip(
+            self, headers_dict):
+        """Test that requests forwarded from external IPs are rejected."""
         request = mock.Mock(spec=fastapi.Request)
         request.client = mock.Mock()
         request.client.host = '127.0.0.1'
 
         request.headers = Headers(headers_dict)
         assert not is_loopback_request(
-            request), f"Should reject request with headers {headers_dict}"
+            request), 'Should reject request with external forwarded IP'
 
     def test_is_loopback_request_no_client(self):
         """Test loopback detection when client is None."""
