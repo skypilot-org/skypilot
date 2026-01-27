@@ -685,7 +685,7 @@ def get_service_schema():
             },
             'pool': {
                 'type': 'object',
-                'required': ['workers'],
+                'required': [],
                 'additionalProperties': False,
                 'properties': {
                     'workers': {

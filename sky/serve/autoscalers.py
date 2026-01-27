@@ -1151,10 +1151,8 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
     def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
                        update_mode: serve_utils.UpdateMode) -> None:
         super().update_version(version, spec, update_mode)
-        # Update threshold, using default if not specified
-        self.queue_length_threshold = (spec.queue_length_threshold if
-                                       spec.queue_length_threshold is not None
-                                       else self.queue_length_threshold)
+        # Update threshold.
+        self.queue_length_threshold = spec.queue_length_threshold
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:

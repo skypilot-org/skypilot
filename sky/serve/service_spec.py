@@ -72,9 +72,6 @@ class SkyServiceSpec:
                 if locals()[unsupported_field] is not None:
                     with ux_utils.print_exception_no_traceback():
                         error_msg = (
-                            f'{unsupported_field} is not supported for pool. '
-                            'For pools use max_workers instead of max_replicas.'
-                            if unsupported_field == 'max_replicas' else
                             f'{unsupported_field} is not supported for pool.')
                         raise ValueError(error_msg)
 
@@ -220,7 +217,8 @@ class SkyServiceSpec:
         if policy_section is not None and pool_config:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify `replica_policy` for cluster '
-                                 'pool. Only `workers: <num>` is supported '
+                                 'pool. Only `workers: <num>` or `min_workers: '
+                                 '<num> <max_workers: <num>` is supported '
                                  'for pool now.')
 
         simplified_policy_section = config.get('replicas', None)
@@ -250,6 +248,14 @@ class SkyServiceSpec:
             pool_upscale_delay = pool_config.get('upscale_delay_seconds', None)
             pool_downscale_delay = pool_config.get('downscale_delay_seconds',
                                                    None)
+            # Validate: one of workers or max_workers and min_workers must be 
+            # set.
+            if (pool_min_workers is None and pool_max_workers is None and
+                workers_config is None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'One of workers, or both min_workers and max_workers'
+                        ' must be set for pool autoscaling.')
             # Validate: if queue_length_threshold is set, max_workers must also
             # be set
             if queue_length_threshold is not None and pool_max_workers is None:
