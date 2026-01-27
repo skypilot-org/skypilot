@@ -438,7 +438,13 @@ def pytest_collection_modifyitems(config, items):
     if config.option.collectonly:
         for item in items:
             full_name = item.nodeid
-            marks = [mark.name for mark in item.iter_markers()]
+            marks = []
+            for mark in item.iter_markers():
+                # Include arguments for markers like run_multiple(3)
+                if mark.args:
+                    marks.append(f'{mark.name}({mark.args[0]})')
+                else:
+                    marks.append(mark.name)
             print(f"Collected {full_name} with marks: {marks}")
 
 

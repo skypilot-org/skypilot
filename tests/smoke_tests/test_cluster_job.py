@@ -1994,6 +1994,8 @@ def test_kubernetes_pod_failure_detection():
 
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
+@pytest.mark.run_multiple(3)
+@pytest.mark.no_auto_retry
 def test_kubernetes_container_status_unknown_status_refresh():
     """Test sky status --refresh handles evicted pods without crashing.
 
