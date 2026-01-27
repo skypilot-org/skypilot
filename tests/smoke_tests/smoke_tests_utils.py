@@ -49,7 +49,7 @@ from sky.utils import yaml_utils
 # different job id.
 test_id = str(uuid.uuid4())[-2:]
 
-LAMBDA_TYPE = '--infra lambda --gpus A10'
+LAMBDA_TYPE = '--infra lambda --gpus A100'
 FLUIDSTACK_TYPE = '--infra fluidstack --gpus RTXA4000'
 
 SCP_TYPE = '--infra scp'
