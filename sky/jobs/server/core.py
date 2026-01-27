@@ -419,12 +419,19 @@ def _submit_remotely(controller: controller_utils.Controllers,
     task_ids = []
     task_names = []
     metadata_jsons = []
+    is_primary_in_job_groups = []
     for task_id, task in enumerate(dag.tasks):
         task_ids.append(task_id)
         assert task.name is not None, 'task name is not set'
         task_names.append(task.name)
         assert task.metadata_json is not None, 'task metadata is not set'
         metadata_jsons.append(task.metadata_json)
+        if dag.is_job_group():
+            is_primary_in_job_group = (dag.primary_tasks is None or
+                                       task.name in dag.primary_tasks)
+            is_primary_in_job_groups.append(is_primary_in_job_group)
+        else:
+            is_primary_in_job_groups.append(False)
 
     # Use the same resources_str for all tasks
     resources_str = backend_utils.get_task_resources_str(dag.tasks[0],
@@ -433,19 +440,21 @@ def _submit_remotely(controller: controller_utils.Controllers,
     assert dag.name is not None, 'dag name is not set'
     execution_mode = (dag.execution.value
                       if dag.execution else DEFAULT_EXECUTION.value)
-    job_ids = backend.set_job_info_without_job_id(handle=local_handle,
-                                                  name=dag.name,
-                                                  workspace=workspace,
-                                                  entrypoint=entrypoint,
-                                                  pool=pool,
-                                                  pool_hash=pool_hash,
-                                                  user_hash=user_hash,
-                                                  task_ids=task_ids,
-                                                  task_names=task_names,
-                                                  resources_str=resources_str,
-                                                  metadata_jsons=metadata_jsons,
-                                                  num_jobs=num_jobs,
-                                                  execution=execution_mode)
+    job_ids = backend.set_job_info_without_job_id(
+        handle=local_handle,
+        name=dag.name,
+        workspace=workspace,
+        entrypoint=entrypoint,
+        pool=pool,
+        pool_hash=pool_hash,
+        user_hash=user_hash,
+        task_ids=task_ids,
+        task_names=task_names,
+        resources_str=resources_str,
+        metadata_jsons=metadata_jsons,
+        num_jobs=num_jobs,
+        execution=execution_mode,
+        is_primary_in_job_groups=(is_primary_in_job_groups))
     return job_ids
 
 

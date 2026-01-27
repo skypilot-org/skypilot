@@ -1221,6 +1221,7 @@ class JobLibCodeGen:
                                     task_names: List[str],
                                     resources_str: str,
                                     metadata_jsons: List[str],
+                                    is_primary_in_job_groups: List[bool],
                                     execution: str,
                                     num_jobs: int = 1) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
@@ -1233,6 +1234,8 @@ class JobLibCodeGen:
         metadata_jsons_str = ('[' +
                               ','.join(f'{md!r}' for md in metadata_jsons) +
                               ']')
+        is_primary_in_job_groups_str = ('[' + ','.join(
+            str(is_primary) for is_primary in is_primary_in_job_groups) + ']')
         code = [
             '\nfrom sky.jobs import state as managed_job_state',
             f'\nnum_jobs = {num_jobs}',
@@ -1249,13 +1252,14 @@ class JobLibCodeGen:
             f'pool={pool_str},'
             f'pool_hash={pool_hash_str},'
             f'user_hash={user_hash_str},'
-            f'execution={execution!r})',
+            f'execution={execution!r},'
+            f'is_primary_in_job_groups={is_primary_in_job_groups_str})',
             '\n  job_ids.append(job_id)',
             '\n  # Set pending state for all tasks',
-            '\n  for task_id, task_name, metadata_json in zip('
-            '\n      task_ids, task_names, metadata_jsons):'
+            '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long
+            '\n      task_ids, task_names, metadata_jsons, is_primary_in_job_groups):'  # pylint: disable=line-too-long
             '\n    managed_job_state.set_pending('
-            '\n      job_id, task_id, task_name, resources_str, metadata_json)',
+            '\n      job_id, task_id, task_name, resources_str, metadata_json, is_primary_in_job_group)',  # pylint: disable=line-too-long
             '\nprint("Job IDs: " + ",".join(map(str, job_ids)), flush=True)',
         ]
         return cls._build(code)

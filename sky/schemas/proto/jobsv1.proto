@@ -196,6 +196,7 @@ message SetJobInfoWithoutJobIdRequest {
   repeated string metadata_jsons = 10;
   int32 num_jobs = 11;
   string execution = 12;
+  repeated bool is_primary_in_job_groups = 13;
 }
 
 message SetJobInfoWithoutJobIdResponse {

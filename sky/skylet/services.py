@@ -226,14 +226,17 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
             user_hash = request.user_hash if request.HasField(
                 'user_hash') else None
             job_ids = []
-            for _ in range(request.num_jobs):
+            execution = request.execution
+            for i in range(request.num_jobs):
+                is_primary_in_job_group = request.is_primary_in_job_groups[i]
                 job_id = managed_job_state.set_job_info_without_job_id(
                     name=request.name,
                     workspace=request.workspace,
                     entrypoint=request.entrypoint,
                     pool=pool,
                     pool_hash=pool_hash,
-                    user_hash=user_hash)
+                    user_hash=user_hash,
+                    execution=execution)
                 job_ids.append(job_id)
                 # Set pending state for all tasks
                 for task_id, task_name, metadata_json in zip(
@@ -241,7 +244,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                         request.metadata_jsons):
                     managed_job_state.set_pending(job_id, task_id, task_name,
                                                   request.resources_str,
-                                                  metadata_json)
+                                                  metadata_json,
+                                                  is_primary_in_job_group)
             return jobsv1_pb2.SetJobInfoWithoutJobIdResponse(job_ids=job_ids)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
