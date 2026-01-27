@@ -849,7 +849,22 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Note: We retry this command because the background status refresh
+            # daemon may cause lock contention, resulting in cached status being
+            # returned instead of the expected warning message.
+            (f'start_time=$SECONDS; '
+             f'while true; do '
+             f'if (( $SECONDS - $start_time > 120 )); then '
+             f'  echo "Timeout after 120 seconds waiting for Failed getting cluster status message"; exit 1; '
+             f'fi; '
+             f's=$(sky status -r {name}); '
+             f'echo "$s"; '
+             f'if echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."; then '
+             f'  echo "Got expected warning message"; break; '
+             f'fi; '
+             f'echo "Retrying sky status -r in 10 seconds..."; '
+             f'sleep 10; '
+             f'done'),
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
@@ -1039,25 +1054,13 @@ def test_cluster_labels_in_status(generic_cloud: str):
                 cluster_record = cluster
                 break
 
-        if cluster_record is None:
-            yield f'Cluster {name} not found in status'
-            return
-
-        if 'labels' not in cluster_record:
-            yield 'labels field missing from cluster record'
-            return
-
-        if cluster_record['labels'] is None:
-            yield 'labels field is None'
-            return
-
-        if cluster_record['labels'] != expected_labels:
-            yield (f"Expected labels {expected_labels}, "
-                   f"got {cluster_record['labels']}")
-            return
-
-        # Success - labels are correct
-        return
+        assert cluster_record is not None, f'Cluster {name} not found in status'
+        assert 'labels' in cluster_record, (
+            'labels field missing from cluster record')
+        assert cluster_record['labels'] is not None, 'labels field is None'
+        assert cluster_record['labels'] == expected_labels, (
+            f'Expected labels {expected_labels}, '
+            f'got {cluster_record["labels"]}')
 
     # Create YAML with labels
     yaml_content = textwrap.dedent("""\
@@ -1140,8 +1143,10 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
-            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
-                                                                name=name))
+            job_ids, handle = sky.stream_and_get(
+                sky.jobs.launch(task, name=name))
+            assert len(job_ids) == 1
+            job_id = job_ids[0]
             assert handle is not None
             # Check the job status from the dashboard
             queue_request_id = (
@@ -1437,13 +1442,13 @@ def test_kubernetes_context_failover(unreachable_context):
                 'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
                 '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
                 'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
-                'sky show-gpus --infra kubernetes/kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
+                'output=$(sky show-gpus --infra kubernetes/kind-skypilot) && echo "$output" && echo "$output" | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
                 # H100 should not be in the current context
-                f'! sky show-gpus --infra kubernetes/{context} | grep H100',
+                f'output=$(sky show-gpus --infra kubernetes/{context}) && echo "$output" && ! echo "$output" | grep H100',
                 # H100 should be displayed as long as it is available in one of the contexts
-                'sky show-gpus --infra kubernetes | grep H100',
+                'output=$(sky show-gpus --infra kubernetes) && echo "$output" && echo "$output" | grep H100',
                 f'sky launch -y -c {name}-1 --cpus 1 echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
@@ -1458,7 +1463,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 # It should be launched on kind-skypilot
                 f'sky status -v {name}-3 | grep "kind-skypilot"',
                 # Should be 7 free GPUs
-                f'sky show-gpus --infra kubernetes/kind-skypilot | grep H100 | grep "  7"',
+                f'output=$(sky show-gpus --infra kubernetes/kind-skypilot) && echo "$output" && echo "$output" | grep H100 | grep "  7"',
                 # Remove the line with "kind-skypilot"
                 f'sed -i "/kind-skypilot/d" {f.name}',
                 f'export KUBECONFIG={f.name}',

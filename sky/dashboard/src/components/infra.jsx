@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CircularProgress } from '@mui/material';
 import { Layout } from '@/components/elements/layout';
 import {
+  AlertTriangleIcon,
   RotateCwIcon,
   SearchIcon,
   XIcon,
@@ -151,6 +152,16 @@ const GpuUtilizationBar = ({
   );
 };
 
+// Skeleton badge for loading cells - replaces CircularProgress size={12}
+const SkeletonBadge = () => (
+  <span className="px-2 py-0.5 bg-muted rounded text-xs font-medium inline-flex items-center">
+    <span
+      className="infra-skeleton-text"
+      style={{ width: '20px', height: '12px' }}
+    />
+  </span>
+);
+
 // Reusable component for infrastructure sections (SSH Node Pool or Kubernetes)
 export function InfrastructureSection({
   title,
@@ -216,6 +227,16 @@ export function InfrastructureSection({
     );
   }
 
+  // Determine if table should show refreshing state
+  // For K8s: show during loading or when contexts haven't all loaded yet
+  // For SSH/Slurm: only show during loading
+  const isTableRefreshing =
+    !isInitialLoad &&
+    (isLoading ||
+      (!(isSlurm || isSSH) &&
+        safeContexts.length > 0 &&
+        !safeContexts.every((c) => loadedContexts.has(c))));
+
   // Show table if we have contexts to display, even if some data is still loading
   if (safeContexts.length > 0) {
     return (
@@ -243,7 +264,11 @@ export function InfrastructureSection({
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+              <div
+                className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
+                  isTableRefreshing ? 'infra-table-refreshing' : ''
+                }`}
+              >
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-50">
                     <tr>
@@ -349,32 +374,47 @@ export function InfrastructureSection({
                           : '';
 
                       return (
-                        <tr key={context} className="hover:bg-gray-50">
+                        <tr
+                          key={context}
+                          className={`hover:bg-muted/50 ${
+                            !hasGpuData && !isInitialLoad
+                              ? 'infra-loading-row'
+                              : ''
+                          }`}
+                        >
                           <td className="p-3">
-                            <NonCapitalizedTooltip
-                              content={`${displayName}${workspaceDisplay}`}
-                              className="text-sm text-muted-foreground"
-                            >
-                              <span
-                                className="text-blue-600 hover:underline cursor-pointer"
-                                onClick={() => handleContextClick(context)}
+                            <div className="flex items-center gap-1.5">
+                              <NonCapitalizedTooltip
+                                content={`${displayName}${workspaceDisplay}`}
+                                className="text-sm text-muted-foreground"
                               >
-                                {displayName.length > NAME_TRUNCATE_LENGTH
-                                  ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
-                                  : displayName}
-                                {workspaceDisplay && (
-                                  <span className="text-xs text-gray-500 ml-1">
-                                    {workspaceDisplay}
-                                  </span>
-                                )}
-                              </span>
-                            </NonCapitalizedTooltip>
+                                <span
+                                  className="text-blue-600 hover:underline cursor-pointer"
+                                  onClick={() => handleContextClick(context)}
+                                >
+                                  {displayName.length > NAME_TRUNCATE_LENGTH
+                                    ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
+                                    : displayName}
+                                  {workspaceDisplay && (
+                                    <span className="text-xs text-gray-500 ml-1">
+                                      {workspaceDisplay}
+                                    </span>
+                                  )}
+                                </span>
+                              </NonCapitalizedTooltip>
+                              {contextErrors[context] && (
+                                <NonCapitalizedTooltip
+                                  content={`Context unreachable: ${contextErrors[context]}`}
+                                  className="text-sm text-muted-foreground"
+                                >
+                                  <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                                </NonCapitalizedTooltip>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
                             {isClusterDataLoading ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {stats.clusters}
@@ -383,9 +423,7 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {isJobsDataLoading ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {jobsData[contextStatsKey]?.jobs || 0}
@@ -394,33 +432,17 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {!hasNodeData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
-                              <span
-                                className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                  contextErrors[context]
-                                    ? 'bg-yellow-100 text-yellow-800'
-                                    : 'bg-gray-100 text-gray-500'
-                                }`}
-                                title={
-                                  contextErrors[context]
-                                    ? contextErrors[context]
-                                    : ''
-                                }
-                              >
+                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {nodes.length}
-                                {contextErrors[context] ? '*' : ''}
                               </span>
                             )}
                           </td>
                           {!isSlurm && (
                             <td className="p-3">
                               {!hasNodeData ? (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  <CircularProgress size={12} />
-                                </span>
+                                <SkeletonBadge />
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   {formatCpu(aggregatedCpu)}
@@ -431,9 +453,7 @@ export function InfrastructureSection({
                           {!isSlurm && (
                             <td className="p-3">
                               {!hasNodeData ? (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                  <CircularProgress size={12} />
-                                </span>
+                                <SkeletonBadge />
                               ) : (
                                 <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                   {formatMemory(aggregatedMemory)}
@@ -443,9 +463,7 @@ export function InfrastructureSection({
                           )}
                           <td className="p-3">
                             {!hasGpuData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {gpuTypes || '-'}
@@ -454,9 +472,7 @@ export function InfrastructureSection({
                           </td>
                           <td className="p-3">
                             {!hasGpuData ? (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                                <CircularProgress size={12} />
-                              </span>
+                              <SkeletonBadge />
                             ) : (
                               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                                 {totalGpus}
@@ -472,7 +488,11 @@ export function InfrastructureSection({
             </div>
             {gpus && gpus.length > 0 && (
               <div>
-                <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+                <div
+                  className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
+                    isTableRefreshing ? 'infra-table-refreshing' : ''
+                  }`}
+                >
                   <table className="min-w-full text-sm">
                     <thead className="bg-gray-50">
                       <tr>
@@ -558,6 +578,7 @@ export function ContextDetails({
   gpusInContext,
   nodesInContext,
   gpuMetricsRefreshTrigger = 0,
+  isSlurm = false,
 }) {
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
@@ -689,209 +710,220 @@ export function ContextDetails({
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold">Available GPUs</h4>
+            <h4 className="text-lg font-semibold">Nodes</h4>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            {gpusInContext.map((gpu) => {
-              return (
-                <div
-                  key={gpu.gpu_name}
-                  className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
-                >
-                  <div className="flex justify-between items-center mb-1.5 flex-wrap">
-                    <div className="font-medium text-gray-800 text-sm">
-                      {gpu.gpu_name}
-                      <span className="text-xs text-gray-500 ml-2">
-                        (Requestable: {gpu.gpu_requestable_qty_per_node} / node)
-                      </span>
+          {gpusInContext.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-base font-semibold mb-3">Available GPUs</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {gpusInContext.map((gpu) => {
+                  return (
+                    <div
+                      key={gpu.gpu_name}
+                      className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
+                    >
+                      <div className="flex justify-between items-center mb-1.5 flex-wrap">
+                        <div className="font-medium text-gray-800 text-sm">
+                          {gpu.gpu_name}
+                          <span className="text-xs text-gray-500 ml-2">
+                            (Requestable: {gpu.gpu_requestable_qty_per_node} /
+                            node)
+                          </span>
+                        </div>
+                        <span className="text-xs font-medium">
+                          {gpu.gpu_free} free / {gpu.gpu_total} total
+                        </span>
+                      </div>
+                      <div className="w-full">
+                        <GpuUtilizationBar
+                          gpu={gpu}
+                          heightClass="h-4"
+                          wrapperClassName="w-full"
+                        />
+                      </div>
                     </div>
-                    <span className="text-xs font-medium">
-                      {gpu.gpu_free} free / {gpu.gpu_total} total
-                    </span>
-                  </div>
-                  <div className="w-full">
-                    <GpuUtilizationBar
-                      gpu={gpu}
-                      heightClass="h-4"
-                      wrapperClassName="w-full"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {nodesInContext && nodesInContext.length > 0 && (
-            <>
-              <h4 className="text-lg font-semibold mb-4">Nodes</h4>
-              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Node
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        IP Address
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        vCPU
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Memory (GB)
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        GPU
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        GPU Utilization
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Node Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {nodesInContext.map((node, index) => {
-                      // Format CPU display: "X of Y free" or just "Y" if free is unknown
-                      let cpuDisplay = '-';
-                      if (
-                        node.cpu_count !== null &&
-                        node.cpu_count !== undefined
-                      ) {
-                        const cpuTotal = formatCpu(node.cpu_count);
-                        if (
-                          node.cpu_free !== null &&
-                          node.cpu_free !== undefined
-                        ) {
-                          const cpuFree = formatCpu(node.cpu_free);
-                          cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
-                        } else {
-                          cpuDisplay = cpuTotal;
-                        }
-                      }
-
-                      // Format memory display: "X of Y free" or just "Y" if free is unknown
-                      // (GB is in column header, so don't include it in values)
-                      let memoryDisplay = '-';
-                      if (
-                        node.memory_gb !== null &&
-                        node.memory_gb !== undefined
-                      ) {
-                        const memoryTotal = node.memory_gb.toFixed(1);
-                        if (
-                          node.memory_free_gb !== null &&
-                          node.memory_free_gb !== undefined
-                        ) {
-                          const memoryFree = node.memory_free_gb.toFixed(1);
-                          memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
-                        } else {
-                          memoryDisplay = memoryTotal;
-                        }
-                      }
-
-                      // Build utilization string
-                      const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
-
-                      // Build node status string
-                      const statusInfo = [];
-
-                      // Add not ready info
-                      if (node.is_ready === false) {
-                        statusInfo.push('NotReady');
-                      }
-
-                      // Add cordoned info
-                      if (node.is_cordoned === true) {
-                        statusInfo.push('Cordoned');
-                      }
-
-                      // Build taint info separately
-                      const taints = node.taints || [];
-                      let taintInfo = null;
-                      if (taints.length > 0) {
-                        const taintsByEffect = {};
-                        for (const taint of taints) {
-                          const effect = taint.effect;
-                          const key = taint.key;
-                          if (!taintsByEffect[effect]) {
-                            taintsByEffect[effect] = [];
-                          }
-                          taintsByEffect[effect].push(key);
-                        }
-                        const taintStrs = Object.entries(taintsByEffect).map(
-                          ([effect, keys]) =>
-                            `${effect} Taint [${keys.join(', ')}]`
-                        );
-                        if (taintStrs.length > 0) {
-                          taintInfo = taintStrs.join(', ');
-                        }
-                      }
-
-                      const nodeStatusStr =
-                        statusInfo.length > 0 || taintInfo
-                          ? statusInfo.join(', ')
-                          : 'Healthy';
-                      const isNodeHealthy =
-                        statusInfo.length === 0 && !taintInfo;
-
-                      return (
-                        <tr
-                          key={`${node.node_name}-${index}`}
-                          className="hover:bg-gray-50"
-                        >
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.node_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.ip_address || '-'}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {cpuDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {memoryDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.gpu_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {utilizationStr}
-                          </td>
-                          <td className="p-3 max-w-xs">
-                            <div className="flex flex-col gap-1.5">
-                              {nodeStatusStr && (
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
-                                    isNodeHealthy
-                                      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
-                                      : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
-                                  }`}
-                                >
-                                  {nodeStatusStr}
-                                </span>
-                              )}
-                              {taintInfo && (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
-                                  {taintInfo}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                  );
+                })}
               </div>
-            </>
+            </div>
           )}
 
-          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools */}
+          {nodesInContext.length > 0 && (
+            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      Node
+                    </th>
+                    {!isSlurm && (
+                      <>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          IP Address
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          vCPU
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Memory (GB)
+                        </th>
+                      </>
+                    )}
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      GPU
+                    </th>
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      GPU Utilization
+                    </th>
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      Node Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {nodesInContext.map((node, index) => {
+                    // Format CPU display: "X of Y free" or just "Y" if free is unknown
+                    let cpuDisplay = '-';
+                    if (
+                      node.cpu_count !== null &&
+                      node.cpu_count !== undefined
+                    ) {
+                      const cpuTotal = formatCpu(node.cpu_count);
+                      if (
+                        node.cpu_free !== null &&
+                        node.cpu_free !== undefined
+                      ) {
+                        const cpuFree = formatCpu(node.cpu_free);
+                        cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
+                      } else {
+                        cpuDisplay = cpuTotal;
+                      }
+                    }
+
+                    // Format memory display: "X of Y free" or just "Y" if free is unknown
+                    // (GB is in column header, so don't include it in values)
+                    let memoryDisplay = '-';
+                    if (
+                      node.memory_gb !== null &&
+                      node.memory_gb !== undefined
+                    ) {
+                      const memoryTotal = node.memory_gb.toFixed(1);
+                      if (
+                        node.memory_free_gb !== null &&
+                        node.memory_free_gb !== undefined
+                      ) {
+                        const memoryFree = node.memory_free_gb.toFixed(1);
+                        memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
+                      } else {
+                        memoryDisplay = memoryTotal;
+                      }
+                    }
+
+                    // Build utilization string
+                    const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
+
+                    // Build node status string
+                    const statusInfo = [];
+
+                    // Add not ready info
+                    if (node.is_ready === false) {
+                      statusInfo.push('NotReady');
+                    }
+
+                    // Add cordoned info
+                    if (node.is_cordoned === true) {
+                      statusInfo.push('Cordoned');
+                    }
+
+                    // Build taint info separately
+                    const taints = node.taints || [];
+                    let taintInfo = null;
+                    if (taints.length > 0) {
+                      const taintsByEffect = {};
+                      for (const taint of taints) {
+                        const effect = taint.effect;
+                        const key = taint.key;
+                        if (!taintsByEffect[effect]) {
+                          taintsByEffect[effect] = [];
+                        }
+                        taintsByEffect[effect].push(key);
+                      }
+                      const taintStrs = Object.entries(taintsByEffect).map(
+                        ([effect, keys]) =>
+                          `${effect} Taint [${keys.join(', ')}]`
+                      );
+                      if (taintStrs.length > 0) {
+                        taintInfo = taintStrs.join(', ');
+                      }
+                    }
+
+                    const nodeStatusStr =
+                      statusInfo.length > 0 || taintInfo
+                        ? statusInfo.join(', ')
+                        : 'Healthy';
+                    const isNodeHealthy = statusInfo.length === 0 && !taintInfo;
+
+                    return (
+                      <tr
+                        key={`${node.node_name}-${index}`}
+                        className="hover:bg-gray-50"
+                      >
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.node_name}
+                        </td>
+                        {!isSlurm && (
+                          <>
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {node.ip_address || '-'}
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {cpuDisplay}
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {memoryDisplay}
+                            </td>
+                          </>
+                        )}
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.gpu_name}
+                        </td>
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {utilizationStr}
+                        </td>
+                        <td className="p-3 max-w-xs">
+                          <div className="flex flex-col gap-1.5">
+                            {nodeStatusStr && (
+                              <span
+                                className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
+                                  isNodeHealthy
+                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
+                                    : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+                                }`}
+                              >
+                                {nodeStatusStr}
+                              </span>
+                            )}
+                            {taintInfo && (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                {taintInfo}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools or Slurm */}
           {isGrafanaAvailable &&
             gpusInContext &&
             gpusInContext.length > 0 &&
-            !isSSHContext && (
+            !isSSHContext &&
+            !isSlurm && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
 
@@ -2112,42 +2144,52 @@ export function GPUs() {
         const gpuDataPromise = forceRefresh
           ? getContextGPUData(context)
           : dashboardCache.get(getContextGPUData, [context]);
-        gpuDataPromise.then((gpuData) => {
-          // Mark this context as loaded (even if it has no GPUs)
-          setLoadedContexts((prev) => new Set([...prev, context]));
+        gpuDataPromise
+          .then((gpuData) => {
+            // Mark this context as loaded (even if it has no GPUs)
+            setLoadedContexts((prev) => new Set([...prev, context]));
 
-          // Update perContextGPUs - merge in data for this context
-          setPerContextGPUs((prev) => {
-            // Remove any existing entries for this context, then add new ones
-            const filtered = prev.filter((gpu) => gpu.context !== context);
-            return [...filtered, ...gpuData.perContextGPUs];
-          });
+            // Update perContextGPUs - merge in data for this context
+            setPerContextGPUs((prev) => {
+              // Remove any existing entries for this context, then add new ones
+              const filtered = prev.filter((gpu) => gpu.context !== context);
+              return [...filtered, ...gpuData.perContextGPUs];
+            });
 
-          // Update perNodeGPUs - merge in data for this context
-          setPerNodeGPUs((prev) => {
-            const filtered = prev.filter((node) => node.context !== context);
-            return [...filtered, ...gpuData.perNodeGPUs];
-          });
+            // Update perNodeGPUs - merge in data for this context
+            setPerNodeGPUs((prev) => {
+              const filtered = prev.filter((node) => node.context !== context);
+              return [...filtered, ...gpuData.perNodeGPUs];
+            });
 
-          // Note: allGPUs is computed via useEffect when perContextGPUs changes
+            // Note: allGPUs is computed via useEffect when perContextGPUs changes
 
-          // Update context errors if there was an error
-          if (gpuData.error) {
+            // Update context errors if there was an error
+            if (gpuData.error) {
+              setContextErrors((prev) => ({
+                ...prev,
+                [context]: gpuData.error,
+              }));
+            }
+          })
+          .catch((error) => {
+            // Mark context as loaded even on error to prevent infinite spinner
+            setLoadedContexts((prev) => new Set([...prev, context]));
             setContextErrors((prev) => ({
               ...prev,
-              [context]: gpuData.error,
+              [context]: error.message || 'Failed to load GPU data',
             }));
-          }
-
-          // Decrement pending count and check if ALL fetches are complete
-          pendingContextCountRef.current--;
-          if (
-            pendingContextCountRef.current === 0 &&
-            mainFetchDoneRef.current
-          ) {
-            setIsFetching(false); // Everything done, stop spinner
-          }
-        });
+          })
+          .finally(() => {
+            // Decrement pending count and check if ALL fetches are complete
+            pendingContextCountRef.current--;
+            if (
+              pendingContextCountRef.current === 0 &&
+              mainFetchDoneRef.current
+            ) {
+              setIsFetching(false); // Everything done, stop spinner
+            }
+          });
       });
     } catch (error) {
       console.error('Error in fetchKubernetesData:', error);
@@ -2383,6 +2425,7 @@ export function GPUs() {
     };
 
     initializeData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Effect for interval refresh.
@@ -2754,6 +2797,7 @@ export function GPUs() {
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+        isSlurm={isSlurmCluster}
       />
     );
   };
@@ -2795,7 +2839,14 @@ export function GPUs() {
                 : `No enabled clouds for workspace "${selectedWorkspace}".`}
             </p>
           ) : (
-            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+            <div
+              className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
+                !isInitialLoad &&
+                (clusterDataLoading || sshAndKubeJobsDataLoading)
+                  ? 'infra-table-refreshing'
+                  : ''
+              }`}
+            >
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -2810,7 +2861,7 @@ export function GPUs() {
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-card divide-y divide-gray-200">
                   {filteredCloudInfraData.map((cloud) => {
                     // Use separate loading states for progressive loading
                     // Clusters and jobs load independently (clusters often ready first)
@@ -2819,15 +2870,13 @@ export function GPUs() {
                     const jobCount = cloudJobCounts[cloud.name] ?? cloud.jobs;
 
                     return (
-                      <tr key={cloud.name} className="hover:bg-gray-50">
+                      <tr key={cloud.name} className="hover:bg-muted/50">
                         <td className="p-3 font-medium text-gray-700">
                           {cloud.name}
                         </td>
                         <td className="p-3">
                           {clusterDataLoading ? (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              <CircularProgress size={12} />
-                            </span>
+                            <SkeletonBadge />
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               {clusterCount ?? 0}
@@ -2836,9 +2885,7 @@ export function GPUs() {
                         </td>
                         <td className="p-3">
                           {sshAndKubeJobsDataLoading ? (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                              <CircularProgress size={12} />
-                            </span>
+                            <SkeletonBadge />
                           ) : (
                             <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
                               {jobCount ?? 0}
@@ -3087,6 +3134,13 @@ export function GPUs() {
                   className="text-sky-blue hover:underline cursor-pointer"
                 >
                   SSH Node Pool
+                </Link>
+              ) : slurmClusters.includes(selectedContext) ? (
+                <Link
+                  href="/infra"
+                  className="text-sky-blue hover:underline cursor-pointer"
+                >
+                  Slurm
                 </Link>
               ) : (
                 <Link

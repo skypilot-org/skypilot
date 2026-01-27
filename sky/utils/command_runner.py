@@ -1404,6 +1404,7 @@ class KubernetesCommandRunner(CommandRunner):
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
         deployment: Optional[str] = None,
+        container: Optional[str] = None,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -1415,11 +1416,19 @@ class KubernetesCommandRunner(CommandRunner):
 
         Args:
             node: The namespace and pod_name of the remote machine.
+            deployment: If set, run commands against `deployment/<deployment>`
+                instead of `pod/<pod_name>`.
+            container: If set, run commands inside the given container name via
+                `kubectl exec -c <container>`. This is recommended for
+                multi-container pods (e.g., when sidecars are injected) to
+                ensure commands target the primary workload container (such as
+                `ray-node`).
         """
         del kwargs
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
         self.deployment = deployment
+        self.container = container
 
     @property
     def node_id(self) -> str:
@@ -1541,6 +1550,8 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_args += ['--kubeconfig', '/dev/null']
 
         kubectl_args += [self.kube_identifier]
+        if self.container is not None:
+            kubectl_args += ['-c', self.container]
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
@@ -1644,7 +1655,9 @@ class KubernetesCommandRunner(CommandRunner):
             log_path=log_path,
             stream_logs=stream_logs,
             max_retry=max_retry,
-            prefix_command=f'chmod +x {helper_path} && ',
+            prefix_command=(f'chmod +x {helper_path} && ' + (
+                '' if self.container is None else
+                f'SKYPILOT_K8S_EXEC_CONTAINER={shlex.quote(self.container)} ')),
             # rsync with `kubectl` as the rsh command will cause ~/xx parsed as
             # /~/xx, so we need to replace ~ with the remote home directory. We
             # only need to do this when ~ is at the beginning of the path.

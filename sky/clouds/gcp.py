@@ -542,6 +542,8 @@ class GCP(clouds.Cloud):
                     'runtime_version']
                 resources_vars['tpu_node_name'] = r.accelerator_args.get(
                     'tpu_name')
+                resources_vars['gcp_queued_resource'] = r.accelerator_args.get(
+                    'gcp_queued_resource')
                 # TPU VMs require privileged mode for docker containers to
                 # access TPU devices.
                 resources_vars['docker_run_options'] = ['--privileged']

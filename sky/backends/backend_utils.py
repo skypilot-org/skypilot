@@ -726,7 +726,8 @@ def write_cluster_config(
         cloud=str(cloud).lower(),
         region=region.name,
         keys=('remote_identity',),
-        default_value=None)
+        default_value=None,
+        override_configs=to_provision.cluster_config_overrides)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
     if isinstance(remote_identity_config, str):
         remote_identity = remote_identity_config
@@ -899,6 +900,9 @@ def write_cluster_config(
     if to_provision.labels:
         labels.update(to_provision.labels)
 
+    install_conda = skypilot_config.get_nested(('provision', 'install_conda'),
+                                               True)
+
     # We disable conda auto-activation if the user has specified a docker image
     # to use, which is likely to already have a conda environment activated.
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
@@ -989,9 +993,11 @@ def write_cluster_config(
                 # syntax.
                 'conda_installation_commands':
                     constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}',
-                        conda_auto_activate).replace('{is_custom_docker}',
-                                                     is_custom_docker),
+                        '{conda_auto_activate}', conda_auto_activate).replace(
+                            '{is_custom_docker}', is_custom_docker)
+                    if install_conda else '',
+                # UV setup
+                'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
                 # Currently only used by Slurm. For other clouds, it is
                 # already part of ray_skypilot_installation_commands
                 'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
@@ -1509,23 +1515,6 @@ def wait_until_ray_cluster_ready(
     return True, docker_user  # success
 
 
-def _get_ssh_control_name(config: Dict[str, Any]) -> str:
-    ssh_provider_module = config['provider']['module']
-    ssh_control_name = config.get('cluster_name',
-                                  command_runner.DEFAULT_SSH_CONTROL_NAME)
-    if 'slurm' in ssh_provider_module:
-        # For Slurm, multiple SkyPilot clusters may share the same underlying
-        # Slurm login node. By using a fixed ssh_control_name ('__default__'),
-        # we ensure that all connections to the same login node reuse the same
-        # SSH ControlMaster process, avoiding repeated SSH handshakes.
-        #
-        # The %C token in ControlPath (see ssh_options_list) ensures that
-        # connections to different login nodes use different sockets, avoiding
-        # collisions between different Slurm clusters.
-        ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
-    return ssh_control_name
-
-
 def ssh_credential_from_yaml(
     cluster_yaml: Optional[str],
     docker_user: Optional[str] = None,
@@ -1546,7 +1535,7 @@ def ssh_credential_from_yaml(
     if ssh_user is None:
         ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key_path = auth_section.get('ssh_private_key')
-    ssh_control_name = _get_ssh_control_name(config)
+    ssh_control_name = config.get('cluster_name', '__default__')
     ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
     # Update the ssh_user placeholder in proxy command, if required
@@ -1600,7 +1589,7 @@ def ssh_credentials_from_handles(
         if ssh_user is None:
             ssh_user = auth_section['ssh_user'].strip()
         ssh_private_key_path = auth_section.get('ssh_private_key')
-        ssh_control_name = _get_ssh_control_name(config)
+        ssh_control_name = config.get('cluster_name', '__default__')
         ssh_proxy_command = auth_section.get('ssh_proxy_command')
 
         # Update the ssh_user placeholder in proxy command, if required

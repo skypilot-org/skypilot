@@ -4,7 +4,7 @@ import shlex
 import tempfile
 import threading
 import time
-from typing import Any, cast, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -607,7 +607,6 @@ def get_cluster_info(
         return common.ClusterInfo(
             instances={},
             head_instance_id=None,
-            ssh_user=ssh_user,
             provider_name='slurm',
             provider_config=provider_config,
         )
@@ -638,7 +637,6 @@ def get_cluster_info(
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=slurm_utils.instance_id(job_id, nodes[0]),
-        ssh_user=ssh_user,
         provider_name='slurm',
         provider_config=provider_config,
     )
@@ -764,6 +762,9 @@ def get_command_runners(
     **credentials: Dict[str, Any],
 ) -> List[command_runner.SlurmCommandRunner]:
     """Get a command runner for the given cluster."""
+    # For Slurm, we use the login node credentials from provider_config['ssh']
+    # instead of `credentials` which is for ssh'ing to the SkyPilot cluster.
+    del credentials
     assert cluster_info.provider_config is not None, cluster_info
 
     if cluster_info.head_instance_id is None:
@@ -781,27 +782,34 @@ def get_command_runners(
         instance_infos[0] for instance_infos in cluster_info.instances.values()
     ]
 
-    # Note: For Slurm, the external IP for all instances is the same,
-    # it is the login node's. The internal IP is the private IP of the node.
-    ssh_user = cast(str, credentials.pop('ssh_user'))
-    ssh_private_key = cast(str, credentials.pop('ssh_private_key'))
-    # ssh_proxy_jump is Slurm-specific, it does not exist in the auth section
-    # of the cluster yaml.
-    ssh_proxy_jump = cluster_info.provider_config.get('ssh', {}).get(
-        'proxyjump', None)
-
     provider_config = cluster_info.provider_config
-    assert provider_config is not None, cluster_info
 
-    skypilot_runtime_dir = _skypilot_runtime_dir(cluster_name_on_cloud)
+    # Get login node SSH credentials.
+    login_node_ssh_config = provider_config['ssh']
+    login_node_ssh_hostname = login_node_ssh_config['hostname']
+    login_node_ssh_port = int(login_node_ssh_config.get('port', 22))
+    login_node_ssh_user = login_node_ssh_config['user']
+    login_node_ssh_private_key = login_node_ssh_config['private_key']
+    login_node_ssh_proxy_command = login_node_ssh_config.get(
+        'proxycommand', None)
+    login_node_ssh_proxy_jump = login_node_ssh_config.get('proxyjump', None)
+    # For Slurm, multiple SkyPilot clusters may share the same underlying
+    # Slurm login node. By using a fixed ssh_control_name ('__default__'),
+    # we ensure that all connections to the same login node reuse the same
+    # SSH ControlMaster process, avoiding repeated SSH handshakes.
+    #
+    # The %C token in ControlPath (see ssh_options_list) ensures that
+    # connections to different login nodes use different sockets, avoiding
+    # collisions between different Slurm clusters.
+    ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
 
-    ssh_config_dict = provider_config['ssh']
     login_node_runner = command_runner.SSHCommandRunner(
-        (ssh_config_dict['hostname'], int(ssh_config_dict.get('port', 22))),
-        ssh_user,
-        ssh_private_key,
-        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-        ssh_proxy_jump=ssh_proxy_jump,
+        (login_node_ssh_hostname, login_node_ssh_port),
+        login_node_ssh_user,
+        login_node_ssh_private_key,
+        ssh_proxy_command=login_node_ssh_proxy_command,
+        ssh_proxy_jump=login_node_ssh_proxy_jump,
+        ssh_control_name=ssh_control_name,
         enable_interactive_auth=True,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
@@ -821,18 +829,21 @@ def get_command_runners(
         cluster_name_on_cloud) if rc == 0 else None
 
     runners = [
+        # Note: For Slurm, the external IP for all instances is the same,
+        # it is the login node's. The internal IP is the private IP of the node.
         command_runner.SlurmCommandRunner(
             (instance_info.external_ip or '', instance_info.ssh_port),
-            ssh_user,
-            ssh_private_key,
+            login_node_ssh_user,
+            login_node_ssh_private_key,
             sky_dir=sky_dir,
-            skypilot_runtime_dir=skypilot_runtime_dir,
+            skypilot_runtime_dir=_skypilot_runtime_dir(cluster_name_on_cloud),
             job_id=instance_info.tags['job_id'],
             slurm_node=instance_info.tags['node'],
-            ssh_proxy_jump=ssh_proxy_jump,
-            enable_interactive_auth=True,
+            ssh_proxy_jump=login_node_ssh_proxy_jump,
+            ssh_proxy_command=login_node_ssh_proxy_command,
+            ssh_control_name=ssh_control_name,
             container_args=container_args,
-            **credentials) for instance_info in instances
+            enable_interactive_auth=True) for instance_info in instances
     ]
 
     return runners

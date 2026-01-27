@@ -433,27 +433,29 @@ def parse_memory_resource(resource_qty_str: Union[str, int, float],
     raise ValueError(error_msg)
 
 
-def parse_time_minutes(time: str) -> int:
-    """Convert a time string to minutes.
+def _parse_time_with_units(time: str, time_units: Dict[str, int]) -> int:
+    """Parse a time string using the given unit multipliers.
 
     Args:
-        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d')
+        time: Time string with optional unit suffix.
+        time_units: Dict mapping unit suffix to multiplier value.
 
     Returns:
-        Time in minutes as an integer
+        Time value as an integer in the base unit.
+
+    Raises:
+        ValueError: If the time format is invalid.
     """
     time_str = str(time)
 
     if time_str.isdecimal():
-        # We assume it is already in minutes to maintain backwards
-        # compatibility
         return int(time_str)
 
-    time_str = time_str.lower()
-    for unit, multiplier in constants.TIME_UNITS.items():
-        if time_str.endswith(unit):
+    time_str_lower = time_str.lower()
+    for unit, multiplier in time_units.items():
+        if time_str_lower.endswith(unit):
             try:
-                value = float(time_str[:-len(unit)])
+                value = float(time_str_lower[:-len(unit)])
                 final_value = math.ceil(value * multiplier)
                 if final_value >= 0:
                     return final_value
@@ -461,6 +463,39 @@ def parse_time_minutes(time: str) -> int:
                 continue
 
     raise ValueError(f'Invalid time format: {time}')
+
+
+def parse_time_minutes(time: str) -> int:
+    """Convert a time string to minutes.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30m', '2h', '1d').
+              Plain numbers are treated as minutes.
+
+    Returns:
+        Time in minutes as an integer.
+
+    Raises:
+        ValueError: If the time format is invalid.
+    """
+    return _parse_time_with_units(time, constants.TIME_UNITS)
+
+
+def parse_time_seconds(time: str) -> int:
+    """Convert a time string to seconds.
+
+    Args:
+        time: Time string with optional unit suffix (e.g., '30s', '5m', '1h').
+              Supports: s (seconds), m (minutes), h (hours), d (days),
+              w (weeks). Plain numbers are treated as seconds.
+
+    Returns:
+        Time in seconds as an integer.
+
+    Raises:
+        ValueError: If the time format is invalid.
+    """
+    return _parse_time_with_units(time, constants.TIME_UNITS_SECONDS)
 
 
 def normalize_any_of_resources_config(
