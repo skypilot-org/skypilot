@@ -4,38 +4,20 @@ Usage:
     python fetch_mithril.py
 
 Requires MITHRIL_API_KEY environment variable or a Mithril config file at
-${XDG_CONFIG_HOME:-~/.config}/mithril/config.yaml.
+${XDG_CONFIG_HOME:-~/.config}/mithril/config.yaml with current_profile set.
 """
 
 import csv
 import json
+import logging
 import os
 from typing import Any, Dict, List
 
 import requests
-import yaml
 
 from sky.provision.mithril import utils as mithril_utils
 
-DEFAULT_API_URL = 'https://api.mithril.ai'
-
-
-def _get_credentials_path() -> str:
-    """Get the path to the Mithril credentials file.
-
-    Respects XDG_CONFIG_HOME, otherwise defaults to
-    ~/.config/mithril/config.yaml
-    """
-    xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
-    if xdg_config_home:
-        return os.path.join(xdg_config_home, 'mithril', 'config.yaml')
-    return os.path.expanduser('~/.config/mithril/config.yaml')
-
-
-DEFAULT_CREDENTIALS_PATH = _get_credentials_path()
-
-ENV_API_KEY = 'MITHRIL_API_KEY'
-ENV_API_URL = 'MITHRIL_API_URL'
+logger = logging.getLogger(__name__)
 
 
 def _get_headers(api_key: str) -> Dict[str, str]:
@@ -43,37 +25,6 @@ def _get_headers(api_key: str) -> Dict[str, str]:
     return {
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json'
-    }
-
-
-def get_config() -> Dict[str, str]:
-    """Get API config from env vars or config file.
-
-    Returns a dict with 'api_key' and 'api_url'.
-    """
-    api_key = os.environ.get(ENV_API_KEY)
-
-    # API URL: env > file > default
-    api_url = os.environ.get(ENV_API_URL)
-
-    # Load from file if needed
-    if not api_key or not api_url:
-        if os.path.exists(DEFAULT_CREDENTIALS_PATH):
-            with open(DEFAULT_CREDENTIALS_PATH, 'r', encoding='utf-8') as f:
-                file_config = yaml.safe_load(f) or {}
-            if not api_key:
-                api_key = file_config.get('api_key')
-            if not api_url:
-                api_url = file_config.get('api_url')
-
-    if not api_key:
-        raise mithril_utils.MithrilError(
-            f'Mithril API key not found. '
-            f'Set {ENV_API_KEY} or run `sky check` for setup instructions.')
-
-    return {
-        'api_key': api_key,
-        'api_url': api_url or DEFAULT_API_URL,
     }
 
 
@@ -185,17 +136,21 @@ def fetch_spot_availability(api_key: str,
 
 def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
     """Create Mithril catalog CSV file."""
-    config = get_config()
+    config = mithril_utils.get_config()
     api_key = config['api_key']
     api_url = config['api_url']
 
+    logger.info('Fetching Mithril instance types...')
     instance_types = fetch_instance_types(api_key, api_url)
+    logger.info('Found %d instance types.', len(instance_types))
 
+    logger.info('Fetching pricing for each instance type...')
     instance_pricing: Dict[str, float] = {}
     for inst in instance_types:
         instance_pricing[inst['fid']] = fetch_instance_pricing(
             api_key, api_url, inst['fid'])
 
+    logger.info('Fetching spot availability...')
     availability = fetch_spot_availability(api_key, api_url)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -224,6 +179,9 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
 
             regions_with_prices = availability.get(inst['fid'], [])
             if not regions_with_prices:
+                logger.warning(
+                    'No availability found for instance type %s, '
+                    'skipping.', instance_type)
                 continue
 
             gpu_info = (make_gpu_info_json(gpu_name, gpu_count, gpu_memory_gb)
@@ -248,3 +206,4 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
 if __name__ == '__main__':
     os.makedirs('mithril', exist_ok=True)
     create_catalog('mithril/vms.csv')
+    logger.info('Mithril catalog saved to mithril/vms.csv')

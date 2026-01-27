@@ -30,6 +30,7 @@ DEFAULT_API_URL = 'https://api.mithril.ai'
 ENV_API_KEY = 'MITHRIL_API_KEY'
 ENV_PROJECT = 'MITHRIL_PROJECT'
 ENV_API_URL = 'MITHRIL_API_URL'
+ENV_PROFILE = 'MITHRIL_PROFILE'
 
 TIMEOUT = 3600
 
@@ -81,44 +82,68 @@ def to_cluster_status(
     return mapping.get(raw_status)
 
 
-def _get_config() -> Dict[str, str]:
-    """Get Mithril config with API key, project ID, and API URL.
+def _get_profile_config(file_config: Dict[str, Any],
+                        config_path: str) -> Dict[str, Any]:
+    """Extract config from a named profile.
 
-    Configuration is read from environment variables first, then from the
-    YAML config file. Environment variables take precedence.
+    Profile selection priority:
+    1. MITHRIL_PROFILE env var (highest priority)
+    2. current_profile key in config file (required)
 
-    Environment variables:
-        MITHRIL_API_KEY: API key for authentication
-        MITHRIL_PROJECT: Project ID
-        MITHRIL_API_URL: API base URL (optional, defaults to
-            https://api.mithril.ai)
+    Args:
+        file_config: The parsed YAML config file contents.
+        config_path: Path to the config file (for error messages).
 
-    YAML config file keys (at top level):
-        api_key: API key for authentication
-        project_id: Project ID
-        api_url: API base URL (optional)
+    Returns:
+        The profile-specific config dict.
+
+    Raises:
+        MithrilError: If current_profile is not set or profile doesn't exist.
     """
-    # Check environment variables first
-    api_key = os.environ.get(ENV_API_KEY)
-    project_id = os.environ.get(ENV_PROJECT)
-    api_url = os.environ.get(ENV_API_URL)
+    # Determine profile name: env var takes precedence over config file
+    profile_name = os.environ.get(ENV_PROFILE)
+    if not profile_name:
+        profile_name = file_config.get('current_profile')
 
-    # If any required config is missing from env, try to load from file
-    if not api_key or not project_id:
-        config_path = os.path.expanduser(Mithril.get_credentials_path())
-        if os.path.exists(config_path):
-            with open(config_path, 'r', encoding='utf-8') as f:
-                file_config = yaml.safe_load(f) or {}
+    if not profile_name:
+        raise MithrilError(
+            f'\'current_profile\' is required in Mithril config. '
+            f'Set MITHRIL_PROFILE or add current_profile to {config_path}')
 
-            # Use file values if not set from environment
-            if not api_key:
-                api_key = file_config.get('api_key')
-            if not project_id:
-                project_id = file_config.get('project_id')
-            if not api_url:
-                api_url = file_config.get('api_url')
+    profiles = file_config.get('profiles', {})
+    if profile_name not in profiles:
+        available = list(profiles.keys()) if profiles else []
+        available_str = available if available else '(none)'
+        raise MithrilError(f'Mithril profile \'{profile_name}\' not found. '
+                           f'Available profiles: {available_str}. '
+                           f'Check your config at {config_path}')
 
-    # Validate required fields
+    return profiles[profile_name]
+
+
+def get_config() -> Dict[str, str]:
+    """Get Mithril config with api_key, project_id, and api_url.
+
+    Loads from config file, then environment variables override.
+
+    Returns:
+        Dict with 'api_key', 'project_id', and 'api_url'.
+
+    Raises:
+        MithrilError: If api_key or project_id is not found.
+    """
+    config_path = os.path.expanduser(Mithril.get_credentials_path())
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            file_config = yaml.safe_load(f) or {}
+        profile_config = _get_profile_config(file_config, config_path)
+    else:
+        profile_config = {}
+
+    api_key = os.environ.get(ENV_API_KEY) or profile_config.get('api_key')
+    project_id = os.environ.get(ENV_PROJECT) or profile_config.get('project_id')
+    api_url = os.environ.get(ENV_API_URL) or profile_config.get('api_url')
+
     if not api_key:
         raise MithrilError(f'Mithril API key not found. '
                            f'Set {ENV_API_KEY} or run `sky check mithril` '
@@ -136,15 +161,6 @@ def _get_config() -> Dict[str, str]:
     }
 
 
-def _get_user_info() -> Dict[str, str]:
-    """Get the current user's info from the /v2/me endpoint.
-
-    Returns:
-        Dictionary with user info including 'user_name', 'email', 'id', etc.
-    """
-    return _make_request('GET', '/v2/me')
-
-
 def _is_retryable_status(status_code: int) -> bool:
     """Check if the HTTP status code is retryable."""
     # Retry on rate limiting (429) and server errors (5xx)
@@ -158,7 +174,7 @@ def _make_request(
     params: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Make an API request to Mithril with retry and backoff."""
-    config = _get_config()
+    config = get_config()
     base_url = config['api_url']
     url = f'{base_url}{endpoint}'
     headers = {
@@ -249,7 +265,7 @@ def _make_request(
 
 def _get_or_create_ssh_key(public_key: str) -> List[str]:
     """Get or create SSH key for instances."""
-    config = _get_config()
+    config = get_config()
     endpoint = '/v2/ssh-keys'
     params = {'project': config['project_id']}
 
@@ -387,7 +403,7 @@ def list_instances(status: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
 
     Handles pagination using next_cursor if present in API response.
     """
-    config = _get_config()
+    config = get_config()
     endpoint = '/v2/instances'
     base_params: Dict[str, Any] = ({
         'project': quote(config['project_id'])
@@ -472,7 +488,7 @@ def launch_instances(
     Returns:
         Tuple of (bid_id, list of instance_ids)
     """
-    config = _get_config()
+    config = get_config()
     ssh_keys = _get_or_create_ssh_key(public_key)
 
     # Look up instance type FIDs by name and find available regions
@@ -554,7 +570,7 @@ def get_bid(bid_name: str) -> Optional[Dict[str, Any]]:
     Returns:
         Bid dictionary with fid, name, instances, etc., or None if not found.
     """
-    config = _get_config()
+    config = get_config()
     endpoint = '/v2/spot/bids'
     params = {
         'project': config['project_id'],
@@ -580,7 +596,7 @@ def cancel_bid(bid_id: str) -> bool:
         True if the bid was successfully canceled or didn't exist (404),
         False otherwise.
     """
-    config = _get_config()
+    config = get_config()
     endpoint = f'/v2/spot/bids/{bid_id}'
     params = {'project': config['project_id']}
 
@@ -610,7 +626,7 @@ def update_bid(bid_id: str, paused: bool) -> Dict[str, Any]:
     Raises:
         MithrilError: If the update fails.
     """
-    config = _get_config()
+    config = get_config()
     endpoint = f'/v2/spot/bids/{bid_id}'
     params = {'project': config['project_id']}
     payload = {'paused': paused}
