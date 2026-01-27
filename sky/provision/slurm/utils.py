@@ -590,7 +590,8 @@ def slurm_node_info(
     try:
         node_list = _get_slurm_node_info_list(
             slurm_cluster_name=slurm_cluster_name)
-    except (RuntimeError, exceptions.NotSupportedError) as e:
+    except (FileNotFoundError, ValueError, RuntimeError,
+            exceptions.NotSupportedError) as e:
         logger.debug(f'Could not retrieve Slurm node info: {e}')
         return []
     return node_list
