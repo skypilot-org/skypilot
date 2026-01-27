@@ -13,7 +13,6 @@ from sky.server import plugins
 def test_get_remote_plugin_packages(monkeypatch, tmp_path):
     """Test get_remote_plugin_packages returns remote plugin configurations."""
     remote_config = {
-        'controller_wheel_path': 'dist',
         'plugins': [
             {
                 'class': 'module1.RemotePlugin1',
@@ -30,6 +29,15 @@ def test_get_remote_plugin_packages(monkeypatch, tmp_path):
     remote_config_path.write_text(yaml.safe_dump(remote_config))
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
+
+    plugin_config = {
+        'controller_wheel_path': 'dist',
+        'plugins': []
+    }
+    plugin_config_path = tmp_path / 'plugins.yaml'
+    plugin_config_path.write_text(yaml.safe_dump(plugin_config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(plugin_config_path))
 
     packages = plugins.get_remote_plugin_packages()
     wheel_path = plugins.get_remote_controller_wheel_path()
@@ -53,7 +61,6 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     wheel_file2.write_bytes(b'fake wheel content 2')
 
     remote_config = {
-        'controller_wheel_path': str(wheel_dir),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
         }]
@@ -62,6 +69,15 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     remote_config_path.write_text(yaml.safe_dump(remote_config))
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
+
+    plugin_config = {
+        'controller_wheel_path': str(wheel_dir),
+        'plugins': []
+    }
+    plugin_config_path = tmp_path / 'plugins.yaml'
+    plugin_config_path.write_text(yaml.safe_dump(plugin_config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -93,13 +109,21 @@ def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
     remote_config = {
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            # Missing controller_wheel_path
         }]
     }
     remote_config_path = tmp_path / 'remote_plugins.yaml'
     remote_config_path.write_text(yaml.safe_dump(remote_config))
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
+
+    # plugins.yaml without controller_wheel_path
+    plugin_config = {
+        'plugins': []
+    }
+    plugin_config_path = tmp_path / 'plugins.yaml'
+    plugin_config_path.write_text(yaml.safe_dump(plugin_config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -112,7 +136,6 @@ def test_get_plugin_mounts_and_commands_invalid_wheel_path(
         monkeypatch, tmp_path):
     """Test get_plugin_mounts_and_commands with invalid wheel directory path."""
     remote_config = {
-        'controller_wheel_path': str(tmp_path / 'nonexistent_dir'),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
         }]
@@ -121,6 +144,15 @@ def test_get_plugin_mounts_and_commands_invalid_wheel_path(
     remote_config_path.write_text(yaml.safe_dump(remote_config))
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
+
+    plugin_config = {
+        'controller_wheel_path': str(tmp_path / 'nonexistent_dir'),
+        'plugins': []
+    }
+    plugin_config_path = tmp_path / 'plugins.yaml'
+    plugin_config_path.write_text(yaml.safe_dump(plugin_config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -136,7 +168,6 @@ def test_get_plugin_mounts_and_commands_not_directory(monkeypatch, tmp_path):
     wheel_file.write_bytes(b'fake wheel content')
 
     remote_config = {
-        'controller_wheel_path': str(wheel_file),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
         }]
@@ -145,6 +176,15 @@ def test_get_plugin_mounts_and_commands_not_directory(monkeypatch, tmp_path):
     remote_config_path.write_text(yaml.safe_dump(remote_config))
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
+
+    plugin_config = {
+        'controller_wheel_path': str(wheel_file),
+        'plugins': []
+    }
+    plugin_config_path = tmp_path / 'plugins.yaml'
+    plugin_config_path.write_text(yaml.safe_dump(plugin_config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -162,7 +202,6 @@ def test_get_plugin_mounts_and_commands_no_whl_files(monkeypatch, tmp_path):
     (wheel_dir / 'test_plugin.txt').write_text('not a wheel')
 
     remote_config = {
-        'controller_wheel_path': str(wheel_dir),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
         }]
@@ -171,6 +210,15 @@ def test_get_plugin_mounts_and_commands_no_whl_files(monkeypatch, tmp_path):
     remote_config_path.write_text(yaml.safe_dump(remote_config))
     monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
                        str(remote_config_path))
+
+    plugin_config = {
+        'controller_wheel_path': str(wheel_dir),
+        'plugins': []
+    }
+    plugin_config_path = tmp_path / 'plugins.yaml'
+    plugin_config_path.write_text(yaml.safe_dump(plugin_config))
+    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR,
+                       str(plugin_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -209,7 +257,6 @@ def test_get_filtered_plugins_config_path_with_remote_config(
         monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with remote_plugins.yaml."""
     remote_config = {
-        'controller_wheel_path': 'dist',
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
         }]
@@ -222,23 +269,25 @@ def test_get_filtered_plugins_config_path_with_remote_config(
     result = plugin_utils.get_filtered_plugins_config_path()
 
     assert result is not None
+    assert result == str(remote_config_path)
     assert os.path.exists(result)
 
-    # Read and verify the filtered config
+    # Read and verify the config (should be the original remote_plugins.yaml)
     with open(result) as f:
-        filtered_config = yaml.safe_load(f)
+        config = yaml.safe_load(f)
 
-    assert len(filtered_config['plugins']) == 1
-    assert filtered_config['plugins'][0]['class'] == 'test_plugin.TestPlugin'
+    assert len(config['plugins']) == 1
+    assert config['plugins'][0]['class'] == 'test_plugin.TestPlugin'
+    # controller_wheel_path should not be in remote_plugins.yaml anymore
+    assert 'controller_wheel_path' not in config
     # Config should not include upload_to_controller (not in schema anymore)
-    assert 'upload_to_controller' not in filtered_config['plugins'][0]
+    assert 'upload_to_controller' not in config['plugins'][0]
 
 
 def test_get_filtered_plugins_config_path_multiple_plugins(
         monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with multiple plugins in remote_plugins.yaml."""
     remote_config = {
-        'controller_wheel_path': 'dist',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
@@ -259,19 +308,22 @@ def test_get_filtered_plugins_config_path_multiple_plugins(
     result = plugin_utils.get_filtered_plugins_config_path()
 
     assert result is not None
+    assert result == str(remote_config_path)
     assert os.path.exists(result)
 
-    # Read and verify the filtered config
+    # Read and verify the config (should be the original remote_plugins.yaml)
     with open(result) as f:
-        filtered_config = yaml.safe_load(f)
+        config = yaml.safe_load(f)
 
     # Should contain all plugins from remote_plugins.yaml
-    assert len(filtered_config['plugins']) == 2
-    assert filtered_config['plugins'][0]['class'] == 'module1.Plugin1'
-    assert 'upload_to_controller' not in filtered_config['plugins'][0]
-    assert filtered_config['plugins'][1]['class'] == 'module3.Plugin3'
-    assert 'upload_to_controller' not in filtered_config['plugins'][1]
-    assert filtered_config['plugins'][1]['parameters'] == {'key': 'value'}
+    assert len(config['plugins']) == 2
+    assert config['plugins'][0]['class'] == 'module1.Plugin1'
+    assert 'upload_to_controller' not in config['plugins'][0]
+    assert config['plugins'][1]['class'] == 'module3.Plugin3'
+    assert 'upload_to_controller' not in config['plugins'][1]
+    assert config['plugins'][1]['parameters'] == {'key': 'value'}
+    # controller_wheel_path should not be in remote_plugins.yaml anymore
+    assert 'controller_wheel_path' not in config
 
 
 def test_get_filtered_plugins_config_path_no_config(monkeypatch, tmp_path):

@@ -5,7 +5,6 @@ to remote clusters.
 """
 import os
 import pathlib
-import tempfile
 from typing import Dict, Optional, Tuple
 
 from sky import sky_logging
@@ -20,8 +19,8 @@ _REMOTE_PLUGINS_WHEEL_DIR = '~/.sky/plugins/wheels'
 def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     """Get file mounts and installation commands for plugin wheels.
 
-    This function reads the controller wheel directory path from the remote
-    plugin config (remote_plugins.yaml), finds all .whl files in that directory,
+    This function reads the controller wheel directory path from the plugin
+    config (plugins.yaml), finds all .whl files in that directory,
     and returns both the file mounts for uploading them to remote clusters and
     the shell commands for installing them.
 
@@ -38,12 +37,12 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     if not remote_plugin_packages:
         return {}, ''
 
-    # Get the controller wheel directory path from the remote plugin config
+    # Get the controller wheel directory path from the plugin config
     wheel_dir_str = plugins.get_remote_controller_wheel_path()
     if not wheel_dir_str:
         logger.warning(
             'Remote plugins are specified but '
-            'controller_wheel_path is not specified in remote_plugins.yaml. '
+            'controller_wheel_path is not specified in plugins.yaml. '
             'Skipping wheel upload.')
         return {}, ''
 
@@ -88,32 +87,27 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
 
 
 def get_filtered_plugins_config_path() -> Optional[str]:
-    """Create a plugins config file from remote_plugins.yaml.
+    """Return the path to remote_plugins.yaml if it exists.
 
     The controller should only attempt to load plugins that are specified in
     remote_plugins.yaml. Plugins in plugins.yaml are intended for API server
     use only and should not be loaded on the controller.
 
     Returns:
-        Path to a temporary file containing the remote plugins config,
+        Path to the remote_plugins.yaml file if it exists and contains plugins,
         or None if no remote plugins are configured.
     """
-    # pylint: disable-next=import-outside-toplevel
-    from sky.utils import yaml_utils
-
     remote_plugin_packages = plugins.get_remote_plugin_packages()
     if not remote_plugin_packages:
         return None
 
-    # Create config from remote plugins (no filtering needed since
-    # remote_plugins.yaml already contains only the plugins to upload)
-    filtered_config = {'plugins': remote_plugin_packages}
-
-    # Write to a temporary file
-    # Using delete=False so the file persists until the controller upload
-    with tempfile.NamedTemporaryFile(mode='w',
-                                     suffix='_plugins.yaml',
-                                     prefix='sky_filtered_',
-                                     delete=False) as temp_file:
-        yaml_utils.dump_yaml(temp_file.name, filtered_config)
-        return temp_file.name
+    # Get the path to remote_plugins.yaml
+    config_path = os.getenv(
+        plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+        plugins._DEFAULT_REMOTE_PLUGINS_CONFIG_PATH)
+    config_path = os.path.expanduser(config_path)
+    
+    if not os.path.exists(config_path):
+        return None
+    
+    return config_path

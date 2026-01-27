@@ -170,6 +170,14 @@ def _config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
+            'controller_wheel_path': {
+                # Path to a directory containing prebuilt
+                # plugin wheel files (.whl).
+                # All .whl files in this directory will be uploaded
+                # to controllers.
+                # The wheels will be uploaded to remote clusters and installed.
+                'type': 'string',
+            },
             'plugins': {
                 'type': 'array',
                 'items': plugin_schema,
@@ -201,14 +209,6 @@ def _remote_config_schema():
         'required': [],
         'additionalProperties': False,
         'properties': {
-            'controller_wheel_path': {
-                # Path to a directory containing prebuilt
-                # plugin wheel files (.whl).
-                # All .whl files in this directory will be uploaded
-                # to controllers.
-                # The wheels will be uploaded to remote clusters and installed.
-                'type': 'string',
-            },
             'plugins': {
                 'type': 'array',
                 'items': plugin_schema,
@@ -264,13 +264,13 @@ def get_remote_plugin_packages() -> List[Dict[str, Any]]:
 
 
 def get_remote_controller_wheel_path() -> Optional[str]:
-    """Get the controller wheel path from the remote plugin config.
+    """Get the controller wheel path from the plugin config.
 
     Returns:
-        The controller_wheel_path if specified in remote_plugins.yaml,
+        The controller_wheel_path if specified in plugins.yaml,
         None otherwise.
     """
-    config = _load_remote_plugin_config()
+    config = _load_plugin_config()
     if not config:
         return None
     return config.get('controller_wheel_path')
