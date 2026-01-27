@@ -1,0 +1,12 @@
+# Basic Cluster Template
+resources:
+  cloud: aws
+  accelerators: A10G:1
+
+setup: |
+  echo "Setting up environment..."
+  pip install torch torchvision
+
+run: |
+  echo "Hello from SkyPilot cluster!"
+  python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"

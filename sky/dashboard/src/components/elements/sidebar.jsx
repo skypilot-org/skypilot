@@ -24,6 +24,7 @@ import {
   KueueIcon,
   KeyIcon,
   ShieldIcon,
+  FileCodeIcon,
 } from '@/components/elements/icons';
 import { Settings, User, Clock } from 'lucide-react';
 
@@ -39,6 +40,7 @@ const ICON_MAP = {
   volume: VolumeIcon,
   clock: Clock,
   kueue: KueueIcon,
+  filecode: FileCodeIcon,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
@@ -521,6 +523,15 @@ export function TopBar() {
                 <span>Volumes</span>
               </Link>
 
+              <Link
+                href="/recipes"
+                className={getLinkClasses('/recipes')}
+                prefetch={false}
+              >
+                <FileCodeIcon className="w-4 h-4" />
+                <span>Recipes</span>
+              </Link>
+
               <div className="border-l border-gray-200 h-6 mx-1"></div>
 
               <Link
@@ -780,6 +791,21 @@ export function TopBar() {
                 >
                   <VolumeIcon className="w-5 h-5 mr-3" />
                   Volumes
+                </Link>
+
+
+                <Link
+                  href="/recipes"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/recipes')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <FileCodeIcon className="w-5 h-5 mr-3" />
+                  Recipes
                 </Link>
 
                 <div className="border-t border-gray-200 my-4"></div>

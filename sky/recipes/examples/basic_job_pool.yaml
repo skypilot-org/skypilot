@@ -1,0 +1,9 @@
+# Basic Job Pool Template
+resources:
+  cloud: aws
+  cpus: 4+
+  memory: 16+
+
+pool:
+  min_nodes: 1
+  max_nodes: 4

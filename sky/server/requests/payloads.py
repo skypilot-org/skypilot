@@ -898,3 +898,93 @@ class GetJobEventsBody(RequestBody):
     job_id: int
     task_id: Optional[int] = None
     limit: Optional[int] = 10  # Default to 10 most recent task events
+
+
+# =============================================================================
+# YAML Hub payloads
+# =============================================================================
+
+
+class RecipeListBody(RequestBody):
+    """The request body for listing recipes."""
+    category: Optional[str] = None
+    pinned_only: bool = False
+    my_recipes_only: bool = False
+    recipe_type: Optional[str] = None  # 'cluster' or 'job' or 'serve' or 'pool' or 'volume'
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id from env_vars for filtering by user
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        return kwargs
+
+
+class RecipeGetBody(RequestBody):
+    """The request body for getting a single recipe."""
+    recipe_id: str
+
+
+class RecipeCreateBody(RequestBody):
+    """The request body for creating a new recipe."""
+    name: str
+    content: str
+    recipe_type: str  # 'cluster', 'job', 'pool', or 'volume'
+    description: Optional[str] = None
+    category: Optional[str] = None
+    owner_name: Optional[str] = None  # Override user_name for unauthenticated
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id and user_name from env_vars
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        # Use owner_name if provided (for unauthenticated users), else use env
+        # var.
+        if self.owner_name:
+            kwargs['user_name'] = self.owner_name
+        else:
+            kwargs['user_name'] = self.env_vars.get(constants.USER_ENV_VAR,
+                                                    'local')
+        # Remove owner_name from kwargs - it's only used to set user_name above
+        kwargs.pop('owner_name', None)
+        return kwargs
+
+
+class RecipeUpdateBody(RequestBody):
+    """The request body for updating an existing recipe."""
+    recipe_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    category: Optional[str] = None
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id and user_name from env_vars
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        kwargs['user_name'] = self.env_vars.get(constants.USER_ENV_VAR, 'local')
+        return kwargs
+
+
+class RecipeDeleteBody(RequestBody):
+    """The request body for deleting a recipe."""
+    template_id: str
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id from env_vars for ownership check
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        return kwargs
+
+
+class RecipePinBody(RequestBody):
+    """The request body for toggling pin status."""
+    recipe_id: str
+    pinned: bool

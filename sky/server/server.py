@@ -99,6 +99,7 @@ from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
+from sky.recipes import server as recipes_rest
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -789,6 +790,7 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
