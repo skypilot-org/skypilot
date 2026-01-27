@@ -1243,6 +1243,7 @@ class JobLibCodeGen:
             f'\ntask_names = {task_names_str}',
             f'\nresources_str = {resources_str!r}',
             f'\nmetadata_jsons = {metadata_jsons_str}',
+            f'\nis_primary_in_job_groups = {is_primary_in_job_groups_str}',
             '\njob_ids = []',
             '\nfor _ in range(num_jobs):'
             '\n  job_id = managed_job_state.set_job_info_without_job_id('
@@ -1252,8 +1253,7 @@ class JobLibCodeGen:
             f'pool={pool_str},'
             f'pool_hash={pool_hash_str},'
             f'user_hash={user_hash_str},'
-            f'execution={execution!r},'
-            f'is_primary_in_job_groups={is_primary_in_job_groups_str})',
+            f'execution={execution!r})',
             '\n  job_ids.append(job_id)',
             '\n  # Set pending state for all tasks',
             '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long
