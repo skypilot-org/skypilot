@@ -17,11 +17,15 @@ logger = sky_logging.init_logger(__name__)
 
 # Default paths for plugins configuration
 _DEFAULT_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
+# Default path for remote plugins configuration
+_DEFAULT_REMOTE_PLUGINS_CONFIG_PATH = '~/.sky/remote_plugins.yaml'
 # Remote path for plugins config on the cluster
 REMOTE_PLUGINS_CONFIG_PATH = '~/.sky/plugins.yaml'
 
 _PLUGINS_CONFIG_ENV_VAR = (
     f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}PLUGINS_CONFIG')
+_REMOTE_PLUGINS_CONFIG_ENV_VAR = (
+    f'{skylet_constants.SKYPILOT_SERVER_ENV_VAR_PREFIX}REMOTE_PLUGINS_CONFIG')
 
 
 class ExtensionContext:
@@ -145,6 +149,7 @@ class BasePlugin(abc.ABC):
 
 
 def _config_schema():
+    """Schema for plugins.yaml (API server plugins only)."""
     plugin_schema = {
         'type': 'object',
         'required': ['class'],
@@ -153,14 +158,36 @@ def _config_schema():
             'class': {
                 'type': 'string',
             },
-            'upload_to_controller': {
-                # If True, the plugin will be uploaded to remote clusters
-                # (jobs controller, serve controller).
-                # Requires 'controller_wheel_path' to be
-                # specified at the top level.
-                # Defaults to False if not specified.
-                'type': 'boolean',
-                'default': False,
+            'parameters': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+            },
+        },
+    }
+    return {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'plugins': {
+                'type': 'array',
+                'items': plugin_schema,
+                'default': [],
+            },
+        },
+    }
+
+
+def _remote_config_schema():
+    """Schema for remote_plugins.yaml (plugins for remote controllers)."""
+    plugin_schema = {
+        'type': 'object',
+        'required': ['class'],
+        'additionalProperties': False,
+        'properties': {
+            'class': {
+                'type': 'string',
             },
             'parameters': {
                 'type': 'object',
@@ -179,7 +206,6 @@ def _config_schema():
                 # plugin wheel files (.whl).
                 # All .whl files in this directory will be uploaded
                 # to controllers.
-                # Required when any plugin has 'upload_to_controller: true'.
                 # The wheels will be uploaded to remote clusters and installed.
                 'type': 'string',
             },
@@ -211,7 +237,7 @@ def get_plugin_packages() -> List[Dict[str, Any]]:
 
     Returns:
         A list of dictionaries containing plugin configurations, each with
-        at least 'class' and optionally 'upload_to_controller' and 'parameters'.
+        at least 'class' and optionally 'parameters'.
     """
     config = _load_plugin_config()
     if not config:
@@ -221,13 +247,45 @@ def get_plugin_packages() -> List[Dict[str, Any]]:
     return [dict(p) for p in plugin_configs]
 
 
-def get_controller_wheel_path() -> Optional[str]:
-    """Get the controller wheel path from the plugin config.
+def _load_remote_plugin_config() -> Optional[config_utils.Config]:
+    """Load remote plugin config from remote_plugins.yaml."""
+    config_path = os.getenv(_REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                            _DEFAULT_REMOTE_PLUGINS_CONFIG_PATH)
+    config_path = os.path.expanduser(config_path)
+    if not os.path.exists(config_path):
+        return None
+    config = yaml_utils.read_yaml(config_path) or {}
+    common_utils.validate_schema(
+        config,
+        _remote_config_schema(),
+        err_msg_prefix='Invalid remote plugins config: ')
+    return config_utils.Config.from_dict(config)
+
+
+def get_remote_plugin_packages() -> List[Dict[str, Any]]:
+    """Get the list of remote plugin packages with their configurations.
 
     Returns:
-        The controller_wheel_path if specified in the config, None otherwise.
+        A list of dictionaries containing plugin configurations from
+        remote_plugins.yaml, each with at least 'class' and
+        optionally 'parameters'.
     """
-    config = _load_plugin_config()
+    config = _load_remote_plugin_config()
+    if not config:
+        return []
+
+    plugin_configs = config.get('plugins', [])
+    return [dict(p) for p in plugin_configs]
+
+
+def get_remote_controller_wheel_path() -> Optional[str]:
+    """Get the controller wheel path from the remote plugin config.
+
+    Returns:
+        The controller_wheel_path if specified in remote_plugins.yaml,
+        None otherwise.
+    """
+    config = _load_remote_plugin_config()
     if not config:
         return None
     return config.get('controller_wheel_path')

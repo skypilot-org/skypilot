@@ -1,0 +1,10 @@
+# Path to a directory containing prebuilt wheel files (.whl) that will be uploaded
+# to remote clusters (jobs controller, serve controller).
+# All .whl files in this directory will be uploaded and installed.
+controller_wheel_path: dist
+
+# Plugins specified here will be uploaded to remote controllers.
+# These plugins will be available on both the API server (if also in plugins.yaml)
+# and on remote controllers (jobs controller, serve controller).
+plugins:
+- class: example_plugin.ExamplePatchPlugin

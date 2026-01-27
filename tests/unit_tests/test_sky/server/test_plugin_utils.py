@@ -13,11 +13,9 @@ from sky.server import plugins
 def test_get_plugin_packages(monkeypatch, tmp_path):
     """Test get_plugin_packages returns plugin configurations."""
     config = {
-        'controller_wheel_path': 'dist',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
-                'upload_to_controller': True,
             },
             {
                 'class': 'module2.Plugin2',
@@ -32,12 +30,42 @@ def test_get_plugin_packages(monkeypatch, tmp_path):
     monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
 
     packages = plugins.get_plugin_packages()
-    wheel_path = plugins.get_controller_wheel_path()
 
     assert len(packages) == 2
     assert packages[0]['class'] == 'module1.Plugin1'
-    assert packages[0]['upload_to_controller'] is True
+    assert 'upload_to_controller' not in packages[0]
     assert packages[1]['class'] == 'module2.Plugin2'
+    assert 'upload_to_controller' not in packages[1]
+
+
+def test_get_remote_plugin_packages(monkeypatch, tmp_path):
+    """Test get_remote_plugin_packages returns remote plugin configurations."""
+    remote_config = {
+        'controller_wheel_path': 'dist',
+        'plugins': [
+            {
+                'class': 'module1.RemotePlugin1',
+            },
+            {
+                'class': 'module2.RemotePlugin2',
+                'parameters': {
+                    'param': 'value'
+                },
+            },
+        ]
+    }
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
+
+    packages = plugins.get_remote_plugin_packages()
+    wheel_path = plugins.get_remote_controller_wheel_path()
+
+    assert len(packages) == 2
+    assert packages[0]['class'] == 'module1.RemotePlugin1'
+    assert 'upload_to_controller' not in packages[0]
+    assert packages[1]['class'] == 'module2.RemotePlugin2'
     assert 'upload_to_controller' not in packages[1]
     assert wheel_path == 'dist'
 
@@ -52,16 +80,16 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
     wheel_file2 = wheel_dir / 'another_plugin-0.0.2-py3-none-any.whl'
     wheel_file2.write_bytes(b'fake wheel content 2')
 
-    config = {
+    remote_config = {
         'controller_wheel_path': str(wheel_dir),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            'upload_to_controller': True,
         }]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -90,16 +118,16 @@ def test_get_plugin_mounts_and_commands(monkeypatch, tmp_path):
 
 def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
     """Test get_plugin_mounts_and_commands when controller_wheel_path is missing."""
-    config = {
+    remote_config = {
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            'upload_to_controller': True,
             # Missing controller_wheel_path
         }]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -111,16 +139,16 @@ def test_get_plugin_mounts_and_commands_no_wheel_path(monkeypatch, tmp_path):
 def test_get_plugin_mounts_and_commands_invalid_wheel_path(
         monkeypatch, tmp_path):
     """Test get_plugin_mounts_and_commands with invalid wheel directory path."""
-    config = {
+    remote_config = {
         'controller_wheel_path': str(tmp_path / 'nonexistent_dir'),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            'upload_to_controller': True,
         }]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -135,16 +163,16 @@ def test_get_plugin_mounts_and_commands_not_directory(monkeypatch, tmp_path):
     wheel_file = tmp_path / 'test_plugin.whl'
     wheel_file.write_bytes(b'fake wheel content')
 
-    config = {
+    remote_config = {
         'controller_wheel_path': str(wheel_file),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            'upload_to_controller': True,
         }]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -161,16 +189,16 @@ def test_get_plugin_mounts_and_commands_no_whl_files(monkeypatch, tmp_path):
     # Create a non-wheel file
     (wheel_dir / 'test_plugin.txt').write_text('not a wheel')
 
-    config = {
+    remote_config = {
         'controller_wheel_path': str(wheel_dir),
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            'upload_to_controller': True,
         }]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     file_mounts, commands = plugin_utils.get_plugin_mounts_and_commands()
 
@@ -181,53 +209,43 @@ def test_get_plugin_mounts_and_commands_no_whl_files(monkeypatch, tmp_path):
 
 def test_get_filtered_plugins_config_path_empty(monkeypatch, tmp_path):
     """Test get_filtered_plugins_config_path with no plugins."""
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump({'plugins': []}))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump({'plugins': []}))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     result = plugin_utils.get_filtered_plugins_config_path()
 
     assert result is None
 
 
-def test_get_filtered_plugins_config_path_no_upload_flag(monkeypatch, tmp_path):
-    """Test get_filtered_plugins_config_path with plugins without upload_to_controller."""
-    config = {
-        'plugins': [
-            {
-                'class': 'module1.Plugin1',
-            },
-            {
-                'class': 'module2.Plugin2',
-                'parameters': {
-                    'key': 'value'
-                },
-            },
-        ]
-    }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
-
-    result = plugin_utils.get_filtered_plugins_config_path()
-
-    # No plugins with upload_to_controller - should return None
-    assert result is None
-
-
-def test_get_filtered_plugins_config_path_with_upload_flag(
+def test_get_filtered_plugins_config_path_no_remote_config(
         monkeypatch, tmp_path):
-    """Test get_filtered_plugins_config_path with plugins that have upload_to_controller."""
-    config = {
+    """Test get_filtered_plugins_config_path when remote_plugins.yaml doesn't exist."""
+    # Set a path that doesn't exist
+    remote_config_path = tmp_path / 'nonexistent_remote_plugins.yaml'
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
+
+    result = plugin_utils.get_filtered_plugins_config_path()
+
+    # No remote_plugins.yaml - should return None
+    assert result is None
+
+
+def test_get_filtered_plugins_config_path_with_remote_config(
+        monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path with remote_plugins.yaml."""
+    remote_config = {
         'controller_wheel_path': 'dist',
         'plugins': [{
             'class': 'test_plugin.TestPlugin',
-            'upload_to_controller': True,
         }]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     result = plugin_utils.get_filtered_plugins_config_path()
 
@@ -240,35 +258,31 @@ def test_get_filtered_plugins_config_path_with_upload_flag(
 
     assert len(filtered_config['plugins']) == 1
     assert filtered_config['plugins'][0]['class'] == 'test_plugin.TestPlugin'
-    # Filtered config should not include upload_to_controller
+    # Config should not include upload_to_controller (not in schema anymore)
     assert 'upload_to_controller' not in filtered_config['plugins'][0]
 
 
-def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
-    """Test get_filtered_plugins_config_path with mixed plugins."""
-    config = {
+def test_get_filtered_plugins_config_path_multiple_plugins(
+        monkeypatch, tmp_path):
+    """Test get_filtered_plugins_config_path with multiple plugins in remote_plugins.yaml."""
+    remote_config = {
         'controller_wheel_path': 'dist',
         'plugins': [
             {
                 'class': 'module1.Plugin1',
-                'upload_to_controller': True,
-            },
-            {
-                # Plugin without upload_to_controller - should NOT be included
-                'class': 'module2.Plugin2',
             },
             {
                 'class': 'module3.Plugin3',
-                'upload_to_controller': True,
                 'parameters': {
                     'key': 'value'
                 },
             },
         ]
     }
-    config_path = tmp_path / 'plugins.yaml'
-    config_path.write_text(yaml.safe_dump(config))
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    remote_config_path = tmp_path / 'remote_plugins.yaml'
+    remote_config_path.write_text(yaml.safe_dump(remote_config))
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     result = plugin_utils.get_filtered_plugins_config_path()
 
@@ -279,7 +293,7 @@ def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
     with open(result) as f:
         filtered_config = yaml.safe_load(f)
 
-    # Should only contain plugins with upload_to_controller=True
+    # Should contain all plugins from remote_plugins.yaml
     assert len(filtered_config['plugins']) == 2
     assert filtered_config['plugins'][0]['class'] == 'module1.Plugin1'
     assert 'upload_to_controller' not in filtered_config['plugins'][0]
@@ -287,15 +301,12 @@ def test_get_filtered_plugins_config_path_mixed(monkeypatch, tmp_path):
     assert 'upload_to_controller' not in filtered_config['plugins'][1]
     assert filtered_config['plugins'][1]['parameters'] == {'key': 'value'}
 
-    # Verify Plugin2 (without upload_to_controller) is NOT in the filtered config
-    for plugin in filtered_config['plugins']:
-        assert plugin['class'] != 'module2.Plugin2'
-
 
 def test_get_filtered_plugins_config_path_no_config(monkeypatch, tmp_path):
-    """Test get_filtered_plugins_config_path when no config file exists."""
-    config_path = tmp_path / 'nonexistent.yaml'
-    monkeypatch.setenv(plugins._PLUGINS_CONFIG_ENV_VAR, str(config_path))
+    """Test get_filtered_plugins_config_path when remote_plugins.yaml doesn't exist."""
+    remote_config_path = tmp_path / 'nonexistent.yaml'
+    monkeypatch.setenv(plugins._REMOTE_PLUGINS_CONFIG_ENV_VAR,
+                       str(remote_config_path))
 
     result = plugin_utils.get_filtered_plugins_config_path()
 

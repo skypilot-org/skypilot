@@ -1,9 +1,7 @@
-# Path to a directory containing prebuilt wheel files (.whl) that will be uploaded
-# to remote clusters (jobs controller, serve controller).
-# All .whl files in this directory will be uploaded and installed.
-# Required when any plugin has 'upload_to_controller: true'.
-controller_wheel_path: dist
-
+# Plugins for the API server only.
+# Plugins specified here will only be loaded on the API server.
+# To upload plugins to remote controllers (jobs controller, serve controller),
+# use remote_plugins.yaml instead.
 plugins:
 - class: example_plugin.ExamplePlugin
 - class: example_plugin.ExampleParameterizedPlugin
@@ -11,9 +9,3 @@ plugins:
     message: "Message from parameters"
 - class: example_plugin.ExampleMiddlewarePlugin
 - class: example_plugin.ExampleBackgroundTaskPlugin
-# When 'upload_to_controller' is set to True, the plugin will be
-# automatically uploaded to remote clusters (jobs controller, serve controller).
-# All .whl files in the directory specified in 'controller_wheel_path' (above)
-# will be uploaded and installed.
-- class: example_plugin.ExamplePatchPlugin
-  upload_to_controller: true

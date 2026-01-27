@@ -549,8 +549,8 @@ def shared_controller_vars_to_fill(
 
     # Get plugins config and wheel file mounts/commands together to ensure
     # consistency between the uploaded wheel paths and installation commands.
-    # Only upload plugins that have upload_to_controller=True - plugins
-    # without this flag are intended for local API server use only.
+    # Only upload plugins specified in remote_plugins.yaml - plugins in
+    # plugins.yaml are intended for local API server use only.
     local_plugins_config_path = None
     plugin_wheel_file_mounts, plugins_wheel_install_commands = (
         plugin_utils.get_plugin_mounts_and_commands())

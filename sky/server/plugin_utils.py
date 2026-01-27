@@ -20,10 +20,10 @@ _REMOTE_PLUGINS_WHEEL_DIR = '~/.sky/plugins/wheels'
 def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     """Get file mounts and installation commands for plugin wheels.
 
-    This function reads the controller wheel directory path from the plugin
-    config, finds all .whl files in that directory, and returns both the file
-    mounts for uploading them to remote clusters and the shell commands for
-    installing them.
+    This function reads the controller wheel directory path from the remote
+    plugin config (remote_plugins.yaml), finds all .whl files in that directory,
+    and returns both the file mounts for uploading them to remote clusters and
+    the shell commands for installing them.
 
     Returns:
         A tuple of:
@@ -33,23 +33,18 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     # pylint: disable-next=import-outside-toplevel
     from sky.skylet import constants
 
-    plugin_packages = plugins.get_plugin_packages()
+    remote_plugin_packages = plugins.get_remote_plugin_packages()
 
-    if not plugin_packages:
+    if not remote_plugin_packages:
         return {}, ''
 
-    # Check if any plugins should be uploaded to controllers
-    should_upload = any(
-        p.get('upload_to_controller', False) for p in plugin_packages)
-    if not should_upload:
-        return {}, ''
-
-    # Get the controller wheel directory path from the top-level config
-    wheel_dir_str = plugins.get_controller_wheel_path()
+    # Get the controller wheel directory path from the remote plugin config
+    wheel_dir_str = plugins.get_remote_controller_wheel_path()
     if not wheel_dir_str:
-        logger.warning('Some plugins have upload_to_controller=True but '
-                       'controller_wheel_path is not specified in the config. '
-                       'Skipping wheel upload.')
+        logger.warning(
+            'Remote plugins are specified but '
+            'controller_wheel_path is not specified in remote_plugins.yaml. '
+            'Skipping wheel upload.')
         return {}, ''
 
     # Expand user path and validate
@@ -93,43 +88,26 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
 
 
 def get_filtered_plugins_config_path() -> Optional[str]:
-    """Create a filtered plugins.yaml with only plugins that should be uploaded.
+    """Create a plugins config file from remote_plugins.yaml.
 
-    The controller should only attempt to load plugins that have their packages
-    uploaded. Plugins without upload_to_controller=True are intended
-    for API server use only and should not be loaded on the controller.
+    The controller should only attempt to load plugins that are specified in
+    remote_plugins.yaml. Plugins in plugins.yaml are intended for API server
+    use only and should not be loaded on the controller.
 
     Returns:
-        Path to a temporary file containing the filtered plugins config,
-        or None if no plugins should be uploaded.
+        Path to a temporary file containing the remote plugins config,
+        or None if no remote plugins are configured.
     """
     # pylint: disable-next=import-outside-toplevel
     from sky.utils import yaml_utils
 
-    plugin_packages = plugins.get_plugin_packages()
-    if not plugin_packages:
+    remote_plugin_packages = plugins.get_remote_plugin_packages()
+    if not remote_plugin_packages:
         return None
 
-    # Filter to only include plugins that should be uploaded to controllers
-    plugins_to_upload = [
-        p for p in plugin_packages if p.get('upload_to_controller', False)
-    ]
-
-    if not plugins_to_upload:
-        # No plugins should be uploaded - don't upload any config
-        return None
-
-    # Create a filtered config, removing internal fields that aren't needed
-    # on the controller (upload_to_controller)
-    filtered_plugins = []
-    for plugin_config in plugins_to_upload:
-        filtered_plugin = plugin_config.copy()
-        # Pop 'upload_to_controller'
-        # as it's not needed on the remote controller.
-        filtered_plugin.pop('upload_to_controller', None)
-        filtered_plugins.append(filtered_plugin)
-
-    filtered_config = {'plugins': filtered_plugins}
+    # Create config from remote plugins (no filtering needed since
+    # remote_plugins.yaml already contains only the plugins to upload)
+    filtered_config = {'plugins': remote_plugin_packages}
 
     # Write to a temporary file
     # Using delete=False so the file persists until the controller upload
