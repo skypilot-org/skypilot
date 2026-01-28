@@ -25,6 +25,7 @@ setup: |
   uv pip install vllm==0.10.0
   # Have to use triton==3.2.0 to avoid https://github.com/triton-lang/triton/issues/6698
   uv pip install triton==3.2.0
+  uv pip install transformers==5.0.0.dev0
   uv pip install openai
 
 run: |
