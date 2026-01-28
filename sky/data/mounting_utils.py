@@ -34,7 +34,7 @@ FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
                              'sudo ln -s /bin/fusermount /bin/fusermount3 || '
                              'true')
 # https://github.com/Azure/azure-storage-fuse/releases
-BLOBFUSE2_VERSION = '2.2.0'
+BLOBFUSE2_VERSION = '2.5.2'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
@@ -250,14 +250,19 @@ def get_az_mount_install_cmd() -> str:
         # Try to install fuse3 from default repos
         'sudo apt-get update && '
         'FUSE3_INSTALLED=0 && '
+        # Detect which libfuse3 package is available. Debian 13+ (trixie) uses
+        # libfuse3-4 instead of libfuse3-3 due to library soname bump.
+        'LIBFUSE3_PKG=$(apt-cache search --names-only "^libfuse3-[0-9]+$" '
+        '2>/dev/null | head -1 | cut -d" " -f1) && '
+        'LIBFUSE3_PKG="${LIBFUSE3_PKG:-libfuse3-3}" && '
         # On Kubernetes, if FUSERMOUNT_SHARED_DIR is set, it means
         # fusermount and fusermount3 is symlinked to fusermount-shim.
         # If we reinstall fuse3, it may overwrite the symlink, so
         # just install libfuse3, which is needed by blobfuse2.
         'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
-        '  PACKAGES="libfuse3-3 libfuse3-dev"; '
+        '  PACKAGES="$LIBFUSE3_PKG libfuse3-dev"; '
         'else '
-        '  PACKAGES="fuse3 libfuse3-3 libfuse3-dev"; '
+        '  PACKAGES="fuse3 $LIBFUSE3_PKG libfuse3-dev"; '
         'fi && '
         'if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
@@ -296,9 +301,27 @@ def get_az_mount_install_cmd() -> str:
         # Install blobfuse2 only if fuse3 is available
         'if [ "$FUSE3_INSTALLED" = "1" ]; then '
         '  echo "Installing blobfuse2 with libfuse3 support"; '
+        # Workaround for Debian 13+ where libfuse3 soname changed from 3 to 4.
+        # The blobfuse2 binary still links against libfuse3.so.3, so we create
+        # a symlink if needed.
+        '  LIBFUSE_SO=$(find /usr/lib -name "libfuse3.so.3.*" 2>/dev/null | '
+        'head -1) && '
+        '  if [ -n "$LIBFUSE_SO" ]; then '
+        '    LIBFUSE_DIR=$(dirname "$LIBFUSE_SO") && '
+        '    if [ ! -e "$LIBFUSE_DIR/libfuse3.so.3" ]; then '
+        '      echo "Creating libfuse3.so.3 symlink for compatibility"; '
+        '      sudo ln -s $(basename "$LIBFUSE_SO") '
+        '"$LIBFUSE_DIR/libfuse3.so.3"; '
+        '    fi; '
+        '  fi && '
+        # Detect Debian version for blobfuse2 package selection. Blobfuse2
+        # provides version-specific packages (Debian-11.0, Debian-12.0, etc.)
+        '  DEBIAN_VER=$(grep "^VERSION_ID=" /etc/os-release 2>/dev/null | '
+        'cut -d= -f2 | tr -d \'"\' | cut -d. -f1) && '
+        '  DEBIAN_VER="${DEBIAN_VER:-11}" && '
         '  wget -nc https://github.com/Azure/azure-storage-fuse'
         f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}/'
-        f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
+        f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-${{DEBIAN_VER}}.0.x86_64.deb '
         '-O /tmp/blobfuse2.deb && '
         '  sudo dpkg --install /tmp/blobfuse2.deb; '
         'else '
