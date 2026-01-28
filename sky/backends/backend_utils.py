@@ -954,119 +954,119 @@ def write_cluster_config(
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
-    if cloud_specific_failover_overrides is None:
-        cloud_specific_failover_overrides = {}
+    variables = dict(
+        resources_vars,
+        **{
+            'cluster_name_on_cloud': cluster_name_on_cloud,
+            'num_nodes': num_nodes,
+            'disk_size': to_provision.disk_size,
+            # If the current code is run by controller, propagate the real
+            # calling user which should've been passed in as the
+            # SKYPILOT_USER env var (see
+            # controller_utils.shared_controller_vars_to_fill().
+            'user': common_utils.get_cleaned_username(
+                os.environ.get(constants.USER_ENV_VAR, '')),
+
+            # Networking configs
+            'use_internal_ips': skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=region.name,
+                keys=('use_internal_ips',),
+                default_value=False),
+            'ssh_proxy_command': ssh_proxy_command,
+            'vpc_name': skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=region.name,
+                keys=('vpc_name',),
+                default_value=None),
+            # User-supplied labels.
+            'labels': labels,
+            # User-supplied remote_identity
+            'remote_identity': remote_identity,
+            # The reservation pools that specified by the user. This is
+            # currently only used by AWS and GCP.
+            'specific_reservations': specific_reservations,
+
+            # Conda setup
+            # We should not use `.format`, as it contains '{}' as the bash
+            # syntax.
+            'conda_installation_commands':
+                constants.CONDA_INSTALLATION_COMMANDS.replace(
+                    '{conda_auto_activate}', conda_auto_activate).replace(
+                        '{is_custom_docker}', is_custom_docker)
+                if install_conda else '',
+            # UV setup
+            'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
+            # Currently only used by Slurm. For other clouds, it is
+            # already part of ray_skypilot_installation_commands
+            'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
+            'ray_skypilot_installation_commands':
+                (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
+                    '{sky_wheel_hash}',
+                    wheel_hash).replace('{cloud}',
+                                        str(cloud).lower())),
+            'skypilot_wheel_installation_commands':
+                constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
+                    '{sky_wheel_hash}',
+                    wheel_hash).replace('{cloud}',
+                                        str(cloud).lower()),
+            'copy_skypilot_templates_commands':
+                constants.COPY_SKYPILOT_TEMPLATES_COMMANDS,
+            # Port of Ray (GCS server).
+            # Ray's default port 6379 is conflicted with Redis.
+            'ray_port': constants.SKY_REMOTE_RAY_PORT,
+            'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
+            'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
+            'dump_port_command': instance_setup.DUMP_RAY_PORTS,
+            # Sky-internal constants.
+            'sky_ray_cmd': constants.SKY_RAY_CMD,
+            # pip install needs to have python env activated to make sure
+            # installed packages are within the env path.
+            'sky_pip_cmd': f'{constants.SKY_PIP_CMD}',
+            # Activate the SkyPilot runtime environment when starting ray
+            # cluster, so that ray autoscaler can access cloud SDK and CLIs
+            # on remote
+            'sky_activate_python_env':
+                constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+            'ray_version': constants.SKY_REMOTE_RAY_VERSION,
+            # Command for waiting ray cluster to be ready on head.
+            'ray_head_wait_initialized_command':
+                instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
+
+            # Cloud credentials for cloud storage.
+            'credentials': credentials,
+            # Sky remote utils.
+            'sky_remote_path': SKY_REMOTE_PATH,
+            'sky_local_path': str(local_wheel_path),
+            # Add yaml file path to the template variables.
+            'sky_ray_yaml_remote_path':
+                cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
+            'sky_ray_yaml_local_path': tmp_yaml_path,
+            'sky_version': str(version.parse(sky.__version__)),
+            'sky_wheel_hash': wheel_hash,
+            'ssh_max_sessions_config':
+                constants.SET_SSH_MAX_SESSIONS_CONFIG_CMD,
+            # Authentication (optional).
+            **auth_config,
+
+            # Controller specific configs
+            'is_remote_controller': is_remote_controller,
+            'high_availability': high_availability_specified,
+
+            # Volume mounts
+            'volume_mounts': volume_mount_vars,
+            'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
+
+            # runcmd to run before any of the SkyPilot runtime setup commands.
+            # This is currently only used by AWS and Kubernetes.
+            'runcmd': runcmd,
+        },
+    )
+    if cloud_specific_failover_overrides is not None:
+        variables.update(cloud_specific_failover_overrides)
     common_utils.fill_template(
         cluster_config_template,
-        dict(
-            resources_vars,
-            **{
-                'cluster_name_on_cloud': cluster_name_on_cloud,
-                'num_nodes': num_nodes,
-                'disk_size': to_provision.disk_size,
-                # If the current code is run by controller, propagate the real
-                # calling user which should've been passed in as the
-                # SKYPILOT_USER env var (see
-                # controller_utils.shared_controller_vars_to_fill().
-                'user': common_utils.get_cleaned_username(
-                    os.environ.get(constants.USER_ENV_VAR, '')),
-
-                # Networking configs
-                'use_internal_ips': skypilot_config.get_effective_region_config(
-                    cloud=str(cloud).lower(),
-                    region=region.name,
-                    keys=('use_internal_ips',),
-                    default_value=False),
-                'ssh_proxy_command': ssh_proxy_command,
-                'vpc_name': skypilot_config.get_effective_region_config(
-                    cloud=str(cloud).lower(),
-                    region=region.name,
-                    keys=('vpc_name',),
-                    default_value=None),
-                # User-supplied labels.
-                'labels': labels,
-                # User-supplied remote_identity
-                'remote_identity': remote_identity,
-                # The reservation pools that specified by the user. This is
-                # currently only used by AWS and GCP.
-                'specific_reservations': specific_reservations,
-
-                # Conda setup
-                # We should not use `.format`, as it contains '{}' as the bash
-                # syntax.
-                'conda_installation_commands':
-                    constants.CONDA_INSTALLATION_COMMANDS.replace(
-                        '{conda_auto_activate}', conda_auto_activate).replace(
-                            '{is_custom_docker}', is_custom_docker)
-                    if install_conda else '',
-                # UV setup
-                'uv_installation_commands': constants.UV_INSTALLATION_COMMANDS,
-                # Currently only used by Slurm. For other clouds, it is
-                # already part of ray_skypilot_installation_commands
-                'setup_sky_dirs_commands': constants.SETUP_SKY_DIRS_COMMANDS,
-                'ray_skypilot_installation_commands':
-                    (constants.RAY_SKYPILOT_INSTALLATION_COMMANDS.replace(
-                        '{sky_wheel_hash}',
-                        wheel_hash).replace('{cloud}',
-                                            str(cloud).lower())),
-                'skypilot_wheel_installation_commands':
-                    constants.SKYPILOT_WHEEL_INSTALLATION_COMMANDS.replace(
-                        '{sky_wheel_hash}',
-                        wheel_hash).replace('{cloud}',
-                                            str(cloud).lower()),
-                'copy_skypilot_templates_commands':
-                    constants.COPY_SKYPILOT_TEMPLATES_COMMANDS,
-                # Port of Ray (GCS server).
-                # Ray's default port 6379 is conflicted with Redis.
-                'ray_port': constants.SKY_REMOTE_RAY_PORT,
-                'ray_dashboard_port': constants.SKY_REMOTE_RAY_DASHBOARD_PORT,
-                'ray_temp_dir': constants.SKY_REMOTE_RAY_TEMPDIR,
-                'dump_port_command': instance_setup.DUMP_RAY_PORTS,
-                # Sky-internal constants.
-                'sky_ray_cmd': constants.SKY_RAY_CMD,
-                # pip install needs to have python env activated to make sure
-                # installed packages are within the env path.
-                'sky_pip_cmd': f'{constants.SKY_PIP_CMD}',
-                # Activate the SkyPilot runtime environment when starting ray
-                # cluster, so that ray autoscaler can access cloud SDK and CLIs
-                # on remote
-                'sky_activate_python_env':
-                    constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
-                'ray_version': constants.SKY_REMOTE_RAY_VERSION,
-                # Command for waiting ray cluster to be ready on head.
-                'ray_head_wait_initialized_command':
-                    instance_setup.RAY_HEAD_WAIT_INITIALIZED_COMMAND,
-
-                # Cloud credentials for cloud storage.
-                'credentials': credentials,
-                # Sky remote utils.
-                'sky_remote_path': SKY_REMOTE_PATH,
-                'sky_local_path': str(local_wheel_path),
-                # Add yaml file path to the template variables.
-                'sky_ray_yaml_remote_path':
-                    cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH,
-                'sky_ray_yaml_local_path': tmp_yaml_path,
-                'sky_version': str(version.parse(sky.__version__)),
-                'sky_wheel_hash': wheel_hash,
-                'ssh_max_sessions_config':
-                    constants.SET_SSH_MAX_SESSIONS_CONFIG_CMD,
-                # Authentication (optional).
-                **auth_config,
-
-                # Controller specific configs
-                'is_remote_controller': is_remote_controller,
-                'high_availability': high_availability_specified,
-
-                # Volume mounts
-                'volume_mounts': volume_mount_vars,
-                'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
-
-                # runcmd to run before any of the SkyPilot runtime setup commands.
-                # This is currently only used by AWS and Kubernetes.
-                'runcmd': runcmd,
-            },
-            **cloud_specific_failover_overrides,
-        ),
+        variables,
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
