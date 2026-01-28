@@ -1,0 +1,9 @@
+# Minimal managed job recipe for smoke testing
+name: test-recipe-job
+
+resources:
+  cpus: 2+
+  memory: 4+
+
+run: |
+  echo "Recipe managed job test completed successfully"
