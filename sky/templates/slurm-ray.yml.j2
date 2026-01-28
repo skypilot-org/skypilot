@@ -1,3 +1,4 @@
+{% set user = 'root' if image_id is not none else ssh_user %}
 cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
@@ -25,7 +26,7 @@ provider:
 {% endif %}
 
 auth:
-  ssh_user: {{ssh_user}}
+  ssh_user: {{user}}
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
@@ -69,7 +70,6 @@ initialization_commands: []
 #
 # Increment the following for catching performance bugs easier:
 #   current num items (num SSH connections): 1
-{% set user = 'root' if image_id is not none else ssh_user %}
 setup_commands:
   - |
     {%- for initial_setup_command in initial_setup_commands %}
