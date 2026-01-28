@@ -569,12 +569,14 @@ export function RecipeDetail() {
             </div>
             <div>
               <div className="text-gray-600 font-medium text-base">Updated</div>
-              <div
-                className="text-base mt-1"
-                title={formatFullTimestamp(template.updated_at)}
-              >
-                {formatRelativeTime(template.updated_at)} by{' '}
-                {template.updated_by_name || template.user_name || 'Unknown'}
+              <div className="text-base mt-1">
+                <span
+                  className="border-b border-dotted border-gray-400 cursor-help"
+                  title={formatFullTimestamp(template.updated_at)}
+                >
+                  {formatRelativeTime(template.updated_at)}
+                </span>
+                {' '}by {template.updated_by_name || template.user_name || 'Unknown'}
               </div>
             </div>
           </div>

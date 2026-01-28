@@ -144,12 +144,11 @@ function RecipeCard({ recipe }) {
 
             {/* Last updated info */}
             <div className="text-sm text-gray-500 truncate">
+              Updated by {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
               <span
                 className="border-b border-dotted border-gray-400 cursor-help"
-                title={`Updated by ${recipe.updated_by_name || recipe.user_name || 'Unknown'} ${formatRelativeTime(recipe.updated_at)}`}
+                title={new Date(recipe.updated_at * 1000).toLocaleString()}
               >
-                Updated by{' '}
-                {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
                 {formatRelativeTime(recipe.updated_at)}
               </span>
             </div>
