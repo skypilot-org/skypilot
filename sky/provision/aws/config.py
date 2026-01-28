@@ -80,8 +80,6 @@ def bootstrap_instances(
 
     ec2 = aws.resource('ec2', region_name=region, **aws_credentials)
 
-    logger.info(f'!!!!!!!1 {config.provider_config.get("vpc_name")}')
-
     # Pick a reasonable subnet if not specified by the user.
     subnets, vpc_id = _get_subnet_and_vpc_id(
         ec2,
