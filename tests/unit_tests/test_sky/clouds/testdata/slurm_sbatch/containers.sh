@@ -44,10 +44,11 @@ srun --nodes=1 mkdir -p /tmp/test-cluster
 touch /home/testuser/.sky_clusters/test-cluster/.sky_slurm_cluster
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster/.hushlogin
+srun --nodes=1 mkdir -p /tmp/ccache_$(id -u)
 echo "Initializing container test-cluster on all nodes..."
 rm -rf /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
 mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
-srun --overlap --label --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+srun --overlap --label --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 apt-get update
 apt-get install -y ca-certificates rsync curl git wget fuse
 echo '"'"'alias sudo=""'"'"' >> ~/.bashrc

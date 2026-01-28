@@ -75,10 +75,11 @@ setup_commands:
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-    # TODO(kevin): Do this only for non-container jobs.
+    # TODO(kevin): Generate SSH host key only for non-containers.
     # Also, for containers, modify ~/.sky_ssh_rc to make it work.
     # Currently, ssh will take you to your user's home directory, not
     # the container user's (always `root` in our case, for now) home directory.
+    #
     # Generate host key for sshd -i if not exists
     mkdir -p ~{{user}}/.ssh && chmod 700 ~{{user}}/.ssh
     [ -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
@@ -120,7 +121,7 @@ setup_commands:
     # environments. It's actively maintained (https://github.com/mkj/dropbear/releases)
     # and doesn't have the same issue with OpenSSH.
     #
-    # This runs on both host and container; only install when root (container).
+    # This section runs on both host and container; only install when root (container).
     # TODO(kevin): Host the binary somewhere, so we don't have to build it every time.
     if [ "$(id -u)" = "0" ]; then
       set -e
@@ -146,7 +147,9 @@ setup_commands:
         curl -sL https://matt.ucc.asn.au/dropbear/releases/dropbear-$DROPBEAR_VERSION.tar.bz2 | tar xj
         cd dropbear-$DROPBEAR_VERSION
         ./configure --disable-zlib --disable-syslog --disable-wtmp --disable-lastlog >/dev/null
+        BUILD_START=$SECONDS
         make CC="ccache gcc" -j$(nproc) PROGRAMS="dropbear" >/dev/null
+        echo "[dropbear] Build took $((SECONDS - BUILD_START))s"
         cp dropbear /usr/local/bin/
         cd /; rm -rf /tmp/dropbear-$DROPBEAR_VERSION
       fi

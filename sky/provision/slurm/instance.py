@@ -285,7 +285,7 @@ def _create_virtual_instance(
         #   /dev/shm is inherited from the host
         # See:
         # https://github.com/NVIDIA/enroot/blob/main/conf/hooks/10-devices.sh
-        host_ccache_dir = f'{remote_home_dir}/.cache/ccache'
+        host_ccache_dir = '/tmp/ccache_$(id -u)'
         container_ccache_dir = '/var/cache/ccache'
         container_mounts = ','.join([
             f'{remote_home_dir}:{remote_home_dir}',
