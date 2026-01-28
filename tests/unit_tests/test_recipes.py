@@ -272,3 +272,45 @@ run: echo hello
 """
         # Should not raise
         recipes_core._validate_skypilot_yaml(simple_yaml, 'cluster')
+
+    # =========================================================================
+    # Tests for volume recipe validation
+    # =========================================================================
+
+    def test_valid_volume_yaml(self):
+        """Test that a valid volume YAML passes validation."""
+        valid_volume_yaml = """
+name: my-volume
+type: k8s-pvc
+size: 100Gi
+"""
+        # Should not raise
+        recipes_core._validate_skypilot_yaml(valid_volume_yaml, 'volume')
+
+    def test_volume_yaml_missing_name(self):
+        """Test that volume YAML without name is rejected."""
+        invalid_volume_yaml = """
+type: k8s-pvc
+size: 100Gi
+"""
+        with pytest.raises(ValueError, match="'name' is a required property"):
+            recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
+
+    def test_volume_yaml_missing_type(self):
+        """Test that volume YAML without type is rejected."""
+        invalid_volume_yaml = """
+name: my-volume
+size: 100Gi
+"""
+        with pytest.raises(ValueError, match="'type' is a required property"):
+            recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
+
+    def test_volume_yaml_invalid_type(self):
+        """Test that volume YAML with invalid type is rejected."""
+        invalid_volume_yaml = """
+name: my-volume
+type: invalid-type
+size: 100Gi
+"""
+        with pytest.raises(ValueError, match='Invalid volume YAML'):
+            recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
