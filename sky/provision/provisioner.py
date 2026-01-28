@@ -214,9 +214,6 @@ def bulk_provision(
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
-                    if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
-                        logger.info('Ignoring teardown error as ')
-
                     retry_cnt += 1
                     if retry_cnt <= _MAX_RETRY:
                         logger.debug(f'Retrying {retry_cnt}/{_MAX_RETRY}...')
