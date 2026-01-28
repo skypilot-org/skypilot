@@ -63,6 +63,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
+    :ref:`install_conda <config-yaml-provision-install-conda>`: false
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -614,6 +615,31 @@ Cluster SSH connection is probed during provisioning to check if a cluster is up
 determines how long to wait for the connection to be established.
 
 Default: ``10``.
+
+.. _config-yaml-provision-install-conda:
+
+``provision.install_conda``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to install conda on the remote cluster (optional).
+
+Skypilot clusters come with conda preinstalled for convenience.
+When set to ``false``, SkyPilot will not install conda on the cluster.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    install_conda: false
+
+.. note::
+
+  Default SkyPilot images often come with conda preinstalled.
+  To fully avoid installing conda, use a custom Docker image that does not have conda preinstalled
+  along with ``install_conda: false``.
 
 .. _config-yaml-aws:
 
@@ -1364,6 +1390,7 @@ Example:
         myannotation: myvalue
     provision_timeout: 10
     autoscaler: gke
+    set_pod_resource_limits: true  # or a multiplier like 1.5
     pod_config:
       metadata:
         labels:
@@ -1470,6 +1497,47 @@ Example:
   kubernetes:
     post_provision_runcmd:
       - echo "hello world!"
+
+.. _config-yaml-kubernetes-set-pod-resource-limits:
+
+``kubernetes.set_pod_resource_limits``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Set pod CPU/memory limits relative to requests (optional).
+
+This is useful for Kubernetes clusters that require resource limits to be set
+(e.g., for LimitRange enforcement, resource quotas, or cluster policies).
+
+Can be one of:
+
+- ``false`` (default): Do not set CPU/memory limits (only requests are set).
+- ``true``: Set limits equal to requests (multiplier of 1).
+- A positive number: Set limits to requests multiplied by this value (e.g., ``1.5`` for 50% headroom).
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    # Set limits equal to requests
+    set_pod_resource_limits: true
+
+.. code-block:: yaml
+
+  kubernetes:
+    # Set limits to 1.5x requests (50% headroom)
+    set_pod_resource_limits: 1.5
+
+This can also be configured per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        set_pod_resource_limits: 2.0
 
 .. _config-yaml-kubernetes-context-configs:
 

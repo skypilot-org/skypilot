@@ -123,7 +123,8 @@ _VERBOSE_REQUEST_FIELDS_TO_SHOW = _DEFAULT_REQUEST_FIELDS_TO_SHOW + [
 ]
 _DEFAULT_MANAGED_JOB_FIELDS_TO_GET = [
     'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
-    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status', 'pool'
+    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status',
+    'pool', 'is_primary_in_job_group'
 ]
 _VERBOSE_MANAGED_JOB_FIELDS_TO_GET = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET + [
     'current_cluster_name', 'job_id_on_pool_cluster', 'start_at', 'infra',
@@ -317,14 +318,21 @@ def _async_call_or_wait(request_id: server_common.RequestId[T],
             f'{colorama.Style.RESET_ALL}\n')
 
 
-def _merge_env_vars(env_dict: Optional[Dict[str, str]],
-                    env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    """Merges all values from env_list into env_dict."""
-    if not env_dict:
-        return env_list
-    for (key, value) in env_list:
-        env_dict[key] = value
-    return list(env_dict.items())
+def _merge_cli_and_file_vars(
+        env_dicts: List[Optional[Dict[str, str]]],
+        env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    """Merges all values from env_list and env_dicts. Priority is
+    as follows: env_list has highest priority, and env_dict with
+    higher index has more priority than that of lower index."""
+    final_env_dict = {}
+    for env_dict in env_dicts:
+        if env_dict is None:
+            continue
+        for k, v in env_dict.items():
+            final_env_dict[k] = v
+    for k, v in env_list:
+        final_env_dict[k] = v
+    return list(final_env_dict.items())
 
 
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
@@ -801,6 +809,20 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if is_yaml:
         assert entrypoint is not None
         usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+
+        # Check if this is a JobGroup YAML
+        if dag_utils.is_job_group_yaml(entrypoint):
+            click.secho('Detected JobGroup YAML', fg='cyan')
+            dag = dag_utils.load_job_group_from_yaml(entrypoint,
+                                                     env_overrides=env,
+                                                     secrets_overrides=secret)
+            if override_params:
+                click.secho(
+                    f'WARNING: override params {override_params} are ignored '
+                    'for JobGroup YAML.',
+                    fg='yellow')
+            return dag
+
         dag = dag_utils.load_chain_dag_from_yaml(entrypoint,
                                                  env_overrides=env,
                                                  secret_overrides=secret)
@@ -1058,6 +1080,7 @@ def launch(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
@@ -1093,7 +1116,8 @@ def launch(
     # job can take up resources on the API server. When there are a lot of
     # `launch` submitted asynchronously, the log tailing may overwhelm the API
     # server, if the jobs are long running.
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
     if backend_name is None:
@@ -1247,6 +1271,7 @@ def exec(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     cpus: Optional[str],
     memory: Optional[str],
@@ -1327,7 +1352,8 @@ def exec(
         raise click.UsageError('Missing argument \'[ENTRYPOINT]...\'')
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
 
@@ -1568,12 +1594,15 @@ def _handle_services_request(
             # print the original error.
             pass
         if not msg:
-            msg = (f'Failed to fetch {noun} statuses due to connection issues. '
-                   'Please try again later. Details: '
-                   f'{common_utils.format_exception(e, use_bracket=True)}')
-    except Exception as e:  # pylint: disable=broad-except
-        msg = (f'Failed to fetch {noun} statuses: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+            # This is an actual error (connection issues), not a normal state.
+            # Format the error message and raise a new exception.
+            # Use 'from None' to suppress the exception chain and only show
+            # the formatted message.
+            error_msg = (
+                f'Failed to fetch {noun} statuses due to connection issues. '
+                'Please try again later. Details: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            raise RuntimeError(error_msg) from None
     else:
         if show_endpoint:
             if len(service_records) != 1:
@@ -2024,6 +2053,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(pool_status_request_id, silent=True)
                     num_pools = -1
                     msg = 'KeyboardInterrupt'
+                except Exception as e:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # printing the error message instead of crashing.
+                    num_pools = None
+                    msg = str(e)
         if num_pools is not None:
             if num_pools > 0:
                 click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -2052,6 +2086,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                     sdk.api_cancel(service_status_request_id, silent=True)
                     num_services = -1
                     msg = 'KeyboardInterrupt'
+                except Exception as e:  # pylint: disable=broad-except
+                    # For internal calls, handle exceptions gracefully by
+                    # printing the error message instead of crashing.
+                    num_services = None
+                    msg = str(e)
         click.echo(msg)
         if num_services is not None:
             hints.append(
@@ -4476,12 +4515,8 @@ def show_gpus(
                                                    min_spot_price=('spot_price',
                                                                    'min'))
             df = df.merge(min_price_df, on='cloud')
-            # Sort within each cloud by price.
-            # using df.cloud.values is a hack to keep the 'cloud' column in the output for pandas>=3.0.0
-            df = df.groupby(df.cloud.values, group_keys=False).apply(
-                lambda x: x.sort_values(by=['price', 'spot_price']))
-            # Sort across groups (clouds).
-            df = df.sort_values(by=['min_price', 'min_spot_price'])
+            df = df.sort_values(
+                by=['min_price', 'min_spot_price', 'price', 'spot_price'])
             df = df.drop(columns=['min_price', 'min_spot_price'])
             sorted_dataclasses = [
                 catalog_common.InstanceTypeInfo(*row)
@@ -4985,6 +5020,7 @@ def jobs_launch(
     job_recovery: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
@@ -5021,7 +5057,8 @@ def jobs_launch(
             raise click.UsageError('Cannot specify both --name and --cluster. '
                                    'Use one of the flags as they are alias.')
         name = cluster
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
@@ -5395,10 +5432,31 @@ def jobs_cancel(
               required=False,
               help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
+@click.argument('task', required=False, type=str, default=None)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool, sync_down: bool):
-    """Tail or sync down the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool,
+              task: Optional[str]):
+    """Tail or sync down the log of a managed job.
+
+    TASK can be a task ID (integer) or task name. Numeric values are treated
+    as task IDs. If not specified, logs for all tasks are shown.
+
+
+    Examples:
+
+    \b
+    # View logs for job ID 1, task 0
+    sky jobs logs 1 0
+
+    \b
+    # View logs for job named 'my-job', task 'train'
+    sky jobs logs -n my-job train
+
+    \b
+    # View logs for job named 'my-job', task 'eval'
+    sky jobs logs -n my-job eval
+    """
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -5415,11 +5473,17 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
+            # Parse task argument: if numeric, treat as task ID (int),
+            # otherwise treat as task name (str)
+            parsed_task: Optional[Union[str, int]] = None
+            if task is not None:
+                parsed_task = int(task) if task.isdigit() else task
             returncode = managed_jobs.tail_logs(name=name,
                                                 job_id=job_id,
                                                 follow=follow,
                                                 controller=controller,
-                                                refresh=refresh)
+                                                refresh=refresh,
+                                                task=parsed_task)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
@@ -5488,6 +5552,7 @@ def jobs_pool_apply(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -5548,6 +5613,7 @@ def jobs_pool_apply(
             image_id=image_id,
             env_file=env_file,
             env=env,
+            secret_file=secret_file,
             secret=secret,
             disk_size=disk_size,
             disk_tier=disk_tier,
@@ -5989,7 +6055,8 @@ def _generate_task_with_service(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
-    secret: Optional[List[Tuple[str, str]]],
+    secret_file: Optional[Dict[str, str]],
+    secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
     ports: Optional[Tuple[str]],
@@ -6008,7 +6075,8 @@ def _generate_task_with_service(
     yaml_name = 'SERVICE_YAML' if not pool else 'POOL_YAML'
     if not is_yaml:
         raise click.UsageError(f'{yaml_name} must be a valid YAML file.')
-    env = _merge_env_vars(env_file, env)
+    env = _merge_cli_and_file_vars([env_file], env)
+    secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     # We keep nargs=-1 in service_yaml argument to reuse this function.
     task = _make_task_or_dag_from_entrypoint_with_overrides(
         service_yaml_args,
@@ -6146,6 +6214,7 @@ def serve_up(
     image_id: Optional[str],
     env_file: Optional[Dict[str, str]],
     env: List[Tuple[str, str]],
+    secret_file: Optional[Dict[str, str]],
     secret: List[Tuple[str, str]],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -6209,6 +6278,7 @@ def serve_up(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret_file=secret_file,
         secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,
@@ -6260,12 +6330,12 @@ def serve_up(
 @timeline.event
 @usage_lib.entrypoint
 def serve_update(
-        service_name: str, service_yaml: Tuple[str,
-                                               ...], workdir: Optional[str],
-        infra: Optional[str], cloud: Optional[str], region: Optional[str],
-        zone: Optional[str], num_nodes: Optional[int], use_spot: Optional[bool],
-        image_id: Optional[str], env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]], secret: List[Tuple[str, str]],
+        service_name: str, service_yaml: Tuple[str, ...],
+        workdir: Optional[str], infra: Optional[str], cloud: Optional[str],
+        region: Optional[str], zone: Optional[str], num_nodes: Optional[int],
+        use_spot: Optional[bool], image_id: Optional[str],
+        env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+        secret_file: Optional[Dict[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
         disk_tier: Optional[str], network_tier: Optional[str], mode: str,
@@ -6319,6 +6389,7 @@ def serve_update(
         image_id=image_id,
         env_file=env_file,
         env=env,
+        secret_file=secret_file,
         secret=secret,
         disk_size=disk_size,
         disk_tier=disk_tier,

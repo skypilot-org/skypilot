@@ -544,6 +544,31 @@ def shared_controller_vars_to_fill(
             yaml_utils.dump_yaml(temp_file.name, dict(**local_user_config))
         local_user_config_path = temp_file.name
 
+    vars_to_fill: Dict[str, Any] = controller_only_vars_to_fill(controller)
+    vars_to_fill.update({
+        'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+        'sky_python_cmd': constants.SKY_PYTHON_CMD,
+        'local_user_config_path': local_user_config_path,
+    })
+    env_vars: Dict[str, Any] = {
+        env.env_key: str(int(env.get())) for env in env_options.Options
+    }
+    env_vars.update({
+        # Make sure the clusters launched by the controller are marked as
+        # launched with a remote API server if the controller is launched
+        # with a remote API server.
+        constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
+            common_utils.get_using_remote_api_server()),
+    })
+    if skypilot_config.loaded():
+        # Only set the SKYPILOT_CONFIG env var if the user has a config file.
+        env_vars[
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
+    vars_to_fill['controller_envs'].update(env_vars)
+    return vars_to_fill
+
+
+def controller_only_vars_to_fill(controller: Controllers) -> Dict[str, str]:
     # Get plugins config and wheel file mounts/commands together to ensure
     # consistency between the uploaded wheel paths and installation commands.
     # Only upload plugins specified in remote_plugins.yaml - plugins in
@@ -554,23 +579,17 @@ def shared_controller_vars_to_fill(
     if plugin_wheel_file_mounts and plugins_wheel_install_commands:
         local_plugins_config_path = (
             plugin_utils.get_filtered_plugins_config_path())
-
     vars_to_fill: Dict[str, Any] = {
+        'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
         'cloud_dependencies_installation_commands':
             _get_cloud_dependencies_installation_commands(controller),
-        # We need to activate the python environment on the controller to ensure
-        # cloud SDKs are installed in SkyPilot runtime environment and can be
-        # accessed.
-        'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
-        'sky_python_cmd': constants.SKY_PYTHON_CMD,
-        'local_user_config_path': local_user_config_path,
         # Plugin-related template variables
         'local_plugins_config_path': local_plugins_config_path,
         'remote_plugins_config_path': plugins.REMOTE_PLUGINS_CONFIG_PATH,
         'plugin_wheel_file_mounts': plugin_wheel_file_mounts,
         'plugins_wheel_install_commands': plugins_wheel_install_commands,
     }
-    env_vars: Dict[str, str] = {
+    env_vars: Dict[str, Any] = {
         env.env_key: str(int(env.get())) for env in env_options.Options
     }
     env_vars.update({
@@ -582,11 +601,6 @@ def shared_controller_vars_to_fill(
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
         # Disable minimize logging to get more details on the controller.
         env_options.Options.MINIMIZE_LOGGING.env_key: '0',
-        # Make sure the clusters launched by the controller are marked as
-        # launched with a remote API server if the controller is launched
-        # with a remote API server.
-        constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
-            common_utils.get_using_remote_api_server()),
         constants.IS_SKYPILOT_SERVE_CONTROLLER:
             ('true'
              if controller == Controllers.SKY_SERVE_CONTROLLER else 'false'),
@@ -596,10 +610,6 @@ def shared_controller_vars_to_fill(
     if override_concurrent_launches is not None:
         env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
             int(override_concurrent_launches))
-    if skypilot_config.loaded():
-        # Only set the SKYPILOT_CONFIG env var if the user has a config file.
-        env_vars[
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
     vars_to_fill['controller_envs'] = env_vars
     return vars_to_fill
 

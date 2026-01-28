@@ -2134,3 +2134,394 @@ def test_managed_jobs_instance_links(generic_cloud: str):
             timeout=15 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing JobGroups ----------
+
+
+def _render_job_group_yaml(yaml_template_path: str, name: str, cloud: str,
+                           **kwargs) -> str:
+    """Render a JobGroup YAML template with name, cloud, and extra variables."""
+    with open(yaml_template_path, 'r') as f:
+        template_content = f.read()
+
+    template = jinja2.Template(template_content)
+    rendered = template.render(name=name, cloud=cloud, **kwargs)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(rendered)
+        f.flush()
+        return f.name
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_basic(generic_cloud: str):
+    """Test basic JobGroup with 2 parallel jobs."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_basic',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_networking(generic_cloud: str):
+    """Test JobGroup cross-job networking via hostname resolution."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking.yaml', name, generic_cloud)
+
+    # NOTE: We use job ID instead of `-n {name}` for `sky jobs logs` because
+    # `sky jobs logs -n <name>` only works for running (non-terminal) jobs.
+    # For completed jobs, we need to use the job ID directly.
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_networking',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "SUCCESS: Connected to server"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        # Ubuntu base image - no sudo installed by default
+        'docker:ubuntu:22.04',
+        # Miniconda image - commonly used, has Python, no sudo
+        'docker:continuumio/miniconda3:24.1.2-0',
+    ])
+def test_job_group_networking_custom_image(generic_cloud: str, image_id: str):
+    """Test JobGroup networking with custom images that have no sudo installed.
+
+    This tests the fix for containers running as root but without sudo binary.
+    The DNS updater script must handle this case by aliasing sudo to empty
+    when running as root (using ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD).
+    """
+    # Include image name in cluster name for uniqueness across parametrized runs
+    image_suffix = image_id.split(':')[-1].replace('.', '-')[:8]
+    name = smoke_tests_utils.get_cluster_name() + f'-{image_suffix}'
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_networking_custom_image.yaml',
+        name,
+        generic_cloud,
+        image_id=image_id)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        f'job_group_networking_custom_image_{image_suffix}',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            # Verify the client connected successfully (proves networking worked)
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | '
+            f'grep "SUCCESS: Connected to server on custom image without sudo"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_rl_architecture(generic_cloud: str):
+    """Test JobGroup with RL-style heterogeneous architecture (4 components)."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml(
+        'tests/test_job_groups/smoke_rl_architecture.yaml', name, generic_cloud)
+
+    test = smoke_tests_utils.Test(
+        'job_group_rl_architecture',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            f'sky jobs queue | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_task_logs(generic_cloud: str):
+    """Test task-specific log viewing for JobGroups."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    get_job_id_cmd = (f'sky jobs queue | grep {name} | head -1 | '
+                      f'awk \'{{print $1}}\'')
+    test = smoke_tests_utils.Test(
+        'job_group_task_logs',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            # Test default behavior - should show all tasks
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | grep "Job A" && '
+            f'sky jobs logs $({get_job_id_cmd}) --no-follow | grep "Job B"',
+            # Test viewing logs by task ID - should only show job-a
+            f'sky jobs logs $({get_job_id_cmd}) 0 --no-follow | '
+            f'grep "Job A" && ! sky jobs logs $({get_job_id_cmd}) 0 '
+            f'--no-follow | grep "Job B"',
+            # Test viewing logs by task name - should only show job-b
+            f'sky jobs logs $({get_job_id_cmd}) job-b --no-follow | '
+            f'grep "Job B" && ! sky jobs logs $({get_job_id_cmd}) job-b '
+            f'--no-follow | grep "Job A"',
+            # Test invalid task ID/name - should show error
+            f'sky jobs logs $({get_job_id_cmd}) 999 --no-follow 2>&1 | '
+            f'grep "No task found matching"',
+            f'sky jobs logs $({get_job_id_cmd}) nonexistent --no-follow 2>&1 | '
+            f'grep "No task found matching"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.kubernetes
+def test_job_group_task_logs_sdk(generic_cloud: str):
+    """Test SDK task filtering with typed task parameter (int vs str).
+
+    This test verifies that the SDK correctly handles:
+    - task=int filters by task_id
+    - task=str filters by task_name
+    - Invalid task values return appropriate errors
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = _render_job_group_yaml('tests/test_job_groups/smoke_basic.yaml',
+                                       name, generic_cloud)
+
+    def sdk_task_filter_test():
+        # Get job_id for the launched job
+        queue_request_id = jobs_sdk.queue_v2(refresh=False)
+        queue_records = sky.stream_and_get(queue_request_id)
+        # Parse the queue response (queue_v2 returns a tuple)
+        if isinstance(queue_records, tuple):
+            jobs_list, _, _, _ = queue_records
+        else:
+            jobs_list = queue_records
+        job_id = None
+        for job in jobs_list:
+            if job.get('job_name') == name:
+                job_id = job.get('job_id')
+                break
+        assert job_id is not None, f'Job {name} not found in queue'
+
+        # Test 1: task=int(0) should filter by task_id and show only job-a
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task=0,
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'Job A' in content, f'Expected "Job A" in output for task=0'
+        assert 'Job B' not in content, f'Unexpected "Job B" in output for task=0'
+
+        # Test 2: task=str('job-b') should filter by task_name and show only job-b
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task='job-b',
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'Job B' in content, f'Expected "Job B" in output for task="job-b"'
+        assert 'Job A' not in content, f'Unexpected "Job A" for task="job-b"'
+
+        # Test 3: task=int(999) should fail (non-existent task_id)
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task=999,
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'No task found matching 999' in content, (
+            f'Expected error for task=999, got: {content}')
+
+        # Test 4: task=str('nonexistent') should fail (non-existent task_name)
+        output = io.StringIO()
+        jobs_sdk.tail_logs(job_id=job_id,
+                           follow=False,
+                           task='nonexistent',
+                           output_stream=output)
+        content = output.getvalue()
+        assert 'No task found matching' in content, (
+            f'Expected error for task="nonexistent", got: {content}')
+
+    test = smoke_tests_utils.Test(
+        'job_group_task_logs_sdk',
+        [
+            f'sky jobs launch {yaml_path} -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=360),
+            sdk_task_filter_test,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing JobGroup Primary/Auxiliary ----------
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_job_group_primary_auxiliary(generic_cloud: str):
+    """Test JobGroup with primary/auxiliary tasks termination behavior.
+
+    Tests that:
+    1. Primary task (trainer) completes successfully
+    2. Auxiliary task (replay-buffer) is automatically terminated after primary
+    3. The termination_delay is respected before auxiliary termination
+    4. The job group status is SUCCEEDED when primary succeeds
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    # Use short delay (5s) for faster testing
+    delay = '5s'
+
+    # Generate the test YAML using Jinja template
+    template_str = pathlib.Path(
+        'tests/test_job_groups/smoke_primary_auxiliary.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud=generic_cloud, name=name, delay=delay)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'job_group_primary_auxiliary',
+            [
+                f'sky jobs launch {yaml_path} -y -d',
+                # Wait for the job to complete (should succeed based on primary)
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=600),
+                # Verify primary task succeeded
+                f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
+                f'echo "$s"; echo "$s" | grep trainer | grep SUCCEEDED',
+                # Verify auxiliary task was cancelled (terminated after primary)
+                # Check for CANCELLING or CANCELLED as the state may still be
+                # transitioning when we check
+                f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
+                f'echo "$s"; echo "$s" | grep replay-buffer | grep -E "CANCELLING|CANCELLED"',
+                # Verify logs show the termination delay message
+                f'sky jobs logs --controller -n {name} --no-follow | '
+                f'grep -E "Waiting.*before terminating|Terminating auxiliary"',
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
+    """Test that auxiliary tasks are terminated immediately when primary fails.
+
+    Tests that:
+    1. Primary task fails
+    2. Auxiliary task is terminated immediately (no delay, despite config)
+    3. The job group status is FAILED
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Generate the test YAML using Jinja template
+    template_str = pathlib.Path(
+        'tests/test_job_groups/smoke_primary_failure.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud=generic_cloud, name=name)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(content)
+        f.flush()
+        yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'job_group_primary_failure',
+            [
+                f'sky jobs launch {yaml_path} -y -d',
+                # Wait for the job to complete (should fail based on primary)
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.FAILED],
+                    timeout=600),
+                # Verify primary task failed
+                f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
+                f'echo "$s"; echo "$s" | grep failing-trainer | grep FAILED',
+                # Verify auxiliary task was cancelled (terminated immediately)
+                # Check for CANCELLING or CANCELLED as the state may still be
+                # transitioning when we check
+                f's=$({smoke_tests_utils.GET_JOB_QUEUE} | grep -A 2 {name}); '
+                f'echo "$s"; echo "$s" | grep replay-buffer | grep -E "CANCELLING|CANCELLED"',
+            ],
+            f'sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)

@@ -104,6 +104,7 @@ async def deploy_ssh_node_pool(request: fastapi.Request,
             request_body=ssh_up_body,
             func=core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
+            auth_user=request.state.auth_user,
         )
 
         return {
@@ -129,6 +130,7 @@ async def deploy_ssh_node_pool_general(
             request_body=ssh_up_body,
             func=core.ssh_up,
             schedule_type=requests_lib.ScheduleType.LONG,
+            auth_user=request.state.auth_user,
         )
 
         pool_name = ssh_up_body.infra or 'default'
@@ -155,6 +157,7 @@ async def down_ssh_node_pool(request: fastapi.Request,
             request_body=ssh_up_body,
             func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
+            auth_user=request.state.auth_user,
         )
 
         return {
@@ -183,6 +186,7 @@ async def down_ssh_node_pool_general(
             request_body=ssh_up_body,
             func=core.ssh_up,  # Reuse ssh_up function with cleanup=True
             schedule_type=requests_lib.ScheduleType.LONG,
+            auth_user=request.state.auth_user,
         )
 
         pool_name = ssh_up_body.infra or 'default'

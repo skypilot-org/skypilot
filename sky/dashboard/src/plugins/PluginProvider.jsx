@@ -805,7 +805,7 @@ export function useTableColumns(tableName, context = {}) {
       }
       return true;
     });
-  }, [tableName, tableColumns, JSON.stringify(context)]);
+  }, [tableName, tableColumns, context]);
 }
 
 export function useDataProvider(id) {
@@ -876,11 +876,5 @@ export function useMergedTableColumns(
     });
 
     return visibleColumns;
-  }, [
-    tableName,
-    baseColumns,
-    pluginColumns,
-    transformPluginColumn,
-    JSON.stringify(context),
-  ]);
+  }, [baseColumns, pluginColumns, transformPluginColumn, context]);
 }

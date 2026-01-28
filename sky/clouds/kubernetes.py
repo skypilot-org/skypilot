@@ -607,7 +607,8 @@ class Kubernetes(clouds.Cloud):
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
-            default_value=schemas.get_default_remote_identity('kubernetes'))
+            default_value=schemas.get_default_remote_identity('kubernetes'),
+            override_configs=resources.cluster_config_overrides)
 
         if isinstance(remote_identity, dict):
             # If remote_identity is a dict, use the service account for the
@@ -623,13 +624,16 @@ class Kubernetes(clouds.Cloud):
 
         lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
         sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
+        no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
 
-        if k8s_service_account_name == lc or k8s_service_account_name == sa:
+        if k8s_service_account_name in (lc, sa, no_upload):
             # Use the default service account if remote identity is not set.
             # For LOCAL_CREDENTIALS, this is for in-cluster authentication
             # which needs a serviceaccount (specifically for SSH node pools
             # which uses in-cluster authentication internally, and we would
             # like to support exec-auth when the user is also using SSH infra)
+            # For NO_UPLOAD, we don't upload credentials but still need a
+            # service account for pod creation.
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
 
@@ -685,6 +689,19 @@ class Kubernetes(clouds.Cloud):
                 region=context,
                 keys=('high_availability', 'storage_class_name'),
                 default_value=None))
+
+        # Get the config for setting pod CPU/memory limits relative to requests.
+        # This is useful for clusters that require limits to be set (e.g., for
+        # LimitRange enforcement or resource quotas).
+        # Can be: False (default, no limits), True (limits = requests),
+        # or a number (limits = requests * multiplier).
+        set_pod_resource_limits_config = (
+            skypilot_config.get_effective_workspace_region_config(
+                cloud='kubernetes',
+                region=context,
+                keys=('set_pod_resource_limits',),
+                default_value=False,
+                override_configs=resources.cluster_config_overrides))
 
         k8s_kueue_local_queue_name = (
             skypilot_config.get_effective_workspace_region_config(
@@ -795,6 +812,17 @@ class Kubernetes(clouds.Cloud):
             'k8s_max_run_duration_seconds': max_run_duration_seconds,
             'k8s_network_type': network_type.value,
         }
+
+        # Calculate CPU/memory limits if set_pod_resource_limits is configured.
+        # Convert config: False -> no limits, True -> multiplier 1.0,
+        # number -> that multiplier
+        if set_pod_resource_limits_config is not False:
+            if set_pod_resource_limits_config is True:
+                multiplier = 1.0
+            else:
+                multiplier = float(set_pod_resource_limits_config)
+            deploy_vars['k8s_cpu_limit'] = round(cpus * multiplier, 3)
+            deploy_vars['k8s_memory_limit'] = round(mem * multiplier, 3)
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running
         # inside a pod with in-cluster auth.

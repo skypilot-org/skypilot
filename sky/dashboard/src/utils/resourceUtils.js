@@ -9,7 +9,7 @@
  */
 export function formatCpu(cpu) {
   if (cpu === null || cpu === undefined) return '-';
-  return cpu === Math.floor(cpu) ? Math.floor(cpu).toString() : cpu.toFixed(1);
+  return Math.round(cpu).toString();
 }
 
 /**
@@ -19,7 +19,7 @@ export function formatCpu(cpu) {
  */
 export function formatMemory(memory) {
   if (memory === null || memory === undefined) return '-';
-  return `${memory.toFixed(1)} GB`;
+  return `${Math.round(memory)} GB`;
 }
 
 /**

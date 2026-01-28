@@ -145,6 +145,10 @@ def apply(
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
     mutated_dag.name = dag.name
+    # Preserve DAG execution properties if set
+    if dag.is_job_group():
+        assert dag.execution is not None
+        mutated_dag.set_execution(dag.execution)
 
     mutated_config = None
     for task in dag.tasks:

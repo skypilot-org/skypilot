@@ -4126,7 +4126,7 @@ class OciStore(AbstractStore):
                     'Storage \'store: oci\' specified, but ' \
                     'OCI access is disabled. To fix, enable '\
                     'OCI by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
                     )
 
     @classmethod

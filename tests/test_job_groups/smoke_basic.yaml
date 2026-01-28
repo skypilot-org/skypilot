@@ -1,0 +1,24 @@
+# Basic JobGroup smoke test - 2 parallel jobs
+---
+name: {{name}}
+execution: parallel
+---
+name: job-a
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job A Starting"
+  echo "SKYPILOT_JOBGROUP_NAME: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 10
+  echo "Job A Done"
+---
+name: job-b
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job B Starting"
+  echo "SKYPILOT_JOBGROUP_NAME: ${SKYPILOT_JOBGROUP_NAME}"
+  sleep 10
+  echo "Job B Done"
