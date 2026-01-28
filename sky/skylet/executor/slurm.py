@@ -9,11 +9,11 @@ import os
 import pathlib
 import shutil
 import socket
-import subprocess
 import sys
 import time
 
 import colorama
+import hostlist
 
 from sky.skylet.log_lib import run_bash_command_with_log
 
@@ -31,16 +31,10 @@ def _get_job_node_ips() -> str:
     nodelist = os.environ.get('SLURM_JOB_NODELIST', '')
     assert nodelist, 'SLURM_JOB_NODELIST is not set'
 
-    # Expand compressed nodelist (e.g., "node[1-3,5]"
-    # -> "node1\nnode2\nnode3\nnode5")
-    result = subprocess.run(['scontrol', 'show', 'hostnames', nodelist],
-                            capture_output=True,
-                            text=True,
-                            check=False)
-    if result.returncode != 0:
-        raise RuntimeError(f'Failed to get hostnames for: {nodelist}')
-
-    hostnames = result.stdout.strip().split('\n')
+    # Expand compressed nodelist (e.g., "node[1-3,5]" -> "node1\nnode2...")
+    # Alternative: `scontrol show hostnames $SLURM_JOB_NODELIST`, but `scontrol`
+    # (and Slurm CLI binaries in general) may not exist inside containers.
+    hostnames = list(hostlist.expand_hostlist(nodelist))
     ips = []
     for hostname in hostnames:
         try:
