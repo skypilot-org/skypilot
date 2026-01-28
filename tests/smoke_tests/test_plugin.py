@@ -99,16 +99,20 @@ def test_plugin_upload_to_jobs_controller(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                # It is possible this timeout is not enough
+                # (since the jobs controller needs to be created from scratch).
+                # Increase this as needed.
                 timeout=200,
             ),
             # Controller setup includes "uv pip install" (or "pip install") for plugin wheels
-            ('sky logs $(sky status | grep sky-jobs-controller | awk \'NR==1{{print $1}}\') '
-             f'$(sky jobs queue | grep {name} | awk \'NR==1{{print $1}}\') '
-             # We assume this is the first time the job controller is started.
-             # Else, we'd see logline like
-             # "Audited 1 package in 2ms" instead of the wheel install log
-             # (since the wheel is already installed)
-             '--no-follow | grep -E "\\.whl"'),
+            (
+                'sky logs $(sky status | grep sky-jobs-controller | awk \'NR==1{{print $1}}\') '
+                f'$(sky jobs queue | grep {name} | awk \'NR==1{{print $1}}\') '
+                # We assume this is the first time the job controller is started.
+                # Else, we'd see logline like
+                # "Audited 1 package in 2ms" instead of the wheel install log
+                # (since the wheel is already installed)
+                '--no-follow | grep -E "\\.whl"'),
             f'sky jobs cancel -y -n {name}',
         ],
         f'sky jobs cancel -y -n {name}',
