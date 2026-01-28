@@ -1,6 +1,7 @@
 """Utilities for recipes."""
 import enum
 
+
 class RecipeType(enum.Enum):
     """Type of recipe in the Recipe Hub."""
     CLUSTER = 'cluster'

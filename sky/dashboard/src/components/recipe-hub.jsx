@@ -55,22 +55,13 @@ import {
 import { LastUpdatedTimestamp } from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
-import {
-  getRecipes,
-  createRecipe,
-  getCategories,
-} from '@/data/connectors/recipes';
-import {
-  RecipeType,
-  getRecipeTypeInfo,
-  capitalizeWords,
-} from '@/data/constants/recipeTypes';
+import { getRecipes, createRecipe } from '@/data/connectors/recipes';
+import { RecipeType, getRecipeTypeInfo } from '@/data/constants/recipeTypes';
 
 // Define filter options for the YAML filter dropdown
 const RECIPE_PROPERTY_OPTIONS = [
   { label: 'Name', value: 'name' },
   { label: 'Type', value: 'recipe_type' },
-  { label: 'Category', value: 'category' },
   { label: 'Owner', value: 'user_name' },
 ];
 
@@ -134,14 +125,6 @@ function RecipeCard({ recipe }) {
               </div>
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm text-gray-500">{typeInfo.label}</span>
-                {recipe.category && (
-                  <>
-                    <span className="text-sm text-gray-300">·</span>
-                    <span className="text-sm text-gray-500">
-                      {capitalizeWords(recipe.category)}
-                    </span>
-                  </>
-                )}
               </div>
             </div>
           </div>
@@ -232,13 +215,11 @@ function AllRecipesSection({ recipes }) {
   const optionValues = useMemo(() => {
     const names = new Set();
     const types = new Set();
-    const categories = new Set();
     const owners = new Set();
 
     recipes.forEach((r) => {
       if (r.name) names.add(r.name);
       if (r.recipe_type) types.add(r.recipe_type);
-      if (r.category) categories.add(r.category);
       if (r.user_name) owners.add(r.user_name);
       else if (r.user_id) owners.add(r.user_id);
     });
@@ -246,7 +227,6 @@ function AllRecipesSection({ recipes }) {
     return {
       name: Array.from(names).sort(),
       recipe_type: Array.from(types).sort(),
-      category: Array.from(categories).sort(),
       user_name: Array.from(owners).sort(),
     };
   }, [recipes]);
@@ -279,7 +259,6 @@ function AllRecipesSection({ recipes }) {
 
           if (propertyKey === 'name') itemValue = item.name || '';
           else if (propertyKey === 'type') itemValue = item.recipe_type || '';
-          else if (propertyKey === 'category') itemValue = item.category || '';
           else if (propertyKey === 'owner')
             itemValue = item.user_name || item.user_id || '';
 
@@ -344,12 +323,6 @@ function AllRecipesSection({ recipes }) {
                 </TableHead>
                 <TableHead
                   className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                  onClick={() => requestSort('category')}
-                >
-                  Category{getSortDirection('category')}
-                </TableHead>
-                <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
                   onClick={() => requestSort('user_name')}
                 >
                   Owner{getSortDirection('user_name')}
@@ -372,7 +345,7 @@ function AllRecipesSection({ recipes }) {
               {sortedAndFilteredTemplates.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={6}
                     className="text-center py-6 text-gray-500"
                   >
                     {recipes.length === 0
@@ -423,11 +396,6 @@ function AllRecipesSection({ recipes }) {
                         title={recipe.description || ''}
                       >
                         <span className="cursor-default">{truncatedDesc}</span>
-                      </TableCell>
-                      <TableCell className="text-gray-600">
-                        {recipe.category
-                          ? capitalizeWords(recipe.category)
-                          : '-'}
                       </TableCell>
                       <TableCell className="text-gray-600">
                         {recipe.user_name || recipe.user_id || 'Unknown'}
@@ -748,176 +716,18 @@ run: |
   }
 }
 
-// Category Combobox Component - allows selecting predefined or typing custom
-function CategoryCombobox({
-  value,
-  onChange,
-  predefinedCategories,
-  customCategories,
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [inputValue, setInputValue] = useState(value || '');
-  const inputRef = useRef(null);
-  const dropdownRef = useRef(null);
-
-  // Combine all categories for suggestions
-  const allCategories = useMemo(() => {
-    const predefined = predefinedCategories.map((c) => ({
-      name: c.name,
-      icon: c.icon,
-      isPredefined: true,
-    }));
-    const custom = customCategories.map((name) => ({
-      name,
-      icon: null,
-      isPredefined: false,
-    }));
-    return [...predefined, ...custom];
-  }, [predefinedCategories, customCategories]);
-
-  // Filter categories based on input
-  const filteredCategories = useMemo(() => {
-    if (!inputValue) return allCategories;
-    const lower = inputValue.toLowerCase();
-    return allCategories.filter((c) => c.name.toLowerCase().includes(lower));
-  }, [allCategories, inputValue]);
-
-  // Check if current input matches an existing category
-  const isExistingCategory = useMemo(() => {
-    return allCategories.some(
-      (c) => c.name.toLowerCase() === inputValue.toLowerCase()
-    );
-  }, [allCategories, inputValue]);
-
-  // Handle click outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target) &&
-        inputRef.current &&
-        !inputRef.current.contains(event.target)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Sync input value with external value
-  useEffect(() => {
-    setInputValue(value || '');
-  }, [value]);
-
-  const handleInputChange = (e) => {
-    const newValue = e.target.value;
-    setInputValue(newValue);
-    onChange(newValue);
-    if (!isOpen) setIsOpen(true);
-  };
-
-  const handleSelect = (categoryName) => {
-    setInputValue(categoryName);
-    onChange(categoryName);
-    setIsOpen(false);
-  };
-
-  const handleClear = () => {
-    setInputValue('');
-    onChange('');
-    inputRef.current?.focus();
-  };
-
-  return (
-    <div className="relative">
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          value={inputValue}
-          onChange={handleInputChange}
-          onFocus={() => setIsOpen(true)}
-          placeholder="Select or type a category..."
-          className="w-full h-10 px-3 pr-8 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        {inputValue && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        )}
-      </div>
-      {isOpen && (
-        <div
-          ref={dropdownRef}
-          className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto"
-        >
-          {filteredCategories.length > 0 ? (
-            <>
-              {filteredCategories.map((cat, index) => (
-                <div
-                  key={cat.name}
-                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
-                    index !== filteredCategories.length - 1
-                      ? 'border-b border-gray-100'
-                      : ''
-                  }`}
-                  onClick={() => handleSelect(cat.name)}
-                >
-                  <span className="text-gray-700">
-                    {cat.icon && <span className="mr-2">{cat.icon}</span>}
-                    {cat.name}
-                  </span>
-                </div>
-              ))}
-            </>
-          ) : inputValue && !isExistingCategory ? (
-            <div className="px-3 py-2 text-sm text-gray-500">
-              Press Enter or click away to use &quot;{inputValue}&quot; as a new
-              category
-            </div>
-          ) : (
-            <div className="px-3 py-2 text-sm text-gray-500">
-              No categories found
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Create YAML Modal with Category Combobox and Owner Name field
+// Create YAML Modal with Owner Name field
 function CreateRecipeModal({
   isOpen,
   onClose,
   onSubmit,
   initialData,
-  predefinedCategories,
-  customCategories,
   isAuthenticated,
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState(getExampleRecipe(RecipeType.CLUSTER));
   const [recipeType, setRecipeType] = useState(RecipeType.CLUSTER);
-  const [category, setCategory] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -928,13 +738,11 @@ function CreateRecipeModal({
         setDescription(initialData.description || '');
         setContent(initialData.content || '');
         setRecipeType(initialData.recipe_type || RecipeType.CLUSTER);
-        setCategory(initialData.category || '');
       } else {
         setName('');
         setDescription('');
         setRecipeType(RecipeType.CLUSTER);
         setContent(getExampleRecipe(RecipeType.CLUSTER));
-        setCategory('');
       }
       setOwnerName('');
     }
@@ -969,7 +777,6 @@ function CreateRecipeModal({
         description: description || null,
         content,
         recipeType,
-        category: category || null,
         ownerName: ownerName || null,
       });
       onClose();
@@ -1062,19 +869,6 @@ function CreateRecipeModal({
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
-            <CategoryCombobox
-              value={category}
-              onChange={setCategory}
-              predefinedCategories={predefinedCategories}
-              customCategories={customCategories}
-            />
-            <p className="text-xs text-gray-500">
-              Select a predefined category or type a custom one
-            </p>
-          </div>
-
-          <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
             <Input
               id="description"
@@ -1131,8 +925,6 @@ export function RecipeHub() {
 
   // Data state
   const [allRecipes, setAllRecipes] = useState([]);
-  const [predefinedCategories, setPredefinedCategories] = useState([]);
-  const [customCategories, setCustomCategories] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
@@ -1168,13 +960,8 @@ export function RecipeHub() {
   const fetchData = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
-      const [recipesData, categoriesData] = await Promise.all([
-        getRecipes(),
-        getCategories(),
-      ]);
+      const recipesData = await getRecipes();
       setAllRecipes(recipesData || []);
-      setPredefinedCategories(categoriesData?.predefined || []);
-      setCustomCategories(categoriesData?.custom || []);
       setLastFetchedTime(new Date());
     } catch (error) {
       console.error('Error fetching recipes:', error);
@@ -1337,8 +1124,6 @@ export function RecipeHub() {
         onClose={handleCloseCreateModal}
         onSubmit={handleCreate}
         initialData={initialCreateData}
-        predefinedCategories={predefinedCategories}
-        customCategories={customCategories}
         isAuthenticated={isAuthenticated}
       />
     </div>

@@ -44,7 +44,6 @@ recipes_table = sqlalchemy.Table(
     sqlalchemy.Column('description', sqlalchemy.Text),
     sqlalchemy.Column('content', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('recipe_type', sqlalchemy.Text, nullable=False),
-    sqlalchemy.Column('category', sqlalchemy.Text),
     sqlalchemy.Column('pinned', sqlalchemy.Integer, default=0),
     sqlalchemy.Column('user_id', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('user_name', sqlalchemy.Text),
@@ -56,33 +55,8 @@ recipes_table = sqlalchemy.Table(
     sqlalchemy.Column('is_pinnable', sqlalchemy.Integer, default=1),
     sqlalchemy.Index('idx_recipe_user_id', 'user_id'),
     sqlalchemy.Index('idx_recipe_pinned', 'pinned'),
-    sqlalchemy.Index('idx_recipe_category', 'category'),
     sqlalchemy.Index('idx_recipe_type', 'recipe_type'),
 )
-
-# Predefined categories that are always available
-PREDEFINED_CATEGORIES = [
-    {
-        'name': 'training',
-        'icon': '🎯'
-    },
-    {
-        'name': 'inference',
-        'icon': '🔮'
-    },
-    {
-        'name': 'dev',
-        'icon': '💻'
-    },
-    {
-        'name': 'batch',
-        'icon': '📦'
-    },
-    {
-        'name': 'other',
-        'icon': '📁'
-    },
-]
 
 # Directory containing example YAML files
 _EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), 'examples')
@@ -94,25 +68,21 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
         'name': 'Basic Cluster',
         'description': 'A simple cluster with GPU resources',
         'recipe_type': 'cluster',
-        'category': 'dev',
     },
     'basic_managed_job': {
         'name': 'Basic Managed Job',
         'description': 'A simple managed job with automatic recovery',
         'recipe_type': 'job',
-        'category': 'batch',
     },
     'basic_job_pool': {
         'name': 'Basic Job Pool',
         'description': 'A job pool for running multiple concurrent jobs',
         'recipe_type': 'pool',
-        'category': 'batch',
     },
     'basic_volume': {
         'name': 'Basic Volume',
         'description': 'A starting point for a k8s volume',
         'recipe_type': 'volume',
-        'category': 'storage',
     },
 }
 
@@ -163,8 +133,8 @@ def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
         # Check if table is empty
         # pylint: disable=not-callable
         count = session.execute(
-            sqlalchemy.select(sqlalchemy.func.count()).select_from(
-                recipes_table)).scalar()
+            sqlalchemy.select(
+                sqlalchemy.func.count()).select_from(recipes_table)).scalar()
         if count == 0:
             now = time.time()
             for filename, metadata in DEFAULT_TEMPLATES.items():
@@ -181,7 +151,6 @@ def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
                     description=metadata['description'],
                     content=content,
                     recipe_type=metadata['recipe_type'],
-                    category=metadata['category'],
                     pinned=1,
                     user_id='system',
                     user_name='SkyPilot',
@@ -244,7 +213,6 @@ class Recipe:
         recipe_type: RecipeType,
         user_id: str,
         description: Optional[str] = None,
-        category: Optional[str] = None,
         pinned: bool = False,
         user_name: Optional[str] = None,
         created_at: Optional[float] = None,
@@ -259,7 +227,6 @@ class Recipe:
         self.description = description
         self.content = content
         self.recipe_type = recipe_type
-        self.category = category
         self.pinned = pinned
         self.user_id = user_id
         self.user_name = user_name
@@ -278,7 +245,6 @@ class Recipe:
             'description': self.description,
             'content': self.content,
             'recipe_type': self.recipe_type.value,
-            'category': self.category,
             'pinned': self.pinned,
             'user_id': self.user_id,
             'user_name': self.user_name,
@@ -299,7 +265,6 @@ class Recipe:
             description=row.description,
             content=row.content,
             recipe_type=RecipeType.from_str(row.recipe_type),
-            category=row.category,
             pinned=bool(row.pinned),
             user_id=row.user_id,
             user_name=row.user_name,
@@ -325,7 +290,6 @@ def create_recipe(
     user_id: str,
     user_name: Optional[str] = None,
     description: Optional[str] = None,
-    category: Optional[str] = None,
 ) -> Recipe:
     """Create a new recipe.
 
@@ -336,7 +300,6 @@ def create_recipe(
         user_id: ID of the user creating the recipe.
         user_name: Optional display name of the user.
         description: Optional description.
-        category: Optional category for organization.
 
     Returns:
         The created YamlTemplate object.
@@ -352,7 +315,6 @@ def create_recipe(
             description=description,
             content=content,
             recipe_type=recipe_type.value,
-            category=category,
             pinned=0,
             user_id=user_id,
             user_name=user_name,
@@ -369,7 +331,6 @@ def create_recipe(
         description=description,
         content=content,
         recipe_type=recipe_type,
-        category=category,
         pinned=False,
         user_id=user_id,
         user_name=user_name,
@@ -405,7 +366,6 @@ def list_recipes(
     user_id: Optional[str] = None,
     pinned_only: bool = False,
     my_recipes_only: bool = False,
-    category: Optional[str] = None,
     recipe_type: Optional[RecipeType] = None,
 ) -> List[Recipe]:
     """List recipes with optional filters.
@@ -417,7 +377,6 @@ def list_recipes(
         user_id: Filter to recipes owned by this user (for my_recipes_only).
         pinned_only: If True, only return pinned templates.
         my_recipes_only: If True, only return recipes owned by user_id.
-        category: Filter by category.
         recipe_type: Filter by type.
 
     Returns:
@@ -431,9 +390,6 @@ def list_recipes(
         query = query.where(recipes_table.c.pinned == 1)
     elif my_recipes_only and user_id:
         query = query.where(recipes_table.c.user_id == user_id)
-
-    if category:
-        query = query.where(recipes_table.c.category == category)
 
     if recipe_type:
         query = query.where(recipes_table.c.recipe_type == recipe_type.value)
@@ -456,7 +412,6 @@ def update_recipe(
     name: Optional[str] = None,
     description: Optional[str] = None,
     content: Optional[str] = None,
-    category: Optional[str] = None,
 ) -> Optional[Recipe]:
     """Update a recipe.
 
@@ -469,7 +424,6 @@ def update_recipe(
         name: New name (if updating).
         description: New description (if updating).
         content: New YAML content (if updating).
-        category: New category (if updating).
 
     Returns:
         The updated Recipe if successful, None if not found
@@ -497,8 +451,6 @@ def update_recipe(
         updates['description'] = description
     if content is not None:
         updates['content'] = content
-    if category is not None:
-        updates['category'] = category
 
     if not updates:
         return recipe
@@ -543,8 +495,8 @@ def delete_recipe(recipe_id: str, user_id: str) -> bool:
         return False
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(recipes_table.delete().where(
-            recipes_table.c.id == recipe_id))
+        session.execute(
+            recipes_table.delete().where(recipes_table.c.id == recipe_id))
         session.commit()
 
     return True
@@ -577,55 +529,8 @@ def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Recipe]:
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(recipes_table.update().where(
-            recipes_table.c.id == recipe_id).values(
-                pinned=1 if pinned else 0, updated_at=time.time()))
+            recipes_table.c.id == recipe_id).values(pinned=1 if pinned else 0,
+                                                    updated_at=time.time()))
         session.commit()
 
     return get_recipe(recipe_id)
-
-
-def get_predefined_category_names() -> List[str]:
-    """Get list of predefined category names.
-
-    Returns:
-        List of predefined category names.
-    """
-    return [cat['name'] for cat in PREDEFINED_CATEGORIES]
-
-
-@_init_db
-def get_custom_categories() -> List[str]:
-    """Get custom categories from recipes.
-
-    Returns DISTINCT category names that are not predefined.
-
-    Returns:
-        List of custom category names (sorted).
-    """
-    assert _SQLALCHEMY_ENGINE is not None
-    predefined_names = set(get_predefined_category_names())
-
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        result = session.execute(
-            sqlalchemy.select(recipes_table.c.category).distinct().where(
-                recipes_table.c.category.isnot(None)).order_by(
-                    recipes_table.c.category))
-        rows = result.fetchall()
-
-    # Filter out predefined categories
-    custom = [
-        row[0] for row in rows if row[0] and row[0] not in predefined_names
-    ]
-    return sorted(custom)
-
-
-@_init_db
-def get_all_categories() -> List[str]:
-    """Get all categories (predefined + custom from recipes).
-
-    Returns:
-        List of all category names (sorted).
-    """
-    predefined = get_predefined_category_names()
-    custom = get_custom_categories()
-    return predefined + custom
