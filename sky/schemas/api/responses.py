@@ -217,6 +217,20 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Network endpoint information for connecting to the job's cluster.
+    # These are populated from the cluster handle when the job is running.
+    # Note: IPs may change during job recovery (e.g., after preemption).
+    # For Kubernetes, internal_dns_entries are more stable as they're tied
+    # to services that route to the new pod after recovery.
+    # Internal IPs for all nodes in the cluster.
+    internal_ips: Optional[List[str]] = None
+    # External (feasible) IPs for all nodes in the cluster. For K8s with
+    # use_internal_ips=True, these may be the same as internal_ips.
+    external_ips: Optional[List[str]] = None
+    # Kubernetes internal service DNS entries (only for K8s clusters).
+    # Format: '{pod_name}.{namespace}.svc.cluster.local'
+    # These are resolvable from within the K8s cluster.
+    internal_dns_entries: Optional[List[str]] = None
 
 
 class VolumeRecord(ResponseBaseModel):
