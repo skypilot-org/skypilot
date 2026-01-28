@@ -34,7 +34,7 @@ FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
                              'sudo ln -s /bin/fusermount /bin/fusermount3 || '
                              'true')
 # https://github.com/Azure/azure-storage-fuse/releases
-BLOBFUSE2_VERSION = '2.5.2'
+BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
@@ -314,14 +314,9 @@ def get_az_mount_install_cmd() -> str:
         '"$LIBFUSE_DIR/libfuse3.so.3"; '
         '    fi; '
         '  fi && '
-        # Detect Debian version for blobfuse2 package selection. Blobfuse2
-        # provides version-specific packages (Debian-11.0, Debian-12.0, etc.)
-        '  DEBIAN_VER=$(grep "^VERSION_ID=" /etc/os-release 2>/dev/null | '
-        'cut -d= -f2 | tr -d \'"\' | cut -d. -f1) && '
-        '  DEBIAN_VER="${DEBIAN_VER:-11}" && '
         '  wget -nc https://github.com/Azure/azure-storage-fuse'
         f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}/'
-        f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-${{DEBIAN_VER}}.0.x86_64.deb '
+        f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
         '-O /tmp/blobfuse2.deb && '
         '  sudo dpkg --install /tmp/blobfuse2.deb; '
         'else '
