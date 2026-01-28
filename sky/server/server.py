@@ -56,6 +56,7 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
+from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -99,7 +100,6 @@ from sky.utils import ux_utils
 from sky.utils.db import db_utils
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
-from sky.recipes import server as recipes_rest
 
 if typing.TYPE_CHECKING:
     from sky import backends

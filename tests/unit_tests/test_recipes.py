@@ -144,3 +144,131 @@ run: echo hello world
 """
         # Should not raise - minimal YAML with just a run command is valid
         recipes_core._validate_skypilot_yaml(valid_yaml, 'cluster')
+
+    # =========================================================================
+    # Tests for local path validation (workdir and file_mounts)
+    # =========================================================================
+
+    def test_local_workdir_rejected(self):
+        """Test that local workdir paths are rejected in recipes."""
+        yaml_with_local_workdir = """
+workdir: /path/to/local/dir
+run: python train.py
+"""
+        with pytest.raises(ValueError,
+                           match='Local workdir paths are not allowed'):
+            recipes_core._validate_skypilot_yaml(yaml_with_local_workdir,
+                                                 'cluster')
+
+    def test_local_workdir_relative_path_rejected(self):
+        """Test that relative workdir paths are rejected in recipes."""
+        yaml_with_relative_workdir = """
+workdir: ./my-project
+run: python train.py
+"""
+        with pytest.raises(ValueError,
+                           match='Local workdir paths are not allowed'):
+            recipes_core._validate_skypilot_yaml(yaml_with_relative_workdir,
+                                                 'cluster')
+
+    def test_git_workdir_allowed(self):
+        """Test that git URL workdir is allowed in recipes."""
+        yaml_with_git_workdir = """
+workdir:
+  url: https://github.com/user/repo
+  ref: main
+run: python train.py
+"""
+        # Should not raise
+        recipes_core._validate_skypilot_yaml(yaml_with_git_workdir, 'cluster')
+
+    def test_git_workdir_no_ref_allowed(self):
+        """Test that git URL workdir without ref is allowed in recipes."""
+        yaml_with_git_workdir = """
+workdir:
+  url: https://github.com/user/repo
+run: python train.py
+"""
+        # Should not raise
+        recipes_core._validate_skypilot_yaml(yaml_with_git_workdir, 'cluster')
+
+    def test_local_file_mount_rejected(self):
+        """Test that local file mount sources are rejected in recipes."""
+        yaml_with_local_mount = """
+file_mounts:
+  /remote/data: /local/path/to/data
+run: echo hello
+"""
+        with pytest.raises(ValueError,
+                           match='Local file mounts are not allowed'):
+            recipes_core._validate_skypilot_yaml(yaml_with_local_mount,
+                                                 'cluster')
+
+    def test_local_file_mount_relative_path_rejected(self):
+        """Test that relative file mount paths are rejected in recipes."""
+        yaml_with_relative_mount = """
+file_mounts:
+  /remote/data: ./local/data
+run: echo hello
+"""
+        with pytest.raises(ValueError,
+                           match='Local file mounts are not allowed'):
+            recipes_core._validate_skypilot_yaml(yaml_with_relative_mount,
+                                                 'cluster')
+
+    def test_cloud_file_mount_s3_allowed(self):
+        """Test that S3 file mounts are allowed in recipes."""
+        yaml_with_cloud_mount = """
+file_mounts:
+  /remote/data: s3://my-bucket/data
+run: echo hello
+"""
+        # Should not raise
+        recipes_core._validate_skypilot_yaml(yaml_with_cloud_mount, 'cluster')
+
+    def test_cloud_file_mount_gs_allowed(self):
+        """Test that GCS file mounts are allowed in recipes."""
+        yaml_with_gcs_mount = """
+file_mounts:
+  /remote/data: gs://my-bucket/data
+run: echo hello
+"""
+        # Should not raise
+        recipes_core._validate_skypilot_yaml(yaml_with_gcs_mount, 'cluster')
+
+    def test_mixed_file_mounts_one_local_rejected(self):
+        """Test that mixed file mounts with one local source are rejected."""
+        yaml_with_mixed_mounts = """
+file_mounts:
+  /remote/cloud-data: s3://my-bucket/data
+  /remote/local-data: /local/path/to/data
+run: echo hello
+"""
+        with pytest.raises(ValueError,
+                           match='Local file mounts are not allowed'):
+            recipes_core._validate_skypilot_yaml(yaml_with_mixed_mounts,
+                                                 'cluster')
+
+    def test_inline_storage_mount_allowed(self):
+        """Test that inline storage definitions (dicts) are allowed."""
+        yaml_with_inline_storage = """
+file_mounts:
+  /remote/data:
+    name: my-bucket
+    source: s3://my-bucket/data
+    mode: COPY
+run: echo hello
+"""
+        # Should not raise - dict sources are inline storage definitions
+        recipes_core._validate_skypilot_yaml(yaml_with_inline_storage,
+                                             'cluster')
+
+    def test_no_workdir_no_file_mounts_allowed(self):
+        """Test that recipes without workdir or file_mounts are valid."""
+        simple_yaml = """
+resources:
+  cpus: 2
+run: echo hello
+"""
+        # Should not raise
+        recipes_core._validate_skypilot_yaml(simple_yaml, 'cluster')
