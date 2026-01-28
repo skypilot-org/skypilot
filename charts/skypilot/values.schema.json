@@ -700,6 +700,17 @@
                 }
             }
         },
+        "slurmCredentials": {
+            "type": "object",
+            "properties": {
+                "config": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
         "storage": {
             "type": "object",
             "properties": {
