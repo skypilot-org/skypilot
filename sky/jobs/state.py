@@ -2027,6 +2027,27 @@ def get_job_schedule_state(job_id: int) -> ManagedJobScheduleState:
         return ManagedJobScheduleState(state)
 
 
+def get_job_pending_reason(job_id: int) -> Optional[str]:
+    """Get the pending reason for a job based on schedule_state.
+
+    Returns:
+        - "In backoff, waiting for resources" if ALIVE_BACKOFF
+        - "Waiting for resources" if WAITING/ALIVE_WAITING
+        - "Submitting to scheduler" if INACTIVE
+        - None otherwise
+    """
+    schedule_state = get_job_schedule_state(job_id)
+
+    if schedule_state == ManagedJobScheduleState.ALIVE_BACKOFF:
+        return 'In backoff, waiting for resources'
+    elif schedule_state in (ManagedJobScheduleState.WAITING,
+                            ManagedJobScheduleState.ALIVE_WAITING):
+        return 'Waiting for resources'
+    elif schedule_state == ManagedJobScheduleState.INACTIVE:
+        return 'Submitting to scheduler'
+    return None
+
+
 @_init_db
 def get_num_launching_jobs() -> int:
     assert _SQLALCHEMY_ENGINE is not None

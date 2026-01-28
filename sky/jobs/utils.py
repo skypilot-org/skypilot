@@ -967,7 +967,10 @@ def stream_logs_by_id(
         # task_filter is a str, match by task name
         return task_name == task_filter
 
-    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
+    pending_reason = managed_job_state.get_job_pending_reason(job_id)
+    status_str = f' ({pending_reason})' if pending_reason else ''
+    msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
+                                             job_id=job_id)
     status_display = rich_utils.safe_status(msg)
     num_tasks = managed_job_state.get_num_tasks(job_id)
 
@@ -1128,7 +1131,13 @@ def stream_logs_by_id(
                 status_str = ''
                 if (managed_job_status is not None and managed_job_status !=
                         managed_job_state.ManagedJobStatus.RUNNING):
-                    status_str = f' (status: {managed_job_status.value})'
+                    # Get specific pending reason instead of just showing status
+                    pending_reason = managed_job_state.get_job_pending_reason(
+                        job_id)
+                    if pending_reason:
+                        status_str = f' ({pending_reason})'
+                    else:
+                        status_str = f' (status: {managed_job_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
