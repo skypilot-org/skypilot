@@ -35,6 +35,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`extraEnvs <helm-values-global-extraEnvs>`: null
   :ref:`fullnameOverride <helm-values-fullnameOverride>`: null
   :ref:`apiService <helm-values-apiService>`:
+    :ref:`imageRegistry <helm-values-apiService-imageRegistry>`: null
     :ref:`image <helm-values-apiService-image>`: berkeleyskypilot/skypilot-nightly:latest
     :ref:`upgradeStrategy <helm-values-apiService-upgradeStrategy>`: Recreate
     :ref:`replicas <helm-values-apiService-replicas>`: 1
@@ -84,6 +85,7 @@ Below is the available helm value keys and the default value of each key:
   :ref:`auth <helm-values-auth>`:
     :ref:`oauth <helm-values-auth-oauth>`:
       :ref:`enabled <helm-values-auth-oauth-enabled>`: false
+      :ref:`imageRegistry <helm-values-auth-oauth-imageRegistry>`: null
       :ref:`oidc-issuer-url <helm-values-auth-oauth-oidc-issuer-url>`: null
       :ref:`client-id <helm-values-auth-oauth-client-id>`: ""
       :ref:`client-secret <helm-values-auth-oauth-client-secret>`: ""
@@ -92,6 +94,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`session-store-type <helm-values-auth-oauth-session-store-type>`: "redis"
       :ref:`redis-url <helm-values-auth-oauth-redis-url>`: null
       :ref:`redis-secret <helm-values-auth-oauth-redis-secret>`: null
+      :ref:`redis-imageRegistry <helm-values-auth-oauth-redis-imageRegistry>`: null
       :ref:`cookie-refresh <helm-values-auth-oauth-cookie-refresh>`: null
       :ref:`cookie-expire <helm-values-auth-oauth-cookie-expire>`: null
     :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
@@ -118,6 +121,7 @@ Below is the available helm value keys and the default value of each key:
     # Deprecated: use auth.oauth instead.
     :ref:`oauth2-proxy <helm-values-ingress-oauth2-proxy>`:
       :ref:`enabled <helm-values-ingress-oauth2-proxy-enabled>`: false
+      :ref:`imageRegistry <helm-values-ingress-oauth2-proxy-imageRegistry>`: null
       :ref:`oidc-issuer-url <helm-values-ingress-oauth2-proxy-oidc-issuer-url>`: null
       :ref:`client-id <helm-values-ingress-oauth2-proxy-client-id>`: ""
       :ref:`client-secret <helm-values-ingress-oauth2-proxy-client-secret>`: ""
@@ -127,6 +131,7 @@ Below is the available helm value keys and the default value of each key:
       :ref:`email-domain <helm-values-ingress-oauth2-proxy-email-domain>`: "*"
       :ref:`session-store-type <helm-values-ingress-oauth2-proxy-session-store-type>`: "redis"
       :ref:`redis-url <helm-values-ingress-oauth2-proxy-redis-url>`: null
+      :ref:`redis-imageRegistry <helm-values-ingress-oauth2-proxy-redis-imageRegistry>`: null
       :ref:`cookie-refresh <helm-values-ingress-oauth2-proxy-cookie-refresh>`: null
       :ref:`cookie-expire <helm-values-ingress-oauth2-proxy-cookie-expire>`: null
     :ref:`tls <helm-values-ingress-tls>`:
@@ -211,6 +216,7 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-gcpCredentials-enabled>`: false
     :ref:`projectId <helm-values-gcpCredentials-projectId>`: null
     :ref:`gcpSecretName <helm-values-gcpCredentials-gcpSecretName>`: gcp-credentials
+    :ref:`imageRegistry <helm-values-gcpCredentials-imageRegistry>`: null
 
   :ref:`r2Credentials <helm-values-r2Credentials>`:
     :ref:`enabled <helm-values-r2Credentials-enabled>`: false
@@ -365,6 +371,20 @@ Default: ``null``
 ~~~~~~~~~~~~~~
 
 Configuration for the SkyPilot API server deployment.
+
+.. _helm-values-apiService-imageRegistry:
+
+``apiService.imageRegistry``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Override the image registry for API service container images. Takes lower priority than :ref:`global.imageRegistry <helm-values-global-imageRegistry>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    imageRegistry: registry.example.com/custom
 
 .. _helm-values-apiService-image:
 
@@ -948,6 +968,21 @@ Default: ``false``
     oauth:
       enabled: true
 
+.. _helm-values-auth-oauth-imageRegistry:
+
+``auth.oauth.imageRegistry``
+'''''''''''''''''''''''''''''
+
+Override the image registry for OAuth2 Proxy on API server. Takes lower priority than :ref:`global.imageRegistry <helm-values-global-imageRegistry>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      imageRegistry: registry.example.com/custom
+
 .. _helm-values-auth-oauth-oidc-issuer-url:
 
 ``auth.oauth.oidc-issuer-url``
@@ -1070,6 +1105,21 @@ Default: ``null``
   auth:
     oauth:
       redis-secret: "my-redis-credentials"
+
+.. _helm-values-auth-oauth-redis-imageRegistry:
+
+``auth.oauth.redis-imageRegistry``
+'''''''''''''''''''''''''''''''''''
+
+Override the image registry for Redis used by OAuth2 Proxy on API server. Takes lower priority than :ref:`global.imageRegistry <helm-values-global-imageRegistry>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  auth:
+    oauth:
+      redis-imageRegistry: registry.example.com/custom
 
 .. _helm-values-auth-oauth-cookie-refresh:
 
@@ -1432,6 +1482,21 @@ Default: ``false``
     oauth2-proxy:
       enabled: true
 
+.. _helm-values-ingress-oauth2-proxy-imageRegistry:
+
+``ingress.oauth2-proxy.imageRegistry``
+'''''''''''''''''''''''''''''''''''''''
+
+Override the image registry for OAuth2 Proxy on ingress. Takes lower priority than :ref:`global.imageRegistry <helm-values-global-imageRegistry>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      imageRegistry: registry.example.com/custom
+
 .. _helm-values-ingress-oauth2-proxy-oidc-issuer-url:
 
 ``ingress.oauth2-proxy.oidc-issuer-url``
@@ -1566,6 +1631,21 @@ Default: ``null``
   ingress:
     oauth2-proxy:
       redis-url: "redis://redis-host:6379/0"
+
+.. _helm-values-ingress-oauth2-proxy-redis-imageRegistry:
+
+``ingress.oauth2-proxy.redis-imageRegistry``
+'''''''''''''''''''''''''''''''''''''''''''''
+
+Override the image registry for Redis used by OAuth2 Proxy on ingress. Takes lower priority than :ref:`global.imageRegistry <helm-values-global-imageRegistry>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  ingress:
+    oauth2-proxy:
+      redis-imageRegistry: registry.example.com/custom
 
 .. _helm-values-ingress-oauth2-proxy-cookie-refresh:
 
@@ -2027,6 +2107,20 @@ Default: ``gcp-credentials``
 
   gcpCredentials:
     gcpSecretName: gcp-credentials
+
+.. _helm-values-gcpCredentials-imageRegistry:
+
+``gcpCredentials.imageRegistry``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Override the image registry for GCP Cloud SDK init container. Takes lower priority than :ref:`global.imageRegistry <helm-values-global-imageRegistry>`.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  gcpCredentials:
+    imageRegistry: registry.example.com/custom
 
 .. _helm-values-r2Credentials:
 
