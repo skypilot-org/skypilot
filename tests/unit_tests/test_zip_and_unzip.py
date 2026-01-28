@@ -168,7 +168,7 @@ def test_unzip_file_zip_slip_blocked():
             with zipfile.ZipFile(zip_path, 'w') as z:
                 z.writestr(name, b'malicious content')
 
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(ValueError) as exc_info:
                 asyncio.run(server.unzip_file(zip_path, extract_dir))
 
             assert 'outside target directory' in str(exc_info.value), \
