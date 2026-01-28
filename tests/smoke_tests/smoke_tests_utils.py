@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
@@ -1168,6 +1169,186 @@ def get_response_from_request_id_dashboard(request_id: str) -> Any:
         return request_task.get_return_value()
     raise RuntimeError(f'Failed to get request {request_id}: '
                        f'{response.status_code} {response.text}')
+
+
+def verify_cluster_in_dashboard(cluster_name: str,
+                                expected_status: Optional[str] = None,
+                                timeout: int = 60) -> Generator[str, None, None]:
+    """Verify a cluster appears in the dashboard with expected status.
+
+    This is a generator function that can be used as a command in smoke tests.
+
+    Args:
+        cluster_name: Name of the cluster to verify.
+        expected_status: Expected status (e.g., 'UP', 'STOPPED'). If None, just
+            verifies the cluster exists.
+        timeout: Maximum time to wait for the cluster to appear.
+
+    Yields:
+        Progress messages.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            request_id = get_dashboard_cluster_status_request_id()
+            clusters = get_response_from_request_id_dashboard(request_id)
+
+            # Find the cluster by name
+            cluster = None
+            for c in clusters:
+                if c.get('cluster_name') == cluster_name or c.get(
+                        'name') == cluster_name:
+                    cluster = c
+                    break
+
+            if cluster:
+                status = cluster.get('status', 'UNKNOWN')
+                if expected_status is None:
+                    yield f'Dashboard: Cluster {cluster_name} found with status {status}'
+                    return
+                elif status == expected_status:
+                    yield f'Dashboard: Cluster {cluster_name} has expected status {status}'
+                    return
+                else:
+                    yield f'Dashboard: Cluster {cluster_name} has status {status}, waiting for {expected_status}'
+            else:
+                yield f'Dashboard: Cluster {cluster_name} not found yet, waiting...'
+
+        except Exception as e:
+            yield f'Dashboard: Error checking cluster status: {e}'
+
+        time.sleep(5)
+
+    raise AssertionError(
+        f'Dashboard: Cluster {cluster_name} did not appear with expected '
+        f'status {expected_status} within {timeout}s')
+
+
+def verify_job_in_dashboard(job_name: str,
+                            expected_status: Optional[List[str]] = None,
+                            timeout: int = 60) -> Generator[str, None, None]:
+    """Verify a managed job appears in the dashboard with expected status.
+
+    This is a generator function that can be used as a command in smoke tests.
+
+    Args:
+        job_name: Name of the job to verify.
+        expected_status: List of acceptable statuses. If None, just verifies
+            the job exists.
+        timeout: Maximum time to wait for the job to appear.
+
+    Yields:
+        Progress messages.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            request_id = get_dashboard_jobs_queue_request_id()
+            jobs = get_response_from_request_id_dashboard(request_id)
+
+            # Find the job by name
+            job = None
+            for j in jobs:
+                if j.get('job_name') == job_name or j.get('name') == job_name:
+                    job = j
+                    break
+
+            if job:
+                status = job.get('status', 'UNKNOWN')
+                if expected_status is None:
+                    yield f'Dashboard: Job {job_name} found with status {status}'
+                    return
+                elif status in expected_status:
+                    yield f'Dashboard: Job {job_name} has expected status {status}'
+                    return
+                else:
+                    yield f'Dashboard: Job {job_name} has status {status}, waiting for one of {expected_status}'
+            else:
+                yield f'Dashboard: Job {job_name} not found yet, waiting...'
+
+        except Exception as e:
+            yield f'Dashboard: Error checking job status: {e}'
+
+        time.sleep(5)
+
+    raise AssertionError(
+        f'Dashboard: Job {job_name} did not appear with expected '
+        f'status {expected_status} within {timeout}s')
+
+
+def get_cmd_verify_cluster_in_dashboard(cluster_name: str,
+                                        expected_status: Optional[str] = None,
+                                        timeout: int = 60) -> str:
+    """Get a shell command to verify a cluster appears in the dashboard.
+
+    Args:
+        cluster_name: Name of the cluster to verify.
+        expected_status: Expected status (e.g., 'UP', 'STOPPED'). If None, just
+            verifies the cluster exists.
+        timeout: Maximum time to wait for the cluster to appear.
+
+    Returns:
+        A shell command string that can be used in smoke tests.
+    """
+    status_check = f' | grep -i "{expected_status}"' if expected_status else ''
+    return (
+        f'python -c "'
+        f'from smoke_tests import smoke_tests_utils; '
+        f'import time; '
+        f'start = time.time(); '
+        f'while time.time() - start < {timeout}: '
+        f'    try: '
+        f'        rid = smoke_tests_utils.get_dashboard_cluster_status_request_id(); '
+        f'        clusters = smoke_tests_utils.get_response_from_request_id_dashboard(rid); '
+        f'        cluster = next((c for c in clusters if c.get(\\\"cluster_name\\\") == \\\"{cluster_name}\\\" or c.get(\\\"name\\\") == \\\"{cluster_name}\\\"), None); '
+        f'        if cluster: '
+        f'            status = cluster.get(\\\"status\\\", \\\"UNKNOWN\\\"); '
+        f'            print(f\\\"Dashboard: Cluster {cluster_name} found with status {{status}}\\\"); '
+        + (f'            assert \\\"{expected_status}\\\" in status.upper(), f\\\"Expected {expected_status}, got {{status}}\\\"; '
+           if expected_status else '') + f'            exit(0); '
+        f'    except Exception as e: '
+        f'        print(f\\\"Waiting for cluster in dashboard: {{e}}\\\"); '
+        f'    time.sleep(5); '
+        f'raise AssertionError(\\\"Cluster {cluster_name} not found in dashboard\\\"); '
+        f'"')
+
+
+def get_cmd_verify_job_in_dashboard(job_name: str,
+                                    expected_statuses: Optional[List[str]] = None,
+                                    timeout: int = 60) -> str:
+    """Get a shell command to verify a managed job appears in the dashboard.
+
+    Args:
+        job_name: Name of the job to verify.
+        expected_statuses: List of acceptable statuses. If None, just verifies
+            the job exists.
+        timeout: Maximum time to wait for the job to appear.
+
+    Returns:
+        A shell command string that can be used in smoke tests.
+    """
+    statuses_str = str(expected_statuses) if expected_statuses else 'None'
+    return (
+        f'python -c "'
+        f'from smoke_tests import smoke_tests_utils; '
+        f'import time; '
+        f'start = time.time(); '
+        f'expected = {statuses_str}; '
+        f'while time.time() - start < {timeout}: '
+        f'    try: '
+        f'        rid = smoke_tests_utils.get_dashboard_jobs_queue_request_id(); '
+        f'        jobs = smoke_tests_utils.get_response_from_request_id_dashboard(rid); '
+        f'        job = next((j for j in jobs if j.get(\\\"job_name\\\") == \\\"{job_name}\\\" or j.get(\\\"name\\\") == \\\"{job_name}\\\"), None); '
+        f'        if job: '
+        f'            status = job.get(\\\"status\\\", \\\"UNKNOWN\\\"); '
+        f'            print(f\\\"Dashboard: Job {job_name} found with status {{status}}\\\"); '
+        f'            if expected is None or status in expected: '
+        f'                exit(0); '
+        f'    except Exception as e: '
+        f'        print(f\\\"Waiting for job in dashboard: {{e}}\\\"); '
+        f'    time.sleep(5); '
+        f'raise AssertionError(\\\"Job {job_name} not found in dashboard with expected status\\\"); '
+        f'"')
 
 
 def with_config(cmd: str, config_path: str) -> str:
