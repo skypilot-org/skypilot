@@ -1,0 +1,7 @@
+# Minimal cluster recipe for smoke testing
+resources:
+  cpus: 2+
+  memory: 4+
+
+run: |
+  echo "Recipe cluster test completed successfully"

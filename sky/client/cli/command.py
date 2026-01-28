@@ -28,6 +28,7 @@ import concurrent.futures
 import fnmatch
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
@@ -727,7 +728,12 @@ def _check_recipe_reference(entrypoint: str) -> Tuple[bool, Optional[str]]:
         Tuple of (is_recipe, recipe_name). If is_recipe is True, recipe_name
         contains the name of the recipe to fetch from the Recipe Hub.
     """
-    match = constants._RECIPE_PATTERN.match(entrypoint)
+    # Pattern matches 'recipes:<valid-recipe-name>'
+    # Recipe names must start with a letter, can contain letters, numbers,
+    # and dashes, and must end with an alphanumeric character.
+    pattern = re.compile(r'^recipes:(' + constants.RECIPE_NAME_VALID_REGEX +
+                         r')$')
+    match = pattern.match(entrypoint)
     if match:
         return True, match.group(1)
     return False, None
