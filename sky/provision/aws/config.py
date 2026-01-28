@@ -21,6 +21,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.clouds import aws as aws_cloud
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.aws import utils
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -47,8 +48,9 @@ def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
 
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
-    # NOTE: keep. The backend looks for this to know no nodes are launched.
-    full_error = f'SKYPILOT_ERROR_NO_NODES_LAUNCHED: {error}'
+    # NOTE: keep. The backend and provisioner looks for this to know
+    # no nodes are launched.
+    full_error = f'{provision_constants.ERROR_NO_NODES_LAUNCHED}: {error}'
     logger.error(full_error)
     raise RuntimeError(full_error)
 

@@ -311,6 +311,8 @@ function JobDetails() {
                     refreshFlag={0}
                     poolsData={poolsData}
                     links={enhancedJobData?.links}
+                    logExtractedLinks={logExtractedLinks}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
@@ -587,6 +589,7 @@ function JobDetails() {
                     selectedTaskIndex={isMultiTask ? selectedTaskIndex : null}
                     selectedNode={selectedNode}
                     onNodesExtracted={setLogNodes}
+                    onLinksExtracted={setLogExtractedLinks}
                   />
                 </div>
               </Card>
@@ -864,8 +867,8 @@ function JobDetailsContent({
     () => ({
       jobId: jobData.id,
       controller: false,
-      // Pass task index when viewing a specific task in a multi-task job
-      task: selectedTaskIndex !== null ? String(selectedTaskIndex) : null,
+      // Pass task index (as int) when viewing a specific task in a multi-task job
+      task: selectedTaskIndex,
     }),
     [jobData.id, selectedTaskIndex]
   );

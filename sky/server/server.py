@@ -1203,6 +1203,16 @@ async def unzip_file(zip_file_path: pathlib.Path,
                     new_path = client_file_mounts_dir / original_path.lstrip(
                         '/')
 
+                    # Security check: ensure extracted path stays within target
+                    # directory to prevent Zip Slip attacks (path traversal via
+                    # malicious "../" sequences in archive member names).
+                    resolved_path = new_path.resolve()
+                    if not _is_relative_to(resolved_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(
+                            f'Zip member {member.filename!r} would extract '
+                            'outside target directory. Aborted.')
+
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
                         new_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2367,9 +2377,17 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
+    is_container_image = handle.launched_resources.extract_docker_image(
+    ) is not None
     ssh_cmd += [
         shlex.quote(
-            slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+            slurm_utils.srun_sshd_command(
+                job_id,
+                target_node,
+                login_node_user,
+                handle.cluster_name_on_cloud,
+                is_container_image,
+            ))
     ]
 
     proc = await asyncio.create_subprocess_shell(
