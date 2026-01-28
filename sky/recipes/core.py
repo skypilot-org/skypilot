@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.data import data_utils
 from sky.recipes import db as recipes_db
+from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils import schemas
 
@@ -52,12 +53,12 @@ def _validate_no_local_paths(config: Dict[str, Any]) -> None:
                         f'{source!r}')
 
 
-def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
+def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
     """Validate YAML content against SkyPilot schema.
 
     Args:
         content: The YAML content string.
-        recipe_type: Type of recipe ('cluster', 'job', 'pool', 'volume').
+        recipe_type: Type of recipe.
 
     Raises:
         ValueError: If the YAML doesn't conform to SkyPilot schema.
@@ -76,7 +77,7 @@ def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
         _validate_no_local_paths(config)
 
         # Validate based on type
-        if recipe_type == 'volume':
+        if recipe_type == RecipeType.VOLUME:
             # Validate volume schema (handles required fields: name, type)
             try:
                 common_utils.validate_schema(config,
@@ -85,7 +86,7 @@ def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
             except Exception as e:
                 raise ValueError(str(e)) from e
         else:
-            if recipe_type == 'pool':
+            if recipe_type == RecipeType.POOL:
                 # Pool YAMLs should have a 'pool' section
                 if 'pool' not in config:
                     raise ValueError('Pool YAML must contain a \'pool\''
@@ -153,6 +154,9 @@ def list_recipes(
     Returns:
         List of recipe dictionaries.
     """
+    recipe_type = (
+        None if recipe_type is None else RecipeType.from_str(recipe_type)
+    )
     recipes = recipes_db.list_recipes(
         user_id=user_id,
         pinned_only=pinned_only,
@@ -204,11 +208,8 @@ def create_recipe(
     Raises:
         ValueError: If the YAML content is invalid or recipe_type is invalid.
     """
-    # Validate recipe_type
-    valid_types = ('cluster', 'job', 'pool', 'volume')
-    if recipe_type not in valid_types:
-        raise ValueError(
-            f'recipe_type must be one of {valid_types}, got {recipe_type!r}')
+    # Validate recipe_type using enum (raises ValueError with helpful message)
+    recipe_type = RecipeType.from_str(recipe_type)
 
     # Validate content against SkyPilot schema
     _validate_skypilot_yaml(content, recipe_type)

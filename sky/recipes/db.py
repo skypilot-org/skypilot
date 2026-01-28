@@ -18,6 +18,7 @@ from sqlalchemy import orm
 from sqlalchemy.ext import declarative
 
 from sky import sky_logging
+from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
@@ -106,6 +107,12 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
         'description': 'A job pool for running multiple concurrent jobs',
         'recipe_type': 'pool',
         'category': 'batch',
+    },
+    'basic_volume': {
+        'name': 'Basic Volume',
+        'description': 'A starting point for a k8s volume',
+        'recipe_type': 'volume',
+        'category': 'storage',
     },
 }
 
@@ -234,7 +241,7 @@ class Recipe:
         recipe_id: str,
         name: str,
         content: str,
-        recipe_type: str,
+        recipe_type: RecipeType,
         user_id: str,
         description: Optional[str] = None,
         category: Optional[str] = None,
@@ -270,7 +277,7 @@ class Recipe:
             'name': self.name,
             'description': self.description,
             'content': self.content,
-            'recipe_type': self.recipe_type,
+            'recipe_type': self.recipe_type.value,
             'category': self.category,
             'pinned': self.pinned,
             'user_id': self.user_id,
@@ -291,7 +298,7 @@ class Recipe:
             name=row.name,
             description=row.description,
             content=row.content,
-            recipe_type=row.recipe_type,
+            recipe_type=RecipeType.from_str(row.recipe_type),
             category=row.category,
             pinned=bool(row.pinned),
             user_id=row.user_id,
@@ -314,7 +321,7 @@ class Recipe:
 def create_recipe(
     name: str,
     content: str,
-    recipe_type: str,
+    recipe_type: RecipeType,
     user_id: str,
     user_name: Optional[str] = None,
     description: Optional[str] = None,
@@ -325,7 +332,7 @@ def create_recipe(
     Args:
         name: Display name for the recipe.
         content: The YAML content.
-        recipe_type: Type of recipe ('cluster', 'job', 'pool', 'volume').
+        recipe_type: Type of recipe.
         user_id: ID of the user creating the recipe.
         user_name: Optional display name of the user.
         description: Optional description.
@@ -344,7 +351,7 @@ def create_recipe(
             name=name,
             description=description,
             content=content,
-            recipe_type=recipe_type,
+            recipe_type=recipe_type.value,
             category=category,
             pinned=0,
             user_id=user_id,
@@ -399,7 +406,7 @@ def list_recipes(
     pinned_only: bool = False,
     my_recipes_only: bool = False,
     category: Optional[str] = None,
-    recipe_type: Optional[str] = None,
+    recipe_type: Optional[RecipeType] = None,
 ) -> List[Recipe]:
     """List recipes with optional filters.
 
@@ -411,7 +418,7 @@ def list_recipes(
         pinned_only: If True, only return pinned templates.
         my_recipes_only: If True, only return recipes owned by user_id.
         category: Filter by category.
-        recipe_type: Filter by type ('cluster', 'job', 'serve', 'pool').
+        recipe_type: Filter by type.
 
     Returns:
         List of matching YamlTemplate objects.
@@ -429,7 +436,7 @@ def list_recipes(
         query = query.where(recipes_table.c.category == category)
 
     if recipe_type:
-        query = query.where(recipes_table.c.recipe_type == recipe_type)
+        query = query.where(recipes_table.c.recipe_type == recipe_type.value)
 
     query = query.order_by(recipes_table.c.pinned.desc(),
                            recipes_table.c.updated_at.desc())
