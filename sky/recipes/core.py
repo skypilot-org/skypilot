@@ -9,9 +9,45 @@ import yaml
 
 from sky import sky_logging
 from sky import task as task_lib
+from sky.data import data_utils
 from sky.recipes import db as recipes_db
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _validate_no_local_paths(config: Dict[str, Any]) -> None:
+    """Validate that recipes don't contain local file paths.
+
+    Recipes are shareable templates, so they cannot reference local files
+    that wouldn't exist on other users' machines.
+
+    Args:
+        config: The parsed YAML config dictionary.
+
+    Raises:
+        ValueError: If local paths are found in workdir or file_mounts.
+    """
+    # Check workdir - string means local path, dict means git URL
+    workdir = config.get('workdir')
+    if workdir is not None and isinstance(workdir, str):
+        raise ValueError('Local workdir paths are not allowed in recipes. '
+                         'Use a git URL instead. Example:\n'
+                         '  workdir:\n'
+                         '    url: https://github.com/user/repo\n'
+                         '    ref: main  # optional')
+
+    # Check file_mounts - sources must be cloud URLs
+    file_mounts = config.get('file_mounts')
+    if file_mounts is not None:
+        for target, source in file_mounts.items():
+            # source can be a string (path/URL) or a dict (inline storage)
+            if isinstance(source, str):
+                if not data_utils.is_cloud_store_url(source):
+                    raise ValueError(
+                        f'Local file mounts are not allowed in recipes. '
+                        f'Use cloud storage (s3://, gs://, etc.) instead. '
+                        f'Found local path at file_mounts[{target!r}]: '
+                        f'{source!r}')
 
 
 def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
@@ -33,6 +69,10 @@ def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
             raise ValueError(
                 'YAML must be a dictionary/mapping at the top level')
 
+        # Validate no local paths in recipes (workdir must be git, file_mounts
+        # must be cloud storage)
+        _validate_no_local_paths(config)
+
         # Validate based on type
         if recipe_type == 'volume':
             # TODO(lloyd: add volume validation)
@@ -42,8 +82,8 @@ def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
                 # Pool YAMLs should have a 'pool' section
                 if 'pool' not in config:
                     raise ValueError('Pool YAML must contain a \'pool\''
-                                    'section. Example:\n  pool:\n    name: '
-                                    'my-pool')
+                                     'section. Example:\n  pool:\n    name: '
+                                     'my-pool')
 
             # Use Task.from_yaml_str for full schema validation
             # This validates resources, envs, setup, run, file_mounts, etc.

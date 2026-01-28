@@ -523,6 +523,8 @@ export function TopBar() {
                 <span>Volumes</span>
               </Link>
 
+              <div className="border-l border-gray-200 h-6 mx-1"></div>
+
               <Link
                 href="/recipes"
                 className={getLinkClasses('/recipes')}
@@ -531,8 +533,6 @@ export function TopBar() {
                 <FileCodeIcon className="w-4 h-4" />
                 <span>Recipes</span>
               </Link>
-
-              <div className="border-l border-gray-200 h-6 mx-1"></div>
 
               <Link
                 href="/infra"
@@ -793,6 +793,7 @@ export function TopBar() {
                   Volumes
                 </Link>
 
+                <div className="border-t border-gray-200 my-4"></div>
 
                 <Link
                   href="/recipes"
@@ -807,8 +808,6 @@ export function TopBar() {
                   <FileCodeIcon className="w-5 h-5 mr-3" />
                   Recipes
                 </Link>
-
-                <div className="border-t border-gray-200 my-4"></div>
 
                 <Link
                   href="/infra"

@@ -5,11 +5,11 @@ including CRUD operations, pinning, and deployment.
 """
 import fastapi
 
+from sky.recipes import core
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
-from sky.recipes import core
 
 router = fastapi.APIRouter()
 
