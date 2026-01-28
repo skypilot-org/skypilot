@@ -39,6 +39,9 @@ available_node_types:
       memory: {{memory}}
       accelerator_type: {{accelerator_type}}
       accelerator_count: {{accelerator_count}}
+{% if image_id is not none %}
+      image_id: {{image_id}}
+{% endif %}
 
       # TODO: more configs that is required by the provisioner to create new
       # instances on the FluffyCloud:
