@@ -2361,3 +2361,20 @@ def test_docker_pass_redacted(generic_cloud: str):
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_multi_node_proctrack():
+    """Test Slurm multi-node against proctrack/cgroup behaviour."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_multi_node_proctrack',
+        [
+            f'sky launch -y -c {name} --infra slurm --num-nodes 2 tests/test_yamls/slurm_bg_proc.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 | grep "SUCCESS"',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout('slurm'),
+    )
+    smoke_tests_utils.run_one_test(test)
