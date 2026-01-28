@@ -171,5 +171,8 @@ def test_unzip_file_zip_slip_blocked():
             with pytest.raises(ValueError) as exc_info:
                 asyncio.run(server.unzip_file(zip_path, extract_dir))
 
-            assert 'outside target directory' in str(exc_info.value), \
+            # HTTPException stores message in .detail, not __str__
+            exc = exc_info.value
+            error_msg = getattr(exc, 'detail', None) or str(exc)
+            assert 'outside target directory' in error_msg, \
                 f'Expected "outside target directory" error for {name}'
