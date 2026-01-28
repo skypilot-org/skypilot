@@ -34,15 +34,15 @@ export async function getRecipes(options = {}) {
 }
 
 /**
- * Get a single YAML template by ID.
+ * Get a single recipe by name.
  *
- * @param {string} recipeId - The recipe's unique ID
+ * @param {string} recipeName - The recipe's unique name
  * @returns {Promise<Object|null>} Recipe object or null if not found
  */
-export async function getRecipe(recipeId) {
+export async function getRecipe(recipeName) {
   try {
     const result = await apiClient.fetch('/recipes/get', {
-      recipe_id: recipeId,
+      recipe_name: recipeName,
     });
     return result;
   } catch (error) {
@@ -81,19 +81,18 @@ export async function createRecipe(data) {
 /**
  * Update an existing Recipe.
  * Only the owner can update their template.
+ * Note: Recipe names cannot be changed as they are the unique identifier.
  *
- * @param {string} recipeId - The recipe's unique ID
+ * @param {string} recipeName - The recipe's unique name
  * @param {Object} data - Fields to update
- * @param {string} [data.name] - New name
  * @param {string} [data.description] - New description
  * @param {string} [data.content] - New YAML content
  * @returns {Promise<Object|null>} Updated recipe or null if not authorized
  */
-export async function updateRecipe(recipeId, data) {
+export async function updateRecipe(recipeName, data) {
   try {
     const result = await apiClient.fetch('/recipes/update', {
-      recipe_id: recipeId,
-      name: data.name,
+      recipe_name: recipeName,
       description: data.description,
       content: data.content,
     });
@@ -108,13 +107,13 @@ export async function updateRecipe(recipeId, data) {
  * Delete a Recipe.
  * Only the owner can delete their recipe.
  *
- * @param {string} recipeId - The recipe's unique ID
+ * @param {string} recipeName - The recipe's unique name
  * @returns {Promise<boolean>} True if deleted successfully
  */
-export async function deleteRecipe(recipeId) {
+export async function deleteRecipe(recipeName) {
   try {
     const result = await apiClient.fetch('/recipes/delete', {
-      recipe_id: recipeId,
+      recipe_name: recipeName,
     });
     return result;
   } catch (error) {
@@ -127,14 +126,14 @@ export async function deleteRecipe(recipeId) {
  * Toggle pin status of a Recipe.
  * Admin only operation.
  *
- * @param {string} recipeId - The recipe's unique ID
+ * @param {string} recipeName - The recipe's unique name
  * @param {boolean} pinned - New pinned status
  * @returns {Promise<Object|null>} Updated recipe or null if not found
  */
-export async function togglePinRecipe(recipeId, pinned) {
+export async function togglePinRecipe(recipeName, pinned) {
   try {
     const result = await apiClient.fetch('/recipes/pin', {
-      recipe_id: recipeId,
+      recipe_name: recipeName,
       pinned: pinned,
     });
     return result;

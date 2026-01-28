@@ -717,6 +717,22 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, result
 
 
+def _check_recipe_reference(entrypoint: str) -> Tuple[bool, Optional[str]]:
+    """Check if entrypoint is a recipe reference like 'recipes:my-recipe'.
+
+    Args:
+        entrypoint: The entrypoint string to check.
+
+    Returns:
+        Tuple of (is_recipe, recipe_name). If is_recipe is True, recipe_name
+        contains the name of the recipe to fetch from the Recipe Hub.
+    """
+    match = constants._RECIPE_PATTERN.match(entrypoint)
+    if match:
+        return True, match.group(1)
+    return False, None
+
+
 def _pop_and_ignore_fields_in_override_params(
         params: Dict[str, Any], field_to_ignore: List[str]) -> None:
     """Pops and ignores fields in override params.
@@ -774,12 +790,35 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         raise click.UsageError('Cannot specify both --git-url and --workdir')
 
     entrypoint = ' '.join(entrypoint)
-    is_yaml, _ = _check_yaml(entrypoint)
+
+    # Check if entrypoint is a recipe reference (recipes:<name>)
+    is_recipe, recipe_name = _check_recipe_reference(entrypoint)
+    if is_recipe:
+        assert recipe_name is not None  # For mypy
+        click.secho('Recipe to run: ', fg='cyan', nl=False)
+        click.secho(recipe_name)
+        # Fetch recipe content from the Recipe Hub
+        from sky.recipes import core as recipes_core
+        try:
+            content, _ = recipes_core.get_recipe_content(recipe_name)
+        except ValueError as e:
+            raise click.UsageError(str(e))
+        # Write to temp file and treat as YAML
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(content)
+            entrypoint = f.name
+        is_yaml = True
+    else:
+        is_yaml, _ = _check_yaml(entrypoint)
+
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        click.secho('YAML to run: ', fg='cyan', nl=False)
-        click.secho(entrypoint)
+        if not is_recipe:
+            click.secho('YAML to run: ', fg='cyan', nl=False)
+            click.secho(entrypoint)
     else:
         if not entrypoint:
             entrypoint = None

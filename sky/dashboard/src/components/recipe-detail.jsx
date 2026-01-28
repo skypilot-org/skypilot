@@ -68,31 +68,23 @@ function formatFullTimestamp(timestamp) {
 }
 
 
-// Parse template ID from URL slug
+// Parse recipe name from URL slug
+// Names are the unique identifiers for recipes (no UUID parsing needed)
 function parseRecipeSlug(slug) {
   if (!slug) return null;
-  // UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 chars with dashes)
-  // Try to extract UUID from end of slug
-  const uuidMatch = slug.match(
-    /([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i
-  );
-  if (uuidMatch) {
-    return uuidMatch[1];
-  }
-  // If no UUID pattern found, assume the whole slug is the ID
+  // The slug IS the recipe name now
   return slug;
 }
 
 // Edit Modal Component
+// Note: Recipe names cannot be changed as they are the unique identifier
 function EditModal({ isOpen, onClose, template, onSave }) {
-  const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (template && isOpen) {
-      setName(template.name || '');
       setDescription(template.description || '');
       setContent(template.content || '');
     }
@@ -113,7 +105,6 @@ function EditModal({ isOpen, onClose, template, onSave }) {
 
     try {
       await onSave({
-        name,
         description: description || null,
         content,
       });
@@ -132,25 +123,14 @@ function EditModal({ isOpen, onClose, template, onSave }) {
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl text-gray-900">
-            Edit Recipe
+            Edit Recipe: {template.name}
           </DialogTitle>
           <DialogDescription>
-            Update your recipe details and content.
+            Update your recipe description and content.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Name *</Label>
-            <Input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="My GPU Training"
-              required
-            />
-          </div>
-
           <div className="space-y-2">
             <Label htmlFor="description">Description</Label>
             <Input
@@ -278,7 +258,9 @@ export function RecipeDetail() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
   const fetchTemplate = useCallback(async () => {
-    if (!slug) return;
+    // Wait for router to be ready before accessing query params
+    // (required for Next.js static export where query params are populated client-side)
+    if (!router.isReady || !slug) return;
 
     const templateId = parseRecipeSlug(slug);
     if (!templateId) {
@@ -302,14 +284,14 @@ export function RecipeDetail() {
     } finally {
       setLoading(false);
     }
-  }, [slug]);
+  }, [router.isReady, slug]);
 
   useEffect(() => {
     fetchTemplate();
   }, [fetchTemplate]);
 
   const handleEdit = async (data) => {
-    const updated = await updateRecipe(template.id, data);
+    const updated = await updateRecipe(template.name, data);
     if (updated) {
       setTemplate(updated);
       showToast('Recipe updated successfully!', 'success');
@@ -319,7 +301,7 @@ export function RecipeDetail() {
   };
 
   const handleDelete = async () => {
-    const deleted = await deleteRecipe(template.id);
+    const deleted = await deleteRecipe(template.name);
     if (deleted) {
       showToast('Recipe deleted successfully!', 'success');
       router.push('/recipes');
@@ -330,7 +312,7 @@ export function RecipeDetail() {
 
   const handleTogglePin = async () => {
     try {
-      const updated = await togglePinRecipe(template.id, !template.pinned);
+      const updated = await togglePinRecipe(template.name, !template.pinned);
       if (updated) {
         setTemplate(updated);
         showToast(
@@ -390,7 +372,7 @@ export function RecipeDetail() {
 
   const copyCommandToClipboard = () => {
     if (!template) return;
-    const command = getLaunchCommand(template.recipe_type, template.id);
+    const command = getLaunchCommand(template.recipe_type, template.name);
     copyToClipboard(command, 'Command copied to clipboard!', setCommandCopied);
   };
 
@@ -628,7 +610,7 @@ export function RecipeDetail() {
             </div>
             <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
               <code className="text-sm text-gray-800 font-mono break-all">
-                {getLaunchCommand(template.recipe_type, template.id)}
+                {getLaunchCommand(template.recipe_type, template.name)}
               </code>
             </div>
           </div>

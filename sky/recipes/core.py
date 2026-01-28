@@ -112,14 +112,14 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
         raise ValueError(f'Invalid SkyPilot YAML: {e}') from e
 
 
-def get_recipe_content(recipe_id: str) -> Tuple[str, str]:
-    """Get recipe content and type by ID.
+def get_recipe_content(recipe_name: str) -> Tuple[str, str]:
+    """Get recipe content and type by name.
 
     This function is used by the CLI to fetch a recipe from the Hub
-    when launching with --recipe-id.
+    when launching with recipes:<name>.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
 
     Returns:
         Tuple of (recipe_content, recipe_type).
@@ -127,10 +127,10 @@ def get_recipe_content(recipe_id: str) -> Tuple[str, str]:
     Raises:
         ValueError: If recipe not found.
     """
-    template = recipes_db.get_recipe(recipe_id)
+    template = recipes_db.get_recipe(recipe_name)
     if template is None:
-        raise ValueError(f'Recipe not found: {recipe_id}')
-    return (template.content, template.recipe_type)
+        raise ValueError(f'Recipe not found: {recipe_name}')
+    return (template.content, template.recipe_type.value)
 
 
 def list_recipes(
@@ -163,16 +163,16 @@ def list_recipes(
     return [r.to_dict() for r in recipes]
 
 
-def get_recipe(recipe_id: str) -> Optional[Dict[str, Any]]:
-    """Get a single YAML template by ID.
+def get_recipe(recipe_name: str) -> Optional[Dict[str, Any]]:
+    """Get a single recipe by name.
 
     Args:
-        template_id: The template's unique ID.
+        recipe_name: The recipe's unique name.
 
     Returns:
-        Template dictionary if found, None otherwise.
+        Recipe dictionary if found, None otherwise.
     """
-    recipe = recipes_db.get_recipe(recipe_id)
+    recipe = recipes_db.get_recipe(recipe_name)
     if recipe is None:
         return None
     return recipe.to_dict()
@@ -220,22 +220,21 @@ def create_recipe(
 
 
 def update_recipe(
-    recipe_id: str,
+    recipe_name: str,
     user_id: str,
     user_name: Optional[str] = None,
-    name: Optional[str] = None,
     description: Optional[str] = None,
     content: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Update a recipe.
 
     Only the owner can update their recipe, and only if it's editable.
+    Note: Recipe names cannot be changed as they are the primary identifier.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
         user_id: ID of the user making the update (must be owner).
         user_name: Name of the user making the update.
-        name: New name (if updating).
         description: New description (if updating).
         content: New YAML content (if updating).
 
@@ -250,15 +249,14 @@ def update_recipe(
     # Validate YAML content if provided
     if content is not None:
         # Get the existing recipe to know the recipe_type for validation
-        existing = recipes_db.get_recipe(recipe_id)
+        existing = recipes_db.get_recipe(recipe_name)
         if existing is not None:
             _validate_skypilot_yaml(content, existing.recipe_type)
 
     recipe = recipes_db.update_recipe(
-        recipe_id=recipe_id,
+        recipe_name=recipe_name,
         user_id=user_id,
         user_name=user_name,
-        name=name,
         description=description,
         content=content,
     )
@@ -267,13 +265,13 @@ def update_recipe(
     return recipe.to_dict()
 
 
-def delete_recipe(recipe_id: str, user_id: str) -> bool:
+def delete_recipe(recipe_name: str, user_id: str) -> bool:
     """Delete a recipe.
 
     Only the owner can delete their recipe, and only if it's editable.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
         user_id: ID of the user making the deletion (must be owner).
 
     Returns:
@@ -282,17 +280,17 @@ def delete_recipe(recipe_id: str, user_id: str) -> bool:
     Raises:
         ValueError: If the recipe is not editable (e.g., default recipes).
     """
-    return recipes_db.delete_recipe(recipe_id, user_id)
+    return recipes_db.delete_recipe(recipe_name, user_id)
 
 
-def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Dict[str, Any]]:
+def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Dict[str, Any]]:
     """Toggle the pinned status of a recipe.
 
     This is an admin-only operation - authorization should be checked
     by the API layer before calling this function.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
         pinned: New pinned status.
 
     Returns:
@@ -301,7 +299,7 @@ def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Dict[str, Any]]:
     Raises:
         ValueError: If the recipe is not pinnable (e.g., default recipes).
     """
-    recipe = recipes_db.toggle_pin(recipe_id, pinned)
+    recipe = recipes_db.toggle_pin(recipe_name, pinned)
     if recipe is None:
         return None
     return recipe.to_dict()

@@ -6,17 +6,16 @@ pinned globally, filtered by category/tags, and deployed as clusters, jobs,
 pools, or volumes.
 """
 import functools
-import json
 import os
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
-import uuid
 
 import sqlalchemy
 from sqlalchemy import orm
 from sqlalchemy.ext import declarative
 
+from sky import exceptions
 from sky import sky_logging
 from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
@@ -36,11 +35,11 @@ Base = declarative.declarative_base()
 RECIPES_TABLE = 'recipes'
 
 # SQLAlchemy table definition
+# Note: 'name' is the primary key and unique identifier for recipes
 recipes_table = sqlalchemy.Table(
     RECIPES_TABLE,
     Base.metadata,
-    sqlalchemy.Column('id', sqlalchemy.Text, primary_key=True),
-    sqlalchemy.Column('name', sqlalchemy.Text, nullable=False),
+    sqlalchemy.Column('name', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('description', sqlalchemy.Text),
     sqlalchemy.Column('content', sqlalchemy.Text, nullable=False),
     sqlalchemy.Column('recipe_type', sqlalchemy.Text, nullable=False),
@@ -62,25 +61,26 @@ recipes_table = sqlalchemy.Table(
 _EXAMPLES_DIR = os.path.join(os.path.dirname(__file__), 'examples')
 
 # Default templates: maps filename (without .yaml) to metadata
-# Content is loaded from sky/yamls/examples/{filename}.yaml
+# Content is loaded from sky/recipes/examples/{filename}.yaml
+# Note: Recipe names must use letters, numbers, and dashes only
 DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
     'basic_cluster': {
-        'name': 'Basic Cluster',
+        'name': 'basic-cluster',
         'description': 'A simple cluster with GPU resources',
         'recipe_type': 'cluster',
     },
     'basic_managed_job': {
-        'name': 'Basic Managed Job',
+        'name': 'basic-managed-job',
         'description': 'A simple managed job with automatic recovery',
         'recipe_type': 'job',
     },
     'basic_job_pool': {
-        'name': 'Basic Job Pool',
+        'name': 'basic-job-pool',
         'description': 'A job pool for running multiple concurrent jobs',
         'recipe_type': 'pool',
     },
     'basic_volume': {
-        'name': 'Basic Volume',
+        'name': 'basic-volume',
         'description': 'A starting point for a k8s volume',
         'recipe_type': 'volume',
     },
@@ -144,9 +144,7 @@ def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
                     logger.warning(f'Example file not found: {filename}.yaml')
                     continue
 
-                recipe_id = str(uuid.uuid4())
                 session.execute(recipes_table.insert().values(
-                    id=recipe_id,
                     name=metadata['name'],
                     description=metadata['description'],
                     content=content,
@@ -203,11 +201,14 @@ def _init_db(func: Callable) -> Callable:
 
 
 class Recipe:
-    """Represents a YAML template."""
+    """Represents a YAML template.
+
+    Recipes are uniquely identified by their name, which must follow the
+    naming convention (letters, numbers, and dashes only).
+    """
 
     def __init__(
         self,
-        recipe_id: str,
         name: str,
         content: str,
         recipe_type: RecipeType,
@@ -222,7 +223,6 @@ class Recipe:
         is_editable: bool = True,
         is_pinnable: bool = True,
     ):
-        self.id = recipe_id
         self.name = name
         self.description = description
         self.content = content
@@ -240,7 +240,6 @@ class Recipe:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API responses."""
         return {
-            'id': self.id,
             'name': self.name,
             'description': self.description,
             'content': self.content,
@@ -260,7 +259,6 @@ class Recipe:
     def from_row(cls, row) -> 'Recipe':
         """Create from database row."""
         return cls(
-            recipe_id=row.id,
             name=row.name,
             description=row.description,
             content=row.content,
@@ -294,7 +292,8 @@ def create_recipe(
     """Create a new recipe.
 
     Args:
-        name: Display name for the recipe.
+        name: Unique name for the recipe. Must contain only letters, numbers,
+            and dashes.
         content: The YAML content.
         recipe_type: Type of recipe.
         user_id: ID of the user creating the recipe.
@@ -302,15 +301,27 @@ def create_recipe(
         description: Optional description.
 
     Returns:
-        The created YamlTemplate object.
+        The created Recipe object.
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the name format is invalid.
+        exceptions.RecipeAlreadyExistsError: If a recipe with this name exists.
     """
     assert _SQLALCHEMY_ENGINE is not None
-    recipe_id = str(uuid.uuid4())
+
+    # Validate name format
+    common_utils.check_recipe_name_is_valid(name)
+
+    # Check for duplicate name
+    existing = get_recipe(name)
+    if existing is not None:
+        raise exceptions.RecipeAlreadyExistsError(
+            f'A recipe with name "{name}" already exists')
+
     now = time.time()
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(recipes_table.insert().values(
-            id=recipe_id,
             name=name,
             description=description,
             content=content,
@@ -326,7 +337,6 @@ def create_recipe(
         session.commit()
 
     return Recipe(
-        recipe_id=recipe_id,
         name=name,
         description=description,
         content=content,
@@ -340,21 +350,21 @@ def create_recipe(
 
 
 @_init_db
-def get_recipe(recipe_id: str) -> Optional[Recipe]:
-    """Get a YAML template by ID.
+def get_recipe(recipe_name: str) -> Optional[Recipe]:
+    """Get a recipe by name.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
 
     Returns:
-        The YamlTemplate if found, None otherwise.
+        The Recipe if found, None otherwise.
     """
     assert _SQLALCHEMY_ENGINE is not None
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.execute(
             sqlalchemy.select(recipes_table).where(
-                recipes_table.c.id == recipe_id))
+                recipes_table.c.name == recipe_name))
         row = result.fetchone()
         if row is None:
             return None
@@ -406,22 +416,21 @@ def list_recipes(
 
 @_init_db
 def update_recipe(
-    recipe_id: str,
+    recipe_name: str,
     user_id: str,
     user_name: Optional[str] = None,
-    name: Optional[str] = None,
     description: Optional[str] = None,
     content: Optional[str] = None,
 ) -> Optional[Recipe]:
     """Update a recipe.
 
     Anyone can update a recipe, but only if it's editable.
+    Note: Recipe names cannot be changed as they are the primary identifier.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
         user_id: ID of the user making the update.
         user_name: Name of the user making the update.
-        name: New name (if updating).
         description: New description (if updating).
         content: New YAML content (if updating).
 
@@ -435,7 +444,7 @@ def update_recipe(
     assert _SQLALCHEMY_ENGINE is not None
 
     # First check ownership and editability
-    recipe = get_recipe(recipe_id)
+    recipe = get_recipe(recipe_name)
     if recipe is None:
         return None
     if not recipe.is_editable:
@@ -445,8 +454,6 @@ def update_recipe(
     # allowed to update a recipe.
 
     updates: Dict[str, Any] = {}
-    if name is not None:
-        updates['name'] = name
     if description is not None:
         updates['description'] = description
     if content is not None:
@@ -461,20 +468,20 @@ def update_recipe(
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(recipes_table.update().where(
-            recipes_table.c.id == recipe_id).values(**updates))
+            recipes_table.c.name == recipe_name).values(**updates))
         session.commit()
 
-    return get_recipe(recipe_id)
+    return get_recipe(recipe_name)
 
 
 @_init_db
-def delete_recipe(recipe_id: str, user_id: str) -> bool:
+def delete_recipe(recipe_name: str, user_id: str) -> bool:
     """Delete a recipe.
 
     Only the owner can delete a recipe, and only if it's editable.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
         user_id: ID of the user making the deletion (must be owner).
 
     Returns:
@@ -486,7 +493,7 @@ def delete_recipe(recipe_id: str, user_id: str) -> bool:
     assert _SQLALCHEMY_ENGINE is not None
 
     # First check ownership and editability
-    recipe = get_recipe(recipe_id)
+    recipe = get_recipe(recipe_name)
     if recipe is None:
         return False
     if not recipe.is_editable:
@@ -496,21 +503,21 @@ def delete_recipe(recipe_id: str, user_id: str) -> bool:
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(
-            recipes_table.delete().where(recipes_table.c.id == recipe_id))
+            recipes_table.delete().where(recipes_table.c.name == recipe_name))
         session.commit()
 
     return True
 
 
 @_init_db
-def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Recipe]:
+def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
     """Toggle the pinned status of a recipe.
 
     This is an admin-only operation (authorization should be checked
     by the caller). Recipes must be pinnable to be pinned/unpinned.
 
     Args:
-        recipe_id: The recipe's unique ID.
+        recipe_name: The recipe's unique name.
         pinned: New pinned status.
 
     Returns:
@@ -521,7 +528,7 @@ def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Recipe]:
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    recipe = get_recipe(recipe_id)
+    recipe = get_recipe(recipe_name)
     if recipe is None:
         return None
     if not recipe.is_pinnable:
@@ -529,8 +536,8 @@ def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Recipe]:
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         session.execute(recipes_table.update().where(
-            recipes_table.c.id == recipe_id).values(pinned=1 if pinned else 0,
-                                                    updated_at=time.time()))
+            recipes_table.c.name == recipe_name).values(
+                pinned=1 if pinned else 0, updated_at=time.time()))
         session.commit()
 
-    return get_recipe(recipe_id)
+    return get_recipe(recipe_name)

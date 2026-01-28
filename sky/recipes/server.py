@@ -52,7 +52,7 @@ async def get_recipe(
     request: fastapi.Request,
     get_body: payloads.RecipeGetBody,
 ) -> None:
-    """Get a single recipe by ID."""
+    """Get a single recipe by name."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.RECIPE_GET,

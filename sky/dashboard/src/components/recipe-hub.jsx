@@ -78,14 +78,10 @@ function formatRelativeTime(timestamp) {
   return new Date(timestamp * 1000).toLocaleDateString();
 }
 
-// Generate URL slug from template
-function generateRecipeSlug(name, id) {
-  const slugifiedName = name
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .substring(0, 50);
-  return `${slugifiedName}-${id}`;
+// Generate URL slug from recipe
+// Recipe names are the unique identifier and are already URL-safe
+function generateRecipeSlug(name) {
+  return name;
 }
 
 
@@ -93,7 +89,7 @@ function generateRecipeSlug(name, id) {
 function RecipeCard({ recipe }) {
   const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
   const TypeIcon = typeInfo.icon;
-  const slug = generateRecipeSlug(recipe.name, recipe.id);
+  const slug = generateRecipeSlug(recipe.name);
 
   return (
     <Link href={`/recipes/${slug}`} className="block">
@@ -196,7 +192,7 @@ function TemplateRow({
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
         {recipes.map((recipe) => (
-          <RecipeCard key={recipe.id} recipe={recipe} />
+          <RecipeCard key={recipe.name} recipe={recipe} />
         ))}
       </div>
     </div>
@@ -357,14 +353,14 @@ function AllRecipesSection({ recipes }) {
                 sortedAndFilteredTemplates.map((recipe) => {
                   const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
                   const TypeIcon = typeInfo.icon;
-                  const slug = generateRecipeSlug(recipe.name, recipe.id);
+                  const slug = generateRecipeSlug(recipe.name);
                   const truncatedDesc = recipe.description
                     ? recipe.description.length > 30
                       ? recipe.description.substring(0, 30) + '...'
                       : recipe.description
                     : '-';
                   return (
-                    <TableRow key={recipe.id} className="hover:bg-gray-50">
+                    <TableRow key={recipe.name} className="hover:bg-gray-50">
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <TypeIcon

@@ -923,7 +923,7 @@ class RecipeListBody(RequestBody):
 
 class RecipeGetBody(RequestBody):
     """The request body for getting a single recipe."""
-    recipe_id: str
+    recipe_name: str
 
 
 class RecipeCreateBody(RequestBody):
@@ -954,8 +954,7 @@ class RecipeCreateBody(RequestBody):
 
 class RecipeUpdateBody(RequestBody):
     """The request body for updating an existing recipe."""
-    recipe_id: str
-    name: Optional[str] = None
+    recipe_name: str
     description: Optional[str] = None
     content: Optional[str] = None
 
@@ -971,7 +970,7 @@ class RecipeUpdateBody(RequestBody):
 
 class RecipeDeleteBody(RequestBody):
     """The request body for deleting a recipe."""
-    template_id: str
+    recipe_name: str
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -984,5 +983,5 @@ class RecipeDeleteBody(RequestBody):
 
 class RecipePinBody(RequestBody):
     """The request body for toggling pin status."""
-    recipe_id: str
+    recipe_name: str
     pinned: bool

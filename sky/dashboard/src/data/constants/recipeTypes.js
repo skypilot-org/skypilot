@@ -94,20 +94,20 @@ export function getRecipeTypeInfo(recipeType) {
 /**
  * Generate the CLI launch command for a recipe.
  * @param {string} recipeType - The recipe type value
- * @param {string} recipeId - The recipe's unique ID
+ * @param {string} recipeName - The recipe's unique name
  * @returns {string} The CLI command to launch this recipe
  */
-export function getLaunchCommand(recipeType, recipeId) {
+export function getLaunchCommand(recipeType, recipeName) {
   switch (recipeType) {
     case RecipeType.CLUSTER:
-      return `sky launch --recipe-id ${recipeId}`;
+      return `sky launch recipes:${recipeName}`;
     case RecipeType.JOB:
-      return `sky jobs launch --recipe-id ${recipeId}`;
+      return `sky jobs launch recipes:${recipeName}`;
     case RecipeType.VOLUME:
-      return `sky volumes apply --recipe-id ${recipeId}`;
+      return `sky volumes apply recipes:${recipeName}`;
     case RecipeType.POOL:
-      return `sky jobs pool apply --recipe-id ${recipeId}`;
+      return `sky jobs pool apply recipes:${recipeName}`;
     default:
-      return `sky launch --recipe-id ${recipeId}`;
+      return `sky launch recipes:${recipeName}`;
   }
 }

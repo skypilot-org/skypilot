@@ -2706,6 +2706,13 @@ async def serve_dashboard(full_path: str):
         if os.path.isfile(plugin_catchall):
             return fastapi.responses.FileResponse(plugin_catchall)
 
+    # Serve recipe detail page for any /recipes/* paths (dynamic route)
+    if full_path.startswith('recipes/') and full_path != 'recipes/':
+        recipe_page = os.path.join(server_constants.DASHBOARD_DIR, 'recipes',
+                                   '[recipe].html')
+        if os.path.isfile(recipe_page):
+            return fastapi.responses.FileResponse(recipe_page)
+
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
