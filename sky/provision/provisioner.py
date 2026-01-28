@@ -214,6 +214,9 @@ def bulk_provision(
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug(f'{terminate_str} {cluster_name!r} failed.')
                     logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
+                    if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
+                        logger.info('Ignoring teardown error as ')
+
                     retry_cnt += 1
                     if retry_cnt <= _MAX_RETRY:
                         logger.debug(f'Retrying {retry_cnt}/{_MAX_RETRY}...')
@@ -240,9 +243,19 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
             specific exceptions will be raised by the cloud APIs.
     """
     if terminate:
-        provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
-                                      provider_config)
+        try:
+            provision.terminate_instances(cloud_name,
+                                          cluster_name.name_on_cloud,
+                                          provider_config)
+        except RuntimeError as e:
+            if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
+                logger.info(
+                    'Ignoring teardown failure as no nodes were launched.')
+                logger.debug(f'Stacktrace: {traceback.format_exc()}')
+            else:
+                raise
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        # This won't crash because not found volumes is ignored.
         provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
