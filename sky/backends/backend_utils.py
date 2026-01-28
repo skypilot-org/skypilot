@@ -641,7 +641,7 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
-def write_cluster_config(
+def write_cluster_config(  # pylint: disable=dangerous-default-value
     to_provision: 'resources_lib.Resources',
     num_nodes: int,
     cluster_config_template: str,
@@ -653,6 +653,7 @@ def write_cluster_config(
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
+    cloud_specific_failover_overrides: Dict[str, Any] = {},
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -1061,7 +1062,9 @@ def write_cluster_config(
                 # runcmd to run before any of the SkyPilot runtime setup commands.
                 # This is currently only used by AWS and Kubernetes.
                 'runcmd': runcmd,
-            }),
+            },
+            **cloud_specific_failover_overrides,
+        ),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
