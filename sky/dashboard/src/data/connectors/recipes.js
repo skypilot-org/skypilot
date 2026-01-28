@@ -80,7 +80,6 @@ export async function createRecipe(data) {
 
 /**
  * Update an existing Recipe.
- * Only the owner can update their template.
  * Note: Recipe names cannot be changed as they are the unique identifier.
  *
  * @param {string} recipeName - The recipe's unique name
@@ -124,7 +123,6 @@ export async function deleteRecipe(recipeName) {
 
 /**
  * Toggle pin status of a Recipe.
- * Admin only operation.
  *
  * @param {string} recipeName - The recipe's unique name
  * @param {boolean} pinned - New pinned status
