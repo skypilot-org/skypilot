@@ -880,7 +880,6 @@ function CreateRecipeModal({
             <YamlEditor
               value={content}
               onChange={setContent}
-              minHeight="300px"
               maxHeight="400px"
             />
           </div>

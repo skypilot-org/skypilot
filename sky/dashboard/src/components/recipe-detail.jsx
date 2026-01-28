@@ -146,7 +146,6 @@ function EditModal({ isOpen, onClose, template, onSave }) {
             <YamlEditor
               value={content}
               onChange={setContent}
-              minHeight="250px"
               maxHeight="400px"
             />
           </div>
