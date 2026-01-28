@@ -794,12 +794,15 @@ class SkyPilotReplicaManager(ReplicaManager):
 
         for replica_info in serve_state.get_replicas_at_status(
                 self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
+            left_in_record = not (replica_info.status_property.is_scale_down or
+                                  replica_info.status_property.purged)
             self._terminate_replica(
                 replica_info.replica_id,
-                sync_down_logs=False,
+                sync_down_logs=left_in_record,
                 replica_drain_delay_seconds=0,
                 purge=replica_info.status_property.purged,
-                is_scale_down=replica_info.status_property.is_scale_down)
+                is_scale_down=replica_info.status_property.is_scale_down,
+                is_recovery=True)
 
     ################################
     # Replica management functions #
@@ -921,7 +924,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                            sync_down_logs: bool,
                            replica_drain_delay_seconds: int,
                            is_scale_down: bool = False,
-                           purge: bool = False) -> None:
+                           purge: bool = False,
+                           is_recovery: bool = False) -> None:
         left_in_record = not (is_scale_down or purge)
         if left_in_record:
             assert sync_down_logs, (
@@ -1031,24 +1035,26 @@ class SkyPilotReplicaManager(ReplicaManager):
                                                     replica_id)
         assert info is not None
 
+        info.status_property.is_scale_down = is_scale_down
+        info.status_property.purged = purge
+
+        if not global_user_state.cluster_with_name_exists(info.cluster_name):
+            if is_recovery:
+                serve_state.remove_replica(self._service_name, info.replica_id)
+                logger.info(
+                    f'Replica {info.replica_id} removed from the replica '
+                    'table because the cluster no longer exists.')
+            else:
+                self._handle_sky_down_finish(info, format_exc=None)
+            return
+
         if sync_down_logs:
             _download_and_stream_logs(info)
 
         logger.info(f'preempted: {info.status_property.preempted}, '
                     f'replica_id: {replica_id}')
-        info.status_property.is_scale_down = is_scale_down
-        info.status_property.purged = purge
 
-        # If the cluster does not exist, it means either the cluster never
-        # exists (e.g., the cluster is scaled down before it gets a chance to
-        # provision) or the cluster is preempted and cleaned up by the status
-        # refresh. In this case, we skip spawning a new down thread to save
-        # controller resources.
-        if not global_user_state.cluster_with_name_exists(info.cluster_name):
-            self._handle_sky_down_finish(info, format_exc=None)
-            return
-
-        # Otherwise, start the thread to terminate the cluster.
+        # Start the thread to terminate the cluster.
         t = thread_utils.SafeThread(
             target=terminate_cluster,
             args=(info.cluster_name, log_file_name,
