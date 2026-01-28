@@ -12,9 +12,10 @@ run: |
   HEARTBEAT_FILE="$HEARTBEAT_DIR/heartbeat_$SKYPILOT_NODE_RANK"
 
   if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    # Head: create heartbeat dir
+    # Head: create heartbeat dir and set up cleanup
     rm -rf "$HEARTBEAT_DIR"
     mkdir -p "$HEARTBEAT_DIR"
+    trap 'rm -rf "$HEARTBEAT_DIR"' EXIT
   else
     # Worker: wait for dir to exist
     while [ ! -d "$HEARTBEAT_DIR" ]; do sleep 0.1; done
@@ -32,7 +33,7 @@ run: |
     sleep 30
 
     echo "Head: checking heartbeats..."
-    for i in 0 1; do
+    for i in $(seq 0 $((SKYPILOT_NUM_NODES - 1))); do
       FILE="$HEARTBEAT_DIR/heartbeat_$i"
       if [ ! -f "$FILE" ]; then
         echo "FAIL: Heartbeat file missing for rank $i"
@@ -44,13 +45,11 @@ run: |
       echo "Rank $i: last heartbeat ${AGE}s ago"
       if [ "$AGE" -gt 5 ]; then
         echo "FAIL: Rank $i heartbeat is stale (${AGE}s > 5s) - process was killed!"
-        rm -rf "$HEARTBEAT_DIR"
         exit 1
       fi
     done
 
     echo "SUCCESS: All heartbeats are recent - processes survived!"
-    rm -rf "$HEARTBEAT_DIR"
   else
     echo "Worker: exiting immediately"
   fi
