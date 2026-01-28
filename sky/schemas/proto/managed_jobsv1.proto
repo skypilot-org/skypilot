@@ -87,6 +87,9 @@ message GetJobTableRequest {
   optional Statuses statuses = 10;
   bool show_jobs_without_user_hash = 11;
   optional Fields fields = 12;
+  // Sorting parameters, added in ManagedJobsService v14.
+  optional string sort_by = 13;
+  optional string sort_order = 14;
 }
 
 message ManagedJobInfo {
@@ -123,6 +126,10 @@ message ManagedJobInfo {
   optional int64 _job_id = 29;
   // Links (e.g., instance console URLs) as key-value pairs
   map<string, string> links = 30;
+  // Whether this task is a primary task (true) or auxiliary task (false)
+  // within a job group. Auxiliary tasks are terminated when all primary tasks
+  // complete. NULL for non-job-group jobs (single jobs and pipelines).
+  optional bool is_primary_in_job_group = 31;
 }
 
 message GetJobTableResponse {

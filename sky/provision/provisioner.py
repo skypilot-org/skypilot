@@ -25,6 +25,7 @@ from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
@@ -240,9 +241,19 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
             specific exceptions will be raised by the cloud APIs.
     """
     if terminate:
-        provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
-                                      provider_config)
+        try:
+            provision.terminate_instances(cloud_name,
+                                          cluster_name.name_on_cloud,
+                                          provider_config)
+        except RuntimeError as e:
+            if provision_constants.ERROR_NO_NODES_LAUNCHED in str(e):
+                logger.info(
+                    'Ignoring teardown failure as no nodes were launched.')
+                logger.debug(f'Stacktrace: {traceback.format_exc()}')
+            else:
+                raise
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        # This won't crash because not found volumes is ignored.
         provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
@@ -289,15 +300,6 @@ def _ssh_probe_command(ip: str,
     return command
 
 
-def _shlex_join(command: List[str]) -> str:
-    """Join a command list into a shell command string.
-
-    This is copied from Python 3.8's shlex.join, which is not available in
-    Python 3.7.
-    """
-    return ' '.join(shlex.quote(arg) for arg in command)
-
-
 def _wait_ssh_connection_direct(ip: str,
                                 ssh_port: int,
                                 ssh_user: str,
@@ -341,7 +343,7 @@ def _wait_ssh_connection_direct(ip: str,
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
-                 f'{_shlex_join(command)}. '
+                 f'{shlex.join(command)}. '
                  f'{stderr}')
     return False, stderr
 
@@ -362,7 +364,7 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
-    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    message = f'Waiting for SSH using command: {shlex.join(command)}'
     logger.debug(message)
     try:
         proc = subprocess.run(command,

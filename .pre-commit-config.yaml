@@ -33,16 +33,16 @@ repos:
         files: "^sky/skylet/providers/ibm/.*"  # Only match IBM-specific directory
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.1  # Match the version from requirements
+    rev: v1.19.1  # Match the version from requirements
     hooks:
     -   id: mypy
-        args:
-            # From tests/mypy_files.txt
+        args:            # Match tests/mypy_files.txt - check sky and examples/admin_policy/example_policy
             - "sky"
+            - "examples/admin_policy/example_policy"
             - "--exclude"
-            - "sky/benchmark|sky/callbacks|sky/backends/monkey_patches"
-            - "--cache-dir"
-            - "/dev/null"
+            - "sky/backends/monkey_patches"
+            - "--exclude"
+            - "examples/admin_policy/example_policy/build"
             - "--check-untyped-defs"
         pass_filenames: false
         additional_dependencies:
@@ -96,7 +96,7 @@ repos:
 
     -   id: dashboard-format
         name: dashboard format
-        entry: bash -c 'cd sky/dashboard && npm run format'
+        entry: bash -c 'cd sky/dashboard && npm run format -- --log-level warn'
         language: node
         language_version: 24.12.0
         files: ^sky/dashboard/

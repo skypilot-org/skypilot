@@ -1,4 +1,5 @@
 """Vast instance provisioning."""
+from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -56,6 +57,20 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'provider_config: {config.provider_config}')
     logger.debug(f'create_instance_kwargs from provider_config: '
                  f'{create_instance_kwargs}')
+
+    # Get SSH public key path and read the content for vast.ai key injection
+    ssh_public_key_path = config.authentication_config.get('ssh_public_key')
+    ssh_public_key = None
+    if ssh_public_key_path:
+        try:
+            expanded_path = Path(ssh_public_key_path).expanduser()
+            with open(expanded_path, 'r', encoding='utf-8') as f:
+                ssh_public_key = f.read().strip()
+            logger.debug(f'Read SSH public key from {expanded_path}')
+        except OSError as e:
+            logger.warning(f'Failed to read SSH public key from '
+                           f'{ssh_public_key_path}: {e}')
+
     docker_login_config = config.docker_config.get('docker_login_config')
     login_args = None
     image_name = config.node_config['ImageId']
@@ -123,6 +138,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     private_docker_registry=docker_login_config is not None,
                     login=login_args,
                     create_instance_kwargs=create_instance_kwargs,
+                    ssh_public_key=ssh_public_key,
                 )
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'run_instances error: {e}')

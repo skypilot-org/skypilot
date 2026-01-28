@@ -6,6 +6,9 @@
 
 resources:
   cpus: 2+
+  # On SLURM, it is recommended to use a Docker image to avoid permission
+  # issues with /tmp: https://github.com/ray-project/ray/issues/3899
+  # image_id: docker:rayproject/ray:nightly-py39-cpu
 
 num_nodes: 2
 

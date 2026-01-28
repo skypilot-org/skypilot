@@ -43,12 +43,17 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
+            hook = request.hook if request.HasField('hook') else None
+            hook_timeout = (request.hook_timeout
+                            if request.HasField('hook_timeout') else None)
             autostop_lib.set_autostop(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,
                 wait_for=wait_for if wait_for is not None else
                 autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
-                down=request.down)
+                down=request.down,
+                hook=hook,
+                hook_timeout=hook_timeout)
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
@@ -206,33 +211,42 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 # Note that the order of ">filename 2>&1" matters.
                 f' > {remote_log_path} 2>&1')
             job_lib.scheduler.queue(job_id, job_submit_cmd)
-
-            if request.HasField('managed_job'):
-                managed_job = request.managed_job
-                pool = managed_job.pool if managed_job.HasField(
-                    'pool') else None
-                pool_hash = None
-                if pool is not None:
-                    pool_hash = serve_state.get_service_hash(pool)
-                # Add the managed job to job queue database.
-                user_id = managed_job.user_id if managed_job.HasField(
-                    'user_id') else None
-                managed_job_state.set_job_info(job_id, managed_job.name,
-                                               managed_job.workspace,
-                                               managed_job.entrypoint, pool,
-                                               pool_hash, user_id)
-                # Set the managed job to PENDING state to make sure that
-                # this managed job appears in the `sky jobs queue`, even
-                # if it needs to wait to be submitted.
-                # We cannot set the managed job to PENDING state in the
-                # job template (jobs-controller.yaml.j2), as it may need
-                # to wait for the run commands to be scheduled on the job
-                # controller in high-load cases.
-                for task in managed_job.tasks:
-                    managed_job_state.set_pending(job_id, task.task_id,
-                                                  task.name, task.resources_str,
-                                                  task.metadata_json)
             return jobsv1_pb2.QueueJobResponse()
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def SetJobInfoWithoutJobId(  # type: ignore[return]
+        self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
+        try:
+            pool = request.pool if request.HasField('pool') else None
+            pool_hash = request.pool_hash if request.HasField(
+                'pool_hash') else None
+            user_hash = request.user_hash if request.HasField(
+                'user_hash') else None
+            job_ids = []
+            execution = request.execution
+            for i in range(request.num_jobs):
+                is_primary_in_job_group = request.is_primary_in_job_groups[i]
+                job_id = managed_job_state.set_job_info_without_job_id(
+                    name=request.name,
+                    workspace=request.workspace,
+                    entrypoint=request.entrypoint,
+                    pool=pool,
+                    pool_hash=pool_hash,
+                    user_hash=user_hash,
+                    execution=execution)
+                job_ids.append(job_id)
+                # Set pending state for all tasks
+                for task_id, task_name, metadata_json in zip(
+                        request.task_ids, request.task_names,
+                        request.metadata_jsons):
+                    managed_job_state.set_pending(job_id, task_id, task_name,
+                                                  request.resources_str,
+                                                  metadata_json,
+                                                  is_primary_in_job_group)
+            return jobsv1_pb2.SetJobInfoWithoutJobIdResponse(job_ids=job_ids)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
@@ -503,7 +517,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     metadata=converted_metadata,
                     pool=job.get('pool'),
                     pool_hash=job.get('pool_hash'),
-                    links=job.get('links'))
+                    links=job.get('links'),
+                    # Primary/auxiliary task support (None for non-job-groups)
+                    is_primary_in_job_group=job.get('is_primary_in_job_group'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

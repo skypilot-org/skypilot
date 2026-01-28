@@ -17,7 +17,7 @@ Models
    CodeLlama <codellama>
    Pixtral <pixtral>
    Mixtral <mixtral>
-   Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot/>
+   Mistral 7B <https://docs.mistral.ai/deployment/self-deployment/skypilot/>
    Qwen 3 <qwen>
    Kimi K2 <kimi-k2>
    Kimi K2 Thinking <kimi-k2-thinking>

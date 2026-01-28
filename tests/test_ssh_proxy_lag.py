@@ -36,7 +36,7 @@ async def _run_endpoint_func(func, *args, **kwargs):
     if asyncio.iscoroutinefunction(func):
         return await func(*args, **kwargs)
     else:
-        return await context_utils.to_thread(func, *args, **kwargs)
+        return await asyncio.to_thread(func, *args, **kwargs)
 
 
 class SSHLatencyMonitor:
@@ -194,7 +194,7 @@ def mock_blocking_operations(mock_request_obj):
 
 def create_blocking_mock(return_value, delay=0.02, name=None):
     """Create a mock that simulates blocking behavior.
-    
+
     Args:
         return_value: Value to return after blocking
         delay: Time to block in seconds (default 20ms)
@@ -497,9 +497,9 @@ async def test_endpoint_download(monitor, mock_request):
                 pass
             finally:
                 import shutil
-                await context_utils.to_thread(shutil.rmtree,
-                                              test_dir,
-                                              ignore_errors=True)
+                await asyncio.to_thread(shutil.rmtree,
+                                        test_dir,
+                                        ignore_errors=True)
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=10)
     assert not result['blocking'], "/download should not block the event loop"
@@ -938,7 +938,7 @@ async def test_endpoint_validate(monitor):
     print("\n🔍 Testing: /validate")
 
     async def test_func():
-        with mock.patch('sky.utils.context_utils.to_thread') as mock_thread:
+        with mock.patch('sky.server.server.asyncio.to_thread') as mock_thread:
             # to_thread should handle blocking properly
             async def async_validate(*args):
                 await asyncio.sleep(0.001)

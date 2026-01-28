@@ -10,6 +10,7 @@ from typing_extensions import TypedDict
 from sky.adaptors import gcp
 from sky.clouds.utils import gcp_utils
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import resources_utils
@@ -26,7 +27,7 @@ def _skypilot_log_error_and_exit_for_failover(error_code: str,
     Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
-    prefix = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED: '
+    prefix = f'{provision_constants.ERROR_NO_NODES_LAUNCHED}: '
     error = common.ProvisionerError(prefix + error_msg)
     error.errors = [{
         'code': error_code,

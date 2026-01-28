@@ -21,7 +21,7 @@ Follow the steps below to set up a local development environment for contributin
 #### Create a virtual environment
 To avoid package conflicts, create and activate a clean virtual environment using [uv](https://docs.astral.sh/uv/):
 ```bash
-# SkyPilot requires python 3.8-3.11.
+# SkyPilot requires python 3.9-3.11.
 # --seed is required to ensure pip is installed (needed for building wheels)
 uv venv --seed --python 3.11
 source .venv/bin/activate
@@ -98,6 +98,53 @@ uv pip install py-spy # py-spy is a sampling profiler for Python programs
 py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
 py-spy top -- python -m sky.cli status # Get a live top view
 py-spy -h # For more options
+```
+
+#### Testing WSL features on a windows VM (Azure)
+
+To test features that require Windows Subsystem for Linux (WSL), such as the automatic Windows SSH config setup, you can create a Windows VM on Azure:
+
+```bash
+# Create resource group
+az group create --name wsl-test-vm --location eastus2
+
+# Create Windows 11 VM with WSL-compatible settings
+az vm create \
+  --resource-group wsl-test-vm \
+  --name win11-wsl-test \
+  --image MicrosoftWindowsDesktop:windows-11:win11-24h2-pro:latest \
+  --size Standard_D4s_v3 \
+  --admin-username skyuser \
+  --admin-password 'YourPassword123!' \
+  --public-ip-sku Standard
+
+# Enable WSL features on the VM
+az vm run-command invoke \
+  --resource-group wsl-test-vm \
+  --name win11-wsl-test \
+  --command-id RunPowerShellScript \
+  --scripts "
+    dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+    dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+  "
+
+# Restart VM to apply WSL features
+az vm restart --resource-group wsl-test-vm --name win11-wsl-test
+
+# Get VM public IP for RDP connection
+az vm show --resource-group wsl-test-vm --name win11-wsl-test --show-details --query publicIps -o tsv
+```
+
+Connect via RDP, then in PowerShell (as Admin):
+```powershell
+wsl --install -d Ubuntu-22.04
+```
+
+After restart, set up Ubuntu and install SkyPilot to test WSL-specific features.
+
+**Cleanup:**
+```bash
+az group delete --name wsl-test-vm --yes --no-wait
 ```
 
 #### Testing in a container

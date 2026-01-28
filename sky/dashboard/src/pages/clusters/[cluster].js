@@ -18,6 +18,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   CheckIcon,
+  ExternalLinkIcon,
 } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
@@ -25,7 +26,11 @@ import {
   NonCapitalizedTooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import {
+  checkGrafanaAvailability,
+  getGrafanaUrl,
+  buildGrafanaUrl,
+} from '@/utils/grafana';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -139,7 +144,11 @@ function ClusterDetails() {
     } finally {
       setIsLoadingClusterMatch(false);
     }
-  }, [clusterData?.cluster, isGrafanaAvailable]);
+  }, [
+    clusterData?.cluster,
+    clusterData?.cluster_name_on_cloud,
+    isGrafanaAvailable,
+  ]);
 
   // Fetch matching cluster when component mounts and Grafana is available
   useEffect(() => {
@@ -630,6 +639,20 @@ function ActiveTab({
                 </div>
               )}
 
+              {/* Queue Details section - right column */}
+              {clusterData.details && (
+                <PluginSlot
+                  name="clusters.detail.queue_details"
+                  context={{
+                    details: clusterData.details,
+                    queueName: clusterData.kueue_queue_name,
+                    infra: clusterData.full_infra,
+                    clusterData: clusterData,
+                    title: 'Queue Details',
+                  }}
+                />
+              )}
+
               {/* Created by section - spans both columns */}
               {hasCreationArtifacts && (
                 <div className="col-span-2">
@@ -737,6 +760,19 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Jobs Table - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ClusterJobs
+            clusterName={clusterData.cluster}
+            clusterJobData={clusterJobData}
+            loading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
+          />
+        </div>
+      )}
+
       {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
         clusterData.full_infra &&
@@ -762,6 +798,37 @@ function ActiveTab({
                     GPU Metrics
                   </h3>
                 </button>
+                <Tooltip content="Open in Grafana">
+                  <button
+                    onClick={() => {
+                      const clusterParam =
+                        matchedClusterName ||
+                        clusterData?.cluster_name_on_cloud ||
+                        clusterData?.cluster;
+                      const dashboardPath =
+                        '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+                      const queryParams = new URLSearchParams({
+                        orgId: '1',
+                        from: timeRange.from,
+                        to: timeRange.to,
+                        timezone: 'browser',
+                        'var-cluster': clusterParam,
+                        'var-node': '$__all',
+                        'var-gpu': '$__all',
+                      });
+                      window.open(
+                        buildGrafanaUrl(
+                          `${dashboardPath}?${queryParams.toString()}`
+                        ),
+                        '_blank'
+                      );
+                    }}
+                    className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+                    aria-label="Open in Grafana"
+                  >
+                    <ExternalLinkIcon className="w-4 h-4" />
+                  </button>
+                </Tooltip>
               </div>
               {isGpuMetricsExpanded && (
                 <div className="p-5">
