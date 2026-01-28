@@ -733,16 +733,24 @@ def srun_sshd_command(
         # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
         # provides pipes. socat bridges stdin/stdout to a TCP socket.
         ssh_bootstrap_cmd = (
-            'PORT=$((30000 + RANDOM % 30000)); '
-            'DROPBEAR=$(command -v /usr/local/bin/dropbear); '
+            # Find dropbear in PATH
+            'DROPBEAR=$(command -v dropbear); '
             'if [ -z "$DROPBEAR" ]; then '
             'echo "dropbear not found" >&2; exit 1; fi; '
+            # Find a free port in the ephemeral range
+            'while :; do '
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
+            'done; '
+            # Start dropbear and wait for it to bind
             '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
             'DROPBEAR_PID=$!; '
             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
             'for i in $(seq 1 50); do '
-            'ss -tln | grep -q ":$PORT" && break; sleep 0.1; done; '
-            'if ! ss -tln | grep -q ":$PORT"; then '
+            'ss -tlnp 2>/dev/null | grep -q ":$PORT.*pid=$DROPBEAR_PID" '
+            '&& break; sleep 0.1; done; '
+            'if ! ss -tlnp 2>/dev/null | '
+            'grep -q ":$PORT.*pid=$DROPBEAR_PID"; then '
             'echo "Error: Timed out waiting for dropbear to start." >&2; '
             'exit 1; fi; '
             'socat STDIO TCP:127.0.0.1:$PORT')

@@ -1,4 +1,4 @@
-{% set user = 'root' if image_id is not none else ssh_user %}
+{% set user = ssh_user if image_id is none else 'root' %}
 cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
@@ -126,22 +126,35 @@ setup_commands:
       DROPBEAR_VERSION=2025.89
       PACKAGES="socat iproute2 ccache"
       export CCACHE_DIR=/var/cache/ccache
+      # Only Debian-based images are supported for now.
+      # See: https://docs.skypilot.co/en/latest/examples/docker-containers.html
+      export DEBIAN_FRONTEND=noninteractive
+      # Helper: apt with retries and exponential backoff (adapted from kubernetes-ray.yml.j2)
+      # TODO(kevin): Consolidate with the one in kubernetes-ray.yml.j2
+      apt_install_with_retries() {
+        local packages="$@"
+        [ -z "$packages" ] && return 0
+        set +e
+        local log=/tmp/apt-install.log
+        local tries=3
+        local delay=5
+        for i in $(seq 1 $tries); do
+          apt-get update >> "$log" 2>&1
+          apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages >> "$log" 2>&1 && { set -e; return 0; }
+          echo "apt-get install failed (attempt $i/$tries). Retrying in ${delay}s..." >> "$log"
+          apt-get -f install -y >> "$log" 2>&1 || true
+          apt-get clean >> "$log" 2>&1 || true
+          sleep $delay
+          delay=$((delay * 2))
+        done
+        echo "apt-get install failed after $tries attempts. Log:" >&2
+        cat "$log" >&2
+        set -e
+        return 1
+      }
       if ! /usr/local/bin/dropbear -V 2>&1 | grep -q "$DROPBEAR_VERSION"; then
         cd /tmp
-        if command -v apt-get >/dev/null 2>&1; then
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update -y >/dev/null
-          apt-get install -y build-essential $PACKAGES >/dev/null
-        elif command -v yum >/dev/null 2>&1; then
-          yum makecache >/dev/null
-          yum install -y gcc make $PACKAGES >/dev/null
-        elif command -v dnf >/dev/null 2>&1; then
-          dnf makecache >/dev/null
-          dnf install -y gcc make $PACKAGES >/dev/null
-        elif command -v apk >/dev/null 2>&1; then
-          apk update >/dev/null
-          apk add --no-cache build-base $PACKAGES >/dev/null
-        fi
+        apt_install_with_retries build-essential $PACKAGES
         curl -sL https://matt.ucc.asn.au/dropbear/releases/dropbear-$DROPBEAR_VERSION.tar.bz2 | tar xj
         cd dropbear-$DROPBEAR_VERSION
         ./configure --disable-zlib --disable-syslog --disable-wtmp --disable-lastlog >/dev/null
