@@ -54,8 +54,8 @@ run: |
   {%- if plugins_wheel_install_commands %}
   {{plugins_wheel_install_commands}}
   # Move the temporary plugins config to the final location if it exists
-  if [ -f "{{remote_plugins_config_path}}.tmp" ]; then
-    mv "{{remote_plugins_config_path}}.tmp" "{{remote_plugins_config_path}}"
+  if [ -f {{remote_plugins_config_path}}.tmp ]; then
+    mv {{remote_plugins_config_path}}.tmp {{remote_plugins_config_path}}
   fi
   {%- endif %}
   {%- endif %}
