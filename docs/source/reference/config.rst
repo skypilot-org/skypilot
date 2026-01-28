@@ -1417,7 +1417,7 @@ Example:
                 medium: Memory
                 sizeLimit: 3Gi
 
-By default, SkyPilot automatically creates a single container named ``ray-node`` in the Pod. While you typically don't need to explicitly set the container name, if you do specify ``pod_config.spec.containers[0].name``, it must be set to ``ray-node``:
+By default, SkyPilot automatically creates a single container named ``skypilot-node`` in the Pod. Specify the container name to be ``skypilot-node`` to modify this automatically created container:
 
 .. code-block:: yaml
 
@@ -1425,8 +1425,12 @@ By default, SkyPilot automatically creates a single container named ``ray-node``
     pod_config:
       spec:
         containers:
-          - name: ray-node
+          - name: skypilot-node
             ...
+
+.. tip::
+
+  This container was previously named ``ray-node``. While using ``ray-node`` is also still supported, we encourage users to migrate to ``skypilot-node`` as it will be deprecated. SkyPilot will automatically rename ``ray-node`` to ``skypilot-node`` before launching.
 
 .. _config-yaml-kubernetes-kueue:
 

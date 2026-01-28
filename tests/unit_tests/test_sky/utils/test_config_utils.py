@@ -647,7 +647,7 @@ def test_merge_k8s_configs_with_sidecar_containers():
     base_config = {
         'spec': {
             'containers': [{
-                'name': 'ray-node',
+                'name': 'skypilot-node',
                 'image': 'rayproject/ray:latest',
                 'command': ['/bin/bash', '-c', '--'],
                 'args': ['echo hello'],
@@ -682,8 +682,8 @@ def test_merge_k8s_configs_with_sidecar_containers():
     containers = base_config['spec']['containers']
     assert len(containers) == 2
 
-    # Verify ray-node container is preserved
-    ray_node = next(c for c in containers if c['name'] == 'ray-node')
+    # Verify skypilot-node container is preserved
+    ray_node = next(c for c in containers if c['name'] == 'skypilot-node')
     assert ray_node['image'] == 'rayproject/ray:latest'
     assert ray_node['command'] == ['/bin/bash', '-c', '--']
     assert ray_node['resources']['requests']['cpu'] == '2'
@@ -699,7 +699,7 @@ def test_merge_k8s_configs_with_sidecar_and_primary_container_override():
     base_config = {
         'spec': {
             'containers': [{
-                'name': 'ray-node',
+                'name': 'skypilot-node',
                 'image': 'rayproject/ray:latest',
                 'resources': {
                     'requests': {
@@ -714,7 +714,7 @@ def test_merge_k8s_configs_with_sidecar_and_primary_container_override():
         'spec': {
             'containers': [
                 {
-                    'name': 'ray-node',  # Override primary container
+                    'name': 'skypilot-node',  # Override primary container
                     'resources': {
                         'limits': {
                             'cpu': '4',
@@ -735,8 +735,8 @@ def test_merge_k8s_configs_with_sidecar_and_primary_container_override():
     containers = base_config['spec']['containers']
     assert len(containers) == 2
 
-    # Verify ray-node container is merged (not replaced)
-    ray_node = next(c for c in containers if c['name'] == 'ray-node')
+    # Verify skypilot-node container is merged (not replaced)
+    ray_node = next(c for c in containers if c['name'] == 'skypilot-node')
     assert ray_node['image'] == 'rayproject/ray:latest'  # Preserved
     assert ray_node['resources']['requests']['cpu'] == '2'  # Preserved
     assert ray_node['resources']['limits']['cpu'] == '4'  # Added from override

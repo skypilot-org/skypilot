@@ -815,12 +815,14 @@ def launch(
 
 def queue_from_kubernetes_pod(
         pod_name: str,
+        primary_container_name: Optional[str] = None,
         context: Optional[str] = None,
         skip_finished: bool = False) -> List[Dict[str, Any]]:
     """Gets the jobs queue from a specific controller pod.
 
     Args:
         pod_name (str): The name of the controller pod to query for jobs.
+        primary_container_name (str): The name of the SkyPilot container.
         context (Optional[str]): The Kubernetes context to use. If None, the
             current context is used.
         skip_finished (bool): If True, does not return finished jobs.
@@ -848,10 +850,12 @@ def queue_from_kubernetes_pod(
     provider_config = {'context': context}
     instances = {
         pod_name: [
-            provision_common.InstanceInfo(instance_id=pod_name,
-                                          internal_ip='',
-                                          external_ip='',
-                                          tags={})
+            provision_common.InstanceInfo(
+                instance_id=pod_name,
+                internal_ip='',
+                external_ip='',
+                tags={},
+                primary_container_name=primary_container_name)
         ]
     }  # Internal IP is not required for Kubernetes
     cluster_info = provision_common.ClusterInfo(provider_name='kubernetes',
