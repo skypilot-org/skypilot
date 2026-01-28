@@ -100,7 +100,7 @@ function RecipeCard({ recipe }) {
       <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
         <CardContent className="p-3">
           {/* Header with icon and name */}
-          <div className="flex items-start gap-2 mb-2">
+          <div className="flex items-start gap-2 mb-1.5">
             <TypeIcon
               className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
                 typeInfo.color === 'sky'
@@ -123,14 +123,14 @@ function RecipeCard({ recipe }) {
                   <PinIcon className="w-4 h-4 text-amber-500 flex-shrink-0" />
                 )}
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-sm text-gray-500">{typeInfo.label}</span>
-              </div>
             </div>
           </div>
 
           {/* Bottom info section with even spacing */}
-          <div className="space-y-1.5 mt-2">
+          <div className="space-y-1.5">
+            {/* Type */}
+            <div className="text-sm text-gray-500">{typeInfo.label}</div>
+
             {/* Description */}
             {recipe.description && (
               <p
