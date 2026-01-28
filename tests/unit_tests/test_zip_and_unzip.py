@@ -5,6 +5,7 @@ import pathlib
 import tempfile
 import zipfile
 
+import fastapi
 import pytest
 
 from sky.data import storage_utils
@@ -168,7 +169,7 @@ def test_unzip_file_zip_slip_blocked():
             with zipfile.ZipFile(zip_path, 'w') as z:
                 z.writestr(name, b'malicious content')
 
-            with pytest.raises(ValueError) as exc_info:
+            with pytest.raises(fastapi.HTTPException) as exc_info:
                 asyncio.run(server.unzip_file(zip_path, extract_dir))
 
             # HTTPException stores message in .detail, not __str__
