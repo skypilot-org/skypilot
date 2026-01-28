@@ -5,6 +5,8 @@ import pathlib
 import tempfile
 import zipfile
 
+import pytest
+
 from sky.data import storage_utils
 from sky.server import server
 from sky.skylet import constants
@@ -145,3 +147,30 @@ def test_zip_files_and_folders_compression():
             # Check compression method is DEFLATED
             info = zipf.getinfo(zipf.namelist()[0])
             assert info.compress_type == zipfile.ZIP_DEFLATED
+
+
+def test_unzip_file_zip_slip_blocked():
+    """Test that Zip Slip path traversal attacks are blocked."""
+    malicious_names = [
+        '../../../etc/passwd',
+        'foo/../../bar/../../etc/passwd',
+        'normal/../../../etc/shadow',
+    ]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = pathlib.Path(tmpdir)
+
+        for name in malicious_names:
+            zip_path = tmpdir / 'malicious.zip'
+            extract_dir = tmpdir / 'extract'
+            extract_dir.mkdir(exist_ok=True)
+
+            with zipfile.ZipFile(zip_path, 'w') as z:
+                z.writestr(name, b'malicious content')
+
+            with pytest.raises(Exception) as exc_info:
+                asyncio.get_event_loop().run_until_complete(
+                    server.unzip_file(zip_path, extract_dir))
+
+            assert 'outside target directory' in str(exc_info.value), \
+                f'Expected "outside target directory" error for {name}'
