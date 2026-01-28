@@ -13,31 +13,40 @@ export function YamlEditor({
   onChange,
   className,
   maxHeight = '400px',
+  minHeight,
   disabled = false,
 }) {
   return (
-    <CodeMirror
-      value={value}
-      onChange={onChange}
-      extensions={[yaml()]}
-      editable={!disabled}
+    <div
       className={`rounded-md border border-gray-300 overflow-hidden ${className || ''}`}
-      basicSetup={{
-        lineNumbers: true,
-        foldGutter: true,
-        highlightActiveLineGutter: false,
-        highlightActiveLine: false,
-        indentOnInput: true,
-        bracketMatching: true,
-        autocompletion: false,
-      }}
       style={{
-        fontSize: '13px',
-        maxHeight,
-        overflow: 'auto',
+        width: '100%',
+        maxWidth: '100%',
+        minWidth: 0,
       }}
-      theme="light"
-    />
+    >
+      <CodeMirror
+        value={value}
+        onChange={onChange}
+        extensions={[yaml()]}
+        editable={!disabled}
+        basicSetup={{
+          lineNumbers: true,
+          foldGutter: true,
+          highlightActiveLineGutter: false,
+          highlightActiveLine: false,
+          indentOnInput: true,
+          bracketMatching: true,
+          autocompletion: false,
+        }}
+        style={{
+          fontSize: '13px',
+          maxHeight,
+          minHeight,
+        }}
+        theme="light"
+      />
+    </div>
   );
 }
 
