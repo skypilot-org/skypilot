@@ -93,8 +93,8 @@ function JobDetails() {
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
-  // GPU metrics task selection for job groups ('all' or task index)
-  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState('all');
+  // GPU metrics task selection for job groups
+  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState(0);
   const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
   const [isGpuMetricsExpanded, setIsGpuMetricsExpanded] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -247,14 +247,9 @@ function JobDetails() {
   };
 
   // Build Grafana panel URL with filters for managed jobs
-  // clusterNames can be an array for "All Tasks" or a single-element array for specific task
-  const buildGrafanaMetricsUrl = (panelId, clusterNames) => {
+  const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud) => {
     const grafanaUrl = getGrafanaUrl();
-    // Build cluster filter params - Grafana accepts multiple var-cluster params
-    const clusterParams = clusterNames
-      .map((name) => `var-cluster=${encodeURIComponent(name)}`)
-      .join('&');
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&${clusterParams}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterNameOnCloud)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // GPU panels configuration
@@ -288,31 +283,14 @@ function JobDetails() {
     (t) => t.hasMetrics
   );
 
-  // Get the currently selected task for GPU metrics (null when 'all' is selected)
+  // Get the currently selected task for GPU metrics
   const gpuMetricsTask =
-    gpuMetricsTaskIndex === 'all'
-      ? null
-      : allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
+    allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
 
-  // Get cluster names for GPU metrics - either single cluster or array of all job group clusters
-  const gpuMetricsClusterNames = useMemo(() => {
-    if (gpuMetricsTaskIndex === 'all') {
-      // Collect all unique cluster names from tasks with GPU metrics
-      return tasksWithGpuMetrics
-        .filter((t) => t.hasMetrics && t.task.cluster_name_on_cloud)
-        .map((t) => t.task.cluster_name_on_cloud);
-    }
-    // Single task selected
-    const clusterName =
-      gpuMetricsTask?.cluster_name_on_cloud ||
-      allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
-    return clusterName ? [clusterName] : [];
-  }, [
-    gpuMetricsTaskIndex,
-    tasksWithGpuMetrics,
-    gpuMetricsTask,
-    allTasksForGpuMetrics,
-  ]);
+  // Get cluster name for GPU metrics from selected task
+  const gpuMetricsClusterName =
+    gpuMetricsTask?.cluster_name_on_cloud ||
+    allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -610,9 +588,7 @@ function JobDetails() {
                       {isMultiTask && (
                         <Select
                           onValueChange={(value) =>
-                            setGpuMetricsTaskIndex(
-                              value === 'all' ? 'all' : parseInt(value, 10)
-                            )
+                            setGpuMetricsTaskIndex(parseInt(value, 10))
                           }
                           value={String(gpuMetricsTaskIndex)}
                         >
@@ -624,7 +600,6 @@ function JobDetails() {
                             <SelectValue placeholder="Select Task" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="all">All Tasks</SelectItem>
                             {tasksWithGpuMetrics.map(
                               ({ index, task, hasMetrics }) => (
                                 <SelectItem
@@ -652,19 +627,13 @@ function JobDetails() {
                             from: timeRange.from,
                             to: timeRange.to,
                             timezone: 'browser',
+                            'var-cluster': gpuMetricsClusterName,
                             'var-node': '$__all',
                             'var-gpu': '$__all',
                           });
-                          // Add cluster params - Grafana accepts multiple var-cluster params
-                          const clusterParams = gpuMetricsClusterNames
-                            .map(
-                              (name) =>
-                                `var-cluster=${encodeURIComponent(name)}`
-                            )
-                            .join('&');
                           window.open(
                             buildGrafanaUrl(
-                              `${dashboardPath}?${queryParams.toString()}&${clusterParams}`
+                              `${dashboardPath}?${queryParams.toString()}`
                             ),
                             '_blank'
                           );
@@ -716,19 +685,15 @@ function JobDetails() {
                         {/* Show current selection info */}
                         <div className="mt-2 text-xs text-gray-500">
                           Showing:{' '}
-                          {gpuMetricsTaskIndex === 'all'
-                            ? 'All Tasks'
-                            : gpuMetricsTask?.task ||
-                              gpuMetricsTask?.name ||
-                              detailJobData.name}
-                          {isMultiTask && gpuMetricsTaskIndex !== 'all'
-                            ? ` (Task ${gpuMetricsTaskIndex})`
-                            : ''}{' '}
+                          {gpuMetricsTask?.task ||
+                            gpuMetricsTask?.name ||
+                            detailJobData.name}
+                          {isMultiTask ? ` (Task ${gpuMetricsTaskIndex})` : ''}{' '}
                           • Time: {timeRange.from} to {timeRange.to}
                         </div>
                       </div>
 
-                      {gpuMetricsClusterNames.length > 0 ? (
+                      {gpuMetricsClusterName ? (
                         <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
                           {gpuPanels.map((panel) => (
                             <div
@@ -739,14 +704,14 @@ function JobDetails() {
                                 <iframe
                                   src={buildGrafanaMetricsUrl(
                                     panel.id,
-                                    gpuMetricsClusterNames
+                                    gpuMetricsClusterName
                                   )}
                                   width="100%"
                                   height="400"
                                   frameBorder="0"
                                   title={panel.title}
                                   className="rounded"
-                                  key={`${panel.keyPrefix}-${gpuMetricsClusterNames.join('-')}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}-task-${gpuMetricsTaskIndex}`}
+                                  key={`${panel.keyPrefix}-${gpuMetricsClusterName}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}-task-${gpuMetricsTaskIndex}`}
                                 />
                               </div>
                             </div>
