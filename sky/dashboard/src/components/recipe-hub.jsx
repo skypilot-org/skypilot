@@ -15,12 +15,11 @@ import {
   RotateCwIcon,
   PlusIcon,
   PinIcon,
-  FileCodeIcon,
   ServerIcon,
   BriefcaseIcon,
-  GlobeIcon,
   LayersIcon,
   AlertTriangleIcon,
+  DatabaseIcon,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -61,6 +60,11 @@ import {
   createRecipe,
   getCategories,
 } from '@/data/connectors/recipes';
+import {
+  RecipeType,
+  getRecipeTypeInfo,
+  capitalizeWords,
+} from '@/data/constants/recipeTypes';
 
 // Define filter options for the YAML filter dropdown
 const RECIPE_PROPERTY_OPTIONS = [
@@ -83,15 +87,6 @@ function formatRelativeTime(timestamp) {
   return new Date(timestamp * 1000).toLocaleDateString();
 }
 
-// Helper to capitalize first letter of each word
-function capitalizeWords(str) {
-  if (!str) return '';
-  return str
-    .split(' ')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
 // Generate URL slug from template
 function generateRecipeSlug(name, id) {
   const slugifiedName = name
@@ -102,29 +97,10 @@ function generateRecipeSlug(name, id) {
   return `${slugifiedName}-${id}`;
 }
 
-// Get icon and color for yaml type
-function getTypeInfo(recipeType) {
-  switch (recipeType) {
-    case 'cluster':
-      return { icon: ServerIcon, color: 'sky', label: 'Cluster' };
-    case 'job':
-      return { icon: BriefcaseIcon, color: 'purple', label: 'Job' };
-    case 'serve':
-      return { icon: GlobeIcon, color: 'green', label: 'Service' };
-    case 'pool':
-      return { icon: LayersIcon, color: 'orange', label: 'Pool' };
-    default:
-      return {
-        icon: FileCodeIcon,
-        color: 'gray',
-        label: capitalizeWords(recipeType),
-      };
-  }
-}
 
 // Recipe Card Component (for Pinned and My Recipes)
 function RecipeCard({ recipe }) {
-  const typeInfo = getTypeInfo(recipe.recipe_type);
+  const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
   const TypeIcon = typeInfo.icon;
   const slug = generateRecipeSlug(recipe.name, recipe.id);
 
@@ -406,7 +382,7 @@ function AllRecipesSection({ recipes }) {
                 </TableRow>
               ) : (
                 sortedAndFilteredTemplates.map((recipe) => {
-                  const typeInfo = getTypeInfo(recipe.recipe_type);
+                  const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
                   const TypeIcon = typeInfo.icon;
                   const slug = generateRecipeSlug(recipe.name, recipe.id);
                   const truncatedDesc = recipe.description
@@ -734,7 +710,7 @@ const RecipeFilterItem = ({ filter, onRemove }) => {
 // Helper to generate example YAML based on type
 function getExampleRecipe(recipeType) {
   switch (recipeType) {
-    case 'cluster':
+    case RecipeType.CLUSTER:
       return `name: my-cluster
 resources:
   cloud: aws
@@ -743,7 +719,7 @@ resources:
 run: |
   echo "Hello, SkyPilot!"
 `;
-    case 'job':
+    case RecipeType.JOB:
       return `name: my-job
 resources:
   cloud: aws
@@ -752,19 +728,7 @@ resources:
 run: |
   echo "Running managed job..."
 `;
-    case 'serve':
-      return `service:
-  readiness_probe: /health
-  replicas: 2
-
-resources:
-  cloud: aws
-  accelerators: A100:1
-
-run: |
-  python server.py
-`;
-    case 'pool':
+    case RecipeType.POOL:
       return `pool:
   name: my-pool
 
@@ -951,8 +915,8 @@ function CreateRecipeModal({
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [content, setContent] = useState(getExampleRecipe('cluster'));
-  const [recipeType, setRecipeType] = useState('cluster');
+  const [content, setContent] = useState(getExampleRecipe(RecipeType.CLUSTER));
+  const [recipeType, setRecipeType] = useState(RecipeType.CLUSTER);
   const [category, setCategory] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -963,13 +927,13 @@ function CreateRecipeModal({
         setName(initialData.name || '');
         setDescription(initialData.description || '');
         setContent(initialData.content || '');
-        setRecipeType(initialData.recipe_type || 'cluster');
+        setRecipeType(initialData.recipe_type || RecipeType.CLUSTER);
         setCategory(initialData.category || '');
       } else {
         setName('');
         setDescription('');
-        setRecipeType('cluster');
-        setContent(getExampleRecipe('cluster'));
+        setRecipeType(RecipeType.CLUSTER);
+        setContent(getExampleRecipe(RecipeType.CLUSTER));
         setCategory('');
       }
       setOwnerName('');
@@ -1057,25 +1021,19 @@ function CreateRecipeModal({
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="cluster">
+                  <SelectItem value={RecipeType.CLUSTER}>
                     <div className="flex items-center gap-2">
                       <ServerIcon className="w-4 h-4 text-sky-600" />
                       <span>Cluster</span>
                     </div>
                   </SelectItem>
-                  <SelectItem value="job">
+                  <SelectItem value={RecipeType.JOB}>
                     <div className="flex items-center gap-2">
                       <BriefcaseIcon className="w-4 h-4 text-purple-600" />
                       <span>Managed Job</span>
                     </div>
                   </SelectItem>
-                  <SelectItem value="serve">
-                    <div className="flex items-center gap-2">
-                      <GlobeIcon className="w-4 h-4 text-green-600" />
-                      <span>SkyServe</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="pool">
+                  <SelectItem value={RecipeType.POOL}>
                     <div className="flex items-center gap-2">
                       <LayersIcon className="w-4 h-4 text-orange-600" />
                       <span>Job Pool</span>

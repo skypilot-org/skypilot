@@ -103,14 +103,14 @@ run: echo hello
         # Should not raise
         recipes_core._validate_skypilot_yaml(valid_yaml, 'job')
 
-    def test_invalid_yaml_type(self):
-        """Test that an invalid yaml_type is rejected."""
+    def test_invalid_recipe_type(self):
+        """Test that an invalid recipe_type is rejected."""
         valid_yaml = """
 resources:
   cpus: 2
 run: echo hello
 """
-        with pytest.raises(ValueError, match="yaml_type must be one of"):
+        with pytest.raises(ValueError, match='Invalid recipe type'):
             recipes_core.create_recipe(
                 name='test',
                 content=valid_yaml,

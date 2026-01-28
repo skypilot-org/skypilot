@@ -15,7 +15,7 @@ import { apiClient } from './client';
  * @param {string} [options.category] - Filter by category
  * @param {boolean} [options.pinnedOnly] - Only return pinned templates
  * @param {boolean} [options.myRecipesOnly] - Only return user's own templates
- * @param {string} [options.recipeType] - Filter by type ('cluster' or 'job')
+ * @param {string} [options.recipeType] - Filter by type (see RecipeType in constants/recipeTypes.js)
  * @returns {Promise<Array>} List of recipes
  */
 export async function getRecipes(options = {}) {
@@ -59,7 +59,7 @@ export async function getRecipe(recipeId) {
  * @param {Object} data - Recipe data
  * @param {string} data.name - Display name
  * @param {string} data.content - YAML content
- * @param {string} data.recipeType - Type ('cluster' or 'job')
+ * @param {string} data.recipeType - Type (see RecipeType in constants/recipeTypes.js)
  * @param {string} [data.description] - Optional description
  * @param {string} [data.category] - Optional category
  * @param {string} [data.ownerName] - Optional owner name (for unauthenticated users)

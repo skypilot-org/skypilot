@@ -19,11 +19,6 @@ import {
   Trash2Icon,
   EditIcon,
   ShareIcon,
-  ServerIcon,
-  BriefcaseIcon,
-  GlobeIcon,
-  LayersIcon,
-  FileCodeIcon,
   CheckIcon,
 } from 'lucide-react';
 
@@ -58,6 +53,11 @@ import {
   togglePinRecipe,
   getCategories,
 } from '@/data/connectors/recipes';
+import {
+  getRecipeTypeInfo,
+  getLaunchCommand,
+  capitalizeWords,
+} from '@/data/constants/recipeTypes';
 
 // Helper to format relative time
 function formatRelativeTime(timestamp) {
@@ -78,50 +78,6 @@ function formatFullTimestamp(timestamp) {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-// Get icon and color for yaml type
-// Helper to capitalize first letter of each word
-function capitalizeWords(str) {
-  if (!str) return '';
-  return str
-    .split(' ')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
-}
-
-function getTypeInfo(recipeType) {
-  switch (recipeType) {
-    case 'cluster':
-      return { icon: ServerIcon, color: 'sky', label: 'Cluster' };
-    case 'job':
-      return { icon: BriefcaseIcon, color: 'purple', label: 'Managed Job' };
-    case 'serve':
-      return { icon: GlobeIcon, color: 'green', label: 'SkyServe' };
-    case 'pool':
-      return { icon: LayersIcon, color: 'orange', label: 'Job Pool' };
-    default:
-      return {
-        icon: FileCodeIcon,
-        color: 'gray',
-        label: capitalizeWords(recipeType),
-      };
-  }
-}
-
-// Generate launch command based on recipe type and recipe ID
-function getLaunchCommand(recipeType, recipeId) {
-  switch (recipeType) {
-    case 'cluster':
-      return `sky launch --recipe-id ${recipeId}`;
-    case 'job':
-      return `sky jobs launch --recipe-id ${recipeId}`;
-    case 'serve':
-      return `sky serve up --recipe-id ${recipeId}`;
-    case 'pool':
-      return `sky jobs pool apply --recipe-id ${recipeId}`;
-    default:
-      return `sky launch --recipe-id ${recipeId}`;
-  }
-}
 
 // Parse template ID from URL slug
 function parseRecipeSlug(slug) {
@@ -681,7 +637,7 @@ export function RecipeDetail() {
     return null;
   }
 
-  const typeInfo = getTypeInfo(template.recipe_type);
+  const typeInfo = getRecipeTypeInfo(template.recipe_type);
   const TypeIcon = typeInfo.icon;
 
   return (
@@ -719,7 +675,7 @@ export function RecipeDetail() {
                 )}
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>{typeInfo.label}</span>
+                <span>{typeInfo.fullLabel}</span>
                 {template.category && (
                   <>
                     <span>·</span>
@@ -833,7 +789,7 @@ export function RecipeDetail() {
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div>
               <div className="text-gray-600 font-medium text-base">Type</div>
-              <div className="text-base mt-1">{typeInfo.label}</div>
+              <div className="text-base mt-1">{typeInfo.fullLabel}</div>
             </div>
             <div>
               <div className="text-gray-600 font-medium text-base">

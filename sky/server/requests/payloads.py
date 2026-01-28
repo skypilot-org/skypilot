@@ -910,7 +910,7 @@ class RecipeListBody(RequestBody):
     category: Optional[str] = None
     pinned_only: bool = False
     my_recipes_only: bool = False
-    recipe_type: Optional[str] = None  # 'cluster' or 'job' or 'serve' or 'pool' or 'volume'
+    recipe_type: Optional[str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
@@ -930,7 +930,7 @@ class RecipeCreateBody(RequestBody):
     """The request body for creating a new recipe."""
     name: str
     content: str
-    recipe_type: str  # 'cluster', 'job', 'pool', or 'volume'
+    recipe_type: str  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
     description: Optional[str] = None
     category: Optional[str] = None
     owner_name: Optional[str] = None  # Override user_name for unauthenticated
