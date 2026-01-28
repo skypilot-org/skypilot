@@ -99,6 +99,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
+            allowed_cuda_versions = config.node_config.get(
+                'AllowedCudaVersions')
             instance_id = utils.launch(
                 cluster_name=cluster_name_on_cloud,
                 node_type=node_type,
@@ -115,6 +117,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     'docker_login_config'),
                 network_volume_id=network_volume_id,
                 volume_mount_path=volume_mount_path,
+                allowed_cuda_versions=allowed_cuda_versions,
             )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}\n'
