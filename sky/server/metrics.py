@@ -24,6 +24,75 @@ from sky.metrics import utils as metrics_utils
 logger = sky_logging.init_logger(__name__)
 
 _BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
+_COST_TIME_HORIZON_SECONDS = 3600
+
+
+class BurnRateCollector:
+    """Collector for SkyPilot cluster burn rate metrics.
+    This collector calculates the total hourly burn rate (in USD) of all
+    active clusters. It caches the result for _BURN_RATE_UPDATE_INTERVAL_SECONDS
+    to avoid frequent database queries.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cached_total = 0.0
+        self._cache_ttl = _BURN_RATE_UPDATE_INTERVAL_SECONDS
+
+    def _compute_total(self) -> float:
+        total = 0.0
+        clusters = global_user_state.get_clusters()
+        for cluster in clusters:
+            status = cluster.get('status')
+            status_name = getattr(status, 'name', status)
+            if status_name != 'UP':
+                continue
+
+            handle = cluster.get('handle')
+            if handle is None or not getattr(handle, 'launched_resources',
+                                             None):
+                continue
+
+            # instance_type_to_hourly_cost + accelerators_to_hourly_cost.
+            total += handle.launched_resources.get_cost(
+                _COST_TIME_HORIZON_SECONDS)
+        return total
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_total_burn_rate_dollars',
+            'Total estimated hourly spend across all active clusters (USD/hr)',
+            labels=['type'],
+        )
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._cached_total = self._compute_total()
+                    self._last_scrape_time = now
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('Failed to compute burn rate')
+                    self._last_scrape_time = now
+            val = self._cached_total
+
+        metric = prom_core.GaugeMetricFamily(
+            'sky_apiserver_total_burn_rate_dollars',
+            'Total estimated hourly spend across all active clusters (USD/hr)',
+            labels=['type'],
+        )
+        metric.add_metric(['local_clusters'], val)
+        yield metric
+
+
+_BURN_RATE_COLLECTOR = BurnRateCollector()
+
+try:
+    prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
+except ValueError:
+    pass
 
 metrics_app = fastapi.FastAPI()
 
@@ -37,6 +106,7 @@ def metrics() -> fastapi.Response:
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
+        registry.register(_BURN_RATE_COLLECTOR)
         data = generate_latest(registry)
     else:
         data = generate_latest()
@@ -106,59 +176,6 @@ def _is_streaming_api(path: str) -> bool:
     return path.endswith('/logs') or path.endswith('/api/stream')
 
 
-class BurnRateCollector(object):
-    """Custom Prometheus Collector for SkyPilot Burn Rate.
-    This calculates cost only when Prometheus scrapes the /metrics endpoint.
-    """
-
-    def collect(self):
-        metric = prom_core.GaugeMetricFamily(
-            'sky_apiserver_total_burn_rate_dollars',
-            'Total estimated hourly spend across all active clusters (USD/hr)',
-            labels=['type'])
-
-        total_hourly_cost = 0.0
-        try:
-            # 1. Get all clusters from the local database
-            clusters = global_user_state.get_clusters()
-
-            for cluster in clusters:
-                # 2. Only count clusters that are running ('UP')
-                if cluster['status'].name == 'UP':
-                    handle = cluster['handle']
-
-                    # 3. Access the resources
-                    if hasattr(
-                            handle,
-                            'launched_resources') and handle.launched_resources:
-                        r = handle.launched_resources
-
-                        # 4. Calculate Base Instance Cost
-                        if r.cloud is not None:
-                            cost = r.cloud.instance_type_to_hourly_cost(
-                                r.instance_type,
-                                r.use_spot,
-                                region=r.region,
-                                zone=r.zone)
-                            total_hourly_cost += cost
-
-                            # 5. Add Accelerator Cost
-                            if r.accelerators:
-                                acc_cost = r.cloud.accelerators_to_hourly_cost(
-                                    r.accelerators,
-                                    r.use_spot,
-                                    region=r.region,
-                                    zone=r.zone)
-                                total_hourly_cost += acc_cost
-
-            # Add the metric with the label 'local_clusters'
-            metric.add_metric(['local_clusters'], total_hourly_cost)
-            yield metric
-
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Failed to update burn rate: {e}')
-
-
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to collect Prometheus metrics for HTTP requests."""
 
@@ -218,10 +235,3 @@ def process_monitor(process_type: str, stop: threading.Event):
                                                              mode='system').set(
                                                                  ctimes.system)
         time.sleep(1)
-
-
-try:
-    prom.REGISTRY.register(BurnRateCollector())
-except ValueError:
-    # Metric already registered, likely due to a reload.
-    pass

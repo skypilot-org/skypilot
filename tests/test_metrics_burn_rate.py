@@ -20,64 +20,101 @@ from unittest import mock
 from sky.server import metrics
 
 
-class TestBurnRateMetric(unittest.TestCase):
-    """Tests for the burn rate metric calculation."""
+class TestBurnRateCollector(unittest.TestCase):
+
+    def _make_cluster(self,
+                      status_name,
+                      cost=None,
+                      include_handle=True,
+                      include_resources=True):
+        """Create a cluster dict similar to what global_user_state.get_clusters() returns."""
+        status = mock.Mock()
+        status.name = status_name
+
+        cluster = {'status': status}
+
+        if not include_handle:
+            cluster['handle'] = None
+            return cluster
+
+        handle = mock.Mock()
+
+        if not include_resources:
+            handle.launched_resources = None
+            cluster['handle'] = handle
+            return cluster
+
+        launched_resources = mock.Mock()
+        if cost is not None:
+            launched_resources.get_cost.return_value = cost
+        handle.launched_resources = launched_resources
+
+        cluster['handle'] = handle
+        return cluster
 
     @mock.patch('sky.server.metrics.global_user_state.get_clusters')
-    def test_burn_rate_logic(self, mock_get_clusters):
-        """Test burn rate calculation using the Collector pattern."""
+    def test_burn_rate_sums_only_up_clusters(self, mock_get_clusters):
+        # Two valid UP clusters with hourly costs 1.5 and 5.5 -> total 7.0
+        c1 = self._make_cluster('UP', cost=1.5)
+        c2 = self._make_cluster('UP', cost=5.5)
 
-        def create_mock_cluster(status_str, instance_cost=0.0, gpu_cost=0.0):
-            mock_status = mock.Mock()
-            mock_status.name = status_str
-
-            mock_cloud = mock.Mock()
-            mock_cloud.instance_type_to_hourly_cost.return_value = instance_cost
-            mock_cloud.accelerators_to_hourly_cost.return_value = gpu_cost
-
-            mock_resources = mock.Mock()
-            mock_resources.cloud = mock_cloud
-            mock_resources.accelerators = {'GPU': 1} if gpu_cost > 0.0 else None
-
-            mock_handle = mock.Mock()
-            mock_handle.launched_resources = mock_resources
-
-            return {'status': mock_status, 'handle': mock_handle}
-
-        # 1. Setup Data
-        cluster_a = create_mock_cluster('UP', instance_cost=1.50)
-        cluster_b = create_mock_cluster('UP', instance_cost=2.00, gpu_cost=3.50)
-        cluster_c = create_mock_cluster('STOPPED', instance_cost=10.00)
-        cluster_d = create_mock_cluster('INIT', instance_cost=5.00)
+        # These should be ignored
+        stopped = self._make_cluster('STOPPED', cost=999.0)
+        no_handle = self._make_cluster('UP', cost=999.0, include_handle=False)
+        no_resources = self._make_cluster('UP',
+                                          cost=999.0,
+                                          include_resources=False)
 
         mock_get_clusters.return_value = [
-            cluster_a, cluster_b, cluster_c, cluster_d
+            c1, c2, stopped, no_handle, no_resources
         ]
 
-        # 2. Instantiate the Collector (The new way)
         collector = metrics.BurnRateCollector()
+        collected = list(collector.collect())
 
-        # 3. Manually trigger collection
-        # collect() returns a generator, so we convert to list
-        collected_metrics = list(collector.collect())
-
-        # 4. Verify Results
-        # We expect 1 metric family returned
-        self.assertEqual(len(collected_metrics), 1)
-
-        family = collected_metrics[0]
+        self.assertEqual(len(collected), 1)
+        family = collected[0]
         self.assertEqual(family.name, 'sky_apiserver_total_burn_rate_dollars')
 
-        # We expect 1 sample inside that family
+        # Find the single emitted sample
         self.assertEqual(len(family.samples), 1)
         sample = family.samples[0]
 
-        # Check the Value (Should be 1.5 + 2.0 + 3.5 = 7.0)
-        print(f'\nTest Result: Expected 7.0, Got {sample.value}')
-        self.assertEqual(sample.value, 7.0)
-
-        # Check the Label (The reviewer asked for this!)
         self.assertEqual(sample.labels['type'], 'local_clusters')
+        self.assertAlmostEqual(sample.value, 7.0)
+
+        # Ensure get_cost() called correctly for the two UP clusters only
+        c1['handle'].launched_resources.get_cost.assert_called_with(
+            metrics._COST_TIME_HORIZON_SECONDS)
+        c2['handle'].launched_resources.get_cost.assert_called_with(
+            metrics._COST_TIME_HORIZON_SECONDS)
+
+        self.assertFalse(stopped['handle'].launched_resources.get_cost.called)
+
+    @mock.patch('sky.server.metrics.time.time')
+    @mock.patch('sky.server.metrics.global_user_state.get_clusters')
+    def test_burn_rate_cache_respects_ttl(self, mock_get_clusters, mock_time):
+        # Return one UP cluster costing 1.0
+        c1 = self._make_cluster('UP', cost=1.0)
+        mock_get_clusters.return_value = [c1]
+
+        collector = metrics.BurnRateCollector()
+
+        # 1st scrape at t=1000 -> computes
+        # 2nd scrape at t=1001 -> should use cache
+        # 3rd scrape at t=1000 + TTL + 1 -> recompute
+        mock_time.side_effect = [
+            1000.0,
+            1001.0,
+            1000.0 + metrics._BURN_RATE_UPDATE_INTERVAL_SECONDS + 1.0,
+        ]
+
+        list(collector.collect())
+        list(collector.collect())
+        list(collector.collect())
+
+        # Should compute twice total (first and third), not on the second
+        self.assertEqual(mock_get_clusters.call_count, 2)
 
 
 if __name__ == '__main__':
