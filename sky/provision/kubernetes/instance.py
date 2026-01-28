@@ -1096,6 +1096,34 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'mountPath': ephemeral_volume.path,
             })
 
+    # Handle Docker registry authentication for private registries.
+    # This creates a Kubernetes secret with the docker credentials and adds
+    # imagePullSecrets to the pod spec.
+    docker_login_config = provider_config.get('docker_login_config')
+    if docker_login_config is not None:
+        # Convert to DockerLoginConfig if it's a dict
+        docker_login_config = docker_utils.DockerLoginConfig(
+            **docker_login_config)
+        secret_name = kubernetes_utils.create_docker_registry_secret(
+            namespace, context, cluster_name_on_cloud, docker_login_config)
+        # Add imagePullSecrets to pod spec
+        if 'imagePullSecrets' not in pod_spec['spec']:
+            pod_spec['spec']['imagePullSecrets'] = []
+        pod_spec['spec']['imagePullSecrets'].append({'name': secret_name})
+
+        # Add server prefix to image for the ray-node container only.
+        # We don't modify other containers (e.g., sidecars) as they may use
+        # different registries.
+        for container in pod_spec['spec']['containers']:
+            if container.get('name') == k8s_constants.SKYPILOT_CONTAINER_NAME:
+                image = container.get('image', '')
+                if image:
+                    container['image'] = docker_login_config.format_image(image)
+                break
+
+        logger.info(f'Using Docker registry credentials for private image '
+                    f'from {docker_login_config.server}')
+
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
@@ -1521,6 +1549,10 @@ def _terminate_deployment(cluster_name: str, namespace: str,
         resource_type='pvc',
         resource_name=pvc_name)
 
+    # Clean up Docker registry secret if it exists
+    kubernetes_utils.delete_docker_registry_secret(namespace, context,
+                                                   cluster_name)
+
 
 def terminate_instances(
     cluster_name_on_cloud: str,
@@ -1551,6 +1583,12 @@ def terminate_instances(
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
                                      _NUM_THREADS)
+
+    # Clean up Docker registry secret if it exists (only when terminating
+    # all pods, not just workers)
+    if not worker_only:
+        kubernetes_utils.delete_docker_registry_secret(namespace, context,
+                                                       cluster_name_on_cloud)
 
 
 def get_cluster_info(
