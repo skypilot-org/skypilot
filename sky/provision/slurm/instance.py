@@ -767,18 +767,6 @@ def _build_pyxis_args(cluster_name_on_cloud: str) -> str:
     return f'--container-remap-root --container-name={quoted_name}:exec'
 
 
-def _build_pyxis_args(cluster_name_on_cloud: str) -> str:
-    """Build pyxis/enroot container args for srun.
-
-    Uses :exec flag to attach to the already-running container (started with
-    sleep infinity in sbatch). Container settings like --container-remap-root,
-    --container-writable are preserved from when the container was created.
-    """
-    container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
-    quoted_name = shlex.quote(container_name)
-    return f'--container-remap-root --container-name={quoted_name}:exec'
-
-
 def get_command_runners(
     cluster_info: common.ClusterInfo,
     **credentials: Dict[str, Any],

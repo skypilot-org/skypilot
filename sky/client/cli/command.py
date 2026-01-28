@@ -773,7 +773,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     if git_url is not None and workdir is not None:
         raise click.UsageError('Cannot specify both --git-url and --workdir')
 
-    entrypoint = shlex.join(entrypoint)
+    entrypoint = ' '.join(entrypoint)
     is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
     if is_yaml:
