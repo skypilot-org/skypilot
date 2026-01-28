@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -179,6 +180,49 @@ def main():
                                            env_vars=env_vars,
                                            stream_logs=True,
                                            streaming_prefix=prefix)
+
+    # For multi-node Slurm jobs (one task per node), we need to wait for all
+    # tasks to complete before any task exits, because Slurm's proctrack/cgroup
+    # kills all processes in a task's cgroup when that task's main process
+    # exits. If one task exits early, child processes (e.g., Ray workers) get
+    # killed even while other tasks are still running.
+    # This ensures all tasks wait until every task has completed before exiting.
+    if num_nodes > 1 and not args.is_setup:
+        slurm_job_id = os.environ['SLURM_JOB_ID']
+        slurm_step_id = os.environ['SLURM_STEP_ID']
+        run_done_dir = os.path.expanduser(
+            f'~/.sky_run_done_{slurm_job_id}_{slurm_step_id}')
+        done_file = f'{run_done_dir}/{rank}'
+
+        if rank == 0:
+            shutil.rmtree(run_done_dir, ignore_errors=True)
+            os.makedirs(run_done_dir, exist_ok=True)
+        else:
+            # Workers wait for dir to exist (rank 0 creates it)
+            while not os.path.isdir(run_done_dir):
+                time.sleep(0.1)
+
+        pathlib.Path(done_file).touch()
+
+        # All ranks wait for all done files to exist.
+        max_errs = 10
+        errs = 0
+        while True:
+            try:
+                num_ready = len(os.listdir(run_done_dir))
+                errs = 0
+            except OSError as e:
+                errs += 1
+                if errs >= 10:
+                    raise OSError(f'Failed to read {run_done_dir} after '
+                                  f'{max_errs} attempts') from e
+                num_ready = 0
+            if num_ready >= num_nodes:
+                break
+            time.sleep(0.5)
+
+        if rank == 0:
+            shutil.rmtree(run_done_dir, ignore_errors=True)
 
     sys.exit(returncode)
 
