@@ -1284,6 +1284,13 @@ def get_config_schema():
                 },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }]
+                },
                 'vpc_names': {
                     'oneOf': [{
                         'type': 'string',
