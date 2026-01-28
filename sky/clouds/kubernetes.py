@@ -1238,6 +1238,10 @@ class Kubernetes(clouds.Cloud):
                             return (
                                 KubernetesHighPerformanceNetworkType.TOGETHER,
                                 None)
+                        if label_key.startswith('lightning.ai/'):
+                            return (
+                                KubernetesHighPerformanceNetworkType.LIGHTNING_AI,
+                                None)
                         if label_key.startswith('k8s.io/cloud-provider-aws'):
                             network_type = (
                                 KubernetesHighPerformanceNetworkType.AWS_EFA)
