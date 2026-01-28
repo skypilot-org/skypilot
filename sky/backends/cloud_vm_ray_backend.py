@@ -1049,6 +1049,7 @@ class RetryingVmProvisioner(object):
 
             for failover_overrides in to_provision.cloud.yield_cloud_specific_failover_overrides(
                     region=to_provision.region):
+                logger.info(f'!!!!!!!! {failover_overrides}')
                 try:
                     config_dict = backend_utils.write_cluster_config(
                         to_provision,
