@@ -556,6 +556,10 @@ export function RecipeDetail() {
           {/* Metadata Grid */}
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div>
+              <div className="text-gray-600 font-medium text-base">Name</div>
+              <div className="text-base mt-1">{template.name}</div>
+            </div>
+            <div>
               <div className="text-gray-600 font-medium text-base">Type</div>
               <div className="text-base mt-1">{typeInfo.fullLabel}</div>
             </div>
