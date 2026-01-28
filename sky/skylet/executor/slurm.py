@@ -175,6 +175,8 @@ def main():
                                            stream_logs=True,
                                            streaming_prefix=prefix)
 
+    # TODO(kevin): Only do this if proctrack/cgroup is enabled.
+    # https://slurm.schedmd.com/cgroups.html#proctrack
     # For multi-node Slurm jobs (one task per node), we need to wait for all
     # tasks to complete before any task exits, because Slurm's proctrack/cgroup
     # kills all processes in a task's cgroup when that task's main process
