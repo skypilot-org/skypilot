@@ -312,29 +312,30 @@ def create_recipe(
     # Validate name format
     common_utils.check_recipe_name_is_valid(name)
 
-    # Check for duplicate name
-    existing = get_recipe(name)
-    if existing is not None:
-        raise exceptions.RecipeAlreadyExistsError(
-            f'A recipe with name "{name}" already exists')
-
     now = time.time()
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(recipes_table.insert().values(
-            name=name,
-            description=description,
-            content=content,
-            recipe_type=recipe_type.value,
-            pinned=0,
-            user_id=user_id,
-            user_name=user_name,
-            created_at=now,
-            updated_at=now,
-            is_editable=1,
-            is_pinnable=1,
-        ))
-        session.commit()
+    # Use atomic insert - the primary key constraint on 'name' ensures
+    # uniqueness. Catching IntegrityError avoids race conditions between
+    # check and insert, and works for both SQLite and PostgreSQL.
+    try:
+        with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            session.execute(recipes_table.insert().values(
+                name=name,
+                description=description,
+                content=content,
+                recipe_type=recipe_type.value,
+                pinned=0,
+                user_id=user_id,
+                user_name=user_name,
+                created_at=now,
+                updated_at=now,
+                is_editable=1,
+                is_pinnable=1,
+            ))
+            session.commit()
+    except sqlalchemy.exc.IntegrityError as e:
+        raise exceptions.RecipeAlreadyExistsError(
+            f'A recipe with name "{name}" already exists') from e
 
     return Recipe(
         name=name,
