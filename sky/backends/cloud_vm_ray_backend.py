@@ -48,6 +48,7 @@ from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
@@ -5069,7 +5070,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
             elif ('TPU must be specified.' not in stderr and
-                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
+                  provision_constants.ERROR_NO_NODES_LAUNCHED not in stderr):
                 raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
