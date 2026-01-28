@@ -213,7 +213,7 @@ def main():
                 errs = 0
             except OSError as e:
                 errs += 1
-                if errs >= 10:
+                if errs >= max_errs:
                     raise OSError(f'Failed to read {run_done_dir} after '
                                   f'{max_errs} attempts') from e
                 num_ready = 0
