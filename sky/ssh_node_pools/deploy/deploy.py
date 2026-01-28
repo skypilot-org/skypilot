@@ -412,7 +412,7 @@ def deploy_single_cluster(cluster_name,
         'if [ "$(sudo sshd -T | grep allowtcpforwarding)" = "allowtcpforwarding yes" ]; then '
         f'echo "TCP Forwarding already enabled on head node ({head_node})."; '
         'else '
-        'sudo sed -i \'s/^#\?\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '  # pylint: disable=anomalous-backslash-in-string
+        'sudo sed -i \'s/^#\\?\\s*AllowTcpForwarding.*/AllowTcpForwarding yes/\' '
         '/etc/ssh/sshd_config && sudo systemctl restart sshd && '
         f'echo "Successfully enabled TCP Forwarding on head node ({head_node})."; '
         'fi')

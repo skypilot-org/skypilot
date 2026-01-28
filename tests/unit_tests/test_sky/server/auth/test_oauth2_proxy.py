@@ -134,9 +134,6 @@ class TestOriginalOAuth2ProxyMiddleware:
         request.state = mock.Mock()
         request.state.auth_user = None
         request.state.request_id = 'test-request-123'
-        # Mock body and json methods for authn.override_user_info_in_request_body
-        request.body = mock.AsyncMock(return_value=b'{"task": "test"}')
-        request.json = mock.AsyncMock(return_value={'task': 'test'})
         return request
 
     @pytest.fixture

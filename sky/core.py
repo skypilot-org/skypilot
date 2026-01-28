@@ -89,6 +89,14 @@ def optimize(
             request_name=request_names.AdminPolicyRequestName.OPTIMIZE,
             request_options=request_options) as dag:
         dag.resolve_and_validate_volumes()
+        # Use job group optimizer for job groups to properly handle
+        # co-location constraints and show the combined optimizer table
+        if dag.is_job_group():
+            return optimizer.Optimizer.optimize_job_group(
+                dag=dag,
+                minimize=minimize,
+                blocked_resources=blocked_resources,
+                quiet=quiet)
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
@@ -1405,11 +1413,13 @@ def realtime_kubernetes_gpu_availability(
             region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be the same.')
+
+        all_keys = set(counts.keys()) | set(capacity.keys()) | set(
+            available.keys())
+        counts = {key: counts.get(key, []) for key in all_keys}
+        capacity = {key: capacity.get(key, 0) for key in all_keys}
+        available = {key: available.get(key, 0) for key in all_keys}
+
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 

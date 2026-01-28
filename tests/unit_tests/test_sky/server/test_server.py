@@ -279,25 +279,144 @@ def test_server_run_uses_uvloop(mock_asyncio_run, mock_hijack_sys_attrs):
 
 @pytest.mark.asyncio
 async def test_enabled_clouds_respect_auth_user():
+    """Test that enabled_clouds endpoint passes auth_user to schedule_request_async.
+
+    After the refactor, auth_user is passed directly to the executor function
+    which handles setting env_vars internally, rather than modifying env_vars
+    before the call.
+    """
     auth_user = models.User(id='auth-user-id', name='Auth User')
     request = mock.MagicMock()
     request.state = mock.MagicMock()
     request.state.request_id = 'request-id'
     request.state.auth_user = auth_user
 
-    default_env_vars = {
-        constants.USER_ID_ENV_VAR: 'default-id',
-        constants.USER_ENV_VAR: 'default-name',
-    }
-
-    with mock.patch('sky.server.requests.payloads.request_body_env_vars',
-                    side_effect=lambda: default_env_vars.copy()), \
-         mock.patch('sky.server.server.executor.schedule_request_async',
+    with mock.patch('sky.server.server.executor.schedule_request_async',
                     new_callable=mock.AsyncMock) as mock_schedule:
         await server.enabled_clouds(request, workspace='ws', expand=True)
 
     mock_schedule.assert_awaited_once()
     _, kwargs = mock_schedule.call_args
-    request_body = kwargs['request_body']
-    assert request_body.env_vars[constants.USER_ID_ENV_VAR] == auth_user.id
-    assert request_body.env_vars[constants.USER_ENV_VAR] == auth_user.name
+    # Verify auth_user is passed to schedule_request_async
+    assert kwargs['auth_user'] == auth_user
+
+
+@pytest.mark.asyncio
+async def test_schedule_request_passes_auth_user():
+    """Test that schedule_request_async receives auth_user from various endpoints."""
+    from sky.server.requests import payloads
+
+    auth_user = models.User(id='test-user-id', name='Test User')
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = 'test-request-id'
+    request.state.auth_user = auth_user
+
+    # Test check endpoint
+    check_body = payloads.CheckBody()
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.check(request, check_body)
+        mock_schedule.assert_awaited_once()
+        _, kwargs = mock_schedule.call_args
+        assert kwargs['auth_user'] == auth_user
+
+    # Test status endpoint
+    status_body = payloads.StatusBody()
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.status(request, status_body)
+        mock_schedule.assert_awaited_once()
+        _, kwargs = mock_schedule.call_args
+        assert kwargs['auth_user'] == auth_user
+
+    # Test stop endpoint
+    stop_body = payloads.StopOrDownBody(cluster_name='test-cluster')
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.stop(request, stop_body)
+        mock_schedule.assert_awaited_once()
+        _, kwargs = mock_schedule.call_args
+        assert kwargs['auth_user'] == auth_user
+
+
+@pytest.mark.asyncio
+async def test_schedule_request_with_none_auth_user():
+    """Test that endpoints work correctly when auth_user is None."""
+    from sky.server.requests import payloads
+
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = 'test-request-id'
+    request.state.auth_user = None
+
+    check_body = payloads.CheckBody()
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.check(request, check_body)
+        mock_schedule.assert_awaited_once()
+        _, kwargs = mock_schedule.call_args
+        assert kwargs['auth_user'] is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_request_passes_auth_user():
+    """Test that prepare_request_async receives auth_user for streaming endpoints."""
+    from sky.server.requests import payloads
+
+    auth_user = models.User(id='test-user-id', name='Test User')
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = 'test-request-id'
+    request.state.auth_user = auth_user
+
+    cluster_job_body = payloads.ClusterJobBody(cluster_name='test-cluster',
+                                               job_id=1)
+    background_tasks = fastapi.BackgroundTasks()
+
+    mock_request_task = mock.MagicMock()
+    mock_request_task.request_id = 'test-request-id'
+    mock_request_task.log_path = '/tmp/test.log'
+
+    with mock.patch('sky.server.requests.executor.prepare_request_async',
+                    new_callable=mock.AsyncMock,
+                    return_value=mock_request_task) as mock_prepare, \
+         mock.patch('sky.server.requests.executor.execute_request_in_coroutine') as mock_execute, \
+         mock.patch('sky.server.stream_utils.stream_response_for_long_request',
+                    return_value=fastapi.responses.StreamingResponse(
+                        content=iter([]),
+                        media_type='text/plain')):
+        mock_execute.return_value = executor.CoroutineTask(
+            asyncio.create_task(asyncio.sleep(0)))
+
+        await server.logs(request, cluster_job_body, background_tasks)
+
+        mock_prepare.assert_awaited_once()
+        _, kwargs = mock_prepare.call_args
+        assert kwargs['auth_user'] == auth_user
+
+
+@pytest.mark.asyncio
+async def test_launch_endpoint_passes_auth_user():
+    """Test that launch endpoint passes auth_user to schedule_request_async."""
+    from sky.server.requests import payloads
+
+    auth_user = models.User(id='launch-user-id', name='Launch User')
+    request = mock.MagicMock()
+    request.state = mock.MagicMock()
+    request.state.request_id = 'launch-request-id'
+    request.state.auth_user = auth_user
+
+    launch_body = payloads.LaunchBody(
+        task='test_task_yaml',
+        cluster_name='test-cluster',
+    )
+
+    with mock.patch('sky.server.server.executor.schedule_request_async',
+                    new_callable=mock.AsyncMock) as mock_schedule:
+        await server.launch(launch_body, request)
+        mock_schedule.assert_awaited_once()
+        args, kwargs = mock_schedule.call_args
+        assert kwargs['auth_user'] == auth_user
+        # request_id is passed as first positional argument
+        assert args[0] == 'launch-request-id'

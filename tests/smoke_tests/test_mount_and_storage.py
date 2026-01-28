@@ -219,10 +219,14 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     return test_commands, clean_command
 
 
-def _storage_mount_cached_test_command_generator(f1: TextIO, f2: TextIO,
-                                                 cluster_name: str,
-                                                 storage_name: str, cloud: str):
-    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
+def _storage_mount_cached_test_command_generator(
+        f1: TextIO,
+        f2: TextIO,
+        cluster_name: str,
+        storage_name: str,
+        cloud: str,
+        image_id: Optional[str] = None):
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes', 'slurm']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mount_cached.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -244,13 +248,17 @@ def _storage_mount_cached_test_command_generator(f1: TextIO, f2: TextIO,
     write_file_path = f1.name
     check_file_path = f2.name
 
+    image_id_arg = ''
+    if image_id is not None:
+        image_id_arg = f'--image-id {image_id}'
+
     test_commands = [
         smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {write_file_path}',
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {image_id_arg} {write_file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
         f'sky down -y {cluster_name}',
-        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {check_file_path}',
+        f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {image_id_arg} {check_file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
     ]
     clean_command = (
@@ -516,6 +524,30 @@ def test_kubernetes_storage_mounts_cached():
                 f1, f2, name, storage_name, cloud)
             test = smoke_tests_utils.Test(
                 'kubernetes_storage_mount_cached',
+                test_commands,
+                clean_command,
+                timeout=20 * 60,  # 20 mins
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        None,  # No container image
+        'docker:ubuntu:24.04',
+    ])
+def test_slurm_storage_mounts_cached(image_id: Optional[str]):
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'slurm'
+    storage_name = f'sky-test-{int(time.time())}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            test_commands, clean_command = _storage_mount_cached_test_command_generator(
+                f1, f2, name, storage_name, cloud, image_id)
+            test = smoke_tests_utils.Test(
+                'slurm_storage_mount_cached',
                 test_commands,
                 clean_command,
                 timeout=20 * 60,  # 20 mins

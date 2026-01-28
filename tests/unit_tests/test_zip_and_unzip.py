@@ -5,6 +5,9 @@ import pathlib
 import tempfile
 import zipfile
 
+import fastapi
+import pytest
+
 from sky.data import storage_utils
 from sky.server import server
 from sky.skylet import constants
@@ -115,3 +118,62 @@ def test_unzip_file(skyignore_dir, tmp_path):
         # Verify empty folders are preserved
         assert (unzipped_dir / 'empty-folder').is_dir()
         assert not any((unzipped_dir / 'empty-folder').iterdir())
+
+
+def test_zip_files_and_folders_compression():
+    """Test that compression is applied by default."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create a text file with repetitive content (highly compressible)
+        test_file = os.path.join(temp_dir, 'test.log')
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write('INFO: This is a log line\n' * 10000)
+
+        uncompressed_size = os.path.getsize(test_file)
+
+        # Create zip file in the same temp directory for automatic cleanup
+        zip_path = os.path.join(temp_dir, 'test.zip')
+        storage_utils.zip_files_and_folders([test_file], zip_path)
+        compressed_size = os.path.getsize(zip_path)
+
+        # Compressed ZIP should be significantly smaller
+        # Log files with repetitive content should compress to <50% of
+        # original size
+        assert compressed_size < uncompressed_size * 0.5, (
+            f'Compression not effective: {compressed_size} >= '
+            f'{uncompressed_size * 0.5} (original: {uncompressed_size})')
+
+        # Verify the zip is valid and can be extracted
+        with zipfile.ZipFile(zip_path, 'r') as zipf:
+            assert len(zipf.namelist()) == 1
+            # Check compression method is DEFLATED
+            info = zipf.getinfo(zipf.namelist()[0])
+            assert info.compress_type == zipfile.ZIP_DEFLATED
+
+
+def test_unzip_file_zip_slip_blocked():
+    """Test that Zip Slip path traversal attacks are blocked."""
+    malicious_names = [
+        '../../../etc/passwd',
+        'foo/../../bar/../../etc/passwd',
+        'normal/../../../etc/shadow',
+    ]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = pathlib.Path(tmpdir)
+
+        for name in malicious_names:
+            zip_path = tmpdir / 'malicious.zip'
+            extract_dir = tmpdir / 'extract'
+            extract_dir.mkdir(exist_ok=True)
+
+            with zipfile.ZipFile(zip_path, 'w') as z:
+                z.writestr(name, b'malicious content')
+
+            with pytest.raises(fastapi.HTTPException) as exc_info:
+                asyncio.run(server.unzip_file(zip_path, extract_dir))
+
+            # HTTPException stores message in .detail, not __str__
+            exc = exc_info.value
+            error_msg = getattr(exc, 'detail', None) or str(exc)
+            assert 'outside target directory' in error_msg, \
+                f'Expected "outside target directory" error for {name}'

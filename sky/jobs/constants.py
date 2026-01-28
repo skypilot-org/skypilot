@@ -4,7 +4,11 @@ from typing import Any, Dict, Union
 
 from sky.skylet import constants as skylet_constants
 
+# Environment variable for JobGroup name, injected into all jobs in a JobGroup
+SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
+
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
+JOBS_CONTROLLER_PROVISION_TEMPLATE = 'jobs-controller-provision.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
 JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
@@ -54,7 +58,7 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 13  # conditional plugin loading for bwcompat
+MANAGED_JOBS_VERSION = 15  # new fields for job groups
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes
