@@ -87,7 +87,7 @@ async def update_recipe(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.RECIPE_UPDATE,
         request_body=update_body,
-        func=core.update_yaml_template,
+        func=core.update_recipe,
         schedule_type=api_requests.ScheduleType.SHORT,
     )
 
@@ -120,41 +120,5 @@ async def pin_recipe(
         request_name=request_names.RequestName.RECIPE_PIN,
         request_body=pin_body,
         func=core.toggle_pin,
-        schedule_type=api_requests.ScheduleType.SHORT,
-    )
-
-
-@router.get('/categories')
-async def get_categories(request: fastapi.Request) -> None:
-    """Get all available categories."""
-    auth_user = request.state.auth_user
-    auth_user_env_vars_kwargs = {
-        'env_vars': auth_user.to_env_vars()
-    } if auth_user else {}
-    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
-
-    await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.RECIPE_CATEGORIES,
-        request_body=request_body,
-        func=core.get_categories,
-        schedule_type=api_requests.ScheduleType.SHORT,
-    )
-
-
-@router.get('/categories/list')
-async def list_all_categories(request: fastapi.Request) -> None:
-    """List all categories (predefined and custom)."""
-    auth_user = request.state.auth_user
-    auth_user_env_vars_kwargs = {
-        'env_vars': auth_user.to_env_vars()
-    } if auth_user else {}
-    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
-
-    await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.RECIPE_CATEGORIES_LIST,
-        request_body=request_body,
-        func=core.list_all_categories,
         schedule_type=api_requests.ScheduleType.SHORT,
     )

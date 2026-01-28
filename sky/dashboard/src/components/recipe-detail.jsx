@@ -1,12 +1,6 @@
 'use client';
 
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useRef,
-  useMemo,
-} from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
@@ -51,13 +45,8 @@ import {
   updateRecipe,
   deleteRecipe,
   togglePinRecipe,
-  getCategories,
 } from '@/data/connectors/recipes';
-import {
-  getRecipeTypeInfo,
-  getLaunchCommand,
-  capitalizeWords,
-} from '@/data/constants/recipeTypes';
+import { getRecipeTypeInfo, getLaunchCommand } from '@/data/constants/recipeTypes';
 
 // Helper to format relative time
 function formatRelativeTime(timestamp) {
@@ -94,179 +83,11 @@ function parseRecipeSlug(slug) {
   return slug;
 }
 
-// Category Combobox Component - allows selecting predefined or typing custom
-function CategoryCombobox({
-  value,
-  onChange,
-  predefinedCategories,
-  customCategories,
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [inputValue, setInputValue] = useState(value || '');
-  const inputRef = useRef(null);
-  const dropdownRef = useRef(null);
-
-  // Combine all categories for suggestions
-  const allCategories = useMemo(() => {
-    const predefined = predefinedCategories.map((c) => ({
-      name: c.name,
-      icon: c.icon,
-      isPredefined: true,
-    }));
-    const custom = customCategories.map((name) => ({
-      name,
-      icon: null,
-      isPredefined: false,
-    }));
-    return [...predefined, ...custom];
-  }, [predefinedCategories, customCategories]);
-
-  // Filter categories based on input
-  const filteredCategories = useMemo(() => {
-    if (!inputValue) return allCategories;
-    const lower = inputValue.toLowerCase();
-    return allCategories.filter((c) => c.name.toLowerCase().includes(lower));
-  }, [allCategories, inputValue]);
-
-  // Check if current input matches an existing category
-  const isExistingCategory = useMemo(() => {
-    return allCategories.some(
-      (c) => c.name.toLowerCase() === inputValue.toLowerCase()
-    );
-  }, [allCategories, inputValue]);
-
-  // Handle click outside
-  useEffect(() => {
-    const handleClickOutside = (event) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target) &&
-        inputRef.current &&
-        !inputRef.current.contains(event.target)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Sync input value with external value
-  useEffect(() => {
-    setInputValue(value || '');
-  }, [value]);
-
-  const handleInputChange = (e) => {
-    const newValue = e.target.value;
-    setInputValue(newValue);
-    onChange(newValue);
-    if (!isOpen) setIsOpen(true);
-  };
-
-  const handleSelect = (categoryName) => {
-    setInputValue(categoryName);
-    onChange(categoryName);
-    setIsOpen(false);
-  };
-
-  const handleClear = () => {
-    setInputValue('');
-    onChange('');
-    inputRef.current?.focus();
-  };
-
-  return (
-    <div className="relative">
-      <div className="relative">
-        <input
-          ref={inputRef}
-          type="text"
-          value={inputValue}
-          onChange={handleInputChange}
-          onFocus={() => setIsOpen(true)}
-          placeholder="Select or type a category..."
-          className="w-full h-10 px-3 pr-8 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        {inputValue && (
-          <button
-            type="button"
-            onClick={handleClear}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        )}
-      </div>
-      {isOpen && (
-        <div
-          ref={dropdownRef}
-          className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-y-auto"
-        >
-          {filteredCategories.length > 0 ? (
-            <>
-              {filteredCategories.map((cat, index) => (
-                <div
-                  key={cat.name}
-                  className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
-                    index !== filteredCategories.length - 1
-                      ? 'border-b border-gray-100'
-                      : ''
-                  }`}
-                  onClick={() => handleSelect(cat.name)}
-                >
-                  <span className="text-gray-700">
-                    {cat.icon && <span className="mr-2">{cat.icon}</span>}
-                    {cat.name}
-                    {cat.isPredefined && (
-                      <span className="ml-2 text-xs text-gray-400">
-                        (predefined)
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </>
-          ) : inputValue && !isExistingCategory ? (
-            <div className="px-3 py-2 text-sm text-gray-500">
-              Press Enter or click away to use &quot;{inputValue}&quot; as a new
-              category
-            </div>
-          ) : (
-            <div className="px-3 py-2 text-sm text-gray-500">
-              No categories found
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Edit Modal Component
-function EditModal({
-  isOpen,
-  onClose,
-  template,
-  onSave,
-  predefinedCategories,
-  customCategories,
-}) {
+function EditModal({ isOpen, onClose, template, onSave }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('');
-  const [category, setCategory] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -274,7 +95,6 @@ function EditModal({
       setName(template.name || '');
       setDescription(template.description || '');
       setContent(template.content || '');
-      setCategory(template.category || '');
     }
   }, [template, isOpen]);
 
@@ -296,7 +116,6 @@ function EditModal({
         name,
         description: description || null,
         content,
-        category: category || null,
       });
       onClose();
     } catch (error) {
@@ -321,27 +140,15 @@ function EditModal({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Name *</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="My GPU Training"
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="category">Category</Label>
-              <CategoryCombobox
-                value={category}
-                onChange={setCategory}
-                predefinedCategories={predefinedCategories}
-                customCategories={customCategories}
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="name">Name *</Label>
+            <Input
+              id="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My GPU Training"
+              required
+            />
           </div>
 
           <div className="space-y-2">
@@ -462,8 +269,6 @@ export function RecipeDetail() {
   const [template, setTemplate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [predefinedCategories, setPredefinedCategories] = useState([]);
-  const [customCategories, setCustomCategories] = useState([]);
   const [copied, setCopied] = useState(false);
   const [commandCopied, setCommandCopied] = useState(false);
   const [yamlCopied, setYamlCopied] = useState(false);
@@ -499,20 +304,9 @@ export function RecipeDetail() {
     }
   }, [slug]);
 
-  const fetchCategories = useCallback(async () => {
-    try {
-      const data = await getCategories();
-      setPredefinedCategories(data?.predefined || []);
-      setCustomCategories(data?.custom || []);
-    } catch (err) {
-      console.error('Failed to fetch categories:', err);
-    }
-  }, []);
-
   useEffect(() => {
     fetchTemplate();
-    fetchCategories();
-  }, [fetchTemplate, fetchCategories]);
+  }, [fetchTemplate]);
 
   const handleEdit = async (data) => {
     const updated = await updateRecipe(template.id, data);
@@ -556,7 +350,6 @@ export function RecipeDetail() {
       description: template.description,
       content: template.content,
       recipe_type: template.recipe_type,
-      category: template.category,
     };
     router.push({
       pathname: '/recipes',
@@ -676,12 +469,6 @@ export function RecipeDetail() {
               </div>
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <span>{typeInfo.fullLabel}</span>
-                {template.category && (
-                  <>
-                    <span>·</span>
-                    <span>{capitalizeWords(template.category)}</span>
-                  </>
-                )}
               </div>
             </div>
           </div>
@@ -793,16 +580,6 @@ export function RecipeDetail() {
             </div>
             <div>
               <div className="text-gray-600 font-medium text-base">
-                Category
-              </div>
-              <div className="text-base mt-1">
-                {template.category
-                  ? capitalizeWords(template.category)
-                  : 'None'}
-              </div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">
                 Authored by
               </div>
               <div className="text-base mt-1">
@@ -889,8 +666,6 @@ export function RecipeDetail() {
         onClose={() => setIsEditModalOpen(false)}
         template={template}
         onSave={handleEdit}
-        predefinedCategories={predefinedCategories}
-        customCategories={customCategories}
       />
       <DeleteModal
         isOpen={isDeleteModalOpen}

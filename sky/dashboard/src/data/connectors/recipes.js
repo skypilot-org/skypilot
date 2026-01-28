@@ -12,7 +12,6 @@ import { apiClient } from './client';
  * By default returns all pinned templates plus templates owned by the current user.
  *
  * @param {Object} options - Filter options
- * @param {string} [options.category] - Filter by category
  * @param {boolean} [options.pinnedOnly] - Only return pinned templates
  * @param {boolean} [options.myRecipesOnly] - Only return user's own templates
  * @param {string} [options.recipeType] - Filter by type (see RecipeType in constants/recipeTypes.js)
@@ -21,7 +20,6 @@ import { apiClient } from './client';
 export async function getRecipes(options = {}) {
   try {
     const body = {
-      category: options.category || null,
       pinned_only: options.pinnedOnly || false,
       my_recipes_only: options.myRecipesOnly || false,
       recipe_type: options.recipeType || null,
@@ -61,7 +59,6 @@ export async function getRecipe(recipeId) {
  * @param {string} data.content - YAML content
  * @param {string} data.recipeType - Type (see RecipeType in constants/recipeTypes.js)
  * @param {string} [data.description] - Optional description
- * @param {string} [data.category] - Optional category
  * @param {string} [data.ownerName] - Optional owner name (for unauthenticated users)
  * @returns {Promise<Object>} Created recipe object
  */
@@ -72,7 +69,6 @@ export async function createRecipe(data) {
       content: data.content,
       recipe_type: data.recipeType,
       description: data.description || null,
-      category: data.category || null,
       owner_name: data.ownerName || null,
     });
     return result;
@@ -91,7 +87,6 @@ export async function createRecipe(data) {
  * @param {string} [data.name] - New name
  * @param {string} [data.description] - New description
  * @param {string} [data.content] - New YAML content
- * @param {string} [data.category] - New category
  * @returns {Promise<Object|null>} Updated recipe or null if not authorized
  */
 export async function updateRecipe(recipeId, data) {
@@ -101,7 +96,6 @@ export async function updateRecipe(recipeId, data) {
       name: data.name,
       description: data.description,
       content: data.content,
-      category: data.category,
     });
     return result;
   } catch (error) {
@@ -150,66 +144,3 @@ export async function togglePinRecipe(recipeId, pinned) {
   }
 }
 
-/**
- * Get all available categories (grouped).
- *
- * @returns {Promise<Object>} Object with 'predefined', 'custom', and 'all' arrays
- */
-export async function getCategories() {
-  try {
-    const response = await apiClient.fetchImmediate(
-      '/recipes/categories',
-      {},
-      'GET'
-    );
-    if (!response.ok) {
-      throw new Error(`Failed to fetch categories: ${response.status}`);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    if (!id) {
-      throw new Error('No request ID received');
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (!fetchedData.ok) {
-      throw new Error(`Failed to get categories result: ${fetchedData.status}`);
-    }
-    const data = await fetchedData.json();
-    return data.return_value
-      ? JSON.parse(data.return_value)
-      : { predefined: [], custom: [], all: [] };
-  } catch (error) {
-    console.error('Error fetching categories:', error);
-    throw error;
-  }
-}
-
-/**
- * Get all categories as a flat list.
- *
- * @returns {Promise<Array>} Array of category objects
- */
-export async function getAllCategories() {
-  try {
-    const response = await apiClient.fetchImmediate(
-      '/recipes/categories/list',
-      {},
-      'GET'
-    );
-    if (!response.ok) {
-      throw new Error(`Failed to fetch categories: ${response.status}`);
-    }
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    if (!id) {
-      throw new Error('No request ID received');
-    }
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (!fetchedData.ok) {
-      throw new Error(`Failed to get categories result: ${fetchedData.status}`);
-    }
-    const data = await fetchedData.json();
-    return data.return_value ? JSON.parse(data.return_value) : [];
-  } catch (error) {
-    console.error('Error fetching all categories:', error);
-    throw error;
-  }
-}

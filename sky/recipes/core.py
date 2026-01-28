@@ -135,7 +135,6 @@ def get_recipe_content(recipe_id: str) -> Tuple[str, str]:
 
 def list_recipes(
     user_id: Optional[str] = None,
-    category: Optional[str] = None,
     pinned_only: bool = False,
     my_recipes_only: bool = False,
     recipe_type: Optional[str] = None,
@@ -146,7 +145,6 @@ def list_recipes(
 
     Args:
         user_id: The current user's ID (needed to see own recipes).
-        category: Filter by category.
         pinned_only: If True, only return pinned recipes.
         my_recipes_only: If True, only return recipes owned by user_id.
         recipe_type: Filter by type ('cluster' or 'job' or 'pool' or 'volume').
@@ -154,14 +152,12 @@ def list_recipes(
     Returns:
         List of recipe dictionaries.
     """
-    recipe_type = (
-        None if recipe_type is None else RecipeType.from_str(recipe_type)
-    )
+    recipe_type = (None
+                   if recipe_type is None else RecipeType.from_str(recipe_type))
     recipes = recipes_db.list_recipes(
         user_id=user_id,
         pinned_only=pinned_only,
         my_recipes_only=my_recipes_only,
-        category=category,
         recipe_type=recipe_type,
     )
     return [r.to_dict() for r in recipes]
@@ -189,7 +185,6 @@ def create_recipe(
     user_id: str,
     user_name: Optional[str] = None,
     description: Optional[str] = None,
-    category: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create a new recipe.
 
@@ -200,7 +195,6 @@ def create_recipe(
         user_id: ID of the user creating the recipe.
         user_name: Optional display name of the user.
         description: Optional description.
-        category: Optional category for organization.
 
     Returns:
         The created recipe as a dictionary.
@@ -221,7 +215,6 @@ def create_recipe(
         user_id=user_id,
         user_name=user_name,
         description=description,
-        category=category,
     )
     return recipe.to_dict()
 
@@ -233,7 +226,6 @@ def update_recipe(
     name: Optional[str] = None,
     description: Optional[str] = None,
     content: Optional[str] = None,
-    category: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Update a recipe.
 
@@ -246,7 +238,6 @@ def update_recipe(
         name: New name (if updating).
         description: New description (if updating).
         content: New YAML content (if updating).
-        category: New category (if updating).
 
     Returns:
         The updated recipe dictionary if successful, None if not found
@@ -270,7 +261,6 @@ def update_recipe(
         name=name,
         description=description,
         content=content,
-        category=category,
     )
     if recipe is None:
         return None
@@ -315,31 +305,3 @@ def toggle_pin(recipe_id: str, pinned: bool) -> Optional[Dict[str, Any]]:
     if recipe is None:
         return None
     return recipe.to_dict()
-
-
-def get_categories() -> Dict[str, Any]:
-    """Get all available categories.
-
-    Returns predefined categories and custom categories derived from templates.
-
-    Returns:
-        Dictionary with 'predefined', 'custom', and 'all' category lists.
-        Predefined categories have name and icon, custom are just names.
-    """
-    predefined = recipes_db.PREDEFINED_CATEGORIES  # List of {name, icon} dicts
-    custom = recipes_db.get_custom_categories()  # List of category names
-    all_names = recipes_db.get_all_categories()  # Combined list of names
-    return {
-        'predefined': predefined,
-        'custom': custom,
-        'all': all_names,
-    }
-
-
-def list_all_categories() -> List[str]:
-    """List all categories (predefined and custom).
-
-    Returns:
-        List of category names.
-    """
-    return recipes_db.get_all_categories()
