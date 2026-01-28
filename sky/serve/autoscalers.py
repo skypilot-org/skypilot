@@ -1153,9 +1153,8 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
                        update_mode: serve_utils.UpdateMode) -> None:
         super().update_version(version, spec, update_mode)
         # Update threshold.
-        assert isinstance(spec.queue_length_threshold, int), \
-            'queue_length_threshold must be an integer.'
-        self.queue_length_threshold = spec.queue_length_threshold
+        if isinstance(spec.queue_length_threshold, int):
+            self.queue_length_threshold = spec.queue_length_threshold
 
     def collect_request_information(
             self, request_aggregator_info: Dict[str, Any]) -> None:
