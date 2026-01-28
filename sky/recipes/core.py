@@ -79,12 +79,9 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
         # Validate based on type
         if recipe_type == RecipeType.VOLUME:
             # Validate volume schema (handles required fields: name, type)
-            try:
-                common_utils.validate_schema(config,
-                                             schemas.get_volume_schema(),
-                                             'Invalid volume YAML: ')
-            except Exception as e:
-                raise ValueError(str(e)) from e
+            common_utils.validate_schema(config,
+                                            schemas.get_volume_schema(),
+                                            'Invalid volume YAML: ')
         else:
             if recipe_type == RecipeType.POOL:
                 # Pool YAMLs should have a 'pool' section
@@ -92,12 +89,9 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
                     raise ValueError('Pool YAML must contain a \'pool\''
                                      'section. Example:\n  pool:\n    name: '
                                      'my-pool')
-                try:
-                    common_utils.validate_schema(config,
-                                                 schemas.get_pool_schema(),
-                                                 'Invalid pool YAML: ')
-                except Exception as e:
-                    raise ValueError(str(e)) from e
+                common_utils.validate_schema(config,
+                                                schemas.get_pool_schema(),
+                                                'Invalid pool YAML: ')
 
             # Use Task.from_yaml_str for full schema validation
             # This validates resources, envs, setup, run, file_mounts, etc.

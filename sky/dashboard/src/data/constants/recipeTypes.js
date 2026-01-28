@@ -82,12 +82,7 @@ export function getRecipeTypeInfo(recipeType) {
         fullLabel: 'Job Pool',
       };
     default:
-      return {
-        icon: FileCodeIcon,
-        color: 'gray',
-        label: capitalizeWords(recipeType),
-        fullLabel: capitalizeWords(recipeType),
-      };
+      throw new Error(`Invalid recipe type: ${recipeType}`);
   }
 }
 
@@ -108,6 +103,6 @@ export function getLaunchCommand(recipeType, recipeName) {
     case RecipeType.POOL:
       return `sky jobs pool apply recipes:${recipeName}`;
     default:
-      return `sky launch recipes:${recipeName}`;
+      throw new Error(`Invalid recipe type: ${recipeType}`);
   }
 }
