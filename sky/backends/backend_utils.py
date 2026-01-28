@@ -1026,8 +1026,7 @@ def write_cluster_config(
             # Activate the SkyPilot runtime environment when starting ray
             # cluster, so that ray autoscaler can access cloud SDK and CLIs
             # on remote
-            'sky_activate_python_env':
-                constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+            'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
             'ray_version': constants.SKY_REMOTE_RAY_VERSION,
             # Command for waiting ray cluster to be ready on head.
             'ray_head_wait_initialized_command':
@@ -1064,10 +1063,9 @@ def write_cluster_config(
     )
     if cloud_specific_failover_overrides is not None:
         variables.update(cloud_specific_failover_overrides)
-    common_utils.fill_template(
-        cluster_config_template,
-        variables,
-        output_path=tmp_yaml_path)
+    common_utils.fill_template(cluster_config_template,
+                               variables,
+                               output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
 
