@@ -7,6 +7,19 @@ import {
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { getGrafanaUrl, buildGrafanaUrl } from '@/utils/grafana';
 
+// Grafana configuration constants
+const GRAFANA_DASHBOARD_SLUG = 'skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
+const GRAFANA_ORG_ID = '1';
+
+// Time range presets for GPU metrics
+const TIME_RANGE_PRESETS = [
+  { label: '15m', value: '15m' },
+  { label: '1h', value: '1h' },
+  { label: '6h', value: '6h' },
+  { label: '24h', value: '24h' },
+  { label: '7d', value: '7d' },
+];
+
 // GPU panels configuration
 const GPU_PANELS = [
   { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
@@ -20,7 +33,18 @@ const GPU_PANELS = [
  */
 const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
   const grafanaUrl = getGrafanaUrl();
-  return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterNameOnCloud)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
+  const params = new URLSearchParams({
+    orgId: GRAFANA_ORG_ID,
+    from: timeRange.from,
+    to: timeRange.to,
+    timezone: 'browser',
+    'var-cluster': clusterNameOnCloud,
+    'var-node': '$__all',
+    'var-gpu': '$__all',
+    theme: 'light',
+    panelId: panelId,
+  });
+  return `${grafanaUrl}/d-solo/${GRAFANA_DASHBOARD_SLUG}?${params.toString()}&__feature.dashboardSceneSolo`;
 };
 
 /**
@@ -32,6 +56,7 @@ const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud, timeRange) => {
  * @param {number} props.refreshTrigger - Increment to trigger iframe refresh
  * @param {string} props.storageKey - LocalStorage key for expanded state
  * @param {React.ReactNode} props.headerExtra - Optional extra content for header (e.g., task selector)
+ * @param {string} props.noMetricsMessage - Custom message when no metrics available
  */
 export function GPUMetricsSection({
   clusterNameOnCloud,
@@ -39,6 +64,7 @@ export function GPUMetricsSection({
   refreshTrigger = 0,
   storageKey = 'skypilot-gpu-metrics-expanded',
   headerExtra = null,
+  noMetricsMessage = 'No GPU metrics available.',
 }) {
   const [timeRange, setTimeRange] = useState({ from: 'now-1h', to: 'now' });
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -65,9 +91,8 @@ export function GPUMetricsSection({
   };
 
   const openInGrafana = () => {
-    const dashboardPath = '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
     const queryParams = new URLSearchParams({
-      orgId: '1',
+      orgId: GRAFANA_ORG_ID,
       from: timeRange.from,
       to: timeRange.to,
       timezone: 'browser',
@@ -76,7 +101,7 @@ export function GPUMetricsSection({
       'var-gpu': '$__all',
     });
     window.open(
-      buildGrafanaUrl(`${dashboardPath}?${queryParams.toString()}`),
+      buildGrafanaUrl(`/d/${GRAFANA_DASHBOARD_SLUG}?${queryParams.toString()}`),
       '_blank'
     );
   };
@@ -122,13 +147,7 @@ export function GPUMetricsSection({
                     Time Range:
                   </label>
                   <div className="flex gap-1">
-                    {[
-                      { label: '15m', value: '15m' },
-                      { label: '1h', value: '1h' },
-                      { label: '6h', value: '6h' },
-                      { label: '24h', value: '24h' },
-                      { label: '7d', value: '7d' },
-                    ].map((preset) => (
+                    {TIME_RANGE_PRESETS.map((preset) => (
                       <button
                         key={preset.value}
                         onClick={() => handleTimeRangePreset(preset.value)}
@@ -180,7 +199,7 @@ export function GPUMetricsSection({
               </div>
             ) : (
               <div className="p-4 text-center text-gray-500 bg-gray-50 rounded-md">
-                No GPU metrics available.
+                {noMetricsMessage}
               </div>
             )}
           </div>
