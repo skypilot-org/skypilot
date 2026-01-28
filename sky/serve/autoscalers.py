@@ -1090,9 +1090,10 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
         """
         super().__init__(service_name, spec)
         # Use default threshold if not specified
-        assert isinstance(spec.queue_length_threshold, int), \
-            'queue_length_threshold must be an integer.'
-        self.queue_length_threshold: int = spec.queue_length_threshold
+        self.queue_length_threshold = (
+            spec.queue_length_threshold
+            if spec.queue_length_threshold is not None else
+            constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
         self._service_name: str = service_name
         logger.info(f'QueueLengthAutoscaler for pool "{service_name}": '
                     f'min_replicas={self.min_replicas}, '
