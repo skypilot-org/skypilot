@@ -424,8 +424,8 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
     dropped_rows = df[df['Price'].isna() & df['SpotPrice'].isna()]
     dropped_info = (dropped_rows[['InstanceType',
                                   'AvailabilityZone']].drop_duplicates())
-    az2missing = dropped_info.groupby('AvailabilityZone').apply(
-        lambda x: x['InstanceType'].tolist())
+    az2missing = dropped_info.groupby('AvailabilityZone')['InstanceType'].apply(
+        list)
     print('Price not found for the following zones and instance types. '
           'Dropping them.')
     for az, instances in az2missing.items():
