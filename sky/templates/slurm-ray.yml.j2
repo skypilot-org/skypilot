@@ -76,10 +76,8 @@ setup_commands:
     {{ initial_setup_command }}
     {%- endfor %}
     # TODO(kevin): Generate SSH host key only for non-containers.
-    # Also, for containers, modify ~/.sky_ssh_rc to make it work.
-    # Currently, ssh will take you to your user's home directory, not
-    # the container user's (always `root` in our case, for now) home directory.
-    #
+    # Containers use dropbear with -R (auto-generate keys), so this is redundant
+    # but harmless.
     # Generate host key for sshd -i if not exists
     mkdir -p ~{{user}}/.ssh && chmod 700 ~{{user}}/.ssh
     [ -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
