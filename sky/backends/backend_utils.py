@@ -641,7 +641,7 @@ def _get_volume_name(path: str, cluster_name_on_cloud: str) -> str:
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
-def write_cluster_config(  # pylint: disable=dangerous-default-value
+def write_cluster_config(
     to_provision: 'resources_lib.Resources',
     num_nodes: int,
     cluster_config_template: str,
@@ -653,7 +653,7 @@ def write_cluster_config(  # pylint: disable=dangerous-default-value
     dryrun: bool = False,
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
-    cloud_specific_failover_overrides: Dict[str, Any] = {},
+    cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -954,6 +954,8 @@ def write_cluster_config(  # pylint: disable=dangerous-default-value
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
+    if cloud_specific_failover_overrides is None:
+        cloud_specific_failover_overrides = {}
     common_utils.fill_template(
         cluster_config_template,
         dict(

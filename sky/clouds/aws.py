@@ -1663,6 +1663,8 @@ class AWS(clouds.Cloud):
         vpc_names = skypilot_config.get_effective_region_config(
             cloud='aws', region=region, keys=('vpc_names',), default_value=None)
         if vpc_names:
+            if isinstance(vpc_names, str):
+                vpc_names = [vpc_names]
             for vpc_name in vpc_names:
                 yield {'vpc_name': vpc_name}
         else:
