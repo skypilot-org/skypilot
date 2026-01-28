@@ -285,13 +285,11 @@ def _create_virtual_instance(
         #   /dev/shm is inherited from the host
         # See:
         # https://github.com/NVIDIA/enroot/blob/main/conf/hooks/10-devices.sh
-        container_home_dir = '/root'  # TODO(kevin): Don't hardcode this.
-        ccache_subdir = '.cache/ccache'
+        host_ccache_dir = f'{remote_home_dir}/.cache/ccache'
+        container_ccache_dir = '/var/cache/ccache'
         container_mounts = ','.join([
             f'{remote_home_dir}:{remote_home_dir}',
-            # ccache dir for faster builds
-            f'{remote_home_dir}/{ccache_subdir}:'
-            f'{container_home_dir}/{ccache_subdir}',
+            f'{host_ccache_dir}:{container_ccache_dir}',
         ])
         # Add sudo alias to bashrc since we're already root in the container.
         # This allows scripts with 'sudo' commands to work without modification.
@@ -315,7 +313,7 @@ echo 'alias sudo=""' >> ~/.bashrc
             f'touch {container_init_done_dir}/$SLURM_PROCID && sleep infinity')
         container_block = (
             f'srun --nodes={num_nodes} mkdir -p '
-            f'{remote_home_dir}/{ccache_subdir}\n'
+            f'{host_ccache_dir}\n'
             f'echo "Initializing container {container_name} on all nodes..."\n'
             f'rm -rf {container_init_done_dir}\n'
             f'mkdir -p {container_init_done_dir}\n'

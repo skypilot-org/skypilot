@@ -126,7 +126,7 @@ setup_commands:
       set -e
       DROPBEAR_VERSION=2025.89
       PACKAGES="socat iproute2 ccache"
-      export CCACHE_DIR=~{{user}}/.cache/ccache
+      export CCACHE_DIR=/var/cache/ccache
       if ! /usr/local/bin/dropbear -V 2>&1 | grep -q "$DROPBEAR_VERSION"; then
         cd /tmp
         if command -v apt-get >/dev/null 2>&1; then
