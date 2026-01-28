@@ -11,6 +11,8 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.data import data_utils
 from sky.recipes import db as recipes_db
+from sky.utils import common_utils
+from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
 
@@ -75,8 +77,13 @@ def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
 
         # Validate based on type
         if recipe_type == 'volume':
-            # TODO(lloyd: add volume validation)
-            pass
+            # Validate volume schema (handles required fields: name, type)
+            try:
+                common_utils.validate_schema(config,
+                                             schemas.get_volume_schema(),
+                                             'Invalid volume YAML: ')
+            except Exception as e:
+                raise ValueError(str(e)) from e
         else:
             if recipe_type == 'pool':
                 # Pool YAMLs should have a 'pool' section
@@ -84,6 +91,12 @@ def _validate_skypilot_yaml(content: str, recipe_type: str) -> None:
                     raise ValueError('Pool YAML must contain a \'pool\''
                                      'section. Example:\n  pool:\n    name: '
                                      'my-pool')
+                try:
+                    common_utils.validate_schema(config,
+                                                 schemas.get_pool_schema(),
+                                                 'Invalid pool YAML: ')
+                except Exception as e:
+                    raise ValueError(str(e)) from e
 
             # Use Task.from_yaml_str for full schema validation
             # This validates resources, envs, setup, run, file_mounts, etc.
