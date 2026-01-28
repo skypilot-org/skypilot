@@ -23,6 +23,7 @@ from sky.clouds.hyperbolic import Hyperbolic
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
+from sky.clouds.mithril import Mithril
 from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
@@ -65,6 +66,7 @@ __all__ = [
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Mithril',
     'Seeweb',
     # Utility functions
     'cloud_in_iterable',
