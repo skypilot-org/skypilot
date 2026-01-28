@@ -247,9 +247,14 @@ function JobDetails() {
   };
 
   // Build Grafana panel URL with filters for managed jobs
-  const buildGrafanaMetricsUrl = (panelId, clusterNameOnCloud) => {
+  // clusterNames can be an array for "All Tasks" or a single-element array for specific task
+  const buildGrafanaMetricsUrl = (panelId, clusterNames) => {
     const grafanaUrl = getGrafanaUrl();
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterNameOnCloud)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
+    // Build cluster filter params - Grafana accepts multiple var-cluster params
+    const clusterParams = clusterNames
+      .map((name) => `var-cluster=${encodeURIComponent(name)}`)
+      .join('&');
+    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&${clusterParams}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
   };
 
   // GPU panels configuration
@@ -288,12 +293,26 @@ function JobDetails() {
     gpuMetricsTaskIndex === 'all'
       ? null
       : allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
-  // Use '$__all' for Grafana when showing all tasks, otherwise use specific cluster name
-  const gpuMetricsClusterName =
-    gpuMetricsTaskIndex === 'all'
-      ? '$__all'
-      : gpuMetricsTask?.cluster_name_on_cloud ||
-        allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
+
+  // Get cluster names for GPU metrics - either single cluster or array of all job group clusters
+  const gpuMetricsClusterNames = useMemo(() => {
+    if (gpuMetricsTaskIndex === 'all') {
+      // Collect all unique cluster names from tasks with GPU metrics
+      return tasksWithGpuMetrics
+        .filter((t) => t.hasMetrics && t.task.cluster_name_on_cloud)
+        .map((t) => t.task.cluster_name_on_cloud);
+    }
+    // Single task selected
+    const clusterName =
+      gpuMetricsTask?.cluster_name_on_cloud ||
+      allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
+    return clusterName ? [clusterName] : [];
+  }, [
+    gpuMetricsTaskIndex,
+    tasksWithGpuMetrics,
+    gpuMetricsTask,
+    allTasksForGpuMetrics,
+  ]);
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -633,13 +652,19 @@ function JobDetails() {
                             from: timeRange.from,
                             to: timeRange.to,
                             timezone: 'browser',
-                            'var-cluster': gpuMetricsClusterName,
                             'var-node': '$__all',
                             'var-gpu': '$__all',
                           });
+                          // Add cluster params - Grafana accepts multiple var-cluster params
+                          const clusterParams = gpuMetricsClusterNames
+                            .map(
+                              (name) =>
+                                `var-cluster=${encodeURIComponent(name)}`
+                            )
+                            .join('&');
                           window.open(
                             buildGrafanaUrl(
-                              `${dashboardPath}?${queryParams.toString()}`
+                              `${dashboardPath}?${queryParams.toString()}&${clusterParams}`
                             ),
                             '_blank'
                           );
@@ -703,7 +728,7 @@ function JobDetails() {
                         </div>
                       </div>
 
-                      {gpuMetricsClusterName ? (
+                      {gpuMetricsClusterNames.length > 0 ? (
                         <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
                           {gpuPanels.map((panel) => (
                             <div
@@ -714,14 +739,14 @@ function JobDetails() {
                                 <iframe
                                   src={buildGrafanaMetricsUrl(
                                     panel.id,
-                                    gpuMetricsClusterName
+                                    gpuMetricsClusterNames
                                   )}
                                   width="100%"
                                   height="400"
                                   frameBorder="0"
                                   title={panel.title}
                                   className="rounded"
-                                  key={`${panel.keyPrefix}-${gpuMetricsClusterName}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}-task-${gpuMetricsTaskIndex}`}
+                                  key={`${panel.keyPrefix}-${gpuMetricsClusterNames.join('-')}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger}-task-${gpuMetricsTaskIndex}`}
                                 />
                               </div>
                             </div>
