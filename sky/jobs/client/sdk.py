@@ -49,7 +49,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-) -> server_common.RequestId[Tuple[Optional[int],
+) -> server_common.RequestId[Tuple[Optional[List[int]],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a managed job.
 
@@ -66,7 +66,7 @@ def launch(
         The request ID of the launch request.
 
     Request Returns:
-        job_id (Optional[int]): Job ID for the managed job
+        job_ids (Optional[List[int]]]): Job IDs for the managed jobs
         controller_handle (Optional[ResourceHandle]): ResourceHandle of the
           controller
 

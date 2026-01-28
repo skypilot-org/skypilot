@@ -2367,9 +2367,17 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
+    is_container_image = handle.launched_resources.extract_docker_image(
+    ) is not None
     ssh_cmd += [
         shlex.quote(
-            slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+            slurm_utils.srun_sshd_command(
+                job_id,
+                target_node,
+                login_node_user,
+                handle.cluster_name_on_cloud,
+                is_container_image,
+            ))
     ]
 
     proc = await asyncio.create_subprocess_shell(

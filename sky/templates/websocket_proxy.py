@@ -30,6 +30,10 @@ from sky.skylet import constants as skylet_constants
 BUFFER_SIZE = 2**16  # 64KB
 HEARTBEAT_INTERVAL_SECONDS = 10
 MAX_UNANSWERED_PINGS = 100
+# Timeout for opening the WebSocket connection. The default (10s) can be
+# insufficient when many concurrent SSH connections are established under load,
+# causing intermittent "timed out during opening handshake" errors.
+OPEN_TIMEOUT_SECONDS = 60
 
 
 async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
@@ -37,7 +41,9 @@ async def main(url: str, timestamps_supported: bool, login_url: str) -> None:
     headers.update(server_common.get_cookie_header_for_url(url))
     headers.update(service_account_auth.get_service_account_headers())
     try:
-        async with connect(url, ping_interval=None,
+        async with connect(url,
+                           ping_interval=None,
+                           open_timeout=OPEN_TIMEOUT_SECONDS,
                            additional_headers=headers) as websocket:
             await run_websocket_proxy(websocket, timestamps_supported)
     except websockets.exceptions.InvalidStatus as e:
