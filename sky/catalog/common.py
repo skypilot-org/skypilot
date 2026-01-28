@@ -210,6 +210,9 @@ def read_catalog(filename: str,
                 return False
 
             url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            # TODO(huksley): Remove this when catalog is merged into main repo
+            if filename.startswith('verda/'):
+                url = f'https://raw.githubusercontent.com/huksley/skypilot-catalog/master/catalogs/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
             url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
             headers = {'User-Agent': 'SkyPilot/0.7'}
             update_frequency_str = ''
