@@ -742,6 +742,9 @@ def srun_sshd_command(
             'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
             'for i in $(seq 1 50); do '
             'ss -tln | grep -q ":$PORT" && break; sleep 0.1; done; '
+            'if ! ss -tln | grep -q ":$PORT"; then '
+            'echo "Error: Timed out waiting for dropbear to start." >&2; '
+            'exit 1; fi; '
             'socat STDIO TCP:127.0.0.1:$PORT')
         return shlex.join([
             'srun',
