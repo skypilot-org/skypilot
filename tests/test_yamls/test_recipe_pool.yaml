@@ -1,7 +1,0 @@
-# Minimal job pool recipe for smoke testing
-resources:
-  cpus: 2+
-  memory: 4+
-
-pool:
-  workers: 1
