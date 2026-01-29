@@ -233,9 +233,8 @@ def ssh_options_list(
         #   Warning: Permanently added 'xx.xx.xx.xx' (EDxxx) to the list of
         #   known hosts.
         'LogLevel': 'ERROR',
-        # Try fewer extraneous key pairs. This is disabled for environments
-        # where SkyPilot does not manage SSH keys (e.g., Slurm clusters),
-        # allowing SSH to fall back to ssh-agent or default identity files.
+        # Try fewer extraneous key pairs. Disabled when disable_identities_only
+        # is set, allowing fallback to ssh-agent or default identity files.
         'IdentitiesOnly': None if disable_identities_only else 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
@@ -922,8 +921,7 @@ class SSHCommandRunner(CommandRunner):
                 SSH tunnel is established.
             disable_identities_only: If True, do not set IdentitiesOnly=yes.
                 This allows SSH to use keys from ssh-agent and default key
-                locations in addition to any explicitly specified key. Useful
-                for user-controlled environments like Slurm clusters.
+                locations in addition to any explicitly specified key.
         """
         super().__init__(node)
         ip, port = node
