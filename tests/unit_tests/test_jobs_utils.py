@@ -188,3 +188,110 @@ def test_job_recovery_skips_autostopping():
     assert up_status in recovery_skip_statuses
     assert autostopping_status in recovery_skip_statuses
     assert stopped_status not in recovery_skip_statuses
+
+
+# Tests for handle serialization in managed job queue
+
+class TestHandleSerialization:
+    """Tests for handle serialization/deserialization in job queue."""
+
+    def test_serialize_handle_for_json_none(self):
+        """Test that None handle returns None."""
+        result = utils._serialize_handle_for_json(None)
+        assert result is None
+
+    def test_serialize_handle_for_json_dict(self):
+        """Test serialization of a dict object (picklable)."""
+        # Use a dict instead of a local class since dicts are always picklable
+        handle = {
+            'stable_internal_external_ips': [('10.0.0.1', '35.1.2.3')],
+            'cluster_name_on_cloud': 'test-cluster',
+        }
+        result = utils._serialize_handle_for_json(handle)
+
+        # Should return a base64-encoded string
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_deserialize_handle_from_json_none(self):
+        """Test that None string returns None."""
+        result = utils._deserialize_handle_from_json(None)
+        assert result is None
+
+    def test_serialize_deserialize_roundtrip(self):
+        """Test that serialize/deserialize is a proper roundtrip."""
+        # Use a dict since it's always picklable
+        original = {
+            'stable_internal_external_ips': [('10.0.0.1', '35.1.2.3')],
+            'cluster_name_on_cloud': 'test-cluster',
+            'launched_nodes': 1,
+        }
+
+        # Serialize
+        serialized = utils._serialize_handle_for_json(original)
+        assert isinstance(serialized, str)
+
+        # Deserialize
+        deserialized = utils._deserialize_handle_from_json(serialized)
+
+        # Check attributes are preserved
+        assert deserialized['stable_internal_external_ips'] == original['stable_internal_external_ips']
+        assert deserialized['cluster_name_on_cloud'] == original['cluster_name_on_cloud']
+        assert deserialized['launched_nodes'] == original['launched_nodes']
+
+
+class TestPopulateJobRecordFromHandle:
+    """Tests for _populate_job_record_from_handle."""
+
+    def test_populate_job_record_sets_handle(self):
+        """Test that the handle is set in the job record."""
+        # Create a minimal mock handle with required attributes
+        mock_handle = mock.MagicMock()
+        mock_handle.stable_internal_external_ips = [('10.0.0.1', '35.1.2.3')]
+        mock_handle.cluster_name_on_cloud = 'test-cluster'
+        mock_handle.launched_nodes = 1
+        mock_handle.launched_resources = mock.MagicMock()
+        mock_handle.launched_resources.cloud = mock.MagicMock()
+        mock_handle.launched_resources.cloud.__str__ = lambda self: 'AWS'
+        mock_handle.launched_resources.region = 'us-east-1'
+        mock_handle.launched_resources.zone = 'us-east-1a'
+        mock_handle.launched_resources.accelerators = None
+        mock_handle.launched_resources.labels = {}
+        
+        job = {}
+        
+        # Mock the resources_utils function
+        with mock.patch('sky.jobs.utils.resources_utils.get_readable_resources_repr',
+                       return_value=('1x[CPU:1]', '1x[CPU:1+]')):
+            utils._populate_job_record_from_handle(
+                job=job,
+                cluster_name='test-cluster',
+                handle=mock_handle
+            )
+        
+        # Check handle is set
+        assert 'handle' in job
+        assert job['handle'] is mock_handle
+        
+        # Check other fields are also set
+        assert job['cluster_resources'] == '1x[CPU:1]'
+        assert job['cloud'] == 'AWS'
+        assert job['region'] == 'us-east-1'
+
+
+class TestClusterHandleFields:
+    """Tests for _CLUSTER_HANDLE_FIELDS configuration."""
+
+    def test_handle_in_cluster_handle_fields(self):
+        """Test that 'handle' is in _CLUSTER_HANDLE_FIELDS."""
+        assert 'handle' in utils._CLUSTER_HANDLE_FIELDS
+
+    def test_cluster_handle_not_required_excludes_handle(self):
+        """Test that _cluster_handle_not_required returns False when 'handle' is present."""
+        fields_with_handle = ['job_id', 'status', 'handle']
+        assert not utils._cluster_handle_not_required(fields_with_handle)
+
+    def test_cluster_handle_not_required_without_handle_fields(self):
+        """Test that _cluster_handle_not_required returns True without handle fields."""
+        fields_without_handle = ['job_id', 'status', 'job_name']
+        assert utils._cluster_handle_not_required(fields_without_handle)
