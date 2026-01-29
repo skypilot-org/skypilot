@@ -204,48 +204,6 @@ The SkyPilot dashboard, ``sky dashboard`` has a **Jobs** page that shows all man
 The UI shows the same information as the CLI ``sky jobs queue -au``.
 
 
-Programmatic access via SDK
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Use the Python SDK to programmatically access managed job information, including
-network endpoints (IPs and Kubernetes DNS entries) for connecting to running jobs:
-
-.. code-block:: python
-
-    import sky
-    from sky.jobs.client import sdk as jobs_sdk
-
-    # Get job queue with handles
-    request_id = jobs_sdk.queue_v2(refresh=True)
-    jobs, total, status_counts, total_no_filter = sky.get(request_id)
-
-    for job in jobs:
-        print(f"Job ID: {job.job_id}, Name: {job.job_name}, Status: {job.status}")
-        
-        # Access the cluster handle (similar to sky.status() for clusters)
-        handle = job.handle
-        if handle is not None:
-            # Get internal/external IPs for all nodes
-            print(f"  IPs: {handle.stable_internal_external_ips}")
-            
-            # For Kubernetes: get service DNS entries
-            if handle.cached_cluster_info:
-                for pod_name, instances in handle.cached_cluster_info.instances.items():
-                    print(f"  DNS: {instances[0].internal_svc}")
-
-This is useful for:
-
-- Connecting external frameworks to managed job workers
-- Building custom monitoring or orchestration tools
-- Programmatic job management
-
-.. note::
-
-   IPs may change during job recovery. For Kubernetes clusters, the DNS entries
-   (e.g., ``pod-name.namespace.svc.cluster.local``) are more stable as they
-   automatically route to the new pod after recovery.
-
-
 .. _spot-jobs:
 
 Running on spot instances
