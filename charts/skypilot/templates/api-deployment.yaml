@@ -144,6 +144,10 @@ spec:
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
+        {{- if .Values.auth.disableBasicAuthMiddleware }}
+        - name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+          value: "true"
+        {{- end }}
         {{- if .Values.auth.oauth.enabled }}
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
           value: "true"
