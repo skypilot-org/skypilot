@@ -1,0 +1,20 @@
+# Available as us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-nonroot-home:latest
+#
+# Test image for non-root user with ENV HOME override.
+# Tests that SkyPilot correctly handles Docker images where:
+# 1. The default USER is non-root
+# 2. ENV HOME is explicitly set to the non-root user's home directory
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y sudo && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user with sudo access
+RUN useradd -m -s /bin/bash -u 1001 testuser && \
+    usermod -aG sudo testuser && \
+    echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to non-root user and set HOME explicitly
+USER testuser
+ENV HOME=/home/testuser
+
+CMD ["/bin/bash"]
