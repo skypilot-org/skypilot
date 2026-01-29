@@ -31,6 +31,19 @@ You can specify environment variables and secrets to be made available to a task
       HF_TOKEN: null
       WANDB_API_KEY: null
 
+- ``env_file`` field in a :ref:`task YAML <yaml-spec>` to load environment variables from a `dotenv` file:
+
+  .. code-block:: yaml
+
+    # Load from a single .env file
+    env_file: /path/to/.env
+
+    # Or load from multiple files (later files take precedence)
+    env_file:
+      - /path/to/.env
+      - /path/to/.env.local
+
+  Variables defined in ``envs`` take precedence over ``env_file``. See :ref:`env_file <yaml-spec-env-file>` for more details.
 
 - ``--env`` and ``--secret`` flags in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
