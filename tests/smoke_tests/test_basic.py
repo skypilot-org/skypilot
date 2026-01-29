@@ -2196,6 +2196,80 @@ def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str,
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.slurm
+def test_slurm_ssh_agent_auth(generic_cloud: str):
+    """Test Slurm SSH authentication via ssh-agent (no IdentityFile in config).
+
+    This tests the fix for IdentitiesOnly=yes preventing ssh-agent fallback.
+    The test temporarily removes IdentityFile from ~/.slurm/config and relies
+    on ssh-agent for authentication.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    agent_env_file = f'/tmp/sky_test_ssh_agent_env_{name}'
+    backup_config = f'/tmp/sky_test_slurm_config_backup_{name}'
+
+    # Helper to source agent env at start of each command
+    source_agent = f'[ -f {agent_env_file} ] && source {agent_env_file};'
+
+    # fmt: off
+    test = smoke_tests_utils.Test(
+        'slurm_ssh_agent_auth',
+        [
+            # Backup config, extract keys, remove IdentityFile lines, start ssh-agent
+            f'''
+            set -e
+            SLURM_CONFIG=~/.slurm/config
+
+            # Backup original config
+            cp "$SLURM_CONFIG" {backup_config}
+            echo "Backed up config to {backup_config}"
+
+            # Extract unique IdentityFile paths
+            IDENTITY_FILES=$(grep -i "^[[:space:]]*IdentityFile" "$SLURM_CONFIG" | awk '{{print $2}}' | sort -u)
+            echo "Found identity files: $IDENTITY_FILES"
+
+            # Remove all IdentityFile lines (macOS-compatible)
+            grep -v -i "^[[:space:]]*IdentityFile" "$SLURM_CONFIG" > "$SLURM_CONFIG.new" || true
+            mv "$SLURM_CONFIG.new" "$SLURM_CONFIG"
+            echo "Removed IdentityFile lines from config"
+
+            # Start ssh-agent and save env vars
+            eval "$(ssh-agent -s)"
+            echo "export SSH_AUTH_SOCK=$SSH_AUTH_SOCK" > {agent_env_file}
+            echo "export SSH_AGENT_PID=$SSH_AGENT_PID" >> {agent_env_file}
+
+            # Add keys to agent
+            for key in $IDENTITY_FILES; do
+                expanded_key=$(eval echo "$key")
+                if [ -f "$expanded_key" ]; then
+                    ssh-add "$expanded_key" 2>/dev/null && echo "Added key: $expanded_key" || true
+                fi
+            done
+            ssh-add -l
+            ''',
+            f'{source_agent} sky check slurm 2>&1 | tee /dev/stderr | grep -E "(├──|└──)" | grep -v "disabled"',
+            f'{source_agent} sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -- echo "SSH agent auth works"',
+            f'{source_agent} sky logs {name} 1 --status',
+            f'{source_agent} ssh {name} whoami',
+            f'{source_agent} sky status {name} -r | grep UP',
+        ],
+        # Cleanup: restore config, kill ssh-agent, down cluster
+        f'''
+        # Restore original config
+        [ -f {backup_config} ] && cp {backup_config} ~/.slurm/config && rm -f {backup_config}
+
+        # Kill ssh-agent
+        [ -f {agent_env_file} ] && source {agent_env_file} && kill $SSH_AGENT_PID 2>/dev/null || true
+        rm -f {agent_env_file}
+
+        # Down the cluster
+        sky down -y {name} 2>/dev/null || true
+        ''',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # Only checks for processes in local machine, so skip remote server test.
 # TODO(kevin): Add metrics for number of open SSH tunnels and refactor this test to use it.
 @pytest.mark.no_remote_server
