@@ -238,6 +238,8 @@ def _create_virtual_instance(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
+        # Allow ssh-agent and default key fallback for Slurm.
+        disable_identities_only=True,
     )
 
     remote_home_dir = login_node_runner.get_remote_home_dir()
@@ -823,6 +825,8 @@ def get_command_runners(
         ssh_proxy_jump=login_node_ssh_proxy_jump,
         ssh_control_name=ssh_control_name,
         enable_interactive_auth=True,
+        # Allow ssh-agent and default key fallback for Slurm.
+        disable_identities_only=True,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
@@ -857,7 +861,9 @@ def get_command_runners(
             ssh_proxy_command=login_node_ssh_proxy_command,
             ssh_control_name=ssh_control_name,
             container_args=container_args,
-            enable_interactive_auth=True) for instance_info in instances
+            enable_interactive_auth=True,
+            # Allow ssh-agent and default key fallback for Slurm.
+            disable_identities_only=True) for instance_info in instances
     ]
 
     return runners
