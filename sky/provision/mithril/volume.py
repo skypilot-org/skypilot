@@ -17,7 +17,7 @@ _TYPE_TO_DISK_INTERFACE = {
 
 
 def _list_volumes(region: Optional[str] = None) -> List[Dict[str, Any]]:
-    config = utils.get_config()
+    config = utils.resolve_current_config()
     params: Dict[str, Any] = {
         'project': config['project_id'],
     }
@@ -41,7 +41,7 @@ def _populate_config_from_volume(config: models.VolumeConfig,
 
 
 def _list_bids() -> List[Dict[str, Any]]:
-    config = utils.get_config()
+    config = utils.resolve_current_config()
     base_params: Dict[str, Any] = ({
         'project': quote(config['project_id'])
     } if config['project_id'] else {})
@@ -60,7 +60,7 @@ def _list_bids() -> List[Dict[str, Any]]:
 
 
 def _list_reservations() -> List[Dict[str, Any]]:
-    config = utils.get_config()
+    config = utils.resolve_current_config()
     base_params: Dict[str, Any] = ({
         'project': quote(config['project_id'])
     } if config['project_id'] else {})
@@ -125,7 +125,7 @@ def apply_volume(config: models.VolumeConfig) -> models.VolumeConfig:
     if disk_interface is None:
         raise MithrilError('Unknown Mithril volume type.')
 
-    api_config = utils.get_config()
+    api_config = utils.resolve_current_config()
     payload = {
         'name': name_on_cloud,
         'project': api_config['project_id'],

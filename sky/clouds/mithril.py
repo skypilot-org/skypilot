@@ -305,6 +305,7 @@ class Mithril(clouds.Cloud):
             'mithril_project_id': config['project_id'],
         }
 
+        docker_run_options = []
         if acc_dict is not None:
             # Mithril's VM images may not register nvidia-container-runtime with
             # Docker in the standard way (e.g., via /etc/docker/daemon.json).
@@ -312,6 +313,14 @@ class Mithril(clouds.Cloud):
             # 'nvidia-container-runtime', which may not be present even though
             # `--gpus all` works. We explicitly add it here to ensure Docker
             # containers can access GPUs.
-            resources_vars['docker_run_options'] = ['--gpus all']
+            docker_run_options.append('--gpus all')
+
+        # Add volume mounts to Docker so containers can access block volumes.
+        if volume_mounts:
+            for vm in volume_mounts:
+                docker_run_options.append(f'--volume={vm.path}:{vm.path}')
+
+        if docker_run_options:
+            resources_vars['docker_run_options'] = docker_run_options
 
         return resources_vars

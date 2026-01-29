@@ -112,12 +112,18 @@ setup_commands:
     {%- if volume_mounts and volume_mounts|length > 0 %}
     {%- for vm in volume_mounts %}
     {%- if vm.volume_type == 'mithril-block' %}
-    DEVICE_BY_ID=$(ls -1 /dev/disk/by-id/*{{ vm.volume_id_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }}* 2>/dev/null | head -n 1 || true);
+    echo "[DEBUG] Looking for block volume device /dev/disk/by-id/virtio-{{ vm.volume_name_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }}";
+    echo "[DEBUG] Contents of /dev/disk/by-id/";
+    ls -la /dev/disk/by-id/ 2>&1 || echo "[DEBUG] Failed to list /dev/disk/by-id/";
+    echo "[DEBUG] Attempting ls -1 /dev/disk/by-id/virtio-{{ vm.volume_name_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }}";
+    ls -1 /dev/disk/by-id/virtio-{{ vm.volume_name_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }} 2>&1 || true;
+    DEVICE_BY_ID=$(ls -1 /dev/disk/by-id/virtio-{{ vm.volume_name_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }} 2>/dev/null | head -n 1 || true);
+    echo "[DEBUG] DEVICE_BY_ID=$DEVICE_BY_ID";
     if [ -z "$DEVICE_BY_ID" ]; then
-      echo "Block volume {{ vm.volume_id_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }} device not found; skipping.";
+      echo "Block volume {{ vm.volume_name_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }} device not found; skipping.";
     else
       if ! sudo blkid "$DEVICE_BY_ID" | grep -q 'TYPE="ext4"'; then
-        echo "Formatting block volume {{ vm.volume_name_on_cloud }} ({{ vm.volume_id_on_cloud[:KUBEVIRT_SERIAL_MAX_LENGTH] }})...";
+        echo "Formatting block volume {{ vm.volume_name_on_cloud }} ({{ vm.volume_id_on_cloud }})...";
         sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$DEVICE_BY_ID";
       fi;
       sudo mkdir -p {{ vm.path }};
@@ -127,6 +133,7 @@ setup_commands:
       if ! grep -q " {{ vm.path }} " /etc/fstab; then
         echo "UUID=$(sudo blkid -s UUID -o value "$DEVICE_BY_ID") {{ vm.path }} ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab;
       fi;
+      sudo chown $(whoami):$(whoami) {{ vm.path }};
     fi;
     {%- else %}
     sudo mkdir -p {{ vm.path }};
