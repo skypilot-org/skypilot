@@ -631,6 +631,11 @@ class PermissionDeniedError(Exception):
     pass
 
 
+class VolumeNotReadyError(Exception):
+    """Raised when a volume is not ready."""
+    pass
+
+
 class VolumeNotFoundError(Exception):
     """Raised when a volume is not found."""
     pass
