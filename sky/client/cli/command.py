@@ -5299,9 +5299,10 @@ def jobs_cancel(
     default=None,
     required=False,
     hidden=True,
-    help=('Show the system logs of the job. Can be used as --system (flag)'
-          ' or --system <UUID>. Should rarely be used as the controller'
-          'processes manage multiple jobs.'))
+    help=('Show the system logs of the job. Can be used as --system (flag) or '
+          '--system <UUID>. This fetches internal debug logs for the '
+          'controller processes that manage multiple jobs and should not '
+          'normally be needed.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
