@@ -218,7 +218,7 @@ class SkyServiceSpec:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify `replica_policy` for cluster '
                                  'pool. Only `workers: <num>` or `min_workers: '
-                                 '<num> <max_workers: <num>` is supported '
+                                 '<num> max_workers: <num>` is supported '
                                  'for pool now.')
 
         simplified_policy_section = config.get('replicas', None)
