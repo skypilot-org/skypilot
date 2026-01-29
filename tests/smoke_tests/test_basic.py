@@ -2212,7 +2212,6 @@ def test_slurm_ssh_agent_auth(generic_cloud: str):
     # Helper to source agent env at start of each command
     source_agent = f'[ -f {agent_env_file} ] && source {agent_env_file};'
 
-    # fmt: off
     test = smoke_tests_utils.Test(
         'slurm_ssh_agent_auth',
         [
@@ -2233,6 +2232,7 @@ def test_slurm_ssh_agent_auth(generic_cloud: str):
             grep -v -i "^[[:space:]]*IdentityFile" "$SLURM_CONFIG" > "$SLURM_CONFIG.new" || true
             mv "$SLURM_CONFIG.new" "$SLURM_CONFIG"
             echo "Removed IdentityFile lines from config"
+            cat "$SLURM_CONFIG"
 
             # Start ssh-agent and save env vars
             eval "$(ssh-agent -s)"

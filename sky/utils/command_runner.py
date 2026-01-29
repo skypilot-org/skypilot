@@ -241,9 +241,9 @@ def ssh_options_list(
         #   Warning: Permanently added 'xx.xx.xx.xx' (EDxxx) to the list of
         #   known hosts.
         'LogLevel': 'ERROR',
-        # Try fewer extraneous key pairs. This is disabled for user-controlled
-        # environments (e.g., Slurm clusters) where SSH authentication may rely
-        # on ssh-agent or default key locations.
+        # Try fewer extraneous key pairs. This is disabled for environments
+        # where SkyPilot does not manage SSH keys (e.g., Slurm clusters),
+        # allowing SSH to fall back to ssh-agent or default identity files.
         'IdentitiesOnly': None if disable_identities_only else 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
@@ -977,14 +977,13 @@ class SSHCommandRunner(CommandRunner):
                 inner_proxy_command = inner_proxy_command.replace(
                     '%p', str(inner_proxy_port))
             self._docker_ssh_proxy_command = lambda ssh: ' '.join(
-                ssh + ssh_options_list(ssh_private_key,
-                                       None,
-                                       ssh_proxy_command=inner_proxy_command,
-                                       port=inner_proxy_port,
-                                       disable_control_master=self.
-                                       disable_control_master,
-                                       disable_identities_only=self.
-                                       disable_identities_only) +
+                ssh + ssh_options_list(
+                    ssh_private_key,
+                    None,
+                    ssh_proxy_command=inner_proxy_command,
+                    port=inner_proxy_port,
+                    disable_control_master=self.disable_control_master,
+                    disable_identities_only=self.disable_identities_only) +
                 ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
