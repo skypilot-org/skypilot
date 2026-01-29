@@ -37,6 +37,14 @@ file_mounts:
   {%- for controller_file_mount_path, local_file_mount_path in local_to_controller_file_mounts.items() %}
   {{controller_file_mount_path}}: {{local_file_mount_path}}
   {%- endfor %}
+  {%- if consolidation_mode_job_id is none %}
+  {%- for remote_plugin_wheel_path, local_plugin_wheel_path in plugin_wheel_file_mounts.items() %}
+  {{remote_plugin_wheel_path}}: {{local_plugin_wheel_path}}
+  {%- endfor %}
+  {%- if local_plugins_config_path is not none %}
+  {{remote_plugins_config_path}}.tmp: {{local_plugins_config_path}}
+  {%- endif %}
+  {%- endif %}
 {%- if use_tls %}
   {{remote_tls_keyfile}}: {{local_tls_keyfile}}
   {{remote_tls_certfile}}: {{local_tls_certfile}}
@@ -47,6 +55,14 @@ run: |
   # PATH.
   {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}
+  # Install plugin wheels if any
+  {%- if plugins_wheel_install_commands %}
+  {{plugins_wheel_install_commands}}
+  # Move the temporary plugins config to the final location if it exists
+  if [ -f {{remote_plugins_config_path}}.tmp ]; then
+    mv {{remote_plugins_config_path}}.tmp {{remote_plugins_config_path}}
+  fi
+  {%- endif %}
   {%- endif %}
   # Start sky serve service.
   {%- if consolidation_mode_job_id is not none %}
