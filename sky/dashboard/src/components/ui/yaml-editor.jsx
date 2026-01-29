@@ -43,6 +43,7 @@ export function YamlEditor({
           fontSize: '13px',
           maxHeight,
           minHeight,
+          overflow: 'auto',
         }}
         theme="light"
       />
