@@ -178,7 +178,13 @@ Refer to the `Prometheus helm chart values <https://github.com/prometheus-commun
     The Prometheus Operator adds an ``exported_`` prefix to pod and namespace labels,
     which breaks the PromQL queries used by SkyPilot.
 
-If you are using the Nebius Kubernetes cluster, refer to :ref:`api-server-gpu-metrics-setup-nebius` for how to setup the GPU metrics.
+Cloud-specific setup guides
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For detailed setup instructions for specific cloud providers:
+
+* **GKE (Google Kubernetes Engine)**: Refer to :ref:`api-server-gpu-metrics-setup-gke` for GKE-specific instructions, including using GKE-managed DCGM metrics.
+* **Nebius Kubernetes**: Refer to :ref:`api-server-gpu-metrics-setup-nebius` for Nebius-specific setup instructions.
 
 .. _api-server-setup-dcgm-metrics-scraping:
 
