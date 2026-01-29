@@ -129,7 +129,7 @@ function RecipeCard({ recipe }) {
             </div>
 
             {/* Last updated info - only show for editable recipes */}
-            {recipe.is_editable && (
+            {recipe.is_editable && recipe.user_name !== "local" && (
               <div className="text-sm text-gray-500 truncate">
                 Updated by{' '}
                 {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
@@ -774,7 +774,7 @@ function CreateRecipeModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto px-8">
         <DialogHeader>
           <DialogTitle className="text-xl text-gray-900">
             Create New Recipe
