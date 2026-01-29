@@ -11,7 +11,6 @@
 # Run with a specific cloud:
 # > pytest tests/smoke_tests/test_recipes.py --generic-cloud aws
 
-import tempfile
 import textwrap
 
 import pytest
@@ -37,11 +36,11 @@ def _create_test_recipe(name: str, recipe_type: RecipeType, content: str):
     except Exception:
         pass
 
-    # Create the recipe
+    # Create the recipe (core.create_recipe expects string for recipe_type)
     recipes_core.create_recipe(
         name=name,
         content=content,
-        recipe_type=recipe_type,
+        recipe_type=recipe_type.value,
         user_id='test-user',
         user_name='Test User',
         description=f'Smoke test recipe for {recipe_type.value}',
@@ -275,3 +274,124 @@ def _test_invalid_recipe_name(name: str):
             f'Expected InvalidRecipeNameError for name: {name}')
     except exceptions.InvalidRecipeNameError:
         print(f'Correctly rejected invalid recipe name: {name}')
+
+
+# ---------- Recipe Duplicate Name Error ----------
+def test_recipe_duplicate_name():
+    """Test that creating a recipe with a duplicate name raises an error."""
+    test = smoke_tests_utils.Test(
+        'recipe_duplicate_name',
+        [
+            _test_duplicate_recipe_name,
+        ],
+        None,
+        timeout=30,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def _test_duplicate_recipe_name():
+    """Helper to test that creating a recipe with duplicate name raises error."""
+    from sky import exceptions
+    recipe_name = 'test-duplicate-name-check'
+
+    # Clean up any existing recipe first
+    try:
+        recipes_db.delete_recipe(recipe_name, user_id='test-user')
+    except Exception:
+        pass
+
+    try:
+        # Create the first recipe (core.create_recipe expects string)
+        recipes_core.create_recipe(
+            name=recipe_name,
+            content='resources:\n  cpus: 1',
+            recipe_type='cluster',
+            user_id='test-user',
+        )
+        print(f'Created first recipe: {recipe_name}')
+
+        # Try to create a second recipe with the same name - should fail
+        try:
+            recipes_core.create_recipe(
+                name=recipe_name,
+                content='resources:\n  cpus: 2',
+                recipe_type='cluster',
+                user_id='test-user',
+            )
+            raise AssertionError(
+                f'Expected RecipeAlreadyExistsError for duplicate name: {recipe_name}'
+            )
+        except exceptions.RecipeAlreadyExistsError:
+            print(f'Correctly rejected duplicate recipe name: {recipe_name}')
+    finally:
+        # Clean up
+        try:
+            recipes_db.delete_recipe(recipe_name, user_id='test-user')
+        except Exception:
+            pass
+
+
+# ---------- Recipe Delete Authorization ----------
+def test_recipe_delete_authorization():
+    """Test that a different user cannot delete another user's recipe."""
+    test = smoke_tests_utils.Test(
+        'recipe_delete_authorization',
+        [
+            _test_recipe_delete_authorization,
+        ],
+        None,
+        timeout=30,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def _test_recipe_delete_authorization():
+    """Helper to test that only the owner can delete a recipe."""
+    recipe_name = 'test-delete-auth-check'
+    owner_user_id = 'owner-user'
+    other_user_id = 'other-user'
+
+    # Clean up any existing recipe first
+    try:
+        recipes_db.delete_recipe(recipe_name, user_id=owner_user_id)
+    except Exception:
+        pass
+
+    try:
+        # Create a recipe as the owner (core.create_recipe expects string)
+        recipes_core.create_recipe(
+            name=recipe_name,
+            content='resources:\n  cpus: 1',
+            recipe_type='cluster',
+            user_id=owner_user_id,
+            user_name='Owner User',
+        )
+        print(f'Created recipe as {owner_user_id}: {recipe_name}')
+
+        # Try to delete as a different user - should return False (not deleted)
+        deleted = recipes_db.delete_recipe(recipe_name, user_id=other_user_id)
+        if deleted:
+            raise AssertionError(
+                f'Recipe should not be deletable by non-owner: {other_user_id}')
+        print(f'Correctly prevented deletion by non-owner: {other_user_id}')
+
+        # Verify recipe still exists
+        recipe = recipes_db.get_recipe(recipe_name)
+        if recipe is None:
+            raise AssertionError(
+                'Recipe was deleted even though delete returned False')
+        print('Recipe still exists after failed delete attempt')
+
+        # Verify owner can delete
+        deleted = recipes_db.delete_recipe(recipe_name, user_id=owner_user_id)
+        if not deleted:
+            raise AssertionError('Owner should be able to delete their recipe')
+        print('Owner successfully deleted recipe')
+
+    finally:
+        # Clean up (in case test failed)
+        try:
+            recipes_db.delete_recipe(recipe_name, user_id=owner_user_id)
+        except Exception:
+            pass
