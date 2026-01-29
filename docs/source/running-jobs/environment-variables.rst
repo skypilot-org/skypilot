@@ -31,6 +31,19 @@ You can specify environment variables and secrets to be made available to a task
       HF_TOKEN: null
       WANDB_API_KEY: null
 
+- ``env_file`` field in a :ref:`task YAML <yaml-spec>` to load environment variables from a `dotenv` file:
+
+  .. code-block:: yaml
+
+    # Load from a single .env file
+    env_file: /path/to/.env
+
+    # Or load from multiple files (later files take precedence)
+    env_file:
+      - /path/to/.env
+      - /path/to/.env.local
+
+  Variables defined in ``envs`` take precedence over ``env_file``. See :ref:`env_file <yaml-spec-env-file>` for more details.
 
 - ``--env`` and ``--secret`` flags in ``sky launch/exec`` :ref:`CLI <cli>` (takes precedence over the above)
 
@@ -188,8 +201,8 @@ Environment variables for ``setup``
          3.4.5.6
    * - ``SKYPILOT_SETUP_NUM_GPUS_PER_NODE``
      - Number of GPUs per node in the cluster.
-     
-       Note that GPUs may not be available at this stage. Do not assume 
+
+       Note that GPUs may not be available at this stage. Do not assume
        GPUs are available during setup.
      - 1
 

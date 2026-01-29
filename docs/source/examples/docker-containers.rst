@@ -118,6 +118,27 @@ Private registries
 When using this mode, to access Docker images hosted on private registries,
 you can use :ref:`task environment variables <env-vars>`:
 
+.. tip::
+
+    Instead of specifying Docker credentials directly in the YAML, you can use ``env_file`` to load them from a ``.env`` file:
+
+    .. code-block:: yaml
+
+      resources:
+        image_id: docker:<user>/<your-docker-hub-repo>:<tag>
+
+      env_file: ~/.docker-credentials.env
+
+    Where ``~/.docker-credentials.env`` contains:
+
+    .. code-block:: bash
+
+      SKYPILOT_DOCKER_USERNAME=<user>
+      SKYPILOT_DOCKER_PASSWORD=<password>
+      SKYPILOT_DOCKER_SERVER=docker.io
+
+    This keeps sensitive credentials out of your task YAML files. See :ref:`env_file <yaml-spec-env-file>` for more details.
+
 .. tab-set::
 
     .. tab-item:: Docker Hub
