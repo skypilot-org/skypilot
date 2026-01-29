@@ -436,20 +436,12 @@ def update_recipe(
         content: New YAML content (if updating).
 
     Returns:
-        The updated Recipe if successful, None if not found
-        or not authorized.
+        The updated Recipe if successful.
 
     Raises:
-        ValueError: If the recipe is not editable (e.g., default recipes).
+        ValueError: If the recipe is not found or not editable.
     """
     assert _SQLALCHEMY_ENGINE is not None
-
-    # First check ownership and editability
-    recipe = get_recipe(recipe_name)
-    if recipe is None:
-        return None
-    if not recipe.is_editable:
-        raise ValueError('This recipe cannot be edited')
 
     # TODO(lloyd): We might want to change this in the future to change who is
     # allowed to update a recipe.
@@ -461,16 +453,30 @@ def update_recipe(
         updates['content'] = content
 
     if not updates:
-        return recipe
+        # No updates requested, just return current state
+        return get_recipe(recipe_name)
 
     updates['updated_at'] = time.time()
     updates['updated_by_id'] = user_id
     updates['updated_by_name'] = user_name
 
+    # Atomic update with editability check in WHERE clause.
+    # This avoids race conditions between check and update, and works
+    # for both SQLite and PostgreSQL.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(recipes_table.update().where(
-            recipes_table.c.name == recipe_name).values(**updates))
+        result = session.execute(recipes_table.update().where(
+            recipes_table.c.name == recipe_name).where(
+                recipes_table.c.is_editable == 1).values(**updates))
         session.commit()
+
+        if result.rowcount == 0:
+            # No rows updated - either recipe not found or not editable.
+            # Query to determine which case.
+            recipe = get_recipe(recipe_name)
+            if recipe is None:
+                raise ValueError(f'Recipe {recipe_name} not found')
+            # Recipe exists but wasn't updated -> not editable
+            raise ValueError(f'Recipe {recipe_name} is not editable')
 
     return get_recipe(recipe_name)
 
@@ -493,21 +499,28 @@ def delete_recipe(recipe_name: str, user_id: str) -> bool:
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    # First check ownership and editability
-    recipe = get_recipe(recipe_name)
-    if recipe is None:
-        return False
-    if not recipe.is_editable:
-        raise ValueError('This recipe cannot be deleted')
-    if recipe.user_id != user_id:
-        return False
-
+    # Atomic delete with ownership and editability checks in WHERE clause.
+    # This avoids race conditions between check and delete, and works
+    # for both SQLite and PostgreSQL.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(
-            recipes_table.delete().where(recipes_table.c.name == recipe_name))
+        result = session.execute(recipes_table.delete().where(
+            recipes_table.c.name == recipe_name).where(
+                recipes_table.c.is_editable == 1).where(
+                    recipes_table.c.user_id == user_id))
         session.commit()
 
-    return True
+        if result.rowcount > 0:
+            return True
+
+        # No rows deleted - determine why (not found, not editable, or
+        # not owner).
+        recipe = get_recipe(recipe_name)
+        if recipe is None:
+            return False
+        if not recipe.is_editable:
+            raise ValueError('This recipe cannot be deleted')
+        # Recipe exists and is editable but wasn't deleted -> not owner
+        return False
 
 
 @_init_db
@@ -529,16 +542,22 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
     """
     assert _SQLALCHEMY_ENGINE is not None
 
-    recipe = get_recipe(recipe_name)
-    if recipe is None:
-        return None
-    if not recipe.is_pinnable:
-        raise ValueError('This recipe cannot be pinned or unpinned')
-
+    # Atomic update with pinnable check in WHERE clause.
+    # This avoids race conditions between check and update, and works
+    # for both SQLite and PostgreSQL.
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(recipes_table.update().where(
-            recipes_table.c.name == recipe_name).values(
-                pinned=1 if pinned else 0, updated_at=time.time()))
+        result = session.execute(recipes_table.update().where(
+            recipes_table.c.name == recipe_name).where(
+                recipes_table.c.is_pinnable == 1).values(
+                    pinned=1 if pinned else 0, updated_at=time.time()))
         session.commit()
 
-    return get_recipe(recipe_name)
+        if result.rowcount > 0:
+            return get_recipe(recipe_name)
+
+        # No rows updated - either not found or not pinnable.
+        recipe = get_recipe(recipe_name)
+        if recipe is None:
+            return None
+        # Recipe exists but wasn't updated -> not pinnable
+        raise ValueError('This recipe cannot be pinned or unpinned')
