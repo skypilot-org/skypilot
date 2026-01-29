@@ -1,4 +1,5 @@
 """Kubernetes utilities for SkyPilot."""
+import base64
 import collections
 import copy
 import dataclasses
@@ -50,6 +51,7 @@ if typing.TYPE_CHECKING:
 
     from sky import backends
     from sky import resources as resources_lib
+    from sky.provision import docker_utils
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     yaml = adaptors_common.LazyImport('yaml')
@@ -4090,6 +4092,123 @@ def get_cleaned_context_and_cloud_str(
         cloud_str = 'ssh'
         context = context[len('ssh-'):]
     return context, cloud_str
+
+
+def get_docker_registry_secret_name(cluster_name_on_cloud: str) -> str:
+    """Get the name for the Docker registry secret for a cluster."""
+    return f'skypilot-registry-{cluster_name_on_cloud}'
+
+
+def create_docker_registry_secret(
+    namespace: str,
+    context: Optional[str],
+    cluster_name_on_cloud: str,
+    docker_login_config: 'docker_utils.DockerLoginConfig',
+) -> str:
+    """Create a Kubernetes secret for Docker registry authentication.
+
+    This creates a secret of type kubernetes.io/dockerconfigjson that can be
+    used as imagePullSecrets for pods.
+
+    Args:
+        namespace: Kubernetes namespace to create the secret in.
+        context: Kubernetes context to use.
+        cluster_name_on_cloud: Name of the cluster (used for secret naming).
+        docker_login_config: DockerLoginConfig with username, password, server.
+
+    Returns:
+        The name of the created secret.
+    """
+
+    secret_name = get_docker_registry_secret_name(cluster_name_on_cloud)
+    server = docker_login_config.server
+    username = docker_login_config.username
+    password = docker_login_config.password
+
+    # Create the docker config JSON structure
+    # Format: {"auths": {"<server>": {"username": "...", "password": "...",
+    #                                  "auth": "<base64(username:password)>"}}}
+    auth_str = base64.b64encode(f'{username}:{password}'.encode()).decode()
+    docker_config = {
+        'auths': {
+            server: {
+                'username': username,
+                'password': password,
+                'auth': auth_str,
+            }
+        }
+    }
+    docker_config_json = json.dumps(docker_config)
+    docker_config_b64 = base64.b64encode(docker_config_json.encode()).decode()
+
+    secret_manifest = {
+        'apiVersion': 'v1',
+        'kind': 'Secret',
+        'metadata': {
+            'name': secret_name,
+            'namespace': namespace,
+            'labels': {
+                'parent': 'skypilot',
+                provision_constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud,
+            },
+        },
+        'type': 'kubernetes.io/dockerconfigjson',
+        'data': {
+            '.dockerconfigjson': docker_config_b64,
+        },
+    }
+
+    try:
+        # Try to create the secret
+        kubernetes.core_api(context).create_namespaced_secret(
+            namespace, secret_manifest)
+        logger.debug(f'Created Docker registry secret {secret_name!r} '
+                     f'in namespace {namespace!r}')
+    except kubernetes.api_exception() as e:
+        if e.status == 409:
+            # Secret already exists, update it
+            kubernetes.core_api(context).replace_namespaced_secret(
+                secret_name, namespace, secret_manifest)
+            logger.debug(f'Updated existing Docker registry secret '
+                         f'{secret_name!r} in namespace {namespace!r}')
+        else:
+            raise
+
+    return secret_name
+
+
+def delete_docker_registry_secret(
+    namespace: str,
+    context: Optional[str],
+    cluster_name_on_cloud: str,
+) -> None:
+    """Delete the Docker registry secret(s) for a cluster.
+
+    Uses label selectors to find and delete secrets associated with the cluster.
+
+    Args:
+        namespace: Kubernetes namespace where the secret exists.
+        context: Kubernetes context to use.
+        cluster_name_on_cloud: Name of the cluster.
+    """
+    label_selector = (f'parent=skypilot,'
+                      f'{provision_constants.TAG_SKYPILOT_CLUSTER_NAME}='
+                      f'{cluster_name_on_cloud}')
+    try:
+        secrets = kubernetes.core_api(context).list_namespaced_secret(
+            namespace, label_selector=label_selector).items
+    except kubernetes.api_exception() as e:
+        logger.warning(f'Failed to list secrets for cluster '
+                       f'{cluster_name_on_cloud}: {e}')
+        return
+
+    for secret in secrets:
+        secret_name = secret.metadata.name
+        delete_k8s_resource_with_retry(
+            delete_func=lambda name=secret_name: kubernetes.core_api(
+                context).delete_namespaced_secret(name, namespace),
+            resource_type='secret',
+            resource_name=secret_name)
 
 
 def get_pvc_events(context: Optional[str],

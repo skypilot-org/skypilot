@@ -291,6 +291,10 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
                 --docker-password=<NGC_API_KEY> \
                 --docker-server=nvcr.io
 
+**Alternative: Using environment variables**
+
+You can also specify Docker credentials using environment variables (``SKYPILOT_DOCKER_USERNAME``, ``SKYPILOT_DOCKER_PASSWORD``, ``SKYPILOT_DOCKER_SERVER``), which is the same workflow as for VMs. SkyPilot will automatically create the necessary Kubernetes secret for you. See :ref:`Using Private Registries <docker-containers-private-registries>` for details.
+
 
 
 

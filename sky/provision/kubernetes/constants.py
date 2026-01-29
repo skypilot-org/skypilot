@@ -66,6 +66,9 @@ SKY_K8S_EXEC_AUTH_PATH = '$HOME/skypilot-runtime/bin:$HOME/google-cloud-sdk/bin:
 # cache directory for kubeconfig with modified exec auth
 SKY_K8S_EXEC_AUTH_KUBECONFIG_CACHE = '~/.sky/generated/kubeconfigs'
 
+# Name of the container running the SkyPilot runtime in the pod
+SKYPILOT_CONTAINER_NAME = 'ray-node'
+
 # Labels for the Pods created by SkyPilot
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
