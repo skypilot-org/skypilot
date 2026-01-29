@@ -487,8 +487,8 @@ function ActiveTab({
       {/* Cluster Info Card */}
       <div className="mb-6">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-          <div className="flex items-center justify-between px-4 pt-4">
-            <h3 className="text-lg font-semibold">
+          <div className="flex items-center justify-between px-3 py-2.5">
+            <h3 className="text-[15px] font-semibold tracking-[0.01em]">
               {isHistoricalCluster ? 'Historical Cluster Details' : 'Details'}
             </h3>
           </div>
@@ -783,18 +783,20 @@ function ActiveTab({
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
               <div
-                className={`flex items-center justify-between px-4 ${isGpuMetricsExpanded ? 'pt-4' : 'py-4'}`}
+                className={`flex items-center justify-between px-3 ${isGpuMetricsExpanded ? 'pt-2.5' : 'py-2.5'}`}
               >
                 <button
                   onClick={toggleGpuMetricsExpanded}
                   className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
                 >
                   {isGpuMetricsExpanded ? (
-                    <ChevronDownIcon className="w-5 h-5 mr-2" />
+                    <ChevronDownIcon className="w-4 h-4 mr-1.5" />
                   ) : (
-                    <ChevronRightIcon className="w-5 h-5 mr-2" />
+                    <ChevronRightIcon className="w-4 h-4 mr-1.5" />
                   )}
-                  <h3 className="text-lg font-semibold">GPU Metrics</h3>
+                  <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+                    GPU Metrics
+                  </h3>
                 </button>
                 <Tooltip content="Open in Grafana">
                   <button
@@ -900,6 +902,32 @@ function ActiveTab({
             </div>
           </div>
         )}
+
+      {/* Plugin Slot: Cluster Nodes - for plugins to show nodes in this cluster */}
+      <PluginSlot
+        name="clusters.detail.nodes"
+        context={{
+          cluster: clusterData.cluster,
+          clusterHash: clusterData.cluster_hash,
+          clusterNameOnCloud: clusterData.cluster_name_on_cloud,
+          infra: clusterData.full_infra,
+          numNodes: clusterData.num_nodes,
+        }}
+        wrapperClassName="mb-6"
+      />
+
+      {/* Jobs Table - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ClusterJobs
+            clusterName={clusterData.cluster}
+            clusterJobData={clusterJobData}
+            loading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
+          />
+        </div>
+      )}
 
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot
