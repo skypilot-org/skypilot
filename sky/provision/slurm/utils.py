@@ -62,18 +62,7 @@ def get_slurm_ssh_config() -> SSHConfig:
 
 
 def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
-    """Get the first identity file from SSH config, or None if not specified.
-
-    For Slurm clusters (user-controlled environments), IdentityFile is optional.
-    Users may rely on ssh-agent or default key locations (~/.ssh/id_rsa, etc.)
-    for authentication instead of explicitly specifying a key file.
-
-    Args:
-        ssh_config_dict: The SSH config dictionary from SSHConfig.lookup().
-
-    Returns:
-        The first identity file path if specified, None otherwise.
-    """
+    """Get the first identity file from SSH config, or None if not specified."""
     identity_files = ssh_config_dict.get('identityfile')
     if identity_files:
         return identity_files[0]
