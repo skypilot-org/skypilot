@@ -630,4 +630,9 @@ def skyignore_dir():
 def reset_global_state():
     """Reset global state before each test."""
     annotations.is_on_api_server = True
+    # Clear caches before each test to ensure clean state
+    annotations.clear_request_level_cache()
     yield
+    # Clean up after each test to prevent accumulation
+    # that can significantly slow down sequential test runs.
+    annotations.clear_request_level_cache()
