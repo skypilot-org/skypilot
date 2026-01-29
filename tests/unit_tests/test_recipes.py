@@ -1,8 +1,9 @@
 """Unit tests for Recipe Hub core functionality.
 Tests validation of recipes against SkyPilot schema.
 """
-import pytest
 import textwrap
+
+import pytest
 
 from sky.recipes import core as recipes_core
 
