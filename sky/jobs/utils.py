@@ -1238,21 +1238,7 @@ def get_alive_controller_uuids() -> List[str]:
     if pids is None:
         return []
 
-    # in consolidation mode the process command lines are in the format:
-    # ['bash', '-c', 'python -u -msky.jobs.controller <controller_uuid>']
-    # in non-consolidation mode the process command lines are in the format:
-    # ['python', '-u', '-msky.jobs.controller', '<controller_uuid>']
-    # we have 3 options,
-    # 1. check if we are in consolidation mode or not and then process
-    # accordingly
-    # 2. check if the length of the command line is 3 or 4 and then process
-    # accordingly
-    # 3. join then split since the uuid is always at the end, we choose this
-    # option since it only assumes that the uuid is the final arguement and
-    # should be safe if another arugment is added or something minor changes.
     cmdlines = [psutil.Process(pid).cmdline() for pid in pids]
-    cmdlines = [' '.join(cmdline) for cmdline in cmdlines]
-    cmdlines = [cmdline.split(' ') for cmdline in cmdlines]
 
     # we use the following command to start the controller
     # run_controller_cmd = (f'{sys.executable} -u -m'
