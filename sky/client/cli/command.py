@@ -33,6 +33,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import typing
@@ -66,6 +67,7 @@ from sky.client.cli import utils as cli_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.recipes import core as recipes_core
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -804,13 +806,11 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         click.secho('Recipe to run: ', fg='cyan', nl=False)
         click.secho(recipe_name)
         # Fetch recipe content from the Recipe Hub
-        from sky.recipes import core as recipes_core
         try:
             content, _ = recipes_core.get_recipe_content(recipe_name)
         except ValueError as e:
             raise click.UsageError(str(e))
         # Write to temp file and treat as YAML
-        import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
                                          delete=False) as f:
             f.write(content)

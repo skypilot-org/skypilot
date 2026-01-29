@@ -79,9 +79,8 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
         # Validate based on type
         if recipe_type == RecipeType.VOLUME:
             # Validate volume schema (handles required fields: name, type)
-            common_utils.validate_schema(config,
-                                            schemas.get_volume_schema(),
-                                            'Invalid volume YAML: ')
+            common_utils.validate_schema(config, schemas.get_volume_schema(),
+                                         'Invalid volume YAML: ')
         else:
             if recipe_type == RecipeType.POOL:
                 # Pool YAMLs should have a 'pool' section
@@ -90,8 +89,8 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
                                      'section. Example:\n  pool:\n    name: '
                                      'my-pool')
                 common_utils.validate_schema(config,
-                                                schemas.get_pool_schema(),
-                                                'Invalid pool YAML: ')
+                                             schemas.get_service_schema(),
+                                             'Invalid pool YAML: ')
 
             # Use Task.from_yaml_str for full schema validation
             # This validates resources, envs, setup, run, file_mounts, etc.
@@ -222,12 +221,12 @@ def update_recipe(
 ) -> Optional[Dict[str, Any]]:
     """Update a recipe.
 
-    Only the owner can update their recipe, and only if it's editable.
+    A recipe can only be updated if it's editable.
     Note: Recipe names cannot be changed as they are the primary identifier.
 
     Args:
         recipe_name: The recipe's unique name.
-        user_id: ID of the user making the update (must be owner).
+        user_id: ID of the user making the update.
         user_name: Name of the user making the update.
         description: New description (if updating).
         content: New YAML content (if updating).
@@ -280,9 +279,6 @@ def delete_recipe(recipe_name: str, user_id: str) -> bool:
 def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Dict[str, Any]]:
     """Toggle the pinned status of a recipe.
 
-    This is an admin-only operation - authorization should be checked
-    by the API layer before calling this function.
-
     Args:
         recipe_name: The recipe's unique name.
         pinned: New pinned status.
@@ -291,7 +287,8 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Dict[str, Any]]:
         The updated recipe dictionary if successful, None if not found.
 
     Raises:
-        ValueError: If the recipe is not pinnable (e.g., default recipes).
+        ValueError: If the recipe's pin status is not editable (e.g., default
+        recipes).
     """
     recipe = recipes_db.toggle_pin(recipe_name, pinned)
     if recipe is None:

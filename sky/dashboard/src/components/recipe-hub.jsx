@@ -84,7 +84,6 @@ function generateRecipeSlug(name) {
   return name;
 }
 
-
 // Recipe Card Component (for Pinned and My Recipes)
 function RecipeCard({ recipe }) {
   const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
@@ -144,7 +143,8 @@ function RecipeCard({ recipe }) {
 
             {/* Last updated info */}
             <div className="text-sm text-gray-500 truncate">
-              Updated by {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
+              Updated by{' '}
+              {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
               <span
                 className="border-b border-dotted border-gray-400 cursor-help"
                 title={new Date(recipe.updated_at * 1000).toLocaleString()}
@@ -160,13 +160,7 @@ function RecipeCard({ recipe }) {
 }
 
 // Template Row Component (for Pinned and My Recipes)
-function TemplateRow({
-  title,
-  icon: Icon,
-  recipes,
-  emptyMessage,
-  iconColor,
-}) {
+function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
   if (recipes.length === 0) {
     return (
       <div className="mb-6">

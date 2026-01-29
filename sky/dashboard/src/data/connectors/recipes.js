@@ -140,4 +140,3 @@ export async function togglePinRecipe(recipeName, pinned) {
     throw error;
   }
 }
-
