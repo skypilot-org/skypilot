@@ -770,69 +770,73 @@ def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     assert 'Did you mean:' not in stdout  # No fuzzy candidates
 
 
-def test_accelerator_memory_filtering(capfd, enable_all_clouds):
+# Parametrized test cases for accelerator memory filtering.
+# Each test case runs as a separate test for better parallelization with pytest-xdist.
+_ACCELERATOR_MEMORY_TEST_CASES = [
+    # (spec, expected_in_output, unexpected_in_output)
+    pytest.param(
+        {'accelerators': '16GB'},
+        ['T4'],  # T4 has 16GB memory
+        [],
+        id='exact_16GB'),
+    pytest.param(
+        {'accelerators': '32GB+'},
+        ['V100', 'A100'],  # V100 has 32GB, A100 has 40GB/80GB
+        ['T4'],  # T4 has 16GB
+        id='32GB_plus'),
+    pytest.param({'accelerators': ['32GB+']}, ['V100', 'A100'], ['T4'],
+                 id='32GB_plus_list'),
+    pytest.param({'accelerators': {
+        '32GB+': 1,
+        'T4': 1
+    }}, ['V100', 'A100', 'T4'], [],
+                 id='32GB_plus_and_T4_dict'),
+    pytest.param({'accelerators': ['32GB+', 'T4']}, ['V100', 'A100', 'T4'], [],
+                 id='32GB_plus_and_T4_list'),
+    pytest.param({'accelerators': ['32GB+', '16gb']}, ['V100', 'A100', 'T4'],
+                 [],
+                 id='32GB_plus_and_16gb'),
+    pytest.param(
+        {'accelerators': '16384MB'},  # 16GB in MB
+        ['T4'],
+        [],
+        id='16384MB'),
+]
+
+
+@pytest.mark.parametrize('spec,expected,unexpected',
+                         _ACCELERATOR_MEMORY_TEST_CASES)
+def test_accelerator_memory_filtering(capfd, enable_all_clouds, spec, expected,
+                                      unexpected):
     """Test filtering accelerators by memory requirements."""
-    # Test exact memory match
-    spec = {'accelerators': '16GB'}
     _test_resources_from_yaml(spec)
     stdout, _ = capfd.readouterr()
-    assert 'T4' in stdout  # T4 has 16GB memory
-
-    # Test memory with plus (greater than or equal)
-    spec = {'accelerators': '32GB+'}
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-    assert 'V100' in stdout  # V100 has 32GB memory
-    assert 'A100' in stdout  # A100 has 40GB/80GB memory
-    assert 'T4' not in stdout  # T4 has 16GB memory
-
-    spec = {'accelerators': ['32GB+']}
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-    assert 'V100' in stdout  # V100 has 32GB memory
-    assert 'A100' in stdout  # A100 has 40GB/80GB memory
-    assert 'T4' not in stdout  # T4 has 16GB memory
-
-    _test_resources_from_yaml({'accelerators': {'32GB+': 1, 'T4': 1}})
-    stdout, _ = capfd.readouterr()
-    assert 'V100' in stdout  # V100 has 32GB memory
-    assert 'A100' in stdout  # A100 has 40GB/80GB memory
-    assert 'T4' in stdout  # T4 has 16GB memory
-
-    _test_resources_from_yaml({'accelerators': ['32GB+', 'T4']})
-    stdout, _ = capfd.readouterr()
-    assert 'V100' in stdout  # V100 has 32GB memory
-    assert 'A100' in stdout  # A100 has 40GB/80GB memory
-    assert 'T4' in stdout  # T4 has 16GB memory
-
-    _test_resources_from_yaml({'accelerators': ['32GB+', '16gb']})
-    stdout, _ = capfd.readouterr()
-    assert 'V100' in stdout  # V100 has 32GB memory
-    assert 'A100' in stdout  # A100 has 40GB/80GB memory
-    assert 'T4' in stdout  # T4 has 16GB memory
-
-    # Test memory with different units
-    spec = {'accelerators': '16384MB'}  # 16GB in MB
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-    assert 'T4' in stdout
+    for exp in expected:
+        assert exp in stdout, f'Expected {exp} in output for spec {spec}'
+    for unexp in unexpected:
+        assert unexp not in stdout, f'Unexpected {unexp} in output for spec {spec}'
 
 
-def test_accelerator_manufacturer_filtering(capfd, enable_all_clouds):
+# Parametrized test cases for accelerator manufacturer filtering.
+_ACCELERATOR_MANUFACTURER_TEST_CASES = [
+    pytest.param({'accelerators': 'nvidia:16GB:1'}, ['T4'], [],
+                 id='nvidia_16GB'),
+    pytest.param({'accelerators': 'nvidia:32GB+'}, ['V100', 'A100'], ['T4'],
+                 id='nvidia_32GB_plus'),
+]
+
+
+@pytest.mark.parametrize('spec,expected,unexpected',
+                         _ACCELERATOR_MANUFACTURER_TEST_CASES)
+def test_accelerator_manufacturer_filtering(capfd, enable_all_clouds, spec,
+                                            expected, unexpected):
     """Test filtering accelerators by manufacturer."""
-    # Test NVIDIA GPUs
-    spec = {'accelerators': 'nvidia:16GB:1'}
     _test_resources_from_yaml(spec)
     stdout, _ = capfd.readouterr()
-    assert 'T4' in stdout
-
-    # Test with memory plus
-    spec = {'accelerators': 'nvidia:32GB+'}
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-    assert 'V100' in stdout
-    assert 'A100' in stdout
-    assert 'T4' not in stdout
+    for exp in expected:
+        assert exp in stdout, f'Expected {exp} in output for spec {spec}'
+    for unexp in unexpected:
+        assert unexp not in stdout, f'Unexpected {unexp} in output for spec {spec}'
 
 
 def test_accelerator_cloud_filtering(capfd, enable_all_clouds):
