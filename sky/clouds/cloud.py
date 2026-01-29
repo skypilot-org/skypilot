@@ -978,6 +978,21 @@ class Cloud:
         """Name of the cloud used in messages displayed to the user."""
         return cls.canonical_name()
 
+    # === Misc Failovers ===
+
+    @classmethod
+    def yield_cloud_specific_failover_overrides(cls,
+                                                region: Optional[str] = None
+                                               ) -> Iterable[Dict[str, Any]]:
+        """Some clouds may have configurations that require them to have
+        non-region/zone failovers. This method yields override keys for the
+        cluster config. Refer to the implementation for AWS for an example."""
+        del region  # unused
+        yield {}
+        return
+
+    # === End of Misc Failovers ===
+
     def __repr__(self):
         return self._REPR
 

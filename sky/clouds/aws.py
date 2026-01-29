@@ -9,8 +9,8 @@ import re
 import subprocess
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
-                    Tuple, TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, Tuple, TypeVar, Union)
 
 import colorama
 from typing_extensions import ParamSpec
@@ -1655,3 +1655,18 @@ class AWS(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def yield_cloud_specific_failover_overrides(cls,
+                                                region: Optional[str] = None
+                                               ) -> Iterable[Dict[str, Any]]:
+        vpc_names = skypilot_config.get_effective_region_config(
+            cloud='aws', region=region, keys=('vpc_names',), default_value=None)
+        if vpc_names:
+            if isinstance(vpc_names, str):
+                vpc_names = [vpc_names]
+            for vpc_name in vpc_names:
+                yield {'vpc_name': vpc_name}
+        else:
+            yield {}
+        return
