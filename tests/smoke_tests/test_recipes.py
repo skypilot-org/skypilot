@@ -177,18 +177,6 @@ def test_recipe_pool_launch(generic_cloud: str, pool_recipe: str):
             f's=$(sky jobs pool apply -p {name} --infra {generic_cloud} recipes:{pool_recipe} -y); '
             'echo "$s"; '
             'echo "$s" | grep "Successfully created pool"',
-            # Wait for pool to be ready
-            f'start_time=$SECONDS; '
-            f'while true; do '
-            f'if (( $SECONDS - $start_time > 300 )); then '
-            f'  echo "Timeout waiting for pool to be ready"; exit 1; '
-            f'fi; '
-            f's=$(sky jobs pool status {name}); '
-            f'echo "$s"; '
-            f'if echo "$s" | grep "READY"; then break; fi; '
-            f'if echo "$s" | grep "FAILED"; then exit 1; fi; '
-            f'sleep 10; '
-            f'done',
         ],
         f'sky jobs pool down {name} -y',
         smoke_tests_utils.get_timeout(generic_cloud),

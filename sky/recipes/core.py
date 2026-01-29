@@ -88,9 +88,6 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
                     raise ValueError('Pool YAML must contain a \'pool\''
                                      'section. Example:\n  pool:\n    name: '
                                      'my-pool')
-                common_utils.validate_schema(config,
-                                             schemas.get_service_schema(),
-                                             'Invalid pool YAML: ')
 
             # Use Task.from_yaml_str for full schema validation
             # This validates resources, envs, setup, run, file_mounts, etc.

@@ -188,7 +188,7 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-xl text-red-600">
-            Delete Template
+            Delete Recipe
           </DialogTitle>
           <DialogDescription>
             Are you sure you want to delete &quot;{template.name}&quot;? This
@@ -203,7 +203,7 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
           <Button
             onClick={handleDelete}
             disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700"
+            className="bg-red-600 hover:bg-red-700 text-white"
           >
             {isDeleting ? (
               <>
