@@ -3,6 +3,6 @@
     "uv venv --seed --python 3.11",
     "uv pip install -e \".[all]\" --prerelease=allow",
     "uv pip install -r requirements-dev.txt",
-    "cd sky/dashboard && npm install && npm run build"
+    "npm --prefix sky/dashboard install && npm --prefix sky/dashboard run build"
   ]
 }
