@@ -975,7 +975,9 @@ def write_cluster_config(
                 default_value=False),
             'ssh_proxy_command': ssh_proxy_command,
             # TODO (kyuds): for backwards compatibility. If `vpc_names`
-            # is set, this will be overridden. Remove after v0.12.0.
+            # is set, this will be overridden. We can remove this after
+            # v0.13.0 if all clouds that currently support `vpc_name`
+            # migrates to `vpc_names` (ie: gcp)
             'vpc_name': skypilot_config.get_effective_region_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
