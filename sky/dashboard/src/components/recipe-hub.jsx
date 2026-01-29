@@ -49,7 +49,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { LastUpdatedTimestamp, TimestampWithTooltip } from '@/components/utils';
+import {
+  LastUpdatedTimestamp,
+  TimestampWithTooltip,
+  NonCapitalizedTooltip,
+} from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
 import { getRecipes, createRecipe } from '@/data/connectors/recipes';
@@ -81,12 +85,13 @@ function UserName({ name, className = '' }) {
   if (isEmail) {
     const displayName = name.split('@')[0];
     return (
-      <span
-        className={`underline decoration-dotted cursor-default ${className}`}
-        title={name}
-      >
-        {displayName}
-      </span>
+      <NonCapitalizedTooltip content={name}>
+        <span
+          className={`border-b border-dotted border-gray-400 cursor-help ${className}`}
+        >
+          {displayName}
+        </span>
+      </NonCapitalizedTooltip>
     );
   }
 
