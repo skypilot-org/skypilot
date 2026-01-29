@@ -754,9 +754,19 @@ class Task:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
             task.set_service(service)
         elif pool is not None:
-            pool['pool'] = True
-            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
-            task.set_service(pool)
+            # When pool is a dict (from top-level pool: in YAML), wrap it
+            # properly The schema expects {'pool': {...}} structure, not
+            # {'workers': 1, 'pool': True}
+            if isinstance(pool, dict):
+                # pool is a dict like {'workers': 1, 'max_workers': 3}
+                # Wrap it as {'pool': {'workers': 1, 'max_workers': 3}}
+                pool_config_dict = {'pool': pool}
+            else:
+                # pool is a boolean True (shouldn't happen, but handle it)
+                pool_config_dict = {'pool': {}}
+            pool_spec = service_spec.SkyServiceSpec.from_yaml_config(
+                pool_config_dict)
+            task.set_service(pool_spec)
 
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:
