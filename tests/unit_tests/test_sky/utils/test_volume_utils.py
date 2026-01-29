@@ -289,3 +289,30 @@ class TestVolumeMount:
         assert 'test-volume' in str(exc_info.value)
         assert 'not ready' in str(exc_info.value)
         assert 'Error: Storage quota exceeded' in str(exc_info.value)
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_status_none(self, mock_get_volume):
+        """Test resolve with a volume where status is None."""
+        mock_volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='us-central1',
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': mock_volume_config,
+            'status': None,
+        }
+
+        volume_mount = volume.VolumeMount.resolve('/data', 'test-volume')
+
+        assert volume_mount.path == '/data'
+        assert volume_mount.volume_name == 'test-volume'
+        assert volume_mount.volume_config == mock_volume_config
+        assert volume_mount.is_ephemeral is False
