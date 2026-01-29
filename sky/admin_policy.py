@@ -55,6 +55,9 @@ class _UserRequestBody(pydantic.BaseModel):
     request_options: Optional[RequestOptions] = None
     at_client_side: bool = False
     user: str
+    # Client version information (server-side only)
+    client_api_version: Optional[int] = None
+    client_version: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -80,6 +83,12 @@ class UserRequest:
         user: User who made the request.
               Only available on the server side.
               This value is None if at_client_side is True.
+        client_api_version: The API version of the client making the request.
+              Only available on the server side (None at client-side).
+              Can be used to enforce minimum client versions.
+        client_version: The package version string of the client (e.g., "1.0.0"
+              or "1.0.0-dev0 (commit: abc1234)").
+              Only available on the server side (None at client-side).
     """
     task: 'sky.Task'
     skypilot_config: 'sky.Config'
@@ -87,6 +96,8 @@ class UserRequest:
     request_options: Optional['RequestOptions'] = None
     at_client_side: bool = False
     user: Optional['models.User'] = None
+    client_api_version: Optional[int] = None
+    client_version: Optional[str] = None
 
     def encode(self) -> str:
         return _UserRequestBody(
@@ -98,6 +109,8 @@ class UserRequest:
             at_client_side=self.at_client_side,
             user=(yaml_utils.dump_yaml_str(self.user.to_dict())
                   if self.user is not None else ''),
+            client_api_version=self.client_api_version,
+            client_version=self.client_version,
         ).model_dump_json()
 
     @classmethod
@@ -119,6 +132,8 @@ class UserRequest:
             request_options=user_request_body.request_options,
             at_client_side=user_request_body.at_client_side,
             user=user,
+            client_api_version=user_request_body.client_api_version,
+            client_version=user_request_body.client_version,
         )
 
 
