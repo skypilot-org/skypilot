@@ -61,6 +61,25 @@ def get_slurm_ssh_config() -> SSHConfig:
     return slurm_config
 
 
+def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
+    """Get the first identity file from SSH config, or None if not specified.
+
+    For Slurm clusters (user-controlled environments), IdentityFile is optional.
+    Users may rely on ssh-agent or default key locations (~/.ssh/id_rsa, etc.)
+    for authentication instead of explicitly specifying a key file.
+
+    Args:
+        ssh_config_dict: The SSH config dictionary from SSHConfig.lookup().
+
+    Returns:
+        The first identity file path if specified, None otherwise.
+    """
+    identity_files = ssh_config_dict.get('identityfile')
+    if identity_files:
+        return identity_files[0]
+    return None
+
+
 @annotations.lru_cache(scope='request')
 def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
     cache_key = f'slurm:nodes_info:{cluster}'
@@ -75,7 +94,7 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
@@ -279,7 +298,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
@@ -460,7 +479,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
             ssh_config_dict['hostname'],
             int(ssh_config_dict.get('port', 22)),
             ssh_config_dict['user'],
-            ssh_config_dict['identityfile'][0],
+            get_identity_file(ssh_config_dict),
             ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
             ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         )
@@ -508,7 +527,7 @@ def _get_slurm_node_info_list(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
-        slurm_config_dict['identityfile'][0],
+        get_identity_file(slurm_config_dict),
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
     )
@@ -656,7 +675,7 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             slurm_config_dict['hostname'],
             int(slurm_config_dict.get('port', 22)),
             slurm_config_dict['user'],
-            slurm_config_dict['identityfile'][0],
+            get_identity_file(slurm_config_dict),
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         )

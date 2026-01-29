@@ -210,6 +210,7 @@ class SSHCommandRunner(CommandRunner):
     disable_control_master: Optional[bool]
     port_forward_execute_remote_command: Optional[bool]
     enable_interactive_auth: bool
+    disable_identities_only: bool
 
     def __init__(
         self,
@@ -223,6 +224,7 @@ class SSHCommandRunner(CommandRunner):
         disable_control_master: Optional[bool] = ...,
         port_forward_execute_remote_command: Optional[bool] = ...,
         enable_interactive_auth: bool = ...,
+        disable_identities_only: bool = ...,
     ) -> None:
         ...
 
