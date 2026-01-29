@@ -6,6 +6,7 @@ import {
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
 import { applyEnhancements } from '@/plugins/dataEnhancement';
 
@@ -54,8 +55,55 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'user_yaml',
+  'entrypoint',
+  'is_job_group',
+  'execution',
+  'is_primary_in_job_group',
   'links',
 ];
+
+/**
+ * Compute the job group status based on primary tasks.
+ * For job groups with primary/auxiliary tasks, the job status is determined
+ * only by the primary tasks. If all primary tasks succeed, the job is
+ * considered successful even if auxiliary tasks were cancelled.
+ *
+ * Uses is_primary_in_job_group per task:
+ * - null: Non-job-group task (counts for status)
+ * - true: Primary task in job group (counts for status)
+ * - false: Auxiliary task in job group (does not count for status)
+ *
+ * @param {Array} tasks - Array of task objects with status and is_primary_in_job_group fields
+ * @returns {string} - The computed job group status
+ */
+export function computeJobGroupStatus(tasks) {
+  if (!tasks || tasks.length === 0) {
+    return null;
+  }
+
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
+
+  // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
+  for (const task of tasksForStatus) {
+    if (task.status !== 'SUCCEEDED') {
+      return task.status;
+    }
+  }
+  return 'SUCCEEDED';
+}
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -245,6 +293,10 @@ export async function getManagedJobs(options = {}) {
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
+        // JobGroup fields
+        is_job_group: job.is_job_group,
+        execution: job.execution,
+        is_primary_in_job_group: job.is_primary_in_job_group,
       };
     });
 
@@ -456,6 +508,7 @@ export async function getPoolStatus() {
 }
 
 // Hook for individual job details that reuses the main jobs cache
+// Returns all tasks for a given job_id (supports multi-task jobs)
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -469,19 +522,19 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Always get all jobs data (cache handles freshness automatically)
+        // Fetch the specific job by ID with all fields for complete data
         const allJobsData = await dashboardCache.get(getManagedJobs, [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
-        // Filter for the specific job client-side
-        const job = allJobsData?.jobs?.find(
-          (j) => String(j.id) === String(jobId)
-        );
+        // Filter for ALL tasks matching this job_id (supports multi-task jobs)
+        const matchingJobs =
+          allJobsData?.jobs?.filter((j) => String(j.id) === String(jobId)) ||
+          [];
 
-        if (job) {
+        if (matchingJobs.length > 0) {
           setJobData({
-            jobs: [job],
+            jobs: matchingJobs,
             controllerStopped: allJobsData.controllerStopped || false,
           });
         } else {
@@ -507,6 +560,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
 export async function streamManagedJobLogs({
   jobId,
+  task = null,
   controller = false,
   signal,
   onNewLog,
@@ -547,6 +601,7 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
+        task: task,
       };
 
       const response = await apiClient.fetchImmediate(
@@ -801,243 +856,4 @@ export async function downloadManagedJobLogs({
     console.error('Error downloading managed job logs:', error);
     showToast(`Error downloading managed job logs: ${error.message}`, 'error');
   }
-}
-
-// ============ useJobsData Hook ============
-
-/**
- * Hook for jobs data with pagination support.
- * If the pagination plugin is available, uses server-side pagination.
- * Otherwise, falls back to client-side pagination with getManagedJobs.
- *
- * With requires_early_init=True, the plugin is guaranteed to be loaded
- * before the first API call completes, so we just need a simple check.
- *
- * @param {Object} options - Hook options
- * @param {number} [options.refreshInterval] - Auto-refresh interval in ms
- * @param {Object} [options.sortConfig] - Sort configuration { key, direction }
- * @param {Array} [options.filters] - Array of filter objects
- * @param {Array} [options.statuses] - Array of status strings to filter by
- * @param {number} [options.initialPage=1] - Initial page number
- * @param {number} [options.initialLimit=10] - Initial page size/limit
- * @returns {Object} Jobs data with pagination state and actions
- */
-export function useJobsData(options = {}) {
-  const {
-    refreshInterval = null,
-    sortConfig = { key: null, direction: 'ascending' },
-    filters = [],
-    statuses = [],
-    initialPage = 1,
-    initialLimit = 10,
-  } = options;
-
-  // Convert sortConfig to API format
-  // Default to submitted_at desc (newest first) when no sort is specified
-  const sortBy = sortConfig.key || 'submitted_at';
-  const sortOrder = sortConfig.key
-    ? sortConfig.direction === 'ascending'
-      ? 'asc'
-      : 'desc'
-    : 'desc';
-
-  // Serialize filters for stable dependency comparison
-  const filtersKey = JSON.stringify(filters);
-  const statusesKey = JSON.stringify(statuses);
-
-  const [data, setData] = useState([]);
-  const [fullData, setFullData] = useState([]); // Full dataset for client-side filtering
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(initialPage);
-  const [limit, setLimit] = useState(initialLimit);
-  const [total, setTotal] = useState(0);
-  const [totalNoFilter, setTotalNoFilter] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasNext, setHasNext] = useState(false);
-  const [hasPrev, setHasPrev] = useState(false);
-  const [error, setError] = useState(null);
-  const [isServerPagination, setIsServerPagination] = useState(false);
-  const [controllerStopped, setControllerStopped] = useState(false);
-  const [statusCounts, setStatusCounts] = useState({});
-
-  // Reset to page 1 when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [filtersKey, statusesKey]);
-
-  /**
-   * Fetch jobs using server-side pagination (plugin path)
-   */
-  const fetchServerSide = useCallback(async () => {
-    console.log('[useJobsData] Using server-side pagination');
-    const pluginFetch = getJobsPaginationFetch();
-
-    const result = await dashboardCache.get(pluginFetch, [
-      {
-        page,
-        limit,
-        sortBy,
-        sortOrder,
-        filters,
-        statuses,
-      },
-    ]);
-
-    // Handle controller stopped
-    if (result.controllerStopped) {
-      setControllerStopped(true);
-      setData([]);
-      setFullData([]);
-      setTotal(0);
-      setTotalPages(0);
-      return;
-    }
-
-    const resultTotal = result.total || 0;
-    const resultTotalNoFilter = result.totalNoFilter || resultTotal;
-    const resultTotalPages = result.totalPages || result.total_pages || 1;
-    const resultHasNext = result.hasNext || result.has_next || false;
-    const resultHasPrev = result.hasPrev || result.has_prev || false;
-    const resultData = result.items || result.data || [];
-
-    setData(resultData);
-    setFullData(resultData);
-    setTotal(resultTotal);
-    setTotalNoFilter(resultTotalNoFilter);
-    setTotalPages(resultTotalPages);
-    setHasNext(resultHasNext);
-    setHasPrev(resultHasPrev);
-    setIsServerPagination(true);
-    setControllerStopped(false);
-    setStatusCounts(result.statusCounts || {});
-
-    // Prefetch next page in background if there is one
-    if (resultHasNext) {
-      const nextPageOptions = {
-        page: page + 1,
-        limit,
-        sortBy,
-        sortOrder,
-        filters,
-        statuses,
-      };
-      dashboardCache
-        .get(pluginFetch, [nextPageOptions])
-        .then(() => console.log('[useJobsData] Prefetched page', page + 1))
-        .catch((err) => console.warn('[useJobsData] Prefetch failed:', err));
-    }
-  }, [page, limit, sortBy, sortOrder, filters, statuses]);
-
-  /**
-   * Fetch jobs using client-side pagination (default path)
-   */
-  const fetchClientSide = useCallback(async () => {
-    console.log('[useJobsData] Using client-side pagination');
-
-    const response = await dashboardCache.get(getManagedJobs, [
-      { allUsers: true },
-    ]);
-
-    // Handle controller stopped
-    if (response.controllerStopped) {
-      setControllerStopped(true);
-      setData([]);
-      setFullData([]);
-      setTotal(0);
-      setTotalPages(0);
-      return;
-    }
-
-    const allJobs = response.jobs || [];
-
-    // Client-side pagination
-    const clientTotal = allJobs.length;
-    const clientTotalPages = Math.ceil(clientTotal / limit) || 1;
-    const startIndex = (page - 1) * limit;
-    const paginatedData = allJobs.slice(startIndex, startIndex + limit);
-
-    setData(paginatedData);
-    setFullData(allJobs);
-    setTotal(clientTotal);
-    setTotalNoFilter(response.totalNoFilter || clientTotal);
-    setTotalPages(clientTotalPages);
-    setHasNext(page < clientTotalPages);
-    setHasPrev(page > 1);
-    setIsServerPagination(false);
-    setControllerStopped(false);
-    setStatusCounts(response.statusCounts || {});
-  }, [page, limit]);
-
-  /**
-   * Main fetch function - chooses server or client path
-   */
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      if (isJobsPaginationPluginAvailable()) {
-        await fetchServerSide();
-      } else {
-        await fetchClientSide();
-      }
-    } catch (fetchError) {
-      console.error('[useJobsData] Error fetching jobs:', fetchError);
-      setError(fetchError);
-      setData([]);
-      setFullData([]);
-    }
-
-    setLoading(false);
-  }, [fetchServerSide, fetchClientSide]);
-
-  // Fetch data on mount and when dependencies change
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  // Auto-refresh
-  useEffect(() => {
-    if (!refreshInterval) return;
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        fetchData();
-      }
-    }, refreshInterval);
-    return () => clearInterval(interval);
-  }, [refreshInterval, fetchData]);
-
-  // Handle limit change - reset to page 1
-  const handleSetLimit = useCallback((newLimit) => {
-    setLimit(newLimit);
-    setPage(1);
-  }, []);
-
-  return {
-    // Data - current page slice (paginated)
-    data,
-    // allData - full dataset for client-side filtering (in server mode, same as data)
-    allData: fullData,
-    total,
-    totalNoFilter,
-    statusCounts,
-
-    // Pagination state
-    page,
-    limit,
-    totalPages,
-    hasNext,
-    hasPrev,
-
-    // Pagination actions
-    setPage,
-    setLimit: handleSetLimit,
-
-    // Other
-    loading,
-    error,
-    refresh: fetchData,
-    isServerPagination,
-    controllerStopped,
-  };
 }

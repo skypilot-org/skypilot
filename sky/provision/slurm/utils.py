@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import slurm
@@ -21,6 +22,7 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
+SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -41,6 +43,11 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     if not match:
         return None, 0
     return match.group('type'), int(match.group('count'))
+
+
+def pyxis_container_name(cluster_name_on_cloud: str) -> str:
+    """Get the pyxis container name that gets passed to --container-name."""
+    return cluster_name_on_cloud
 
 
 # SSH host key filename for sshd.
@@ -491,13 +498,10 @@ def _get_slurm_node_info_list(
     # can raise FileNotFoundError if config file does not exist.
     slurm_config = get_slurm_ssh_config()
     if slurm_cluster_name is None:
-        slurm_cluster_names = get_all_slurm_cluster_names()
-        if slurm_cluster_names:
-            slurm_cluster_name = slurm_cluster_names[0]
-    if slurm_cluster_name is None:
-        raise ValueError(
-            f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} '
-            f'configuration.')
+        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
+        if not slurm_cluster_names:
+            return []
+        slurm_cluster_name = slurm_cluster_names[0]
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
@@ -590,7 +594,7 @@ def slurm_node_info(
     try:
         node_list = _get_slurm_node_info_list(
             slurm_cluster_name=slurm_cluster_name)
-    except (RuntimeError, exceptions.NotSupportedError) as e:
+    except (FileNotFoundError, RuntimeError, exceptions.NotSupportedError) as e:
         logger.debug(f'Could not retrieve Slurm node info: {e}')
         return []
     return node_list
@@ -697,6 +701,8 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
+    cluster_name_on_cloud: str,
+    is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
 
@@ -707,6 +713,8 @@ def srun_sshd_command(
         job_id: The Slurm job ID
         target_node: The target compute node hostname
         unix_user: The Unix user for the job
+        cluster_name_on_cloud: SkyPilot cluster name on Slurm side.
+        is_container_image: Whether the cluster is on containers.
 
     Returns:
         List of command arguments to be extended to ssh base command
@@ -714,6 +722,59 @@ def srun_sshd_command(
     # We use ~username to ensure we use the real home of the user ssh'ing in,
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
+
+    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
+    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
+    # to a file and sourcing it.
+
+    if is_container_image:
+        # Dropbear + socat bridge for container mode.
+        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
+        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
+        # provides pipes. socat bridges stdin/stdout to a TCP socket.
+        ssh_bootstrap_cmd = (
+            # Find dropbear in PATH
+            'DROPBEAR=$(command -v dropbear); '
+            'if [ -z "$DROPBEAR" ]; then '
+            'echo "dropbear not found" >&2; exit 1; fi; '
+            # Find a free port in the ephemeral range
+            'while :; do '
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
+            'done; '
+            # Start dropbear and wait for it to bind
+            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'for i in $(seq 1 50); do '
+            'ss -tlnp 2>/dev/null | grep -q ":$PORT.*pid=$DROPBEAR_PID" '
+            '&& break; sleep 0.1; done; '
+            'if ! ss -tlnp 2>/dev/null | '
+            'grep -q ":$PORT.*pid=$DROPBEAR_PID"; then '
+            'echo "Error: Timed out waiting for dropbear to start." >&2; '
+            'exit 1; fi; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
+        return shlex.join([
+            'srun',
+            '--overlap',
+            '--quiet',
+            '--unbuffered',
+            '--jobid',
+            job_id,
+            '--nodes=1',
+            '--ntasks=1',
+            '--ntasks-per-node=1',
+            '-w',
+            target_node,
+            '--container-remap-root',
+            f'--container-name='
+            f'{pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash',
+            '-c',
+            ssh_bootstrap_cmd,
+        ])
+
+    # Non-container: OpenSSH sshd
     return shlex.join([
         'srun',
         '--quiet',

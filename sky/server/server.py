@@ -677,7 +677,10 @@ app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # auth user.
 app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
-if str(enable_basic_auth).lower() == 'true':
+disable_basic_auth_middleware = os.environ.get(
+    constants.SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE, 'false')
+if (str(enable_basic_auth).lower() == 'true' and
+        str(disable_basic_auth_middleware).lower() != 'true'):
     app.add_middleware(BasicAuthMiddleware)
 # Bearer token middleware should always be present to handle service account
 # authentication
@@ -1032,7 +1035,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
             dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
         await asyncio.to_thread(validate_dag, dag)
@@ -1202,6 +1205,16 @@ async def unzip_file(zip_file_path: pathlib.Path,
                     original_path = os.path.normpath(member.filename)
                     new_path = client_file_mounts_dir / original_path.lstrip(
                         '/')
+
+                    # Security check: ensure extracted path stays within target
+                    # directory to prevent Zip Slip attacks (path traversal via
+                    # malicious "../" sequences in archive member names).
+                    resolved_path = new_path.resolve()
+                    if not _is_relative_to(resolved_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(
+                            f'Zip member {member.filename!r} would extract '
+                            'outside target directory. Aborted.')
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
@@ -2100,7 +2113,8 @@ async def _get_cluster_and_validate(
         cluster_records = await context_utils.to_thread_with_executor(
             thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
-    if cluster_record['status'] not in (status_lib.ClusterStatus.UP,
+    if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
+                                        status_lib.ClusterStatus.UP,
                                         status_lib.ClusterStatus.AUTOSTOPPING):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Cluster {cluster_name} is not running')
@@ -2366,9 +2380,17 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
+    is_container_image = handle.launched_resources.extract_docker_image(
+    ) is not None
     ssh_cmd += [
         shlex.quote(
-            slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+            slurm_utils.srun_sshd_command(
+                job_id,
+                target_node,
+                login_node_user,
+                handle.cluster_name_on_cloud,
+                is_container_image,
+            ))
     ]
 
     proc = await asyncio.create_subprocess_shell(
@@ -2708,6 +2730,10 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Pre-load plugin RBAC rules before initializing permission service.
+    # This ensures plugin RBAC rules are available when policies are created.
+    logger.info('Pre-loading plugin RBAC rules')
+    plugins.load_plugin_rbac_rules()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')

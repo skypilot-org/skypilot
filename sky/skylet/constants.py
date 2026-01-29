@@ -144,11 +144,11 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '31'  # jobs pagination plugin
+SKYLET_VERSION = '33'  # Add better support for launching multiple jobs at once.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 5  # add wait_for param to set_autostop
+SKYLET_LIB_VERSION = 6  # Add better support for launching many jobs at once.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
@@ -234,7 +234,9 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    'fi;'
+    'fi;')
+
+UV_INSTALLATION_COMMANDS = (
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate python environment for SkyPilot dependencies.
@@ -252,7 +254,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
 
 _sky_version = str(version.parse(sky.__version__))
@@ -476,6 +478,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'remote_identity'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -569,6 +572,8 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
 SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
+SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE = (
+    'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE')
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.
@@ -602,10 +607,26 @@ TIME_UNITS = {
     'w': 7 * 24 * 60,
 }
 
-TIME_PATTERN: str = ('^[0-9]+('
-                     f'{"|".join([unit.lower() for unit in TIME_UNITS])}|'
-                     f'{"|".join([unit.upper() for unit in TIME_UNITS])}|'
-                     ')?$')
+# Time units for seconds-based duration parsing (for termination_delay, etc.)
+# This includes 's' for seconds, which is not in TIME_UNITS (minutes-based).
+TIME_UNITS_SECONDS = {
+    's': 1,
+    'm': 60,
+    'h': 3600,
+    'd': 86400,
+    'w': 604800,
+}
+
+
+def _make_time_pattern(units: dict) -> str:
+    """Create a regex pattern for time duration strings."""
+    unit_pattern = '|'.join([unit.lower() for unit in units] +
+                            [unit.upper() for unit in units])
+    return f'^[0-9]+({unit_pattern})?$'
+
+
+TIME_PATTERN: str = _make_time_pattern(TIME_UNITS)
+TIME_PATTERN_SECONDS: str = _make_time_pattern(TIME_UNITS_SECONDS)
 
 MEMORY_SIZE_UNITS = {
     'kb': 2**10,

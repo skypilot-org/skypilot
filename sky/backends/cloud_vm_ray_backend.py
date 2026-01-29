@@ -44,14 +44,17 @@ from sky.backends import task_codegen
 from sky.backends import wheel_utils
 from sky.clouds import cloud as sky_cloud
 from sky.clouds.utils import gcp_utils
+from sky.dag import DEFAULT_EXECUTION
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.provision.slurm import utils as slurm_utils
 from sky.serve import constants as serve_constants
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
@@ -184,6 +187,7 @@ _MAX_RAY_UP_RETRY = 5
 _MAX_GET_ZONE_RETRY = 3
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
+_JOB_IDS_PATTERN = re.compile(r'Job IDs: ([0-9,]+)')
 _LOG_DIR_PATTERN = re.compile(r'Log Dir: ([^ ]+)')
 
 # Path to the monkey-patched ray up script.
@@ -2673,6 +2677,13 @@ class SkyletClient:
     ) -> 'jobsv1_pb2.AddJobResponse':
         return self._jobs_stub.AddJob(request, timeout=timeout)
 
+    def set_job_info_without_job_id(
+        self,
+        request: 'jobsv1_pb2.SetJobInfoWithoutJobIdRequest',
+        timeout: Optional[float] = constants.SKYLET_GRPC_TIMEOUT_SECONDS
+    ) -> 'jobsv1_pb2.SetJobInfoWithoutJobIdResponse':
+        return self._jobs_stub.SetJobInfoWithoutJobId(request, timeout=timeout)
+
     def queue_job(
         self,
         request: 'jobsv1_pb2.QueueJobRequest',
@@ -3072,6 +3083,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             f'{cluster_name!r}: {", ".join(failure_details)}'
                             f'{colorama.Style.RESET_ALL}')
 
+    def check_skylet_running(self, handle: CloudVmRayResourceHandle):
+        # For backward compatibility and robustness of skylet, it is checked
+        # and restarted if necessary.
+        logger.debug('Checking if skylet is running on the head node.')
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Preparing SkyPilot runtime')):
+            # We need to source bashrc for skylet to make sure the autostop
+            # event can access the path to the cloud CLIs.
+            self.run_on_head(handle,
+                             instance_setup.MAYBE_SKYLET_RESTART_CMD,
+                             source_bashrc=True)
+
     def _locked_provision(
         self,
         lock_id: str,
@@ -3326,14 +3349,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             # For backward compatibility and robustness of skylet, it is checked
             # and restarted if necessary.
-            logger.debug('Checking if skylet is running on the head node.')
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message('Preparing SkyPilot runtime')):
-                # We need to source bashrc for skylet to make sure the autostop
-                # event can access the path to the cloud CLIs.
-                self.run_on_head(handle,
-                                 instance_setup.MAYBE_SKYLET_RESTART_CMD,
-                                 source_bashrc=True)
+            self.check_skylet_running(handle)
 
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
@@ -3800,10 +3816,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # We choose to sync code + exec, because the alternative of
                 # 'ray submit' may not work as it may use system python
                 # (python2) to execute the script. Happens for AWS.
-                head_runner.rsync(source=fp.name,
-                                  target=script_path,
-                                  up=True,
-                                  stream_logs=False)
+                head_runner.rsync_driver(source=fp.name,
+                                         target=script_path,
+                                         up=True,
+                                         stream_logs=False)
 
         mkdir_code = f'mkdir -p {remote_log_dir} && touch {remote_log_path}'
         encoded_script = shlex.quote(codegen)
@@ -3852,20 +3868,33 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     for task_id, task in enumerate(managed_job_dag.tasks):
                         resources_str = backend_utils.get_task_resources_str(
                             task, is_managed_job=True)
-                        managed_job_tasks.append(
-                            jobsv1_pb2.ManagedJobTask(
-                                task_id=task_id,
-                                name=task.name,
-                                resources_str=resources_str,
-                                metadata_json=task.metadata_json))
+                        managed_job_task = jobsv1_pb2.ManagedJobTask(
+                            task_id=task_id,
+                            name=task.name,
+                            resources_str=resources_str,
+                            metadata_json=task.metadata_json)
+                        # Only set is_primary_in_job_group for job groups
+                        if managed_job_dag.is_job_group():
+                            # If primary_task_names is None, all tasks are
+                            # primary
+                            managed_job_task.is_primary_in_job_group = (
+                                managed_job_dag.primary_tasks is None or
+                                task.name in managed_job_dag.primary_tasks)
+                        managed_job_tasks.append(managed_job_task)
 
+                    # Execution mode: 'parallel' for job groups, 'serial' for
+                    # pipelines and single jobs
+                    execution = (managed_job_dag.execution.value
+                                 if managed_job_dag.execution else
+                                 DEFAULT_EXECUTION.value)
                     managed_job_info = jobsv1_pb2.ManagedJobInfo(
                         name=managed_job_dag.name,
                         pool=managed_job_dag.pool,
                         workspace=workspace,
                         entrypoint=entrypoint,
                         tasks=managed_job_tasks,
-                        user_id=managed_job_user_id)
+                        user_id=managed_job_user_id,
+                        execution=execution)
 
                 if backend_utils.is_command_length_over_limit(codegen):
                     _dump_code_to_file(codegen)
@@ -3893,29 +3922,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
 
-            def _maybe_add_managed_job_code(job_submit_cmd: str) -> str:
-                if managed_job_dag is not None:
-                    # Add the managed job to job queue database.
-                    managed_job_codegen = managed_jobs.ManagedJobCodeGen()
-                    managed_job_code = managed_job_codegen.set_pending(
-                        job_id,
-                        managed_job_dag,
-                        skypilot_config.get_active_workspace(
-                            force_user_workspace=True),
-                        entrypoint=common_utils.get_current_command(),
-                        user_hash=managed_job_user_id)
-                    # Set the managed job to PENDING state to make sure that
-                    # this managed job appears in the `sky jobs queue`, even
-                    # if it needs to wait to be submitted.
-                    # We cannot set the managed job to PENDING state in the
-                    # job template (jobs-controller.yaml.j2), as it may need
-                    # to wait for the run commands to be scheduled on the job
-                    # controller in high-load cases.
-                    job_submit_cmd += ' && ' + managed_job_code
-                return job_submit_cmd
-
-            job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
-
             # For Slurm, run in background so that SSH returns immediately.
             # This is needed because we add the wait_for_job code above which
             # makes the command block until the job completes.
@@ -3940,7 +3946,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Output: {output}')
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
-                job_submit_cmd = _maybe_add_managed_job_code(job_submit_cmd)
                 # See comment above for why run_in_background=is_slurm.
                 returncode, stdout, stderr = self.run_on_head(
                     handle,
@@ -4025,6 +4030,97 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 raise ValueError(f'Failed to parse job id: {result_str}; '
                                  f'Returncode: {returncode}') from e
         return job_id, log_dir
+
+    def set_job_info_without_job_id(
+            self,
+            handle: CloudVmRayResourceHandle,
+            name: str,
+            workspace: str,
+            entrypoint: str,
+            pool: Optional[str],
+            pool_hash: Optional[str],
+            user_hash: Optional[str],
+            task_ids: List[int],
+            task_names: List[str],
+            resources_str: str,
+            metadata_jsons: List[str],
+            is_primary_in_job_groups: List[bool],
+            num_jobs: int = 1,
+            execution: str = DEFAULT_EXECUTION.value) -> List[int]:
+        """Set job info without creating entries in the jobs table.
+
+        This creates entries in job_info_table and spot_table without creating
+        entries in the jobs table, which prevents autostop from being blocked
+        by jobs stuck in INIT status.
+        """
+        use_legacy = not handle.is_grpc_enabled_with_flag
+
+        if not use_legacy:
+            try:
+                request = jobsv1_pb2.SetJobInfoWithoutJobIdRequest(
+                    name=name,
+                    workspace=workspace,
+                    entrypoint=entrypoint,
+                    pool=pool,
+                    pool_hash=pool_hash,
+                    user_hash=user_hash,
+                    task_ids=task_ids,
+                    task_names=task_names,
+                    resources_str=resources_str,
+                    metadata_jsons=metadata_jsons,
+                    num_jobs=num_jobs,
+                    execution=execution,
+                    is_primary_in_job_groups=is_primary_in_job_groups)
+                response = backend_utils.invoke_skylet_with_retries(
+                    lambda: SkyletClient(handle.get_grpc_channel()
+                                        ).set_job_info_without_job_id(request))
+                return list(response.job_ids)
+            except exceptions.SkyletMethodNotImplementedError:
+                use_legacy = True
+
+        if use_legacy:
+            code = job_lib.JobLibCodeGen.set_job_info_without_job_id(
+                name=name,
+                workspace=workspace,
+                entrypoint=entrypoint,
+                pool=pool,
+                pool_hash=pool_hash,
+                user_hash=user_hash,
+                task_ids=task_ids,
+                task_names=task_names,
+                resources_str=resources_str,
+                metadata_jsons=metadata_jsons,
+                is_primary_in_job_groups=is_primary_in_job_groups,
+                num_jobs=num_jobs,
+                execution=execution)
+            returncode, result_str, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            backend_utils.check_stale_runtime_on_remote(returncode, stderr,
+                                                        handle.cluster_name)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to fetch job id.',
+                                               stderr)
+            try:
+                # Parse job IDs from output
+                job_ids_match = _JOB_IDS_PATTERN.search(result_str)
+                if job_ids_match:
+                    job_ids = [
+                        int(x.strip())
+                        for x in job_ids_match.group(1).split(',')
+                    ]
+                    return job_ids
+                else:
+                    raise ValueError(
+                        f'Failed to parse job ids from: {result_str}')
+            except ValueError as e:
+                logger.error(stderr)
+                raise ValueError(f'Failed to parse job id: {result_str}; '
+                                 f'Returncode: {returncode}') from e
+        return []
 
     def _execute(
         self,
@@ -4356,7 +4452,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             (runner, local_log_dir, remote_log_dir) = args
             try:
                 os.makedirs(os.path.expanduser(local_log_dir), exist_ok=True)
-                runner.rsync(
+                runner.rsync_driver(
                     # Require a `/` at the end to make sure the parent dir
                     # are not created locally. We do not add additional '*' as
                     # kubernetes's rsync does not work with an ending '*'.
@@ -4511,12 +4607,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               job_name: Optional[str] = None,
                               controller: bool = False,
                               follow: bool = True,
-                              tail: Optional[int] = None) -> int:
+                              tail: Optional[int] = None,
+                              task: Optional[Union[str, int]] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail)
+            job_name, job_id, follow, controller, tail, task)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4973,7 +5070,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
             elif ('TPU must be specified.' not in stderr and
-                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
+                  provision_constants.ERROR_NO_NODES_LAUNCHED not in stderr):
                 raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
@@ -5382,7 +5479,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
-        return head_runner.run(
+        return head_runner.run_driver(
             cmd,
             port_forward=port_forward,
             log_path=log_path,
@@ -6065,7 +6162,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             slurm_job_id = head_instance.tags.get('job_id')
             assert (slurm_job_id
                     is not None), ('job_id tag not found in head instance')
-            return task_codegen.SlurmCodeGen(slurm_job_id=slurm_job_id)
+            container_image = handle.launched_resources.extract_docker_image()
+            container_name = None
+            if container_image is not None:
+                container_name = slurm_utils.pyxis_container_name(
+                    handle.cluster_name_on_cloud)
+
+            return task_codegen.SlurmCodeGen(
+                slurm_job_id,
+                container_name,
+            )
         else:
             return task_codegen.RayCodeGen()
 

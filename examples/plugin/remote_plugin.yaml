@@ -1,0 +1,5 @@
+# Plugins specified here will be uploaded to remote controllers.
+# These plugins will be available on both the API server (if also in plugins.yaml)
+# and on remote controllers (jobs controller, serve controller).
+plugins:
+- class: example_plugin.ExamplePatchPlugin

@@ -917,6 +917,7 @@ available_node_types:
                   echo "Waiting for curl package to be installed..."
                 done
                 {{ conda_installation_commands }}
+                {{ uv_installation_commands }}
                 {{ ray_installation_commands }}
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
@@ -1177,10 +1178,15 @@ available_node_types:
               {% if k8s_efa_count is not none %}
               vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
-            {% if k8s_resource_key is not none %}
+            {% if k8s_resource_key is not none or k8s_cpu_limit is defined %}
             limits:
-              # Limits need to be defined for GPU/TPU/EFA requests
+              {% if k8s_cpu_limit is defined %}
+              # CPU/Memory limits set via set_pod_resource_limits config
+              cpu: {{k8s_cpu_limit}}
+              memory: {{k8s_memory_limit}}G
+              {% endif %}
               {% if k8s_resource_key is not none %}
+              # Limits need to be defined for GPU/TPU/EFA requests
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
               {% if k8s_network_type == 'coreweave' %}
