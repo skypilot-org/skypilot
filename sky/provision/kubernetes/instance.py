@@ -1460,12 +1460,37 @@ def _delete_services(name_prefix: str,
             resource_name=service_name)
 
 
+def _delete_cluster_services(cluster_name: str, namespace: str,
+                             context: Optional[str]) -> None:
+    """Delete all services associated with a cluster using label selector.
+
+    This is a fallback cleanup mechanism that works even when pods have been
+    deleted externally. Services are identified by the skypilot-cluster-name
+    label.
+
+    Args:
+        cluster_name: The cluster name used in the skypilot-cluster-name label
+        namespace: Kubernetes namespace
+        context: Kubernetes context
+    """
+    label_selector = f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}'
+    try:
+        kubernetes.core_api(context).delete_collection_namespaced_service(
+            namespace,
+            label_selector=label_selector,
+            _request_timeout=config_lib.DELETION_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        logger.warning(f'Failed to cleanup services for cluster '
+                       f'{cluster_name}: {e}')
+
+
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
                     is_head: bool = False) -> None:
     """Terminate a pod and its associated services."""
-    logger.debug('terminate_instances: calling delete_namespaced_pod')
+    logger.debug(f'terminate_instances: namespace: {namespace}, context: '
+                 f'{context}, pod_name: {pod_name}, is_head: {is_head}')
 
     if is_head:
         # Delete services for the head pod
@@ -1551,6 +1576,33 @@ def terminate_instances(
     # Run pod termination in parallel
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
                                      _NUM_THREADS)
+
+    if not worker_only:
+        # Cleanup all services by label selector as a fallback.
+        # This handles the case where pods were deleted externally.
+        # Only do this when terminating the entire cluster, not when
+        # terminating workers only (head services should remain).
+        _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+
+
+def cleanup_cluster_resources(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+) -> None:
+    """Cleanup Kubernetes resources for a cluster.
+
+    This function is called during post-teardown cleanup to ensure all cluster
+    resources are deleted even when pods were deleted externally. It uses label
+    selectors to find and delete resources, making it resilient to external
+    deletions.
+
+    Args:
+        cluster_name_on_cloud: The cluster name on cloud
+        provider_config: Provider configuration dictionary
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    _delete_cluster_services(cluster_name_on_cloud, namespace, context)
 
 
 def get_cluster_info(

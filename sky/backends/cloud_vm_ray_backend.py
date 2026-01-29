@@ -5184,6 +5184,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     else:
                         raise
 
+                # Clean up all cluster resources (e.g., Kubernetes services).
+                # This is a no-op for most clouds, but Kubernetes needs it to
+                # clean up orphaned services when pods are deleted externally.
+                try:
+                    provision_lib.cleanup_cluster_resources(
+                        repr(cloud), cluster_name_on_cloud, config['provider'])
+                except Exception as e:  # pylint: disable=broad-except
+                    if purge:
+                        msg = common_utils.format_exception(e, use_bracket=True)
+                        logger.warning(
+                            f'Failed to cleanup cluster resources. Skipping '
+                            f'since purge is set. Details: {msg}')
+                    else:
+                        raise
+
                 if ports_cleaned_up and custom_multi_network_cleaned_up:
                     try:
                         self.remove_cluster_config(handle)
