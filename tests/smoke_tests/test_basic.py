@@ -27,7 +27,7 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import Generator
+from typing import Generator, Optional
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -2172,16 +2172,21 @@ def test_cancel_logs_request(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_runpod
 @pytest.mark.no_azure
-def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+@pytest.mark.parametrize('image_id', [None, 'docker:ubuntu:24.04'])
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str,
+                                               image_id: Optional[str]):
     """Test Kubernetes/Slurm SSH proxy connection.
     """
     cluster_name = smoke_tests_utils.get_cluster_name()
+    image_id_arg = ''
+    if image_id:
+        image_id_arg = f'--image-id {image_id}'
 
     test = smoke_tests_utils.Test(
         'kubernetes_ssh_proxy_connection',
         [
             # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
-            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {image_id_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
             # Run an SSH command on the cluster.
             f'ssh {cluster_name} echo "SSH command executed"',
         ],

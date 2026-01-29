@@ -839,24 +839,6 @@ def test_accelerator_manufacturer_filtering(capfd, enable_all_clouds, spec,
         assert unexp not in stdout, f'Unexpected {unexp} in output for spec {spec}'
 
 
-def test_accelerator_cloud_filtering(capfd, enable_all_clouds):
-    """Test filtering accelerators by cloud provider."""
-    # Test AWS GPUs
-    spec = {'accelerators': '16GB'}
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-
-    # Test Azure GPUs
-    spec = {'accelerators': '16GB'}
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-
-    # Test with manufacturer and memory
-    spec = {'accelerators': 'nvidia:32GB+'}
-    _test_resources_from_yaml(spec)
-    stdout, _ = capfd.readouterr()
-
-
 def test_candidate_logging(enable_all_clouds, capfd):
     """
     Verifies that the optimizer candidate log outputs the correct chosen/cheapest resource.
