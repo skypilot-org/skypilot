@@ -144,11 +144,11 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '32'  # new fields in jobs/managed jobs service for job groups
+SKYLET_VERSION = '33'  # Add better support for launching multiple jobs at once.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 5  # add wait_for param to set_autostop
+SKYLET_LIB_VERSION = 6  # Add better support for launching many jobs at once.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
@@ -572,6 +572,8 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
 SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
+SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE = (
+    'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE')
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.

@@ -833,3 +833,30 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  # Test cases for SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE environment variable
+  - it: should set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is true
+    set:
+      auth.disableBasicAuthMiddleware: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+            value: "true"
+
+  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is false
+    set:
+      auth.disableBasicAuthMiddleware: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+
+  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE

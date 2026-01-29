@@ -27,7 +27,7 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import Generator
+from typing import Generator, Optional
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -224,7 +224,6 @@ def test_minimal_with_git_workdir(generic_cloud: str):
 
 
 @pytest.mark.no_runpod
-@pytest.mark.no_slurm  # Slurm does not support containers yet
 def test_minimal_with_git_workdir_docker(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -850,7 +849,22 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Note: We retry this command because the background status refresh
+            # daemon may cause lock contention, resulting in cached status being
+            # returned instead of the expected warning message.
+            (f'start_time=$SECONDS; '
+             f'while true; do '
+             f'if (( $SECONDS - $start_time > 120 )); then '
+             f'  echo "Timeout after 120 seconds waiting for Failed getting cluster status message"; exit 1; '
+             f'fi; '
+             f's=$(sky status -r {name}); '
+             f'echo "$s"; '
+             f'if echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."; then '
+             f'  echo "Got expected warning message"; break; '
+             f'fi; '
+             f'echo "Retrying sky status -r in 10 seconds..."; '
+             f'sleep 10; '
+             f'done'),
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
@@ -1129,8 +1143,10 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
-            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
-                                                                name=name))
+            job_ids, handle = sky.stream_and_get(
+                sky.jobs.launch(task, name=name))
+            assert len(job_ids) == 1
+            job_id = job_ids[0]
             assert handle is not None
             # Check the job status from the dashboard
             queue_request_id = (
@@ -2156,16 +2172,21 @@ def test_cancel_logs_request(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_runpod
 @pytest.mark.no_azure
-def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+@pytest.mark.parametrize('image_id', [None, 'docker:ubuntu:24.04'])
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str,
+                                               image_id: Optional[str]):
     """Test Kubernetes/Slurm SSH proxy connection.
     """
     cluster_name = smoke_tests_utils.get_cluster_name()
+    image_id_arg = ''
+    if image_id:
+        image_id_arg = f'--image-id {image_id}'
 
     test = smoke_tests_utils.Test(
         'kubernetes_ssh_proxy_connection',
         [
             # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
-            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {image_id_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
             # Run an SSH command on the cluster.
             f'ssh {cluster_name} echo "SSH command executed"',
         ],

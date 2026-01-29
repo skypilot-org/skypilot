@@ -8,6 +8,7 @@ from sky.skylet import constants as skylet_constants
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
+JOBS_CONTROLLER_PROVISION_TEMPLATE = 'jobs-controller-provision.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
 JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 

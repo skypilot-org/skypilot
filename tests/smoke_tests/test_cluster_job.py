@@ -99,7 +99,6 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -174,9 +173,9 @@ def test_lambda_job_queue():
         'lambda_job_queue',
         [
             f'sky launch -y -c {name} {smoke_tests_utils.LAMBDA_TYPE} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 --gpus A10:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 --gpus A10:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 --gpus A10:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-1 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
@@ -456,8 +455,6 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_shadeform  # Doesn't support Shadeform for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
-# TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -469,6 +466,55 @@ def test_docker_preinstalled_package(generic_cloud: str):
             f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
+    """Test local .sqsh container images on Slurm (both absolute and relative paths)."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_rel = f'{name}-rel'
+
+    # Parse "sky check slurm" output: "    ├── cluster: enabled" -> "cluster"
+    # sed strips ANSI escape codes from colored output
+    get_slurm_cluster = ("sky check slurm 2>&1 | "
+                         "sed 's/\\x1b\\[[0-9;]*m//g' | "
+                         "grep -E '(├──|└──)' | "
+                         "grep 'enabled' | "
+                         "head -1 | "
+                         "awk -F': ' '{print $1}' | "
+                         "awk '{print $NF}'")
+
+    test = smoke_tests_utils.Test(
+        'docker_preinstalled_sqsh',
+        [
+            # Get slurm cluster name and remote home directory
+            f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+            f'echo "Using Slurm cluster: $SLURM_CLUSTER" && '
+            f'SLURM_HOME=$(ssh -F ~/.slurm/config $SLURM_CLUSTER "echo \\$HOME") && '
+            f'echo "Remote home: $SLURM_HOME" && '
+            # Import nginx image to create .sqsh file in ~/nginx+latest.sqsh
+            f'ssh -F ~/.slurm/config $SLURM_CLUSTER "srun enroot import docker://nginx:latest" && '
+            # Test 1: Absolute path - launch with full path to .sqsh
+            f'sky launch -y -c {name} --infra slurm/$SLURM_CLUSTER '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:$SLURM_HOME/nginx+latest.sqsh -- nginx -V',
+            # Verify absolute path worked
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} whoami | grep root',
+            # Test 2: Relative path - must use ./ prefix for pyxis
+            f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+            f'sky launch -y -c {name_rel} --infra slurm/$SLURM_CLUSTER '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:./nginx+latest.sqsh -- nginx -V',
+            # Verify relative path worked
+            f'sky logs {name_rel} 1 --status',
+            f'sky exec {name} whoami | grep root',
+        ],
+        f'sky down -y {name} {name_rel}; '
+        f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+        f'ssh -F ~/.slurm/config $SLURM_CLUSTER "rm -f ~/nginx+latest.sqsh"',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -495,6 +541,8 @@ def test_multi_echo(generic_cloud: str):
         # Slurm and Kubernetes do not support spot instances
         use_spot = False
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
 
     # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
     is_remote = smoke_tests_utils.is_remote_server_test()
@@ -623,6 +671,8 @@ def test_multi_echo(generic_cloud: str):
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1700,6 +1750,8 @@ def test_cancel_azure():
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1955,13 +2007,14 @@ def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     accelerator = smoke_tests_utils.get_available_gpus()
     name = smoke_tests_utils.get_cluster_name()
+    gpus_arg = f'{accelerator}:1' if accelerator else 'none'
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg}',
             f'sky logs {name} 1 --status',
             # Try exec to run again and check if the logs are printed
-            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1 | grep "Hello 100"',
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg} | grep "Hello 100"',
             # Make sure ssh is working with custom username
             f'ssh {name} echo hi | grep hi',
         ],
@@ -1994,6 +2047,7 @@ def test_kubernetes_pod_failure_detection():
 
 @pytest.mark.kubernetes
 @pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
+@pytest.mark.no_auto_retry
 def test_kubernetes_container_status_unknown_status_refresh():
     """Test sky status --refresh handles evicted pods without crashing.
 

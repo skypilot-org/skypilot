@@ -1,3 +1,4 @@
+{% set user = ssh_user if image_id is none else 'root' %}
 cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
@@ -25,16 +26,8 @@ provider:
 {% endif %}
 
 auth:
-  ssh_user: {{ssh_user}}
-  # TODO(jwj,kevin): Modify this tmp workaround.
-  # Right now there's a chicken-and-egg problem:
-  # 1. ssh_credential_from_yaml reads from the auth.ssh_private_key: ~/.sky/clients/.../ssh/sky-key
-  # 2. This is SkyPilot's generated key, not the Slurm cluster's key
-  # 3. The internal_file_mounts stage tries to rsync using sky-key, but its public key isn't on the remote yet
-  # 4. The public key only gets added by setup_commands, which runs AFTER file_mounts
-  # ssh_private_key: {{ssh_private_key}}
-  ssh_private_key: {{slurm_private_key}}
-  ssh_proxy_command: {{slurm_proxy_command | tojson }}
+  ssh_user: {{user}}
+  ssh_private_key: {{ssh_private_key}}
 
 available_node_types:
   ray_head_default:
@@ -47,6 +40,9 @@ available_node_types:
       memory: {{memory}}
       accelerator_type: {{accelerator_type}}
       accelerator_count: {{accelerator_count}}
+{% if image_id is not none %}
+      image_id: {{image_id}}
+{% endif %}
 
       # TODO: more configs that is required by the provisioner to create new
       # instances on the FluffyCloud:
@@ -79,17 +75,20 @@ setup_commands:
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
+    # TODO(kevin): Generate SSH host key only for non-containers.
+    # Containers use dropbear with -R (auto-generate keys), so this is redundant
+    # but harmless.
     # Generate host key for sshd -i if not exists
-    mkdir -p ~{{ssh_user}}/.ssh && chmod 700 ~{{ssh_user}}/.ssh
-    [ -f ~{{ssh_user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{ssh_user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
+    mkdir -p ~{{user}}/.ssh && chmod 700 ~{{user}}/.ssh
+    [ -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
     # Add public key to user's authorized_keys if not already present
-    grep -qF 'skypilot:ssh_public_key_content' ~{{ssh_user}}/.ssh/authorized_keys 2>/dev/null || cat >> ~{{ssh_user}}/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
+    grep -qF 'skypilot:ssh_public_key_content' ~{{user}}/.ssh/authorized_keys 2>/dev/null || cat >> ~{{user}}/.ssh/authorized_keys <<'SKYPILOT_SSH_KEY_EOF'
     skypilot:ssh_public_key_content
     SKYPILOT_SSH_KEY_EOF
-    chmod 600 ~{{ssh_user}}/.ssh/authorized_keys
+    chmod 600 ~{{user}}/.ssh/authorized_keys
 
-    mkdir -p ~{{ssh_user}}/.sky
-    cat > ~{{ssh_user}}/.sky_ssh_rc <<'SKYPILOT_SSH_RC'
+    mkdir -p ~{{user}}/.sky
+    cat > ~{{user}}/.sky_ssh_rc <<'SKYPILOT_SSH_RC'
     # Added by SkyPilot: override HOME for Slurm interactive sessions
     if [ -n "${{slurm_cluster_name_env_var}}" ]; then
         CLUSTER_DIR=~/.sky_clusters/${{slurm_cluster_name_env_var}}
@@ -99,12 +98,75 @@ setup_commands:
         fi
     fi
     SKYPILOT_SSH_RC
-    grep -q "source ~/.sky_ssh_rc" ~{{ssh_user}}/.bashrc 2>/dev/null || (echo "" >> ~{{ssh_user}}/.bashrc && echo "source ~/.sky_ssh_rc" >> ~{{ssh_user}}/.bashrc)
+    grep -q "source ~/.sky_ssh_rc" ~{{user}}/.bashrc 2>/dev/null || (echo "" >> ~{{user}}/.bashrc && echo "source ~/.sky_ssh_rc" >> ~{{user}}/.bashrc)
     {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ uv_installation_commands }}
     {{ skypilot_wheel_installation_commands }}
     {{ copy_skypilot_templates_commands }}
+{% if image_id is not none %}
+    # Install dropbear and socat for container SSH.
+    # OpenSSH fails in enroot containers created with --container-remap-root with:
+    #   "permanently_set_uid: was able to restore old [e]gid [preauth]"
+    # sshd verifies it can actually drop privileges, which doesn't work with
+    # --container-remap-root because of the uid remapping.
+    # See:
+    # - https://github.com/NVIDIA/pyxis/issues/85#issuecomment-1201913582
+    # - https://github.com/NVIDIA/enroot/issues/92
+    #
+    # So we use Dropbear (https://matt.ucc.asn.au/dropbear/dropbear.html), a
+    # lightweight SSH server popular in embedded and resource-constrained
+    # environments. It's actively maintained (https://github.com/mkj/dropbear/releases)
+    # and doesn't have the same issue with OpenSSH.
+    #
+    # This section runs on both host and container; only install when root (container).
+    # TODO(kevin): Host the binary somewhere, so we don't have to build it every time.
+    if [ "$(id -u)" = "0" ]; then
+      set -e
+      DROPBEAR_VERSION=2025.89
+      PACKAGES="socat iproute2 ccache"
+      export CCACHE_DIR=/var/cache/ccache
+      # Only Debian-based images are supported for now.
+      # See: https://docs.skypilot.co/en/latest/examples/docker-containers.html
+      export DEBIAN_FRONTEND=noninteractive
+      # Helper: apt with retries and exponential backoff (adapted from kubernetes-ray.yml.j2)
+      # TODO(kevin): Consolidate with the one in kubernetes-ray.yml.j2
+      apt_install_with_retries() {
+        local packages="$@"
+        [ -z "$packages" ] && return 0
+        set +e
+        local log=/tmp/apt-install.log
+        local tries=3
+        local delay=5
+        for i in $(seq 1 $tries); do
+          apt-get update >> "$log" 2>&1
+          apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $packages >> "$log" 2>&1 && { set -e; return 0; }
+          echo "apt-get install failed (attempt $i/$tries). Retrying in ${delay}s..." >> "$log"
+          apt-get -f install -y >> "$log" 2>&1 || true
+          apt-get clean >> "$log" 2>&1 || true
+          sleep $delay
+          delay=$((delay * 2))
+        done
+        echo "apt-get install failed after $tries attempts. Log:" >&2
+        cat "$log" >&2
+        set -e
+        return 1
+      }
+      if ! /usr/local/bin/dropbear -V 2>&1 | grep -q "$DROPBEAR_VERSION"; then
+        cd /tmp
+        apt_install_with_retries build-essential $PACKAGES
+        curl -sL https://matt.ucc.asn.au/dropbear/releases/dropbear-$DROPBEAR_VERSION.tar.bz2 | tar xj
+        cd dropbear-$DROPBEAR_VERSION
+        ./configure --disable-zlib --disable-syslog --disable-wtmp --disable-lastlog >/dev/null
+        BUILD_START=$SECONDS
+        make CC="ccache gcc" -j$(nproc) PROGRAMS="dropbear" >/dev/null
+        echo "[dropbear] Build took $((SECONDS - BUILD_START))s"
+        cp dropbear /usr/local/bin/
+        cd /; rm -rf /tmp/dropbear-$DROPBEAR_VERSION
+      fi
+      mkdir -p /etc/dropbear
+    fi
+{% endif %}
 
 head_node: {}
 worker_nodes: {}

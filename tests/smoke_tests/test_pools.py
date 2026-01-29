@@ -165,6 +165,30 @@ def wait_until_job_status(
     return s
 
 
+def check_logs(job_id: int, expected_pattern: str):
+    """Check that job logs contain the expected pattern.
+
+    Args:
+        job_id: The job ID to check logs for.
+        expected_pattern: The pattern to grep for in the logs.
+    """
+    return (
+        f'for attempt in 1 2; do '
+        f'  logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
+        f'  echo "$logs"; '
+        f'  if echo "$logs" | grep "{expected_pattern}"; then '
+        f'    echo "Job {job_id} logs contain expected pattern: {expected_pattern}"; '
+        f'    exit 0; '
+        f'  fi; '
+        f'  if [ $attempt -eq 1 ]; then '
+        f'    echo "Pattern not found on attempt $attempt, retrying in 5 seconds..."; '
+        f'    sleep 5; '
+        f'  fi; '
+        f'done; '
+        f'echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern} after 2 attempts"; '
+        f'exit 1')
+
+
 def wait_until_job_status_by_id(
         job_id: int,
         good_statuses: List[str],
@@ -195,29 +219,11 @@ def wait_until_job_status_by_id(
     return s
 
 
-def check_logs(job_id: int, expected_pattern: str):
-    """Check that job logs contain the expected pattern.
-
-    Args:
-        job_id: The job ID to check logs for.
-        expected_pattern: The pattern to grep for in the logs.
-    """
-    return (
-        f'logs=$(sky jobs logs --controller {job_id} --no-follow 2>&1); '
-        f'echo "$logs"; '
-        f'if ! echo "$logs" | grep "{expected_pattern}"; then '
-        f'  echo "ERROR: Job {job_id} logs do not contain expected pattern: {expected_pattern}"; '
-        f'  exit 1; '
-        f'fi; '
-        f'echo "Job {job_id} logs contain expected pattern: {expected_pattern}"'
-    )
-
-
 def check_num_running_jobs(job_names: List[str],
                            expected_count: int,
                            timeout: int = 30):
     """Check that exactly expected_count jobs are in RUNNING state.
-    
+
     Args:
         job_names: List of job names to check.
         expected_count: Expected number of jobs in RUNNING state.
@@ -1111,10 +1117,7 @@ def test_pools_num_jobs_basic(generic_cloud: str):
         with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
             write_yaml(pool_yaml, pool_config)
             write_yaml(job_yaml, job_config)
-            if smoke_tests_utils.server_side_is_consolidation_mode():
-                job_ids = list(range(1, 1 + num_jobs))
-            else:
-                job_ids = list(range(2, 2 + num_jobs))
+            job_ids = list(range(1, 1 + num_jobs))
             test = smoke_tests_utils.Test(
                 'test_pools_num_jobs',
                 [
@@ -1197,16 +1200,7 @@ def test_pools_num_jobs_option(generic_cloud: str):
                     # Test parallel job launching with --num-jobs 3
                     ('s=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs 10 -d -y); '
                      'echo "$s"; '
-                     'echo; echo; echo "$s" | grep "Job submitted, ID: 1"; '
-                     'echo "$s" | grep "Job submitted, ID: 2"; '
-                     'echo "$s" | grep "Job submitted, ID: 3"; '
-                     'echo "$s" | grep "Job submitted, ID: 4"; '
-                     'echo "$s" | grep "Job submitted, ID: 5"; '
-                     'echo "$s" | grep "Job submitted, ID: 6"; '
-                     'echo "$s" | grep "Job submitted, ID: 7"; '
-                     'echo "$s" | grep "Job submitted, ID: 8"; '
-                     'echo "$s" | grep "Job submitted, ID: 9"; '
-                     'echo "$s" | grep "Job submitted, ID: 10"; '
+                     'echo; echo; echo "$s" | grep "Jobs submitted with IDs: 2,3,4,5,6,7,8,9,10,11"; '
                      'sleep 5').format(pool_name=pool_name,
                                        job_yaml=job_yaml.name)
                 ],
@@ -1261,9 +1255,7 @@ def test_pools_single_yaml(generic_cloud: str):
             [
                 _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
                     pool_name=pool_name, pool_yaml=one_config_yaml.name),
-                (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
-                 'echo "$s"; '
-                 'echo; echo; echo "$s" | grep "Job submitted"'),
+                f'sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y',
                 wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
@@ -1316,12 +1308,12 @@ def test_pools_heterogeneous_any_of(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     """Test resource-aware scheduling with heterogeneous job requirements.
-    
+
     This test validates that jobs with any_of resources (T4 or A100) can be
     scheduled on a worker with only T4s. The scheduler should recognize that
     T4s are available and schedule jobs accordingly, even though A100s are
     also specified as an option.
-    
+
     Test scenario:
     - Pool: 1 worker with g4dn.12xlarge (4 T4 GPUs)
     - Job: Requests any_of T4:1 or A100:1
@@ -1335,11 +1327,11 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     pool_config = textwrap.dedent(f"""
     pool:
         workers: 1
-    
+
     resources:
         instance_type: g4dn.12xlarge
         infra: aws
-    
+
     setup: |
         echo "Pool worker setup complete"
     """)
@@ -1348,10 +1340,10 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     job_name_prefix = f'{name}-job'
     job_config = textwrap.dedent(f"""
     name: {job_name_prefix}
-    
+
     resources:
         accelerators: {{'T4:1', 'A100:1'}}
-    
+
     run: |
         echo "Job running with GPU:"
         nvidia-smi --query-gpu=name --format=csv,noheader
@@ -1732,12 +1724,12 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
 
-    # Pool with 2 CPUs and 4GB memory, single worker
+    # Pool with 2 CPUs and 8GB memory, single worker
     pool_config = basic_pool_conf(
         num_workers=2,
         infra=generic_cloud,
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
     def _get_job_config(job_name: str) -> str:
@@ -1745,12 +1737,12 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
             job_name=job_name,
             run_cmd=f'echo "Job {job_name} running" && sleep infinity',
             cpus='2',
-            memory='4GB',
+            memory='8GB',
         )
 
     num_jobs = 4
 
-    # Four jobs, each taking 2 CPUs and 4GB memory (only two can fit)
+    # Four jobs, each taking 2 CPUs and 8GB memory (only two can fit)
     job_names = [f'{name}-job-{i}' for i in range(num_jobs)]
     job_configs = [_get_job_config(job_name) for job_name in job_names]
 
@@ -1878,28 +1870,28 @@ def test_pool_resource_reclamation(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
 
-    # Pool with 2 CPUs and 4GB memory, single worker
+    # Pool with 2 CPUs and 8GB memory, single worker
     pool_config = basic_pool_conf(
         num_workers=1,
         infra=generic_cloud,
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
-    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit initially)
+    # Two jobs, each taking 2 CPUs and 8GB memory (can't both fit initially)
     job_name_1 = f'{name}-job-1'
     job_name_2 = f'{name}-job-2'
     job_config_1 = basic_job_conf(
         job_name=job_name_1,
         run_cmd='echo "hi"',
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
     job_config_2 = basic_job_conf(
         job_name=job_name_2,
         run_cmd='echo "hi"',
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
@@ -1943,15 +1935,15 @@ def test_pool_resource_fallback_to_unaware(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
 
-    # Pool with 2 CPUs and 4GB memory, single worker
+    # Pool with 2 CPUs and 8GB memory, single worker
     pool_config = basic_pool_conf(
         num_workers=1,
         infra=generic_cloud,
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
-    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit initially)
+    # Two jobs, each taking 2 CPUs and 8GB memory (can't both fit initially)
     resource_aware_job_name = f'{name}-job-1'
     resource_unaware_job_name = f'{name}-job-2'
 
@@ -1959,7 +1951,7 @@ def test_pool_resource_fallback_to_unaware(generic_cloud: str):
         job_name=resource_aware_job_name,
         run_cmd='echo "hi"',
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
     resource_unaware_job_config = basic_job_conf(
         job_name=resource_unaware_job_name,
@@ -2092,7 +2084,7 @@ def test_pool_fractional_gpu_scheduling(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
     """Test that when no resources are specified, only 1 job runs per worker.
-    
+
     This test validates that jobs without resource specifications are
     limited to 1 job per worker. The test:
     1. Launches a pool with 1 worker
@@ -2166,7 +2158,7 @@ def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
     """Test that secrets provided via CLI are preserved when updating pool workers.
-    
+
     This test:
     1. Creates a pool with a secret defined as null in YAML but set via CLI
     2. Verifies the secret is accessible in setup commands on worker 1
@@ -2240,3 +2232,107 @@ def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
         )
 
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pools_num_jobs_rank(generic_cloud: str):
+    """Test that SKYPILOT_JOB_RANK is correctly set for jobs launched with --num-jobs.
+
+    Launches 3 jobs with --num-jobs 3, waits for each to succeed, and verifies
+    that each job's logs show the correct rank (which should be job_id - 1).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    job_config = basic_job_conf(job_name=f'{name}-job',
+                                run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"')
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    NUM_JOBS = 3
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            # Build test commands
+            test_commands = [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ]
+
+            launch_cmd = (
+                's=$(sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y); '
+                'echo "$s"; '
+                'echo "$s" | grep "Jobs submitted with IDs:" | sed "s/.*IDs: \\([0-9,]*\\).*/\\1/" > /tmp/job_ids.txt; '
+                'cat /tmp/job_ids.txt').format(pool_name=pool_name,
+                                               job_yaml=job_yaml.name,
+                                               NUM_JOBS=NUM_JOBS)
+            test_commands.append(launch_cmd)
+
+            START_JOB_ID = 1
+            job_ids = [i for i in range(START_JOB_ID, START_JOB_ID + NUM_JOBS)]
+            for job_id in job_ids:
+                test_commands.append(
+                    wait_until_job_status_by_id(
+                        job_id, ['SUCCEEDED'],
+                        ['CANCELLED', 'FAILED_CONTROLLER'],
+                        timeout=timeout))
+
+            # Wait for the job logs to be ready.
+            test_commands.append('sleep 30')
+
+            for job_id in job_ids:
+                test_commands.append(
+                    check_logs(job_id, f'My rank is {job_id - 1}'))
+
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs_rank',
+                test_commands,
+                timeout=timeout * 2,  # Give extra time for multiple jobs
+                teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pools_num_jobs_speed(generic_cloud: str):
+    """Test that we can launch a large number of jobs quickly.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+    job_config = basic_job_conf(job_name=f'{name}-job',
+                                run_cmd='echo "My rank is $SKYPILOT_JOB_RANK"')
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    NUM_JOBS = 10
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            # Build test commands
+            test_commands = [
+                _LAUNCH_POOL_AND_CHECK_SUCCESS.format(pool_name=pool_name,
+                                                      pool_yaml=pool_yaml.name),
+                wait_until_pool_ready(pool_name, timeout=timeout),
+            ]
+            launch_timeout = 70
+            launch_cmd = (
+                'timeout {launch_timeout} bash -c "sky jobs launch --pool {pool_name} {job_yaml} --num-jobs {NUM_JOBS} -d -y"'
+            ).format(pool_name=pool_name,
+                     job_yaml=job_yaml.name,
+                     NUM_JOBS=NUM_JOBS,
+                     launch_timeout=launch_timeout)
+            test_commands.append(launch_cmd)
+
+            test = smoke_tests_utils.Test(
+                'test_pools_num_jobs_speed',
+                test_commands,
+                timeout=timeout * 2,  # Give extra time for multiple jobs
+                # Try to tear down multiple times since jobs may take a while
+                # to get to pending.
+                teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+            )
+            smoke_tests_utils.run_one_test(test)
