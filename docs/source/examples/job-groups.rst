@@ -321,6 +321,70 @@ termination signal after the 30-second delay, allowing it to flush pending data
 or perform cleanup.
 
 
+Programmatic access to job endpoints
+------------------------------------
+
+For advanced use cases like connecting external frameworks (e.g., Monarch, TorchForge)
+to workers in a Job Group, you can programmatically access the network endpoints
+(IPs and Kubernetes DNS entries) for each task.
+
+Use the ``sky.jobs.queue_v2()`` SDK to get job records with their handles:
+
+.. code-block:: python
+
+    import sky
+    from sky.jobs.client import sdk as jobs_sdk
+
+    # Get job queue with handles
+    request_id = jobs_sdk.queue_v2(refresh=True)
+    jobs, total, status_counts, total_no_filter = sky.get(request_id)
+
+    for job in jobs:
+        print(f"Job: {job.job_name}, Task: {job.task_name}")
+        
+        handle = job.handle
+        if handle is not None:
+            # Access internal/external IPs
+            # Format: [(internal_ip, external_ip), ...]
+            print(f"  IPs: {handle.stable_internal_external_ips}")
+            
+            # For Kubernetes: access service DNS entries
+            if handle.cached_cluster_info:
+                for pod_name, instances in handle.cached_cluster_info.instances.items():
+                    for inst in instances:
+                        # DNS format: {pod_name}.{namespace}.svc.cluster.local
+                        print(f"  DNS: {inst.internal_svc}")
+
+Example output for a Job Group with two workers:
+
+.. code-block:: text
+
+    Job: my-job-group, Task: worker-a
+      IPs: [('10.0.7.183', '10.0.7.183')]
+      DNS: worker-a-1-abc123-head.default.svc.cluster.local
+    Job: my-job-group, Task: worker-b
+      IPs: [('10.0.7.248', '10.0.7.248')]
+      DNS: worker-b-1-def456-head.default.svc.cluster.local
+
+.. note::
+
+   - **IPs may change during recovery**: If a task is preempted and recovered,
+     the new pod will have a different IP address.
+   - **Kubernetes DNS entries are more stable**: They're tied to Kubernetes services
+     that automatically route to the new pod after recovery.
+   - **DNS entries are only available for Kubernetes**: On other clouds, use the
+     IP addresses directly.
+
+This is similar to how you access endpoints for regular clusters:
+
+.. code-block:: python
+
+    # For regular clusters
+    cluster_info = sky.status()[0]
+    handle = cluster_info['handle']
+    handle.stable_internal_external_ips  # [(internal_ip, external_ip), ...]
+
+
 Current limitations
 -------------------
 
