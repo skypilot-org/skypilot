@@ -760,6 +760,33 @@ def _pop_and_ignore_fields_in_override_params(
                             fg='yellow')
 
 
+def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
+    """Checks if entrypoint is a recipe reference and returns the recipe YAML.
+
+    Args:
+        entrypoint: The entrypoint string to check.
+
+    Returns:
+        The recipe YAML if entrypoint is a recipe reference. Otherwise, None.
+    """
+    is_recipe, recipe_name = _check_recipe_reference(entrypoint)
+    if is_recipe:
+        assert recipe_name is not None  # For mypy
+        click.secho(f'Recipe to run: ', fg='cyan', nl=False)
+        click.secho(recipe_name)
+        try:
+            content, _ = recipes_core.get_recipe_content(recipe_name)
+        except ValueError as e:
+            raise click.UsageError(str(e))
+        # Write to temp file and treat as YAML
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(content)
+            return f.name
+    else:
+        logger.debug(f'Not a recipe reference: {entrypoint}')
+    return None
+
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
@@ -800,31 +827,17 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint = ' '.join(entrypoint)
 
     # Check if entrypoint is a recipe reference (recipes:<name>)
-    is_recipe, recipe_name = _check_recipe_reference(entrypoint)
-    if is_recipe:
-        assert recipe_name is not None  # For mypy
-        click.secho('Recipe to run: ', fg='cyan', nl=False)
-        click.secho(recipe_name)
-        # Fetch recipe content from the Recipe Hub
-        try:
-            content, _ = recipes_core.get_recipe_content(recipe_name)
-        except ValueError as e:
-            raise click.UsageError(str(e))
-        # Write to temp file and treat as YAML
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(content)
-            entrypoint = f.name
-        is_yaml = True
-    else:
-        is_yaml, _ = _check_yaml(entrypoint)
+    recipe_yaml = _get_recipe_yaml(entrypoint)
+    if recipe_yaml is not None:
+        entrypoint = recipe_yaml
+
+    is_yaml, _ = _check_yaml(entrypoint)
 
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        if not is_recipe:
-            click.secho('YAML to run: ', fg='cyan', nl=False)
-            click.secho(entrypoint)
+        click.secho('YAML to run: ', fg='cyan', nl=False)
+        click.secho(entrypoint)
     else:
         if not entrypoint:
             entrypoint = None
@@ -5630,6 +5643,11 @@ def jobs_pool_apply(
         raise click.UsageError(
             'Cannot specify both --workers and POOL_YAML. Please use one of '
             'them.')
+    
+    recipe_yaml = _get_recipe_yaml(pool_yaml[0])
+    if recipe_yaml is not None:
+        click.secho(f'Recipe to run: ', fg='cyan', nl=False)
+        pool_yaml = (recipe_yaml,)
 
     if pool_yaml is None or len(pool_yaml) == 0:
         if pool is None:

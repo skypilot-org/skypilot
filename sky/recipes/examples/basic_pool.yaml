@@ -4,5 +4,4 @@ resources:
   memory: 16+
 
 pool:
-  min_nodes: 1
-  max_nodes: 4
+  workers: 4
