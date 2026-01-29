@@ -123,7 +123,7 @@ Below is the configuration syntax and some example values. See detailed explanat
       map-migrated: my-value
       Owner: user-unique-name
     :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
-    :ref:`vpc_name <config-yaml-aws-vpc-names>`:
+    :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true

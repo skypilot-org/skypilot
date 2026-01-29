@@ -974,6 +974,8 @@ def write_cluster_config(
                 keys=('use_internal_ips',),
                 default_value=False),
             'ssh_proxy_command': ssh_proxy_command,
+            # TODO (kyuds): for backwards compatibility. If `vpc_names`
+            # is set, this will be overridden. Remove after v0.12.0.
             'vpc_name': skypilot_config.get_effective_region_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
