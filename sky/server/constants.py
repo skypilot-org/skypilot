@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 31  # add is_primary_in_job_group field for job groups
+API_VERSION = 32  # add recipes endpoint
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

@@ -46,7 +46,10 @@ import {
   deleteRecipe,
   togglePinRecipe,
 } from '@/data/connectors/recipes';
-import { getRecipeTypeInfo, getLaunchCommand } from '@/data/constants/recipeTypes';
+import {
+  getRecipeTypeInfo,
+  getLaunchCommand,
+} from '@/data/constants/recipeTypes';
 
 // Helper to format relative time
 function formatRelativeTime(timestamp) {
@@ -66,7 +69,6 @@ function formatFullTimestamp(timestamp) {
   if (!timestamp) return '';
   return new Date(timestamp * 1000).toLocaleString();
 }
-
 
 // Parse recipe name from URL slug
 // Names are the unique identifiers for recipes (no UUID parsing needed)
@@ -579,8 +581,8 @@ export function RecipeDetail() {
                   title={formatFullTimestamp(template.updated_at)}
                 >
                   {formatRelativeTime(template.updated_at)}
-                </span>
-                {' '}by {template.updated_by_name || template.user_name || 'Unknown'}
+                </span>{' '}
+                by {template.updated_by_name || template.user_name || 'Unknown'}
               </div>
             </div>
           </div>
