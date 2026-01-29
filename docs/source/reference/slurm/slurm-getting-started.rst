@@ -209,7 +209,7 @@ You can also view GPU availability from the CLI:
 
 .. code-block:: console
 
-    $ sky show-gpus --infra slurm
+    $ sky gpus list --infra slurm
     Slurm GPUs
     GPU    UTILIZATION
     L40S   3 of 8 free

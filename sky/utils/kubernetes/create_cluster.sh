@@ -167,7 +167,7 @@ if $ENABLE_GPUS; then
         >&2 echo "GPU support was not enabled. Please check for any errors above."
         exit 1
     else
-        echo "GPU support is enabled. Run 'sky show-gpus --cloud kubernetes' to see the GPUs available on the cluster."
+        echo "GPU support is enabled. Run 'sky gpus list --cloud kubernetes' to see the GPUs available on the cluster."
     fi
 fi
 echo "Number of CPUs available on the local cluster $NAME: $NUM_CPUS"

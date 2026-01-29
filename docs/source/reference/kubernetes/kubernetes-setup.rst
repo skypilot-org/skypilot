@@ -175,7 +175,7 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. code-block:: console
 
- $ sky label-gpus
+ $ sky gpus label
 
  Created GPU labeler job for node ip-192-168-54-76.us-west-2.compute.internal
  Created GPU labeler job for node ip-192-168-93-215.us-west-2.compute.internal
@@ -189,7 +189,7 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
 .. note::
 
-    If the GPU labelling process fails, you can run ``sky label-gpus --cleanup`` to clean up the failed jobs.
+    If the GPU labelling process fails, you can run ``sky gpus label --cleanup`` to clean up the failed jobs.
 
 Manually labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -226,7 +226,7 @@ You can also check the GPUs available on your nodes by running:
 
 .. code-block:: console
 
-    $ sky show-gpus --infra k8s
+    $ sky gpus list --infra k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     L4    1, 2, 4                   12 of 12 free

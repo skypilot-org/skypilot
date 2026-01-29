@@ -1426,13 +1426,13 @@ def test_kubernetes_context_failover(unreachable_context):
                 'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
                 '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
                 'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
-                'output=$(sky show-gpus --infra kubernetes/kind-skypilot) && echo "$output" && echo "$output" | grep H100 | grep "1, 2, 4, 8"',
+                'output=$(sky gpus list --infra kubernetes/kind-skypilot) && echo "$output" && echo "$output" | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
                 # H100 should not be in the current context
-                f'output=$(sky show-gpus --infra kubernetes/{context}) && echo "$output" && ! echo "$output" | grep H100',
+                f'output=$(sky gpus list --infra kubernetes/{context}) && echo "$output" && ! echo "$output" | grep H100',
                 # H100 should be displayed as long as it is available in one of the contexts
-                'output=$(sky show-gpus --infra kubernetes) && echo "$output" && echo "$output" | grep H100',
+                'output=$(sky gpus list --infra kubernetes) && echo "$output" && echo "$output" | grep H100',
                 f'sky launch -y -c {name}-1 --cpus 1 echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
@@ -1447,7 +1447,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 # It should be launched on kind-skypilot
                 f'sky status -v {name}-3 | grep "kind-skypilot"',
                 # Should be 7 free GPUs
-                f'output=$(sky show-gpus --infra kubernetes/kind-skypilot) && echo "$output" && echo "$output" | grep H100 | grep "  7"',
+                f'output=$(sky gpus list --infra kubernetes/kind-skypilot) && echo "$output" && echo "$output" | grep H100 | grep "  7"',
                 # Remove the line with "kind-skypilot"
                 f'sed -i "/kind-skypilot/d" {f.name}',
                 f'export KUBECONFIG={f.name}',
@@ -1517,7 +1517,7 @@ def test_kubernetes_slurm_show_gpus(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'kubernetes_show_gpus',
         [(
-            f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
+            f's=$(SKYPILOT_DEBUG=0 sky gpus list --infra {generic_cloud}) && '
             'echo "$s" && '
             # Verify either:
             # 1. We have at least one GPU entry with utilization info
@@ -1535,18 +1535,18 @@ def test_kubernetes_slurm_show_gpus(generic_cloud: str):
 
 @pytest.mark.no_kubernetes
 @pytest.mark.no_slurm
-def test_show_gpus(generic_cloud: str):
+def test_gpus_list(generic_cloud: str):
     # Check that output contains GPU table headers and common GPU types
     check_cmd = ('echo "$s" && '
                  'echo "$s" | grep "COMMON_GPU" && '
                  'echo "$s" | grep "AVAILABLE_QUANTITIES" && '
                  'echo "$s" | grep -E "A100|H100|H200|L4|T4|B200"')
     test = smoke_tests_utils.Test(
-        'show_gpus',
+        'gpus_list',
         [
-            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud}) && '
+            (f's=$(SKYPILOT_DEBUG=0 sky gpus list --infra {generic_cloud}) && '
              f'{check_cmd}'),
-            (f's=$(SKYPILOT_DEBUG=0 sky show-gpus --infra {generic_cloud} --all) && '
+            (f's=$(SKYPILOT_DEBUG=0 sky gpus list --infra {generic_cloud} --all) && '
              f'{check_cmd}'),
         ],
     )

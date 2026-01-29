@@ -143,11 +143,11 @@ Deploying on Google Cloud GKE
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --infra k8s`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky gpus list --infra k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --infra k8s
+       $ sky gpus list --infra k8s
        GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
        L4    1, 2, 4                   6 of 8 free
        A100  1, 2                      2 of 4 free
@@ -183,7 +183,7 @@ Deploying on Amazon EKS
 
    .. code-block:: console
 
-     sky label-gpus
+     sky gpus label
 
 
    This will create a job on each node to read the GPU type from `nvidia-smi` and assign a ``skypilot.co/accelerator`` label to the node. Note: This command currently only supports NVIDIA GPUs. You can check the status of these jobs by running:
@@ -198,11 +198,11 @@ Deploying on Amazon EKS
 
      $ sky check
 
-5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky show-gpus --infra k8s`
+5. [If using GPUs] Check available GPUs in the kubernetes cluster with :code:`sky gpus list --infra k8s`
 
    .. code-block:: console
 
-       $ sky show-gpus --infra k8s
+       $ sky gpus list --infra k8s
        GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
        A100  1, 2                      2 of 2 free
 

@@ -1464,7 +1464,7 @@ def realtime_kubernetes_gpu_availability(
             err_msg = (f'Resources{gpu_info_msg} not found '
                        f'in {cloud_identity_capital} clusters. ')
             debug_msg = (f'To show available accelerators on {cloud_identity}, '
-                         f' run: sky show-gpus --cloud {cloud_identity} ')
+                         f' run: sky gpus list --cloud {cloud_identity} ')
         full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                         debug_msg)
         raise ValueError(full_err_msg)

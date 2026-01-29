@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 32  # add /label_gpus endpoint for Kubernetes GPU labeling
+API_VERSION = 32  # add /kubernetes_label_gpus endpoint for `sky gpus label`
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

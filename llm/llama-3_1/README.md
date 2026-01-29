@@ -19,7 +19,7 @@ SkyPilot will be used as the unified framework to launch serving on any (or mult
 
 ## Serving Llama 3.1 on your infra
 
-Below is a step-by-step guide to using SkyPilot for testing a new model on a GPU dev node, and then packaging it for one-click deployment across any infrastructure. 
+Below is a step-by-step guide to using SkyPilot for testing a new model on a GPU dev node, and then packaging it for one-click deployment across any infrastructure.
 
 **To skip directly to the packaged deployment YAML for Llama 3.1, see [Step 3: Package and deploy using SkyPilot](#step-3-package-and-deploy-using-skypilot).**
 
@@ -81,7 +81,7 @@ You can add a `-r / --retry-until-up` flag to have SkyPilot auto-retry to guard 
 
 > **Tip:** Vary the `--gpus` flag to get different GPU types and counts. For example, `--gpus H100:8` gets you a pod with 8x H100 GPUs.
 >
-> You can run `sky show-gpus` to see all available GPU types on your infra.
+> You can run `sky gpus list` to see all available GPU types on your infra.
 
 
 Once provisioned, you can easily connect to it to start dev work. Two recommended methods:
@@ -160,7 +160,7 @@ Whichever infra you use for GPUs, SkyPilot abstracts away the mundane infra task
 - Automatic load-balancing across multiple replicas
 - Automatic recovery of replicas
 - Replicas can use different infras to save significant costs
-  - e.g., a mix of clouds, or a mix of reserved & spot GPUs 
+  - e.g., a mix of clouds, or a mix of reserved & spot GPUs
 
 <details>
 <summary>Click to see the YAML: <code>serve.yaml</code>.</summary>
@@ -200,7 +200,7 @@ setup: |
 
 run: |
   echo 'Starting vllm api server...'
-  
+
   vllm serve $MODEL_NAME \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
     --max-model-len 4096 \
@@ -211,7 +211,7 @@ run: |
     echo 'Waiting for vllm api server to start...'
     sleep 5
   done
-  
+
   echo 'Starting gradio server...'
   git clone https://github.com/vllm-project/vllm.git || true
   python vllm/examples/gradio_openai_chatbot_webserver.py \
