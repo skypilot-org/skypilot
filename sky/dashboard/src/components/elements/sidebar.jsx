@@ -24,9 +24,8 @@ import {
   KueueIcon,
   KeyIcon,
   ShieldIcon,
-  FileCodeIcon,
 } from '@/components/elements/icons';
-import { Settings, User, Clock } from 'lucide-react';
+import { Settings, User, Clock, FileCode } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -40,7 +39,7 @@ const ICON_MAP = {
   volume: VolumeIcon,
   clock: Clock,
   kueue: KueueIcon,
-  filecode: FileCodeIcon,
+  filecode: FileCode,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
@@ -530,7 +529,7 @@ export function TopBar() {
                 className={getLinkClasses('/recipes')}
                 prefetch={false}
               >
-                <FileCodeIcon className="w-4 h-4" />
+                <FileCode className="w-4 h-4" />
                 <span>Recipes</span>
               </Link>
 
@@ -805,7 +804,7 @@ export function TopBar() {
                   onClick={toggleMobileSidebar}
                   prefetch={false}
                 >
-                  <FileCodeIcon className="w-5 h-5 mr-3" />
+                  <FileCode className="w-5 h-5 mr-3" />
                   Recipes
                 </Link>
 

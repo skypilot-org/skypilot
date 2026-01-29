@@ -9,7 +9,7 @@ import {
   BriefcaseIcon,
   DatabaseIcon,
   LayersIcon,
-  FileCodeIcon,
+  FileCode,
 } from 'lucide-react';
 
 export const RecipeType = Object.freeze({
@@ -47,43 +47,62 @@ export function capitalizeWords(str) {
 }
 
 /**
+ * Map color names to Tailwind text color classes.
+ */
+const COLOR_CLASS_MAP = {
+  sky: 'text-sky-600',
+  purple: 'text-purple-600',
+  green: 'text-green-600',
+  orange: 'text-orange-600',
+  gray: 'text-gray-600',
+};
+
+/**
  * Get icon, color, and label information for a recipe type.
  * @param {string} recipeType - The recipe type value
- * @returns {Object} Object with icon, color, label (short), and fullLabel properties
+ * @returns {Object} Object with icon, color, colorClass, label (short), and fullLabel properties
  */
 export function getRecipeTypeInfo(recipeType) {
+  let info;
   switch (recipeType) {
     case RecipeType.CLUSTER:
-      return {
+      info = {
         icon: ServerIcon,
         color: 'sky',
         label: 'Cluster',
         fullLabel: 'Cluster',
       };
+      break;
     case RecipeType.JOB:
-      return {
+      info = {
         icon: BriefcaseIcon,
         color: 'purple',
         label: 'Job',
         fullLabel: 'Managed Job',
       };
+      break;
     case RecipeType.VOLUME:
-      return {
+      info = {
         icon: DatabaseIcon,
         color: 'green',
         label: 'Volume',
         fullLabel: 'Volume',
       };
+      break;
     case RecipeType.POOL:
-      return {
+      info = {
         icon: LayersIcon,
         color: 'orange',
         label: 'Pool',
         fullLabel: 'Job Pool',
       };
+      break;
     default:
       throw new Error(`Invalid recipe type: ${recipeType}`);
   }
+  // Add the Tailwind color class
+  info.colorClass = COLOR_CLASS_MAP[info.color] || 'text-gray-600';
+  return info;
 }
 
 /**

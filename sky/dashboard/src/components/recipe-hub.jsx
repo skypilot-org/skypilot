@@ -15,11 +15,8 @@ import {
   RotateCwIcon,
   PlusIcon,
   PinIcon,
-  ServerIcon,
-  BriefcaseIcon,
-  LayersIcon,
   AlertTriangleIcon,
-  DatabaseIcon,
+  FileCode,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -56,7 +53,11 @@ import { LastUpdatedTimestamp, TimestampWithTooltip } from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
 import { getRecipes, createRecipe } from '@/data/connectors/recipes';
-import { RecipeType, getRecipeTypeInfo } from '@/data/constants/recipeTypes';
+import {
+  RecipeType,
+  ALL_RECIPE_TYPES,
+  getRecipeTypeInfo,
+} from '@/data/constants/recipeTypes';
 
 // Define filter options for the YAML filter dropdown
 const RECIPE_PROPERTY_OPTIONS = [
@@ -813,24 +814,18 @@ function CreateRecipeModal({
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={RecipeType.CLUSTER}>
-                    <div className="flex items-center gap-2">
-                      <ServerIcon className="w-4 h-4 text-sky-600" />
-                      <span>Cluster</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value={RecipeType.JOB}>
-                    <div className="flex items-center gap-2">
-                      <BriefcaseIcon className="w-4 h-4 text-purple-600" />
-                      <span>Managed Job</span>
-                    </div>
-                  </SelectItem>
-                  <SelectItem value={RecipeType.POOL}>
-                    <div className="flex items-center gap-2">
-                      <LayersIcon className="w-4 h-4 text-orange-600" />
-                      <span>Job Pool</span>
-                    </div>
-                  </SelectItem>
+                  {ALL_RECIPE_TYPES.map((type) => {
+                    const info = getRecipeTypeInfo(type);
+                    const TypeIcon = info.icon;
+                    return (
+                      <SelectItem key={type} value={type}>
+                        <div className="flex items-center gap-2">
+                          <TypeIcon className={`w-4 h-4 ${info.colorClass}`} />
+                          <span>{info.fullLabel}</span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
@@ -1090,7 +1085,7 @@ export function RecipeHub() {
           {isAuthenticated && (
             <TemplateRow
               title="My Recipes"
-              icon={FileCodeIcon}
+              icon={FileCode}
               iconColor="text-sky-500"
               recipes={myRecipes}
               emptyMessage="You haven't created any recipes yet."

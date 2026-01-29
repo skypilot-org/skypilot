@@ -206,11 +206,11 @@ class TestRecipeValidation:
 
     def test_local_file_mount_relative_path_rejected(self):
         """Test that relative file mount paths are rejected in recipes."""
-        yaml_with_relative_mount = """
-file_mounts:
-  /remote/data: ./local/data
-run: echo hello
-"""
+        yaml_with_relative_mount = textwrap.dedent("""
+        file_mounts:
+          /remote/data: ./local/data
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError,
                            match='Local file mounts are not allowed'):
             recipes_core._validate_skypilot_yaml(yaml_with_relative_mount,
@@ -265,11 +265,6 @@ run: echo hello
 
     def test_no_workdir_no_file_mounts_allowed(self):
         """Test that recipes without workdir or file_mounts are valid."""
-        simple_yaml = """
-resources:
-  cpus: 2
-run: echo hello
-"""
         simple_yaml = textwrap.dedent("""
         resources:
           cpus: 2
@@ -312,10 +307,10 @@ run: echo hello
 
     def test_volume_yaml_invalid_type(self):
         """Test that volume YAML with invalid type is rejected."""
-        invalid_volume_yaml = """
-name: my-volume
-type: invalid-type
-size: 100Gi
-"""
+        invalid_volume_yaml = textwrap.dedent("""
+        name: my-volume
+        type: invalid-type
+        size: 100Gi
+        """).strip()
         with pytest.raises(ValueError, match='Invalid volume YAML'):
             recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
