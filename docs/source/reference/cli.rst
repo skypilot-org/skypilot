@@ -209,7 +209,7 @@ Utils: ``check``/``cost-report``
 
 .. _sky-show-gpus:
 
-``show-gpus`` (Deprecated)
+``show-gpus`` (deprecated)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
