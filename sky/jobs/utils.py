@@ -1272,9 +1272,9 @@ def get_alive_controller_uuids() -> List[str]:
     return uuids
 
 
-def stream_controller_logs(controller_uuid: Optional[str],
-                           follow: bool = True) -> Tuple[str, int]:
-    """Stream controller logs by controller uuid."""
+def stream_controller_system_logs(controller_uuid: Optional[str],
+                                  follow: bool = True) -> Tuple[str, int]:
+    """Stream controller system logs (log of the controller process) by uuid."""
     if controller_uuid is None:
         controller_uuids = get_alive_controller_uuids()
         print('Available system uuids:')
@@ -1339,8 +1339,8 @@ def stream_logs(job_id: Optional[int],
 
     if system is not None:
         assert job_id is None and job_name is None, (job_id, job_name, system)
-        return stream_controller_logs(None if system is True else system,
-                                      follow)
+        return stream_controller_system_logs(None if system is True else system,
+                                             follow)
 
     if controller:
         if job_id is None:
