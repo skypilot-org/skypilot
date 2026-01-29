@@ -2683,6 +2683,16 @@ def test_kubernetes_recovery():
     smoke_tests_utils.run_one_test(test)
 
 
+def _get_k8s_service_cleanup_check_cmd(name: str, name_on_cloud: str) -> str:
+    """Returns the command to check that Kubernetes services are cleaned up."""
+    return smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
+        'echo "Services: [$services]"; '
+        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
+        'else echo "OK: services cleaned up"; fi')
+
+
 @pytest.mark.kubernetes
 def test_kubernetes_service_cleanup_on_down():
     """Test that Kubernetes services are cleaned up when running sky down
@@ -2690,13 +2700,8 @@ def test_kubernetes_service_cleanup_on_down():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Kubernetes.max_cluster_name_length())
-    # Command to check that services are cleaned up
-    service_cleanup_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
-        name,
-        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
-        'echo "Services: [$services]"; '
-        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
-        'else echo "OK: services cleaned up"; fi')
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
     test = smoke_tests_utils.Test(
         'kubernetes_service_cleanup_on_down',
         [
@@ -2733,13 +2738,8 @@ def test_kubernetes_service_cleanup_on_status_refresh():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Kubernetes.max_cluster_name_length())
-    # Command to check that services are cleaned up
-    service_cleanup_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
-        name,
-        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
-        'echo "Services: [$services]"; '
-        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
-        'else echo "OK: services cleaned up"; fi')
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
     test = smoke_tests_utils.Test(
         'kubernetes_service_cleanup_on_status_refresh',
         [
