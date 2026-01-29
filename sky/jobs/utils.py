@@ -118,10 +118,8 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
-    # Network endpoint information fields
-    'internal_ips',
-    'external_ips',
-    'internal_dns_entries',
+    # The cluster resource handle (contains IPs, SSH ports, cluster metadata)
+    'handle',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -1582,6 +1580,7 @@ def _populate_job_record_from_handle(
         *, job: Dict[str, Any], cluster_name: str,
         handle: 'backends.CloudVmRayResourceHandle') -> None:
     """Populate the job record from the handle."""
+    del cluster_name  # Unused.
     resources_str_simple, resources_str_full = (
         resources_utils.get_readable_resources_repr(handle,
                                                     simplified_only=False))
@@ -1597,100 +1596,9 @@ def _populate_job_record_from_handle(
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
-
-    # Populate network endpoint information from handle
-    _populate_network_info_from_handle(job, cluster_name, handle)
-
-
-def _populate_network_info_from_handle(
-        job: Dict[str, Any], cluster_name: str,
-        handle: 'backends.CloudVmRayResourceHandle') -> None:
-    """Populate network endpoint information from the handle.
-
-    This populates:
-    - internal_ips: List of internal IPs for all nodes
-    - external_ips: List of external (feasible) IPs for all nodes
-    - internal_dns_entries: List of K8s internal service DNS entries (K8s only)
-
-    Note: IPs may change during job recovery. For Kubernetes clusters,
-    internal_dns_entries are more stable as they're tied to services that
-    route to the new pod after recovery.
-    """
-    # Populate IPs from stable_internal_external_ips
-    if handle.stable_internal_external_ips:
-        internal_ips = []
-        external_ips = []
-        for internal_ip, external_ip in handle.stable_internal_external_ips:
-            internal_ips.append(internal_ip)
-            external_ips.append(external_ip)
-        job['internal_ips'] = internal_ips
-        job['external_ips'] = external_ips
-    else:
-        job['internal_ips'] = None
-        job['external_ips'] = None
-
-    # Populate K8s internal DNS entries if this is a Kubernetes cluster
-    job['internal_dns_entries'] = _get_k8s_internal_dns_entries(
-        cluster_name, handle)
-
-
-def _get_k8s_internal_dns_entries(
-        cluster_name: str,
-        handle: 'backends.CloudVmRayResourceHandle') -> Optional[List[str]]:
-    """Get Kubernetes internal service DNS entries from the handle.
-
-    Returns:
-        List of DNS entries like '{pod_name}.{namespace}.svc.cluster.local',
-        or None if not a Kubernetes cluster or info not available.
-    """
-    # Check if this is a Kubernetes cluster
-    if not (handle.launched_resources and handle.launched_resources.cloud):
-        return None
-
-    # Import here to avoid circular imports
-    from sky import clouds as sky_clouds  # pylint: disable=import-outside-toplevel
-    if not handle.launched_resources.cloud.is_same_cloud(
-            sky_clouds.Kubernetes()):
-        return None
-
-    # Try to get DNS entries from cached_cluster_info first (most reliable)
-    if handle.cached_cluster_info is not None:
-        dns_entries = []
-        for instance_infos in handle.cached_cluster_info.instances.values():
-            for instance_info in instance_infos:
-                if instance_info.internal_svc:
-                    dns_entries.append(instance_info.internal_svc)
-        if dns_entries:
-            return dns_entries
-
-    # Fallback: construct DNS entries from cluster name and region
-    # Region in K8s is the context name, we can get namespace from it
-    try:
-        # pylint: disable=import-outside-toplevel
-        from sky.provision.kubernetes import utils as k8s_utils
-
-        namespace = 'default'
-        if handle.launched_resources.region:
-            namespace = k8s_utils.get_kube_config_context_namespace(
-                handle.launched_resources.region)
-
-        # Construct DNS entries based on cluster naming convention
-        # Format: {cluster_name_on_cloud}-{head|worker{n}}.{namespace}.svc
-        cluster_name_on_cloud = handle.cluster_name_on_cloud
-        num_nodes = handle.launched_nodes
-
-        dns_entries = []
-        for node_idx in range(num_nodes):
-            if node_idx == 0:
-                pod_name = f'{cluster_name_on_cloud}-head'
-            else:
-                pod_name = f'{cluster_name_on_cloud}-worker{node_idx}'
-            dns_entry = f'{pod_name}.{namespace}.svc.cluster.local'
-            dns_entries.append(dns_entry)
-        return dns_entries
-    except Exception:  # pylint: disable=broad-except
-        # If we can't construct DNS entries, return None
-        return None
+    # Set the full handle for network endpoint access (IPs, SSH ports, etc.)
+    # Similar to StatusResponse.handle for regular clusters.
+    job['handle'] = handle
 
 
 def get_managed_job_queue(
@@ -1828,10 +1736,7 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
-                # Network endpoint fields are not available without handle
-                job['internal_ips'] = None
-                job['external_ips'] = None
-                job['internal_dns_entries'] = None
+                job['handle'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
 

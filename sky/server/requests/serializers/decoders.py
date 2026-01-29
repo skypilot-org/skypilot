@@ -115,6 +115,12 @@ def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
     return decode_jobs_queue_v2(return_value)
 
 
+def _decode_managed_job_handle(job: Dict[str, Any]) -> None:
+    """Decode the handle field of a managed job record."""
+    if 'handle' in job and job['handle'] is not None:
+        job['handle'] = decode_and_unpickle(job['handle'])
+
+
 @register_decoders('jobs.queue_v2')
 def decode_jobs_queue_v2(
     return_value
@@ -136,6 +142,7 @@ def decode_jobs_queue_v2(
         status_counts: Dict[str, int] = return_value.get('status_counts', {})
         for job in jobs:
             job['status'] = managed_jobs.ManagedJobStatus(job['status'])
+            _decode_managed_job_handle(job)
         jobs = [responses.ManagedJobRecord(**job) for job in jobs]
         return jobs, total, status_counts, total_no_filter
     else:
@@ -143,6 +150,7 @@ def decode_jobs_queue_v2(
         jobs = return_value
         for job in jobs:
             job['status'] = managed_jobs.ManagedJobStatus(job['status'])
+            _decode_managed_job_handle(job)
         jobs = [responses.ManagedJobRecord(**job) for job in jobs]
         return jobs
 

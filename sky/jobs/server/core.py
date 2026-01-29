@@ -92,10 +92,8 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
     'metadata',
     'user_name',
     'user_hash',
-    # Network endpoint information for connecting to the job's cluster
-    'internal_ips',
-    'external_ips',
-    'internal_dns_entries',
+    # The cluster resource handle (contains IPs, SSH ports, cluster metadata)
+    'handle',
 ]
 
 
