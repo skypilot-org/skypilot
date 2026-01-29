@@ -2,7 +2,6 @@
 name: my-job
 
 resources:
-  cloud: aws
   accelerators: A10G:1
 
 setup: |

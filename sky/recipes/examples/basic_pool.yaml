@@ -1,6 +1,5 @@
 # Basic Job Pool Template
 resources:
-  cloud: aws
   cpus: 4+
   memory: 16+
 

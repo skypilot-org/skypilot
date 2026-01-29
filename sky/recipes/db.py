@@ -71,12 +71,12 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
     },
     'basic_managed_job': {
         'name': 'basic-managed-job',
-        'description': 'A simple managed job with automatic recovery',
+        'description': 'A simple job with recovery',
         'recipe_type': 'job',
     },
     'basic_pool': {
         'name': 'basic-pool',
-        'description': 'A job pool for running multiple concurrent jobs',
+        'description': 'A pool for concurrent jobs',
         'recipe_type': 'pool',
     },
     'basic_volume': {

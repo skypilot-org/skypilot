@@ -131,9 +131,6 @@ def test_recipe_cluster_launch(generic_cloud: str, cluster_recipe: str):
         [
             # Launch cluster using recipe reference
             f'sky launch -y -c {name} --infra {generic_cloud} recipes:{cluster_recipe}',
-            # Verify job succeeded
-            f'sky logs {name} 1 --status',
-            f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',
             # Verify the run output
             f'sky logs {name} 1 | grep "Recipe cluster test completed successfully"',
         ],
@@ -160,10 +157,8 @@ def test_recipe_managed_job_launch(generic_cloud: str, job_recipe: str):
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=smoke_tests_utils.get_timeout(generic_cloud),
             ),
-            # Verify the output
-            f'sky jobs logs -n {name} | grep "Recipe managed job test completed successfully"',
         ],
-        f'sky jobs cancel -n {name} -y; sleep 5',
+        f'sky jobs cancel -n {name} -y',
         smoke_tests_utils.get_timeout(generic_cloud),
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )

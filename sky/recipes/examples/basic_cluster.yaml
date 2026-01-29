@@ -1,12 +1,15 @@
 # Basic Cluster Template
 resources:
-  cloud: aws
-  accelerators: A10G:1
+  # 8x NVIDIA A100 GPU
+  accelerators: A100:8
 
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
 setup: |
-  echo "Setting up environment..."
-  pip install torch torchvision
+  echo "Running setup."
 
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
 run: |
-  echo "Hello from SkyPilot cluster!"
-  python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+  echo "Hello, SkyPilot!"
+  conda env list

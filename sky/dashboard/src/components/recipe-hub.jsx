@@ -72,6 +72,27 @@ function generateRecipeSlug(name) {
   return name;
 }
 
+// Component to display username, showing just the name part for emails with tooltip
+function UserName({ name, className = '' }) {
+  if (!name) return <span className={className}>Unknown</span>;
+
+  // Check if it's an email address
+  const isEmail = name.includes('@');
+  if (isEmail) {
+    const displayName = name.split('@')[0];
+    return (
+      <span
+        className={`underline decoration-dotted cursor-default ${className}`}
+        title={name}
+      >
+        {displayName}
+      </span>
+    );
+  }
+
+  return <span className={className}>{name}</span>;
+}
+
 // Recipe Card Component (for Pinned and My Recipes)
 function RecipeCard({ recipe }) {
   const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
@@ -98,14 +119,9 @@ function RecipeCard({ recipe }) {
               }`}
             />
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
-                  {recipe.name}
-                </h3>
-                {recipe.pinned && (
-                  <PinIcon className="w-4 h-4 text-amber-500 flex-shrink-0" />
-                )}
-              </div>
+              <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
+                {recipe.name}
+              </h3>
             </div>
           </div>
 
@@ -126,14 +142,15 @@ function RecipeCard({ recipe }) {
 
             {/* Authored by */}
             <div className="text-sm text-gray-500 truncate">
-              Authored by {recipe.user_name || recipe.user_id || 'Unknown'}
+              Authored by{' '}
+              <UserName name={recipe.user_name || recipe.user_id} />
             </div>
 
             {/* Last updated info - only show for editable recipes */}
             {recipe.is_editable && recipe.user_name !== 'local' && (
               <div className="text-sm text-gray-500 truncate">
                 Updated by{' '}
-                {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
+                <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
                 <TimestampWithTooltip
                   date={
                     recipe.updated_at
@@ -174,7 +191,7 @@ function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
         <h2 className="text-base text-gray-700">{title}</h2>
         <span className="text-sm text-gray-500">({recipes.length})</span>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         {recipes.map((recipe) => (
           <RecipeCard key={recipe.name} recipe={recipe} />
         ))}
@@ -339,8 +356,8 @@ function AllRecipesSection({ recipes }) {
                   const TypeIcon = typeInfo.icon;
                   const slug = generateRecipeSlug(recipe.name);
                   const truncatedDesc = recipe.description
-                    ? recipe.description.length > 30
-                      ? recipe.description.substring(0, 30) + '...'
+                    ? recipe.description.length > 80
+                      ? recipe.description.substring(0, 80) + '...'
                       : recipe.description
                     : '-';
                   return (
@@ -372,16 +389,22 @@ function AllRecipesSection({ recipes }) {
                         </Link>
                       </TableCell>
                       <TableCell
-                        className="text-gray-600 max-w-[200px]"
+                        className="text-gray-600 max-w-[400px]"
                         title={recipe.description || ''}
                       >
                         <span className="cursor-default">{truncatedDesc}</span>
                       </TableCell>
                       <TableCell className="text-gray-600">
-                        {recipe.user_name || recipe.user_id || 'Unknown'}
+                        <UserName name={recipe.user_name || recipe.user_id} />
                       </TableCell>
                       <TableCell className="text-gray-600">
-                        {recipe.updated_by_name || recipe.user_name || '-'}
+                        {recipe.updated_by_name || recipe.user_name ? (
+                          <UserName
+                            name={recipe.updated_by_name || recipe.user_name}
+                          />
+                        ) : (
+                          '-'
+                        )}
                       </TableCell>
                       <TableCell className="text-gray-500">
                         <TimestampWithTooltip
@@ -667,7 +690,7 @@ function getExampleRecipe(recipeType) {
     case RecipeType.CLUSTER:
       return `name: my-cluster
 resources:
-  cloud: aws
+  infra: aws
   accelerators: A100:1
 
 run: |
@@ -676,7 +699,7 @@ run: |
     case RecipeType.JOB:
       return `name: my-job
 resources:
-  cloud: aws
+  infra: aws
   accelerators: A100:1
 
 run: |
@@ -687,13 +710,13 @@ run: |
   name: my-pool
 
 resources:
-  cloud: aws
+  infra: aws
   accelerators: A100:1
 `;
     default:
       return `name: my-${recipeType}
 resources:
-  cloud: aws
+  infra: aws
   accelerators: A100:1
 
 run: |
@@ -801,7 +824,7 @@ function CreateRecipeModal({
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="My GPU Training"
+                placeholder="my-gpu-training"
                 className="placeholder:text-gray-400"
                 required
               />
