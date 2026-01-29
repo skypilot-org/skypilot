@@ -104,7 +104,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto px-8">
         <DialogHeader>
           <DialogTitle className="text-xl text-gray-900">
             Edit Recipe: {template.name}
@@ -122,6 +122,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional description..."
+              className="placeholder:text-gray-500"
             />
           </div>
 
@@ -311,7 +312,7 @@ export function RecipeDetail() {
   const handleCopyToNew = () => {
     // Navigate to recipes page with copy data in query params
     const copyData = {
-      name: `${template.name} (copied)`,
+      name: `${template.name}-copied`,
       description: template.description,
       content: template.content,
       recipe_type: template.recipe_type,
