@@ -210,15 +210,7 @@ def ssh_options_list(
     ssh_log_file: Optional[str] = None,
     disable_identities_only: bool = False,
 ) -> List[str]:
-    """Returns a list of sane options for 'ssh'.
-
-    Args:
-        disable_identities_only: If True, do not set IdentitiesOnly=yes. This
-            allows SSH to use keys from ssh-agent and default key locations
-            (~/.ssh/id_rsa, etc.) in addition to any explicitly specified key.
-            Useful for user-controlled environments like Slurm clusters where
-            authentication may rely on ssh-agent or default key locations.
-    """
+    """Returns a list of sane options for 'ssh'."""
     if connect_timeout is None:
         connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
