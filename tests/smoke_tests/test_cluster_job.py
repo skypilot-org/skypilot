@@ -2627,6 +2627,16 @@ def test_scp_autodown():
     smoke_tests_utils.run_one_test(test)
 
 
+def _get_k8s_service_cleanup_check_cmd(name: str, name_on_cloud: str) -> str:
+    """Returns the command to check that Kubernetes services are cleaned up."""
+    return smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
+        'echo "Services: [$services]"; '
+        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
+        'else echo "OK: services cleaned up"; fi')
+
+
 # ---------- Testing Recovery on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_kubernetes_recovery():
@@ -2637,13 +2647,8 @@ def test_kubernetes_recovery():
     head = f'{name_on_cloud}-head'
     worker2 = f'{name_on_cloud}-worker2'
     worker3 = f'{name_on_cloud}-worker3'
-    # Command to check that services are cleaned up after sky down
-    service_cleanup_check = smoke_tests_utils.run_cloud_cmd_on_cluster(
-        name,
-        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
-        'echo "Services after sky down: [$services]"; '
-        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
-        'else echo "OK: services cleaned up"; fi')
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
     test = smoke_tests_utils.Test(
         'kubernetes_pod_recovery',
         [
@@ -2681,16 +2686,6 @@ def test_kubernetes_recovery():
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
-
-
-def _get_k8s_service_cleanup_check_cmd(name: str, name_on_cloud: str) -> str:
-    """Returns the command to check that Kubernetes services are cleaned up."""
-    return smoke_tests_utils.run_cloud_cmd_on_cluster(
-        name,
-        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
-        'echo "Services: [$services]"; '
-        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
-        'else echo "OK: services cleaned up"; fi')
 
 
 @pytest.mark.kubernetes
