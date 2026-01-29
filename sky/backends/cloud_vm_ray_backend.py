@@ -6125,7 +6125,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 'cloud': str(handle.launched_resources.cloud),
                 'region': handle.launched_resources.region,
                 'zone': handle.launched_resources.zone,
-            })
+            }),
+            constants.USER_ENV_VAR: common_utils.get_current_user_name(),
         }
 
     def _get_task_env_vars(self, task: task_lib.Task, job_id: int,
