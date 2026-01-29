@@ -509,27 +509,23 @@ class RejectOldClientsPolicy(sky.AdminPolicy):
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         """Reject requests from clients with an old API version."""
-        # Skip version check for client-side policy application
-        if user_request.at_client_side:
-            return sky.MutatedUserRequest(
-                task=user_request.task,
-                skypilot_config=user_request.skypilot_config)
-
-        # Check client API version
-        if user_request.client_api_version is not None:
-            if user_request.client_api_version < cls.MIN_REQUIRED_API_VERSION:
+        # Version check is only applied at the server-side.
+        if not user_request.at_client_side:
+            # Check client API version
+            if user_request.client_api_version is not None:
+                if user_request.client_api_version < cls.MIN_REQUIRED_API_VERSION:
+                    raise RuntimeError(
+                        f'Client API version {user_request.client_api_version} '
+                        f'is below the minimum required version '
+                        f'{cls.MIN_REQUIRED_API_VERSION}. '
+                        f'Please upgrade your SkyPilot client. '
+                        f'Your client version: {user_request.client_version}')
+            else:
+                # client_api_version is None for very old clients that don't send
+                # version headers. You may choose to reject these clients as well.
                 raise RuntimeError(
-                    f'Client API version {user_request.client_api_version} '
-                    f'is below the minimum required version '
-                    f'{cls.MIN_REQUIRED_API_VERSION}. '
-                    f'Please upgrade your SkyPilot client. '
-                    f'Your client version: {user_request.client_version}')
-        else:
-            # client_api_version is None for very old clients that don't send
-            # version headers. You may choose to reject these clients as well.
-            raise RuntimeError(
-                'Client version information is not available. '
-                'Please upgrade your SkyPilot client to a recent version.')
+                    'Client version information is not available. '
+                    'Please upgrade your SkyPilot client to a recent version.')
 
         return sky.MutatedUserRequest(
             task=user_request.task,
