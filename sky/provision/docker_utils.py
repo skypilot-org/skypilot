@@ -475,7 +475,7 @@ class DockerInitializer:
             # Set ownership of .ssh to the detected docker user, since these
             # commands run as root but SSH will connect as the default user
             # who needs write access to ~/.ssh
-            f'chown -R {docker_user} ~/.ssh;'
+            f'chown -R {shlex.quote(docker_user)} ~/.ssh;'
             'sudo service ssh start;'
             'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
             f'{SETUP_ENV_VARS_CMD}',
