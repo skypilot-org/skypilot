@@ -69,6 +69,7 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  log_cmd: bool = ...,
+                 timeout: Optional[int] = ...,
                  **kwargs) -> int:
     ...
 
@@ -88,6 +89,7 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  log_cmd: bool = ...,
+                 timeout: Optional[int] = ...,
                  **kwargs) -> Tuple[int, str, str]:
     ...
 
@@ -107,6 +109,7 @@ def run_with_log(cmd: Union[List[str], str],
                  line_processor: Optional[log_utils.LineProcessor] = ...,
                  streaming_prefix: Optional[str] = ...,
                  log_cmd: bool = ...,
+                 timeout: Optional[int] = ...,
                  **kwargs) -> Tuple[int, int]:
     ...
 

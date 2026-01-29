@@ -99,7 +99,6 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -174,9 +173,9 @@ def test_lambda_job_queue():
         'lambda_job_queue',
         [
             f'sky launch -y -c {name} {smoke_tests_utils.LAMBDA_TYPE} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 --gpus A10:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 --gpus A10:0.5 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 --gpus A10:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-1 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 --gpus {smoke_tests_utils.LAMBDA_GPU_TYPE}:0.5 -d examples/job_queue/job.yaml',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
@@ -456,8 +455,6 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_shadeform  # Doesn't support Shadeform for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
-# TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -469,6 +466,55 @@ def test_docker_preinstalled_package(generic_cloud: str):
             f'sky exec {name} whoami | grep root',
         ],
         f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
+    """Test local .sqsh container images on Slurm (both absolute and relative paths)."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_rel = f'{name}-rel'
+
+    # Parse "sky check slurm" output: "    ├── cluster: enabled" -> "cluster"
+    # sed strips ANSI escape codes from colored output
+    get_slurm_cluster = ("sky check slurm 2>&1 | "
+                         "sed 's/\\x1b\\[[0-9;]*m//g' | "
+                         "grep -E '(├──|└──)' | "
+                         "grep 'enabled' | "
+                         "head -1 | "
+                         "awk -F': ' '{print $1}' | "
+                         "awk '{print $NF}'")
+
+    test = smoke_tests_utils.Test(
+        'docker_preinstalled_sqsh',
+        [
+            # Get slurm cluster name and remote home directory
+            f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+            f'echo "Using Slurm cluster: $SLURM_CLUSTER" && '
+            f'SLURM_HOME=$(ssh -F ~/.slurm/config $SLURM_CLUSTER "echo \\$HOME") && '
+            f'echo "Remote home: $SLURM_HOME" && '
+            # Import nginx image to create .sqsh file in ~/nginx+latest.sqsh
+            f'ssh -F ~/.slurm/config $SLURM_CLUSTER "srun enroot import docker://nginx:latest" && '
+            # Test 1: Absolute path - launch with full path to .sqsh
+            f'sky launch -y -c {name} --infra slurm/$SLURM_CLUSTER '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:$SLURM_HOME/nginx+latest.sqsh -- nginx -V',
+            # Verify absolute path worked
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} whoami | grep root',
+            # Test 2: Relative path - must use ./ prefix for pyxis
+            f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+            f'sky launch -y -c {name_rel} --infra slurm/$SLURM_CLUSTER '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'--image-id docker:./nginx+latest.sqsh -- nginx -V',
+            # Verify relative path worked
+            f'sky logs {name_rel} 1 --status',
+            f'sky exec {name} whoami | grep root',
+        ],
+        f'sky down -y {name} {name_rel}; '
+        f'SLURM_CLUSTER=$({get_slurm_cluster}) && '
+        f'ssh -F ~/.slurm/config $SLURM_CLUSTER "rm -f ~/nginx+latest.sqsh"',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -495,6 +541,8 @@ def test_multi_echo(generic_cloud: str):
         # Slurm and Kubernetes do not support spot instances
         use_spot = False
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
 
     # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
     is_remote = smoke_tests_utils.is_remote_server_test()
@@ -623,6 +671,8 @@ def test_multi_echo(generic_cloud: str):
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1250,16 +1300,50 @@ def test_volume_env_mount_kubernetes():
 # ---------- Container logs from task on Kubernetes ----------
 
 
-def _check_container_logs(name, logs, total_lines, count):
+def _check_container_logs(name, logs, total_lines, count, timeout=60):
     """Check if the container logs contain the expected number of logging lines.
 
     Each line should be only one number in the given range and should show up
     count number of times. We skip the messages that we see in the job from
     running setup with set -x.
+
+    This function includes a retry mechanism because there can be a small delay
+    between job completion and when container logs become fully available via
+    kubectl logs.
     """
-    output_cmd = f's=$({logs});'
-    for num in range(1, total_lines + 1):
-        output_cmd += f' echo "$s" | grep -x "{num}" | wc -l | grep {count};'
+    # The awk script checks if each number from 1 to total_lines appears
+    # exactly 'count' times and that no other numbers are present.
+    awk_check = f"""awk '
+  /^[0-9]+$/ {{ counts[$0]++ }}
+  END {{
+    if (length(counts) != {total_lines}) {{
+      exit 1
+    }}
+    for (i = 1; i <= {total_lines}; i++) {{
+      if (counts[i] != {count}) {{
+        exit 1
+      }}
+    }}
+    exit 0
+  }}'"""
+
+    # Wrap in a retry loop with timeout
+    output_cmd = f'''
+start_time=$SECONDS
+while true; do
+    if (( $SECONDS - start_time > {timeout} )); then
+        echo "Timeout after {timeout} seconds waiting for container logs"
+        exit 1
+    fi
+    s=$({logs})
+    if echo "$s" | {awk_check}; then
+        echo "Container logs verified successfully"
+        break
+    fi
+    echo "Waiting for container logs to be ready..."
+    sleep 5
+done
+'''
     return smoke_tests_utils.run_cloud_cmd_on_cluster(
         name,
         output_cmd,
@@ -1286,7 +1370,7 @@ def test_container_logs_multinode_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
+                f'sky launch -y -c {name} --infra kubernetes {task_yaml} --num-nodes 2',
                 _check_container_logs(name, head_logs, 9, 1),
                 _check_container_logs(name, worker_logs, 9, 1),
             ],
@@ -1340,7 +1424,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
             [
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     'kubernetes', name),
-                f'sky launch -y -c {name}',
+                f'sky launch -y -c {name} --infra kubernetes',
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
@@ -1666,6 +1750,8 @@ def test_cancel_azure():
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1867,6 +1953,28 @@ def test_aws_custom_image():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.aws
+@pytest.mark.parametrize(
+    'image_id',
+    [
+        'docker:verlai/verl:sgl055.latest',
+        # 'docker:nvcr.io/nvidia/quantum/cuda-quantum:cu12-0.10.0',
+    ])
+def test_aws_custom_docker_image_with_motd(image_id):
+    """Test AWS custom image with MOTD contamination"""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-aws-custom-image',
+        [
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra aws --image-id {image_id}',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.resource_heavy
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
@@ -1899,13 +2007,14 @@ def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     accelerator = smoke_tests_utils.get_available_gpus()
     name = smoke_tests_utils.get_cluster_name()
+    gpus_arg = f'{accelerator}:1' if accelerator else 'none'
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg}',
             f'sky logs {name} 1 --status',
             # Try exec to run again and check if the logs are printed
-            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1 | grep "Hello 100"',
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg} | grep "Hello 100"',
             # Make sure ssh is working with custom username
             f'ssh {name} echo hi | grep hi',
         ],
@@ -1929,6 +2038,46 @@ def test_kubernetes_pod_failure_detection():
             f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} -y --image-id docker:busybox:latest --infra kubernetes echo hi || true',
             # Check that the provision logs contain the expected error message.
             f's=$(sky logs --provision {name}) && echo "==Validating error message==" && echo "$s" && echo "$s" | grep -A 2 "Pod.*terminated:.*" | grep -A 2 "PodFailed" | grep "StartError"',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.resource_heavy  # Not actually resource heavy, but can't reproduce on kind clusters.
+@pytest.mark.no_auto_retry
+def test_kubernetes_container_status_unknown_status_refresh():
+    """Test sky status --refresh handles evicted pods without crashing.
+
+    When pods are evicted due to ephemeral storage limits, containers may enter
+    ContainerStatusUnknown state with terminated.finishedAt=null. This test
+    verifies that SkyPilot handles evicted pods without erroring.
+
+    Note: This test is inherently flaky, it may succeed even before the fix.
+    Triggering ContainerStatusUnknown (where finishedAt is null) requires the kubelet
+    to lose contact with the container runtime during eviction, which is racy. The pod
+    may instead get a clean termination with finishedAt set.
+
+    Regression test for #8674.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_container_status_unknown_status_refresh',
+        [
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
+            # Poll sky status --refresh, fail fast if error found.
+            # Before the fix this logged: "Failed to query ... [TypeError]..."
+            (f'for i in $(seq 1 20); do '
+             f'echo "=== status refresh attempt $i ===" && '
+             f'OUT=$(sky status {name} -v --refresh 2>&1) && '
+             f'echo "$OUT" && '
+             f'if echo "$OUT" | grep -q "TypeError"; then '
+             f'echo "FAIL: TypeError found" && exit 1; fi && '
+             f'if echo "$OUT" | grep -q "Failed to refresh status"; then '
+             f'echo "FAIL: Refresh failed" && exit 1; fi; done'),
         ],
         f'sky down -y {name}',
         timeout=10 * 60,
@@ -2478,6 +2627,16 @@ def test_scp_autodown():
     smoke_tests_utils.run_one_test(test)
 
 
+def _get_k8s_service_cleanup_check_cmd(name: str, name_on_cloud: str) -> str:
+    """Returns the command to check that Kubernetes services are cleaned up."""
+    return smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
+        'echo "Services: [$services]"; '
+        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
+        'else echo "OK: services cleaned up"; fi')
+
+
 # ---------- Testing Recovery on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_kubernetes_recovery():
@@ -2488,6 +2647,8 @@ def test_kubernetes_recovery():
     head = f'{name_on_cloud}-head'
     worker2 = f'{name_on_cloud}-worker2'
     worker3 = f'{name_on_cloud}-worker3'
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
     test = smoke_tests_utils.Test(
         'kubernetes_pod_recovery',
         [
@@ -2520,9 +2681,89 @@ def test_kubernetes_recovery():
             # Check status
             f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
         ],
-        f'sky down -y {name} && '
+        f'sky down -y {name} && {service_cleanup_check} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_service_cleanup_on_down():
+    """Test that Kubernetes services are cleaned up when running sky down
+    after pods have been externally deleted."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
+    test = smoke_tests_utils.Test(
+        'kubernetes_service_cleanup_on_down',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch cluster
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 2 echo hello',
+            # Verify services exist
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name); '
+                'echo "Services before deletion: [$services]"; '
+                'if [ -z "$services" ]; then echo "ERROR: no services found"; exit 1; fi'
+            ),
+            # Delete all pods externally (simulating external deletion)
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl delete pod -l ray-cluster-name={name_on_cloud} --wait'
+            ),
+            # Run sky down - this should clean up services even though pods are gone
+            f'sky down -y {name}',
+            # Verify services are cleaned up
+            service_cleanup_check,
+        ],
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_service_cleanup_on_status_refresh():
+    """Test that Kubernetes services are cleaned up by the status refresh
+    daemon after pods have been externally deleted."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
+    test = smoke_tests_utils.Test(
+        'kubernetes_service_cleanup_on_status_refresh',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch cluster
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 2 echo hello',
+            # Verify services exist
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name); '
+                'echo "Services before deletion: [$services]"; '
+                'if [ -z "$services" ]; then echo "ERROR: no services found"; exit 1; fi'
+            ),
+            # Delete all pods externally (simulating external deletion)
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl delete pod -l ray-cluster-name={name_on_cloud} --wait'
+            ),
+            # Wait for status refresh to detect termination and clean up
+            # The status refresh daemon runs periodically and should detect
+            # that all pods are gone, triggering post_teardown_cleanup
+            f'sleep 90',
+            # Verify cluster is removed from sky status
+            f'sky status {name} --no-show-pools --no-show-services --no-show-managed-jobs 2>&1 | grep -q "not found"',
+            # Verify services are cleaned up
+            service_cleanup_check,
+        ],
+        f'sky down -y {name} || true; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -2690,6 +2931,153 @@ def test_kubernetes_pod_config_change_detection():
         smoke_tests_utils.run_one_test(test)
         os.unlink(task_yaml_1_path)
         os.unlink(task_yaml_2_path)
+
+
+# ---------- Testing Kubernetes remote_identity override ----------
+@pytest.mark.kubernetes
+def test_kubernetes_remote_identity_override():
+    """Test that config.kubernetes.remote_identity can be overridden in task YAML.
+
+    This test verifies that:
+    1. With remote_identity: LOCAL_CREDENTIALS, kubeconfig is uploaded
+    2. With remote_identity: NO_UPLOAD, kubeconfig is NOT uploaded
+
+    This is important for users running SkyPilot from within a SkyPilot pod,
+    where the auto-mounted service account should be used instead of uploading
+    kubeconfig which may have exec auth or unreachable IPs.
+
+    Fixes: https://github.com/skypilot-org/skypilot/issues/8321
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_remote_identity_override',
+        [
+            # First, launch with LOCAL_CREDENTIALS - kubeconfig should be uploaded
+            f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/test_k8s_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+            # Down the cluster
+            f'sky down -y {name}',
+            # Launch with NO_UPLOAD - kubeconfig should NOT be uploaded
+            f'sky launch -y -c {name} --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/test_k8s_remote_identity_no_upload.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_pod_config_sidecar():
+    """Test Kubernetes pod_config with sidecar container injection.
+
+    This test verifies that SkyPilot correctly handles pods with multiple
+    containers (sidecars) by:
+    1. Launching a cluster with a sidecar container via pod_config
+    2. Verifying the pod has both ray-node and sidecar containers
+    3. Verifying sky exec commands run in the ray-node container
+    4. Verifying the sidecar container is running
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_k8s_pod_config_sidecar.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    task_yaml_content = template.render()
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(task_yaml_content)
+        f.flush()
+        task_yaml_path = f.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_pod_config_sidecar',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch SkyPilot cluster with sidecar
+                f'sky launch -y -c {name} --infra kubernetes '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
+                # Verify pod has 2 containers (ray-node and sidecar)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l skypilot-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[*].name}\' | '
+                    'grep -E "ray-node.*sidecar|sidecar.*ray-node"'),
+                # Verify sky exec runs in ray-node container
+                f'sky exec {name} "echo CONTAINER_CHECK: ray-node is working"',
+                # Verify sidecar is running
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl logs -l skypilot-cluster-name={name_on_cloud} '
+                    '-c sidecar --tail=5 | grep "sidecar running"'),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+        os.unlink(task_yaml_path)
+
+
+# ---------- Testing Kubernetes set_pod_resource_limits ----------
+@pytest.mark.kubernetes
+def test_kubernetes_set_pod_resource_limits():
+    """Test that set_pod_resource_limits config sets CPU/memory limits on pods.
+
+    This test verifies that when kubernetes.set_pod_resource_limits is set to
+    a numeric multiplier, the pod limits are set to requests * multiplier.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    # Config with set_pod_resource_limits with a 2x multiplier
+    config = textwrap.dedent("""
+    kubernetes:
+        set_pod_resource_limits: 2.0
+    """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as config_file:
+        config_file.write(config)
+        config_file.flush()
+        config_path = config_file.name
+
+        test = smoke_tests_utils.Test(
+            'kubernetes_set_pod_resource_limits',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Launch a cluster with set_pod_resource_limits=2.0
+                # Using --cpus 2 --memory 2 so limits should be 4 CPU, 4G memory
+                f'sky launch -y -c {name} --infra kubernetes --cpus 2 --memory 2',
+                # Verify CPU limit is set (should be 4 with 2x multiplier)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l ray-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[0].resources.limits.cpu}\' '
+                    '| grep -E "^4"'),
+                # Verify memory limit is set (should be 4G with 2x multiplier)
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'kubectl get pod -l ray-cluster-name={name_on_cloud} '
+                    '-o jsonpath=\'{.items[0].spec.containers[0].resources.limits.memory}\' '
+                    '| grep -E "^4.*G"'),
+            ],
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && '
+            f'rm -f {config_path}',
+            timeout=10 * 60,
+            env={
+                skypilot_config.ENV_VAR_GLOBAL_CONFIG: config_path,
+            },
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 # ---------- SSH Proxy Performance Test ----------

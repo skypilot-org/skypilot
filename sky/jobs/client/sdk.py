@@ -51,7 +51,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-) -> server_common.RequestId[Tuple[Optional[int],
+) -> server_common.RequestId[Tuple[Optional[List[int]],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a managed job.
 
@@ -68,7 +68,7 @@ def launch(
         The request ID of the launch request.
 
     Request Returns:
-        job_id (Optional[int]): Job ID for the managed job
+        job_ids (Optional[List[int]]]): Job IDs for the managed jobs
         controller_handle (Optional[ResourceHandle]): ResourceHandle of the
           controller
 
@@ -120,7 +120,7 @@ def launch(
                               show_default=True)
 
         dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        dag_str = dag_utils.dump_dag_to_yaml_str(dag)
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
@@ -145,6 +145,8 @@ def queue_v2(
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -158,6 +160,8 @@ def queue_v2(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+        sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
+        sort_order: Sort direction ('asc' or 'desc').
 
     Returns:
         The request ID of the queue request.
@@ -193,6 +197,12 @@ def queue_v2(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    # Filter out fields not supported by older servers
+    remote_api_version = versions.get_remote_api_version()
+    if fields is not None and (remote_api_version is None or
+                               remote_api_version < 31):
+        fields = [f for f in fields if f != 'is_primary_in_job_group']
+
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
@@ -200,6 +210,8 @@ def queue_v2(
         job_ids=job_ids,
         limit=limit,
         fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(
@@ -340,6 +352,7 @@ def tail_logs(
         refresh: bool = False,
         tail: Optional[int] = None,
         output_stream: Optional['io.TextIOBase'] = None,
+        task: Optional[Union[str, int]] = None,
         system: Optional[Union[uuid.UUID,
                                Literal[True]]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
@@ -357,6 +370,9 @@ def tail_logs(
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
+        task: Task identifier to view logs for a specific task in a JobGroup.
+            If an int, it is treated as a task ID. If a str, it is treated as
+            a task name. If None, logs for all tasks are shown.
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
@@ -370,7 +386,7 @@ def tail_logs(
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
     version = versions.get_remote_api_version()
-    if version is not None and version < 27 and system is not None:
+    if version is not None and version < 32 and system is not None:
         raise ValueError('system is not supported in your API server. '
                          'Please upgrade to a newer API server to use this '
                          'feature.')
@@ -381,6 +397,7 @@ def tail_logs(
         controller=controller,
         refresh=refresh,
         tail=tail,
+        task=task,
         system=system,
     )
     response = server_common.make_authenticated_request(
@@ -457,7 +474,7 @@ def download_logs(
     """
 
     version = versions.get_remote_api_version()
-    if version is not None and version < 27 and system is not None:
+    if version is not None and version < 32 and system is not None:
         raise ValueError('system is not supported in your API server. '
                          'Please upgrade to a newer API server to use this '
                          'feature.')

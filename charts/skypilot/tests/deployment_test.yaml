@@ -148,6 +148,25 @@ tests:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.uid
+      # Verify sky-ephemeral is NOT added when storage.enabled=false (backward compatibility)
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Verify state-volume uses emptyDir (not PVC)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state-volume
+            emptyDir: {}
+      # Verify ~/.sky is mounted from state-volume with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
 
   - it: should use RollingUpdate strategy when configured with external database via connection string
     set:
@@ -204,6 +223,103 @@ tests:
       - equal:
           path: spec.strategy.rollingUpdate.maxUnavailable
           value: 0
+
+  - it: should use emptyDir for ~/.sky when RollingUpdate with storage enabled to avoid SQLite on NFS
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      # Should have sky-ephemeral emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Should mount sky-ephemeral at ~/.sky
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: sky-ephemeral
+            mountPath: /root/.sky
+      # Should NOT mount state-volume at ~/.sky with subPath .sky
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+
+  - it: should persist api_server/clients directory when RollingUpdate with storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      # Should mount api_server/clients from PVC
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/api_server/clients
+            subPath: api_server/clients
+
+  - it: should use state-volume for ~/.sky when Recreate with storage enabled
+    set:
+      apiService.upgradeStrategy: Recreate
+      storage.enabled: true
+    asserts:
+      # Should NOT have sky-ephemeral volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Should mount state-volume at ~/.sky with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+      # Should NOT have separate clients mount
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/api_server/clients
+            subPath: api_server/clients
+
+  - it: should use sky-ephemeral for logrotate sidecar when RollingUpdate with storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+      apiService.logs.retention.enabled: true
+    asserts:
+      # Logrotate sidecar should mount sky-ephemeral at ~/.sky
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: sky-ephemeral
+            mountPath: /root/.sky
+
+  - it: should use state-volume for logrotate sidecar when Recreate with storage enabled
+    set:
+      apiService.upgradeStrategy: Recreate
+      storage.enabled: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      # Logrotate sidecar should mount state-volume at ~/.sky with subPath
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
 
   - it: should mount managed job log directories when storage is enabled
     set:
@@ -657,3 +773,90 @@ tests:
           content:
             name: setup-coreweave-credentials
             image: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
+
+  # Test cases for SKYPILOT_INITIAL_BASIC_AUTH environment variable
+  - it: should set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthSecret
+    set:
+      apiService.enableUserManagement: true
+      apiService.initialBasicAuthSecret: my-auth-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: my-auth-secret
+                key: auth
+
+  - it: should set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthCredentials
+    set:
+      apiService.enableUserManagement: true
+      apiService.initialBasicAuthCredentials: "user:password"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-initial-basic-auth
+                key: auth
+
+  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled but no initial credentials
+    set:
+      apiService.enableUserManagement: true
+      # Neither initialBasicAuthSecret nor initialBasicAuthCredentials set
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when basic auth disabled
+    set:
+      apiService.enableUserManagement: false
+      apiService.initialBasicAuthSecret: my-auth-secret
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when oauth2-proxy is enabled
+    set:
+      ingress.oauth2-proxy.enabled: true
+      apiService.enableUserManagement: true
+      apiService.initialBasicAuthSecret: my-auth-secret
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  # Test cases for SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE environment variable
+  - it: should set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is true
+    set:
+      auth.disableBasicAuthMiddleware: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+            value: "true"
+
+  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is false
+    set:
+      auth.disableBasicAuthMiddleware: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+
+  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE

@@ -31,6 +31,8 @@ echo "namespace: $namespace" >&2
 context=$(echo $namespace_context | grep '+' >/dev/null && echo $namespace_context | cut -d+ -f2- || echo "")
 echo "context: $context" >&2
 context_lower=$(echo "$context" | tr '[:upper:]' '[:lower:]')
+container="${SKYPILOT_K8S_EXEC_CONTAINER:-ray-node}"
+echo "container: $container" >&2
 
 # Check if the resource is a pod or a deployment (or other type)
 if [[ "$pod" == *"/"* ]]; then
@@ -49,9 +51,9 @@ fi
 if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
     # If context is none, it means we are using incluster auth. In this case,
     # we need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
-    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --kubeconfig=/dev/null --"
+    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" -c \"$container\" --kubeconfig=/dev/null --"
 else
-    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" --context=\"$context\" --"
+    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" -c \"$container\" --context=\"$context\" --"
 fi
 
 # Execute command on remote pod, waiting for rsync to be available first.

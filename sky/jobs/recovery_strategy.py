@@ -281,7 +281,8 @@ class StrategyExecutor:
                 logger.info(f'Unexpected exception: {e}\nFailed to get the '
                             'refresh the cluster status. Retrying.')
                 continue
-            if cluster_status != status_lib.ClusterStatus.UP:
+            if cluster_status not in (status_lib.ClusterStatus.UP,
+                                      status_lib.ClusterStatus.AUTOSTOPPING):
                 # The cluster can be preempted before the job is
                 # launched.
                 # Break to let the retry launch kick in.
@@ -741,6 +742,18 @@ class FailoverStrategyExecutor(StrategyExecutor):
                 'Cluster should be launched.', handle)
             launched_resources = handle.launched_resources
             self._launched_resources = launched_resources
+
+            # Persist infra info to database for sorting/filtering
+            if launched_resources is not None:
+                cloud = str(launched_resources.cloud
+                           ) if launched_resources.cloud else None
+                await asyncio.to_thread(
+                    state.set_job_infra,
+                    self.job_id,
+                    cloud=cloud,
+                    region=launched_resources.region,
+                    zone=launched_resources.zone,
+                )
         else:
             self._launched_resources = None
         return job_submitted_at

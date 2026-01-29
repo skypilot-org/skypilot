@@ -144,7 +144,11 @@ function ClusterDetails() {
     } finally {
       setIsLoadingClusterMatch(false);
     }
-  }, [clusterData?.cluster, isGrafanaAvailable]);
+  }, [
+    clusterData?.cluster,
+    clusterData?.cluster_name_on_cloud,
+    isGrafanaAvailable,
+  ]);
 
   // Fetch matching cluster when component mounts and Grafana is available
   useEffect(() => {
@@ -756,6 +760,19 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Jobs Table - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ClusterJobs
+            clusterName={clusterData.cluster}
+            clusterJobData={clusterJobData}
+            loading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
+          />
+        </div>
+      )}
+
       {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
       {clusterData &&
         clusterData.full_infra &&
@@ -883,19 +900,6 @@ function ActiveTab({
             </div>
           </div>
         )}
-
-      {/* Jobs Table - Only show for active clusters */}
-      {!isHistoricalCluster && (
-        <div className="mb-8">
-          <ClusterJobs
-            clusterName={clusterData.cluster}
-            clusterJobData={clusterJobData}
-            loading={clusterJobsLoading}
-            refreshClusterJobsOnly={refreshClusterJobsOnly}
-            workspace={clusterData.workspace}
-          />
-        </div>
-      )}
 
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot

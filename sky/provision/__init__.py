@@ -192,6 +192,27 @@ def map_all_volumes_usedby(
 
 
 @_route_to_cloud_impl
+def get_all_volumes_errors(
+        provider_name: str,
+        configs: List[models.VolumeConfig]) -> Dict[str, Optional[str]]:
+    """Get error messages for all volumes.
+
+    Checks if volumes have errors (e.g., pending state due to
+    misconfiguration) and returns appropriate error messages.
+
+    Args:
+        provider_name: Name of the provider.
+        configs: List of VolumeConfig objects.
+
+    Returns:
+        Dictionary mapping volume name to error message (None if no error).
+    """
+    # Default implementation returns empty dict (no error checking)
+    del provider_name, configs
+    return {}
+
+
+@_route_to_cloud_impl
 def run_instances(provider_name: str, region: str, cluster_name: str,
                   cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -219,6 +240,27 @@ def terminate_instances(
 ) -> None:
     """Terminate running or stopped instances."""
     raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def cleanup_cluster_resources(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Cleanup all cloud resources for a cluster (services, etc.).
+
+    Called during post-teardown to ensure resources are cleaned up even when
+    instances were deleted externally. Currently only Kubernetes needs this
+    to clean up orphaned services.
+
+    Args:
+        provider_name: Name of the cloud provider
+        cluster_name_on_cloud: The cluster name on cloud
+        provider_config: Provider configuration dictionary
+    """
+    # Default implementation does nothing - only Kubernetes overrides this
+    del provider_name, cluster_name_on_cloud, provider_config
 
 
 @_route_to_cloud_impl

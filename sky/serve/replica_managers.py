@@ -1096,7 +1096,8 @@ class SkyPilotReplicaManager(ReplicaManager):
             info.cluster_name,
             force_refresh_statuses=set(status_lib.ClusterStatus))
 
-        if cluster_status == status_lib.ClusterStatus.UP:
+        if cluster_status in (status_lib.ClusterStatus.UP,
+                              status_lib.ClusterStatus.AUTOSTOPPING):
             return False
         # The cluster is (partially) preempted. It can be down, INIT or STOPPED,
         # based on the interruption behavior of the cloud.

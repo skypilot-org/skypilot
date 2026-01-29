@@ -74,7 +74,9 @@ Create the configuration file:
 
 .. note::
 
-    ``HostName``, ``User``, and ``IdentityFile`` are required fields.
+    ``HostName`` and ``User`` are required fields. ``IdentityFile`` is optional;
+    if not specified, SSH will use keys from ssh-agent or default key locations
+    (e.g., ``~/.ssh/id_rsa``, ``~/.ssh/id_ed25519``).
 
 Verify your SSH connection works by running:
 
@@ -176,6 +178,63 @@ SkyPilot will translate this to the appropriate ``--gres=gpu:`` directive for Sl
 
     The GPU type name should match what's configured in your Slurm cluster's GRES configuration.
     Common names include ``H100``, ``H200``, ``L4`` etc.
+
+
+Viewing GPU availability
+------------------------
+
+SkyPilot provides a unified dashboard to monitor GPU availability and utilization across **all** your Slurm clusters.
+
+To open the dashboard:
+
+.. code-block:: bash
+
+    $ sky dashboard
+
+Navigate to the **Infra** tab to see the real-time GPU availability across all your Slurm clusters:
+
+.. image:: /images/slurm-infra-page.png
+   :alt: SkyPilot Dashboard showing Slurm GPU availability overview
+   :width: 100%
+
+|
+
+Click on a cluster name to see detailed GPU availability per node:
+
+.. image:: /images/slurm-cluster-details-page.png
+   :alt: SkyPilot Dashboard showing Slurm cluster GPU details
+   :width: 100%
+
+|
+
+You can also view GPU availability from the CLI:
+
+.. code-block:: console
+
+    $ sky show-gpus --infra slurm
+    Slurm GPUs
+    GPU    UTILIZATION
+    L40S   3 of 8 free
+    GH200  1 of 2 free
+    H100   8 of 8 free
+
+    Slurm Cluster: mycluster1
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+    L40S  1, 2, 4                   3 of 8 free
+
+    Slurm Cluster: mycluster2
+    GPU    REQUESTABLE_QTY_PER_NODE  UTILIZATION
+    GH200  1                         1 of 2 free
+
+    Slurm Cluster: mycluster3
+    GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
+    H100  1, 2, 4, 8                8 of 8 free
+
+    Slurm per node GPU availability
+    CLUSTER     NODE            PARTITION  STATE  GPU   UTILIZATION
+    mycluster1  ip-10-3-132-97  dev*,gpus  mix    L40S  1 of 4 free
+    mycluster1  ip-10-3-168-59  dev*,gpus  mix    L40S  2 of 4 free
+    ...
 
 
 Shared filesystem (NFS)

@@ -151,6 +151,7 @@ def run_with_log(
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
+    timeout: Optional[int] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -165,9 +166,15 @@ def run_with_log(
             enabled, lines are printed only when '\r' or '\n' is found.
         streaming_prefix: Optional prefix for each log line. Can contain {pid}
             placeholder which will be replaced with the subprocess PID.
+        timeout: Optional timeout in seconds. If the command does not complete
+            within this time, it will be terminated and TimeoutExpired will be
+            raised. None means no timeout (default).
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
+
+    Raises:
+        subprocess.TimeoutExpired: If the command times out.
     """
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
@@ -258,24 +265,65 @@ def run_with_log(
                         _handle_io_stream,
                         args=err_args,
                     )
-            if ctx is not None:
-                # When runs in a coroutine, always process the subprocess
-                # stream to:
-                # 1. handle context cancellation
-                # 2. redirect subprocess stdout/stderr to the contextual
-                #    stdout/stderr of current coroutine.
-                stdout, stderr = context_utils.pipe_and_wait_process(
-                    ctx,
-                    proc,
-                    stdout_stream_handler=stdout_stream_handler,
-                    stderr_stream_handler=stderr_stream_handler)
-            elif process_stream:
-                # When runs in a process, only process subprocess stream if
-                # necessary to avoid unnecessary stream handling overhead.
-                stdout, stderr = process_subprocess_stream(
-                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Use a timer to enforce timeout during stream processing.
+            # Without this, process_subprocess_stream blocks until the process
+            # finishes, making the timeout at proc.wait() ineffective.
+            timeout_triggered = False
+            timer = None
+
+            def _timeout_handler():
+                nonlocal timeout_triggered
+                timeout_triggered = True
+                subprocess_utils.kill_children_processes(proc.pid)
+
+            if timeout is not None:
+                timer = threading.Timer(timeout, _timeout_handler)
+                timer.start()
+
+            try:
+                if ctx is not None:
+                    # When runs in a coroutine, always process the subprocess
+                    # stream to:
+                    # 1. handle context cancellation
+                    # 2. redirect subprocess stdout/stderr to the contextual
+                    #    stdout/stderr of current coroutine.
+                    stdout, stderr = context_utils.pipe_and_wait_process(
+                        ctx,
+                        proc,
+                        stdout_stream_handler=stdout_stream_handler,
+                        stderr_stream_handler=stderr_stream_handler)
+                elif process_stream:
+                    # When runs in a process, only process subprocess stream if
+                    # necessary to avoid unnecessary stream handling overhead.
+                    stdout, stderr = process_subprocess_stream(
+                        proc, stdout_stream_handler, stderr_stream_handler)
+            finally:
+                if timer is not None:
+                    timer.cancel()
+
+            # Check if timeout was triggered during stream processing
+            if timeout_triggered:
+                logger.error(
+                    f'Command timed out after {timeout} seconds: {cmd}')
+                raise subprocess.TimeoutExpired(cmd, timeout)
+
             # Ensure returncode is set.
-            proc.wait()
+            if ctx is not None or process_stream:
+                # Stream processing already waited for process completion, so
+                # proc.wait() will return immediately. We still call it to
+                # ensure proc.returncode is set.
+                proc.wait()
+            else:
+                # No stream processing - use proc.wait with timeout as primary
+                # timeout mechanism.
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Kill the process and all its children
+                    subprocess_utils.kill_children_processes(proc.pid)
+                    logger.error(
+                        f'Command timed out after {timeout} seconds: {cmd}')
+                    raise
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
@@ -489,19 +537,36 @@ if script or True:
         # allocation. See:
         # https://support.schedmd.com/show_bug.cgi?id=14298
         # https://github.com/huggingface/datatrove/issues/248
+        cmd_parts = []
+        # Only unset SKY_RUNTIME_DIR for container runs. For non-container
+        # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
+        # SlurmCommandRunner to avoid SQLite WAL issues on shared filesystems.
+        if False:
+            cmd_parts.append('unset SKY_RUNTIME_DIR;')
+        cmd_parts.extend([
+            constants.SKY_SLURM_PYTHON_CMD,
+            '-m sky.skylet.executor.slurm',
+            runner_args,
+        ])
+        bash_cmd = shlex.quote(' '.join(cmd_parts))
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
-            f'{constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}'
+            f'/bin/bash -c {bash_cmd}'
         )
-        return srun_cmd, script_path
+
+        def cleanup():
+            if script_path is not None:
+                os.remove(script_path)
+
+        return srun_cmd, cleanup
 
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
         run_flags = f'--nodes=1 --cpus-per-task=4 --mem=0 {gpu_arg} --exclusive'
-        srun_cmd, task_script_path = build_task_runner_cmd(
+        srun_cmd, cleanup = build_task_runner_cmd(
             script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
             task_name='train_task',
             alloc_signal=alloc_signal_file,
@@ -516,8 +581,7 @@ if script or True:
             print(line, end='', flush=True)
         proc.wait()
 
-        if task_script_path is not None:
-            os.remove(task_script_path)
+        cleanup()
         return {'return_code': proc.returncode, 'pid': proc.pid}
 
     run_thread_result = {'result': None}
@@ -558,7 +622,7 @@ if script or True:
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
         setup_flags = f'--overlap --nodes=1'
-        setup_srun, setup_script_path = build_task_runner_cmd(
+        setup_srun, setup_cleanup = build_task_runner_cmd(
             'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
             is_setup=True
         )
@@ -572,8 +636,7 @@ if script or True:
             print(line, end='', flush=True)
         setup_proc.wait()
 
-        if setup_script_path is not None:
-            os.remove(setup_script_path)
+        setup_cleanup()
 
         setup_returncode = setup_proc.returncode
         if setup_returncode != 0:
