@@ -204,13 +204,10 @@ Admin CLI
    :nested: full
 
 
-Utils: ``check``/``cost-report``
---------------------------------
+Utils: ``check``/``cost-report``/``show-gpus`` (deprecated)
+------------------------------------------------------------
 
 .. _sky-show-gpus:
-
-``show-gpus`` (deprecated)
-^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
 
