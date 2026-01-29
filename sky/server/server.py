@@ -1203,6 +1203,16 @@ async def unzip_file(zip_file_path: pathlib.Path,
                     new_path = client_file_mounts_dir / original_path.lstrip(
                         '/')
 
+                    # Security check: ensure extracted path stays within target
+                    # directory to prevent Zip Slip attacks (path traversal via
+                    # malicious "../" sequences in archive member names).
+                    resolved_path = new_path.resolve()
+                    if not _is_relative_to(resolved_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(
+                            f'Zip member {member.filename!r} would extract '
+                            'outside target directory. Aborted.')
+
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
                         new_path.parent.mkdir(parents=True, exist_ok=True)
