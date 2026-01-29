@@ -30,8 +30,10 @@ sky check k8s
 If you are using it with SkyPilot for the first time, you may see a hint to create GPU labels for your nodes. Follow the instructions to create the labels.
 
 ```bash
-python -m sky.utils.kubernetes.gpu_labeler
+sky label-gpus
 ```
+
+Note: This command currently only supports NVIDIA GPUs.
 
 ## Find available GPUs
 
@@ -101,11 +103,3 @@ Or, find the jobs in a dashboard:
 ```bash
 sky dashboard
 ```
-
-
-
-
-
-
-
-
