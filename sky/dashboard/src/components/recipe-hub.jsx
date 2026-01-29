@@ -52,7 +52,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { LastUpdatedTimestamp } from '@/components/utils';
+import { LastUpdatedTimestamp, TimestampWithTooltip } from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
 import { getRecipes, createRecipe } from '@/data/connectors/recipes';
@@ -64,19 +64,6 @@ const RECIPE_PROPERTY_OPTIONS = [
   { label: 'Type', value: 'recipe_type' },
   { label: 'Owner', value: 'user_name' },
 ];
-
-// Helper to format relative time
-function formatRelativeTime(timestamp) {
-  if (!timestamp) return '';
-  const now = Date.now() / 1000;
-  const diff = now - timestamp;
-
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(timestamp * 1000).toLocaleDateString();
-}
 
 // Generate URL slug from recipe
 // Recipe names are the unique identifier and are already URL-safe
@@ -141,17 +128,20 @@ function RecipeCard({ recipe }) {
               Authored by {recipe.user_name || recipe.user_id || 'Unknown'}
             </div>
 
-            {/* Last updated info */}
-            <div className="text-sm text-gray-500 truncate">
-              Updated by{' '}
-              {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
-              <span
-                className="border-b border-dotted border-gray-400 cursor-help"
-                title={new Date(recipe.updated_at * 1000).toLocaleString()}
-              >
-                {formatRelativeTime(recipe.updated_at)}
-              </span>
-            </div>
+            {/* Last updated info - only show for editable recipes */}
+            {recipe.is_editable && (
+              <div className="text-sm text-gray-500 truncate">
+                Updated by{' '}
+                {recipe.updated_by_name || recipe.user_name || 'Unknown'}{' '}
+                <TimestampWithTooltip
+                  date={
+                    recipe.updated_at
+                      ? new Date(recipe.updated_at * 1000)
+                      : null
+                  }
+                />
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -393,7 +383,13 @@ function AllRecipesSection({ recipes }) {
                         {recipe.updated_by_name || recipe.user_name || '-'}
                       </TableCell>
                       <TableCell className="text-gray-500">
-                        {formatRelativeTime(recipe.updated_at)}
+                        <TimestampWithTooltip
+                          date={
+                            recipe.updated_at
+                              ? new Date(recipe.updated_at * 1000)
+                              : null
+                          }
+                        />
                       </TableCell>
                     </TableRow>
                   );

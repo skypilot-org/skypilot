@@ -74,8 +74,8 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
         'description': 'A simple managed job with automatic recovery',
         'recipe_type': 'job',
     },
-    'basic_job_pool': {
-        'name': 'basic-job-pool',
+    'basic_pool': {
+        'name': 'basic-pool',
         'description': 'A job pool for running multiple concurrent jobs',
         'recipe_type': 'pool',
     },
@@ -406,7 +406,7 @@ def list_recipes(
         query = query.where(recipes_table.c.recipe_type == recipe_type.value)
 
     query = query.order_by(recipes_table.c.pinned.desc(),
-                           recipes_table.c.updated_at.desc())
+                           recipes_table.c.name.asc())
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         result = session.execute(query)

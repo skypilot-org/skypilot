@@ -50,25 +50,7 @@ import {
   getRecipeTypeInfo,
   getLaunchCommand,
 } from '@/data/constants/recipeTypes';
-
-// Helper to format relative time
-function formatRelativeTime(timestamp) {
-  if (!timestamp) return '';
-  const now = Date.now() / 1000;
-  const diff = now - timestamp;
-
-  if (diff < 60) return 'just now';
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-  return new Date(timestamp * 1000).toLocaleDateString();
-}
-
-// Helper to format full timestamp
-function formatFullTimestamp(timestamp) {
-  if (!timestamp) return '';
-  return new Date(timestamp * 1000).toLocaleString();
-}
+import { TimestampWithTooltip } from '@/components/utils';
 
 // Parse recipe name from URL slug
 // Names are the unique identifiers for recipes (no UUID parsing needed)
@@ -576,12 +558,13 @@ export function RecipeDetail() {
             <div>
               <div className="text-gray-600 font-medium text-base">Updated</div>
               <div className="text-base mt-1">
-                <span
-                  className="border-b border-dotted border-gray-400 cursor-help"
-                  title={formatFullTimestamp(template.updated_at)}
-                >
-                  {formatRelativeTime(template.updated_at)}
-                </span>{' '}
+                <TimestampWithTooltip
+                  date={
+                    template.updated_at
+                      ? new Date(template.updated_at * 1000)
+                      : null
+                  }
+                />{' '}
                 by {template.updated_by_name || template.user_name || 'Unknown'}
               </div>
             </div>
