@@ -17,6 +17,9 @@ WORKER_NODE_TAGS = {
     TAG_SKYPILOT_HEAD_NODE: '0',
 }
 
+# Magic error string indicating that no nodes were launched.
+ERROR_NO_NODES_LAUNCHED = 'SKYPILOT_ERROR_NO_NODES_LAUNCHED'
+
 # Names for Azure Deployments.
 DEPLOYMENT_NAME = 'skypilot-config'
 LEGACY_DEPLOYMENT_NAME = 'ray-config'
