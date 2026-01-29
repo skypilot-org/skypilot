@@ -300,6 +300,9 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 acc_count = round(fraction, 3)
             elif row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
+            elif row['InstanceType'].startswith('g7e'):
+                # Change name from "RTX PRO Server 6000" to "RTXPRO6000" for consistency
+                acc_name = 'RTXPRO6000'
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,

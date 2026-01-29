@@ -36,7 +36,7 @@ async def launch(
     _need_confirmation: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
     request_id = await asyncio.to_thread(sdk.launch, task, name, pool, num_jobs,
                                          _need_confirmation)

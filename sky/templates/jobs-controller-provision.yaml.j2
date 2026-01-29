@@ -1,0 +1,22 @@
+# The template for provisioning the jobs controller cluster.
+
+name: {{dag_name}}
+
+setup: |
+  {{ sky_activate_python_env }}
+  # Disable the pip version check to avoid the warning message, which makes the
+  # output hard to read.
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
+
+  # This is used by the skylet events to check if we are a jobs controller.
+  touch {{job_controller_indicator_file}}
+
+
+envs:
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

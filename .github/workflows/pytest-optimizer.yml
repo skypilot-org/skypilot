@@ -19,13 +19,16 @@ jobs:
         python-version: ["3.9"]
         test-path:
           - "tests/test_optimizer_dryruns.py -k \"partial\""
-          - "tests/test_optimizer_dryruns.py -k \"not partial\""
+          - "tests/test_optimizer_dryruns.py -k \"not partial and not accelerator_memory and not accelerator_manufacturer\""
+          - "tests/test_optimizer_dryruns.py -k \"accelerator_memory or accelerator_manufacturer\""
           - tests/test_optimizer_random_dag.py
         include:
           - test-path: "tests/test_optimizer_dryruns.py -k \"partial\""
             test-name: "Optimizer Dryruns Part 1"
-          - test-path: "tests/test_optimizer_dryruns.py -k \"not partial\""
+          - test-path: "tests/test_optimizer_dryruns.py -k \"not partial and not accelerator_memory and not accelerator_manufacturer\""
             test-name: "Optimizer Dryruns Part 2"
+          - test-path: "tests/test_optimizer_dryruns.py -k \"accelerator_memory or accelerator_manufacturer\""
+            test-name: "Optimizer Dryruns Part 3"
           - test-path: tests/test_optimizer_random_dag.py
             test-name: "Optimizer Random DAG Tests"
     runs-on: ubuntu-latest
