@@ -75,10 +75,7 @@ function TaskDetails() {
       const available = await checkGrafanaAvailability();
       setIsGrafanaAvailable(available);
     };
-
-    if (typeof window !== 'undefined') {
-      checkGrafana();
-    }
+    checkGrafana();
   }, []);
 
   // Handle manual refresh

@@ -118,10 +118,7 @@ function JobDetails() {
       const available = await checkGrafanaAvailability();
       setIsGrafanaAvailable(available);
     };
-
-    if (typeof window !== 'undefined') {
-      checkGrafana();
-    }
+    checkGrafana();
   }, []);
 
   // Function to scroll to a specific section

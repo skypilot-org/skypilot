@@ -50,7 +50,6 @@ const DEFAULT_FIELDS = [
   'accelerators',
   'cluster_resources',
   'cluster_resources_full',
-  'cluster_name_on_cloud',
   'recovery_count',
   'pool',
   'pool_hash',

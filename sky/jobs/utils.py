@@ -117,6 +117,7 @@ _CLUSTER_HANDLE_FIELDS = [
     'infra',
     'accelerators',
     'cluster_name_on_cloud',
+    'labels',
 ]
 
 # The response fields for managed jobs that are not stored in the database
