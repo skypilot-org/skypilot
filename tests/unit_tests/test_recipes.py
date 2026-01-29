@@ -2,6 +2,7 @@
 Tests validation of recipes against SkyPilot schema.
 """
 import pytest
+import textwrap
 
 from sky.recipes import core as recipes_core
 
@@ -11,11 +12,11 @@ class TestRecipeValidation:
 
     def test_create_invalid_yaml_syntax(self):
         """Test that creating a recipe with invalid syntax fails."""
-        invalid_yaml = """
-name: test
-  bad_indentation: true
-run: echo hello
-"""
+        invalid_yaml = textwrap.dedent("""
+        name: test
+         bad_indentation: true
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError, match='Invalid YAML syntax'):
             recipes_core._validate_skypilot_yaml(invalid_yaml, 'cluster')
 
@@ -35,10 +36,10 @@ run: echo hello
     def test_create_yaml_with_invalid_field(self):
         """Test that creating a YAML with only invalid fields fails."""
         # This YAML has no valid SkyPilot fields
-        invalid_yaml = """
-name3: Lloyd
-random_field: value
-"""
+        invalid_yaml = textwrap.dedent("""
+        name3: Lloyd
+        random_field: value
+        """).strip()
         with pytest.raises(ValueError, match='Invalid task YAML'):
             recipes_core._validate_skypilot_yaml(invalid_yaml, 'cluster')
 
@@ -47,26 +48,24 @@ random_field: value
         
         The service section must have valid fields.
         """
-        invalid_yaml = """
-service:
-  invalid_field: /health
-  replicas: 1
-  
-resources:
-  cpus: 2
-  
-run: echo hello
-"""
+        invalid_yaml = textwrap.dedent("""
+        service:
+          invalid_field: /health
+          replicas: 1
+        resources:
+          cpus: 2
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError, match='Invalid recipe YAML'):
             recipes_core._validate_skypilot_yaml(invalid_yaml, 'serve')
 
     def test_create_serve_yaml_without_service_section(self):
         """Test that creating a recipe without service section fails."""
-        invalid_serve_yaml = """
-resources:
-  cpus: 2
-run: python server.py
-"""
+        invalid_serve_yaml = textwrap.dedent("""
+        resources:
+          cpus: 2
+        run: python server.py
+        """).strip()
         with pytest.raises(
                 ValueError,
                 match="Service YAML must contain a 'service' section"):
@@ -74,42 +73,42 @@ run: python server.py
 
     def test_create_pool_yaml_without_pool_section(self):
         """Test that creating a recipe without pool section fails."""
-        invalid_pool_yaml = """
-resources:
-  cpus: 2
-run: echo hello
-"""
+        invalid_pool_yaml = textwrap.dedent("""
+        resources:
+          cpus: 2
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError,
                            match="Pool YAML must contain a 'pool' section"):
             recipes_core._validate_skypilot_yaml(invalid_pool_yaml, 'pool')
 
     def test_valid_cluster_yaml(self):
         """Test that a valid cluster YAML passes validation."""
-        valid_yaml = """
-resources:
-  cpus: 2
-run: echo hello
-"""
+        valid_yaml = textwrap.dedent("""
+        resources:
+          cpus: 2
+        run: echo hello
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(valid_yaml, 'cluster')
 
     def test_valid_job_yaml(self):
         """Test that a valid job YAML passes validation."""
-        valid_yaml = """
-resources:
-  cpus: 2
-run: echo hello
-"""
+        valid_yaml = textwrap.dedent("""
+        resources:
+          cpus: 2
+        run: echo hello
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(valid_yaml, 'job')
 
     def test_invalid_recipe_type(self):
         """Test that an invalid recipe_type is rejected."""
-        valid_yaml = """
-resources:
-  cpus: 2
-run: echo hello
-"""
+        valid_yaml = textwrap.dedent("""
+        resources:
+          cpus: 2
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError, match='Invalid recipe type'):
             recipes_core.create_recipe(
                 name='test',
@@ -120,28 +119,28 @@ run: echo hello
 
     def test_yaml_with_invalid_resources(self):
         """Test that a YAML with invalid resource specifications fails."""
-        invalid_yaml = """
-resources:
-  invalid_resource: 999
-run: echo hello
-"""
+        invalid_yaml = textwrap.dedent("""
+        resources:
+          invalid_resource: 999
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError, match='Invalid resources YAML'):
             recipes_core._validate_skypilot_yaml(invalid_yaml, 'cluster')
 
     def test_yaml_with_completely_invalid_structure(self):
         """Test that a YAML with completely invalid structure fails."""
-        invalid_yaml = """
-not_a_valid_field: value
-another_invalid: 123
-"""
+        invalid_yaml = textwrap.dedent("""
+        not_a_valid_field: value
+        another_invalid: 123
+        """).strip()
         with pytest.raises(ValueError, match='Invalid task YAML'):
             recipes_core._validate_skypilot_yaml(invalid_yaml, 'cluster')
 
     def test_cluster_yaml_minimal(self):
         """Test that a minimal cluster YAML with just run command works."""
-        valid_yaml = """
-run: echo hello world
-"""
+        valid_yaml = textwrap.dedent("""
+        run: echo hello world
+        """).strip()
         # Should not raise - minimal YAML with just a run command is valid
         recipes_core._validate_skypilot_yaml(valid_yaml, 'cluster')
 
@@ -151,10 +150,10 @@ run: echo hello world
 
     def test_local_workdir_rejected(self):
         """Test that local workdir paths are rejected in recipes."""
-        yaml_with_local_workdir = """
-workdir: /path/to/local/dir
-run: python train.py
-"""
+        yaml_with_local_workdir = textwrap.dedent("""
+        workdir: /path/to/local/dir
+        run: python train.py
+        """).strip()
         with pytest.raises(ValueError,
                            match='Local workdir paths are not allowed'):
             recipes_core._validate_skypilot_yaml(yaml_with_local_workdir,
@@ -162,10 +161,10 @@ run: python train.py
 
     def test_local_workdir_relative_path_rejected(self):
         """Test that relative workdir paths are rejected in recipes."""
-        yaml_with_relative_workdir = """
-workdir: ./my-project
-run: python train.py
-"""
+        yaml_with_relative_workdir = textwrap.dedent("""
+        workdir: ./my-project
+        run: python train.py
+        """).strip()
         with pytest.raises(ValueError,
                            match='Local workdir paths are not allowed'):
             recipes_core._validate_skypilot_yaml(yaml_with_relative_workdir,
@@ -173,32 +172,32 @@ run: python train.py
 
     def test_git_workdir_allowed(self):
         """Test that git URL workdir is allowed in recipes."""
-        yaml_with_git_workdir = """
-workdir:
-  url: https://github.com/user/repo
-  ref: main
-run: python train.py
-"""
+        yaml_with_git_workdir = textwrap.dedent("""
+        workdir:
+          url: https://github.com/user/repo
+          ref: main
+        run: python train.py
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(yaml_with_git_workdir, 'cluster')
 
     def test_git_workdir_no_ref_allowed(self):
         """Test that git URL workdir without ref is allowed in recipes."""
-        yaml_with_git_workdir = """
-workdir:
-  url: https://github.com/user/repo
-run: python train.py
-"""
+        yaml_with_git_workdir = textwrap.dedent("""
+        workdir:
+          url: https://github.com/user/repo
+        run: python train.py
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(yaml_with_git_workdir, 'cluster')
 
     def test_local_file_mount_rejected(self):
         """Test that local file mount sources are rejected in recipes."""
-        yaml_with_local_mount = """
-file_mounts:
-  /remote/data: /local/path/to/data
-run: echo hello
-"""
+        yaml_with_local_mount = textwrap.dedent("""
+        file_mounts:
+          /remote/data: /local/path/to/data
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError,
                            match='Local file mounts are not allowed'):
             recipes_core._validate_skypilot_yaml(yaml_with_local_mount,
@@ -218,32 +217,32 @@ run: echo hello
 
     def test_cloud_file_mount_s3_allowed(self):
         """Test that S3 file mounts are allowed in recipes."""
-        yaml_with_cloud_mount = """
-file_mounts:
-  /remote/data: s3://my-bucket/data
-run: echo hello
-"""
+        yaml_with_cloud_mount = textwrap.dedent("""
+        file_mounts:
+          /remote/data: s3://my-bucket/data
+        run: echo hello
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(yaml_with_cloud_mount, 'cluster')
 
     def test_cloud_file_mount_gs_allowed(self):
         """Test that GCS file mounts are allowed in recipes."""
-        yaml_with_gcs_mount = """
-file_mounts:
-  /remote/data: gs://my-bucket/data
-run: echo hello
-"""
+        yaml_with_gcs_mount = textwrap.dedent("""
+        file_mounts:
+          /remote/data: gs://my-bucket/data
+        run: echo hello
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(yaml_with_gcs_mount, 'cluster')
 
     def test_mixed_file_mounts_one_local_rejected(self):
         """Test that mixed file mounts with one local source are rejected."""
-        yaml_with_mixed_mounts = """
-file_mounts:
-  /remote/cloud-data: s3://my-bucket/data
-  /remote/local-data: /local/path/to/data
-run: echo hello
-"""
+        yaml_with_mixed_mounts = textwrap.dedent("""
+        file_mounts:
+          /remote/cloud-data: s3://my-bucket/data
+          /remote/local-data: /local/path/to/data
+        run: echo hello
+        """).strip()
         with pytest.raises(ValueError,
                            match='Local file mounts are not allowed'):
             recipes_core._validate_skypilot_yaml(yaml_with_mixed_mounts,
@@ -251,14 +250,14 @@ run: echo hello
 
     def test_inline_storage_mount_allowed(self):
         """Test that inline storage definitions (dicts) are allowed."""
-        yaml_with_inline_storage = """
-file_mounts:
-  /remote/data:
-    name: my-bucket
-    source: s3://my-bucket/data
-    mode: COPY
-run: echo hello
-"""
+        yaml_with_inline_storage = textwrap.dedent("""
+        file_mounts:
+          /remote/data:
+            name: my-bucket
+            source: s3://my-bucket/data
+            mode: COPY
+        run: echo hello
+        """).strip()
         # Should not raise - dict sources are inline storage definitions
         recipes_core._validate_skypilot_yaml(yaml_with_inline_storage,
                                              'cluster')
@@ -270,6 +269,11 @@ resources:
   cpus: 2
 run: echo hello
 """
+        simple_yaml = textwrap.dedent("""
+        resources:
+          cpus: 2
+        run: echo hello
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(simple_yaml, 'cluster')
 
@@ -279,29 +283,29 @@ run: echo hello
 
     def test_valid_volume_yaml(self):
         """Test that a valid volume YAML passes validation."""
-        valid_volume_yaml = """
-name: my-volume
-type: k8s-pvc
-size: 100Gi
-"""
+        valid_volume_yaml = textwrap.dedent("""
+        name: my-volume
+        type: k8s-pvc
+        size: 100Gi
+        """).strip()
         # Should not raise
         recipes_core._validate_skypilot_yaml(valid_volume_yaml, 'volume')
 
     def test_volume_yaml_missing_name(self):
         """Test that volume YAML without name is rejected."""
-        invalid_volume_yaml = """
-type: k8s-pvc
-size: 100Gi
-"""
+        invalid_volume_yaml = textwrap.dedent("""
+        type: k8s-pvc
+        size: 100Gi
+        """).strip()
         with pytest.raises(ValueError, match="'name' is a required property"):
             recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
 
     def test_volume_yaml_missing_type(self):
         """Test that volume YAML without type is rejected."""
-        invalid_volume_yaml = """
-name: my-volume
-size: 100Gi
-"""
+        invalid_volume_yaml = textwrap.dedent("""
+        name: my-volume
+        size: 100Gi
+        """).strip()
         with pytest.raises(ValueError, match="'type' is a required property"):
             recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
 
