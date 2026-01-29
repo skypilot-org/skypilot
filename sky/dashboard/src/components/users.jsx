@@ -2893,16 +2893,18 @@ function ServiceAccountTokensView({
                       content={copySuccess ? 'Copied!' : 'Copy token'}
                       className="text-muted-foreground"
                     >
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => copyToClipboard(createdTokenInDialog)}
-                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                        className="h-8 w-8 text-green-600 hover:text-green-800 hover:bg-green-100 ml-2"
                       >
                         {copySuccess ? (
                           <CheckIcon className="w-4 h-4" />
                         ) : (
                           <CopyIcon className="w-4 h-4" />
                         )}
-                      </button>
+                      </Button>
                     </CustomTooltip>
                   </div>
                   <p className="text-sm text-green-700 mb-3">
@@ -3084,16 +3086,18 @@ function ServiceAccountTokensView({
                       content={copySuccess ? 'Copied!' : 'Copy token'}
                       className="text-muted-foreground"
                     >
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => copyToClipboard(rotatedTokenInDialog)}
-                        className="flex items-center text-green-600 hover:text-green-800 transition-colors duration-200 p-1 ml-2"
+                        className="h-8 w-8 text-green-600 hover:text-green-800 hover:bg-green-100 ml-2"
                       >
                         {copySuccess ? (
                           <CheckIcon className="w-4 h-4" />
                         ) : (
                           <CopyIcon className="w-4 h-4" />
                         )}
-                      </button>
+                      </Button>
                     </CustomTooltip>
                   </div>
                   <p className="text-sm text-green-700 mb-3">
