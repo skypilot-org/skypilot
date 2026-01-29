@@ -439,32 +439,6 @@ class DockerInitializer:
             'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;',
             run_env='host')
 
-        # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
-        # Append the host VM's authorized_keys to the container's authorized_keys.
-        # This allows any machine that can ssh into the host VM to ssh into the
-        # container.
-        # Last command here is to eliminate the error
-        # `mesg: ttyname failed: inappropriate ioctl for device`.
-        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
-        port = constants.DEFAULT_DOCKER_PORT
-        # In case the port is already configured in the sshd_config file
-        # in some images, we delete it first and then append the new one.
-        # pylint: disable=anomalous-backslash-in-string
-        self._run(
-            'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
-            f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
-            'mkdir -p ~/.ssh;'
-            'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
-            # Set ownership of .ssh to match the home directory owner, since
-            # these commands run as root but SSH will connect as the default
-            # user who needs write access to ~/.ssh
-            'chown -R $(stat -c "%u:%g" $(dirname ~/)) ~/.ssh;'
-            'sudo service ssh start;'
-            'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
-            f'{SETUP_ENV_VARS_CMD}',
-            run_env='docker')
-
-        # SkyPilot: End of Setup Commands.
         # Detect the container's default user for SSH. We run without -u 0
         # to get the actual default user not root. This ensures SSH connects
         # as the correct user whose home directory and SSH keys we've set up.
@@ -481,6 +455,33 @@ class DockerInitializer:
         else:
             raise ValueError('Failed to find Docker user identifier: '
                              f'{docker_user_output}')
+
+        # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
+        # Append the host VM's authorized_keys to the container's authorized_keys.
+        # This allows any machine that can ssh into the host VM to ssh into the
+        # container.
+        # Last command here is to eliminate the error
+        # `mesg: ttyname failed: inappropriate ioctl for device`.
+        # see https://www.educative.io/answers/error-mesg-ttyname-failed-inappropriate-ioctl-for-device  # pylint: disable=line-too-long
+        port = constants.DEFAULT_DOCKER_PORT
+        # In case the port is already configured in the sshd_config file
+        # in some images, we delete it first and then append the new one.
+        # pylint: disable=anomalous-backslash-in-string
+        self._run(
+            'sudo sed -i "/^Port .*/d" /etc/ssh/sshd_config;'
+            f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
+            'mkdir -p ~/.ssh;'
+            'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
+            # Set ownership of .ssh to the detected docker user, since these
+            # commands run as root but SSH will connect as the default user
+            # who needs write access to ~/.ssh
+            f'chown -R {docker_user} ~/.ssh;'
+            'sudo service ssh start;'
+            'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
+            f'{SETUP_ENV_VARS_CMD}',
+            run_env='docker')
+
+        # SkyPilot: End of Setup Commands.
         self.initialized = True
         return docker_user
 
