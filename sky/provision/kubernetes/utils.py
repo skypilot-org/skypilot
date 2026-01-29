@@ -45,7 +45,9 @@ from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from dateutil import parser as dateutil_parser
     import jinja2
+    from kubernetes.client import models as kubernetes_models
     import yaml
 
     from sky import backends
@@ -53,6 +55,8 @@ if typing.TYPE_CHECKING:
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     yaml = adaptors_common.LazyImport('yaml')
+    dateutil_parser = adaptors_common.LazyImport('dateutil.parser')
+    kubernetes_models = adaptors_common.LazyImport('kubernetes.client.models')
 
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
@@ -2077,7 +2081,7 @@ class PodValidator:
 
     @classmethod
     def validate(cls, data):
-        return cls.__validate(data, kubernetes.models.V1Pod)
+        return cls.__validate(data, kubernetes_models.V1Pod)
 
     @classmethod
     def __validate(cls, data, klass):
@@ -2110,7 +2114,7 @@ class PodValidator:
             if klass in cls.NATIVE_TYPES_MAPPING:
                 klass = cls.NATIVE_TYPES_MAPPING[klass]
             else:
-                klass = getattr(kubernetes.models, klass)
+                klass = getattr(kubernetes_models, klass)
 
         if klass in cls.PRIMITIVE_TYPES:
             return cls.__validate_primitive(data, klass)
@@ -2155,7 +2159,7 @@ class PodValidator:
         :return: date.
         """
         try:
-            return kubernetes.dateutil_parser.parse(string).date()
+            return dateutil_parser.parse(string).date()
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as date object') from exc
@@ -2170,7 +2174,7 @@ class PodValidator:
         :return: datetime.
         """
         try:
-            return kubernetes.dateutil_parser.parse(string)
+            return dateutil_parser.parse(string)
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as datetime object') from exc
