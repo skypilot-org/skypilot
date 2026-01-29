@@ -4589,22 +4589,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        if isinstance(handle, LocalResourcesHandle) and job_id is not None:
+        # Get the log directory path for the job.
+        # For system logs, we use the UUID directly as the path component.
+        # For regular jobs, we fetch the log dir from the remote.
+        log_dir: Optional[str] = None
+
+        if system_array is not None:
+            # For system logs, we'll iterate over system_array directly below.
+            # Check for empty array now to give a clear error message.
+            if not system_array:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching log directories found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
+        elif isinstance(handle, LocalResourcesHandle) and job_id is not None:
             # In consolidation mode, we don't submit a ray job, therefore no
             # run_timestamp is available. We use a dummy run_timestamp here.
-            run_timestamps = {
-                job_id: f'managed-jobs-consolidation-mode-{job_id}'
-            }
-        elif system_array is None:
-            # we know the log dir if system is True
-            # get the run_timestamp
-            # the function takes in [job_id]
+            log_dir = f'managed-jobs-consolidation-mode-{job_id}'
+        else:
+            # safe to ignore type, since job_id can only be None if
+            # system is set and we already checked that
+            assert job_id is not None, job_id
             use_legacy = not handle.is_grpc_enabled_with_flag
             if not use_legacy:
                 try:
-                    # safe to ignore type, since job_id can only be None if
-                    # system is True and we already checked that
-                    assert job_id is not None, 'job_id is None'
                     log_dirs_request = jobsv1_pb2.GetLogDirsForJobsRequest(
                         job_ids=[job_id])
                     log_dirs_response = (
@@ -4612,18 +4620,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             lambda: SkyletClient(handle.get_grpc_channel(
                             )).get_log_dirs_for_jobs(log_dirs_request)))
                     job_log_dirs = log_dirs_response.job_log_dirs
-                    # Convert back to the expected format
-                    # {job_id: run_timestamp}
-                    run_timestamps = {}
-                    for jid, log_dir in job_log_dirs.items():
-                        run_timestamps[int(jid)] = log_dir
+                    log_dir = job_log_dirs.get(job_id)
                 except exceptions.SkyletMethodNotImplementedError:
                     use_legacy = True
 
             if use_legacy:
                 code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(
                     [str(job_id)])
-                returncode, run_timestamps_payload, stderr = self.run_on_head(
+                returncode, log_dirs_payload, stderr = self.run_on_head(
                     handle,
                     code,
                     stream_logs=False,
@@ -4632,45 +4636,41 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 subprocess_utils.handle_returncode(returncode, code,
                                                    'Failed to sync logs.',
                                                    stderr)
-                # returns with a dict of {job_id: run_timestamp}
-                run_timestamps = message_utils.decode_payload(
-                    run_timestamps_payload)
-        elif system_array is not None:
-            run_timestamps = {}
-            for system_uuid in system_array:
-                run_timestamps[system_uuid] = system_uuid
-        else:
-            assert False, 'Should not reach here'
+                # Returns a dict of {job_id: log_dir}.
+                legacy_log_dirs: Dict[str, str] = message_utils.decode_payload(
+                    log_dirs_payload)
+                log_dir = legacy_log_dirs.get(str(job_id))
 
-        if not run_timestamps:
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        'No matching log directories found'
-                        f'{colorama.Style.RESET_ALL}')
-            return {}
+            if not log_dir:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching log directories found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
 
-        run_timestamp = list(run_timestamps.values())[0]
-        job_id = list(run_timestamps.keys())[0]
+        # Now, either system_array is non-empty or log_dir is is non-empty.
+        assert system_array or log_dir, (system_array, log_dir)
 
-        # If run_timestamp contains the full path with SKY_LOGS_DIRECTORY,
+        # If log_dir contains the full path with SKY_LOGS_DIRECTORY,
         # strip the prefix to get just the relative part to avoid duplication
         # when constructing local paths.
-        if run_timestamp.startswith(constants.SKY_LOGS_DIRECTORY):
-            run_timestamp = run_timestamp[len(constants.SKY_LOGS_DIRECTORY
-                                             ):].lstrip('/')
+        if log_dir is not None and log_dir.startswith(
+                constants.SKY_LOGS_DIRECTORY):
+            log_dir = log_dir[len(constants.SKY_LOGS_DIRECTORY):].lstrip('/')
         local_log_dir = ''
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
 
             Args:
-                args: A tuple of (runner, local_log_dir, remote_log_dir)
+                args: A tuple of (runner, local_log_dir, remote_log,
+                    target_name) where target_name is the local filename.
             """
-            (runner, local_log_dir, remote_log) = args
+            (runner, local_log_dir, remote_log, target_name) = args
             try:
                 os.makedirs(os.path.expanduser(local_log_dir), exist_ok=True)
                 runner.rsync(
                     source=remote_log,
-                    target=f'{local_log_dir}/controller.log',
+                    target=f'{local_log_dir}/{target_name}',
                     up=False,
                     stream_logs=False,
                 )
@@ -4683,29 +4683,30 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     raise
 
         if system_array is not None:
-            for system_uuid in run_timestamps.keys():
+            # All system logs go to a shared directory, each with its own file.
+            local_log_dir = os.path.join(local_dir, 'jobs_controller')
+            os.makedirs(os.path.expanduser(local_log_dir), exist_ok=True)
+            runners = handle.get_command_runners()
+
+            for system_uuid in system_array:
                 remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                           f'controller_{system_uuid}.log')
-                local_log_dir = os.path.join(local_dir, 'managed_jobs',
-                                             job_id)  # type: ignore
-                os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
-                            exist_ok=True)
+                target_name = f'controller_{system_uuid}.log'
 
                 logger.debug(f'{colorama.Fore.CYAN}'
-                             f'Job {job_id} local logs: {local_log_dir}'
+                             f'System {system_uuid} local log: '
+                             f'{local_log_dir}/{target_name}'
                              f'{colorama.Style.RESET_ALL}')
 
-                runners = handle.get_command_runners()
-
-                parallel_args = [
-                    (runner, local_log_dir, remote_log) for runner in runners
-                ]
+                parallel_args = [(runner, local_log_dir, remote_log,
+                                  target_name) for runner in runners]
                 subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         elif controller:  # download controller logs
+            # log_dir is guaranteed set for non-system paths
+            assert log_dir is not None, log_dir
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
-            local_log_dir = os.path.join(local_dir, 'managed_jobs',
-                                         run_timestamp)
+            local_log_dir = os.path.join(local_dir, 'managed_jobs', log_dir)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
 
@@ -4715,13 +4716,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             runners = handle.get_command_runners()
 
-            parallel_args = [
-                (runner, local_log_dir, remote_log) for runner in runners
-            ]
+            parallel_args = [(runner, local_log_dir, remote_log,
+                              'controller.log') for runner in runners]
             subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         else:  # download job logs
-            local_log_dir = os.path.join(local_dir, 'managed_jobs',
-                                         run_timestamp)
+            # log_dir and job_id are guaranteed set for non-system paths
+            assert log_dir is not None, log_dir
+            assert job_id is not None, job_id
+            local_log_dir = os.path.join(local_dir, 'managed_jobs', log_dir)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
@@ -4750,10 +4752,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
 
+        if system_array is not None:
+            # All the controller process logs go to the same dir, but we include
+            # all the system ids for the UX.
+            logger.debug(f'{colorama.Fore.CYAN}'
+                         f'All system logs: {local_log_dir}'
+                         f'{colorama.Style.RESET_ALL}')
+            return {system_uuid: local_log_dir for system_uuid in system_array}
+
+        assert job_id is not None
+        return_id = job_id
         logger.debug(f'{colorama.Fore.CYAN}'
-                     f'Job {job_id} logs: {local_log_dir}'
+                     f'Job {return_id} logs: {local_log_dir}'
                      f'{colorama.Style.RESET_ALL}')
-        return {str(job_id): local_log_dir}
+        return {str(return_id): local_log_dir}
 
     def teardown_no_lock(self,
                          handle: CloudVmRayResourceHandle,

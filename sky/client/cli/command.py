@@ -5351,7 +5351,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
             fore = colorama.Fore
             controller_str = ' (controller)' if controller else ''
             # TODO(luca): maybe come up with a better name for the process logs
-            system_str = 'Controller process ' if system else 'Job'
+            system_str = 'Controller process' if system else 'Job'
             for job, log_local_path in log_local_path_dict.items():
                 logger.info(
                     f'{fore.CYAN}{system_str} {job} logs{controller_str}: '
