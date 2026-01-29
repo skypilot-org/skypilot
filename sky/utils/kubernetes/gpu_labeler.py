@@ -10,12 +10,15 @@ import colorama
 import jinja2
 import yaml
 
+from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import annotations
 from sky.utils import directory_utils
 from sky.utils import rich_utils
+
+logger = sky_logging.init_logger(__name__)
 
 
 def _format_string(str_to_format: str, colorama_format: str) -> str:
@@ -338,6 +341,7 @@ def label_gpus_server(context: Optional[str] = None,
             }
     except Exception as e:  # pylint: disable=broad-except
         error_msg = f'GPU labeling failed: {str(e)}'
+        logger.error(error_msg, exc_info=True)
         print(error_msg, flush=True)
         return {'success': False, 'message': error_msg}
 
