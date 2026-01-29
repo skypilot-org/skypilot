@@ -407,3 +407,57 @@ def test_minimal_api_version_decorator_function_with_kwargs():
         result = test_function("arg1", "arg2", key1="value1", key2="value2")
         assert result["args"] == ("arg1", "arg2")
         assert result["kwargs"] == {"key1": "value1", "key2": "value2"}
+
+
+def test_client_sends_version_headers_with_requests():
+    """Test that HTTP requests from the client include version headers.
+
+    This test verifies that when the SDK makes HTTP requests to the API server,
+    the version headers (X-SkyPilot-API-Version and X-SkyPilot-Version) are
+    correctly included. This is important for:
+    1. Server-side version compatibility checking
+    2. Admin policies that need to access client version information
+    """
+    from sky.server import rest
+
+    captured_requests = []
+
+    def capture_request(method, url, **kwargs):
+        # Capture the headers that would be sent with the request
+        # The session headers are merged with per-request headers
+        captured_requests.append({
+            'method': method,
+            'url': url,
+            'session_headers': dict(rest._session.headers),
+        })
+        # Return a mock response
+        mock_response = mock.Mock()
+        mock_response.status_code = 200
+        mock_response.headers = {
+            constants.API_VERSION_HEADER: str(constants.API_VERSION),
+            constants.VERSION_HEADER: versions.get_local_readable_version(),
+        }
+        mock_response.json.return_value = {}
+        return mock_response
+
+    with mock.patch.object(rest._session,
+                           'request',
+                           side_effect=capture_request):
+        # Make a request using the rest module
+        rest.request('GET', 'http://localhost:8000/api/health')
+
+    # Verify the request was captured
+    assert len(captured_requests) == 1
+
+    # Verify version headers were present in the session headers
+    headers = captured_requests[0]['session_headers']
+    assert constants.API_VERSION_HEADER in headers, \
+        f'Missing {constants.API_VERSION_HEADER} header in request'
+    assert headers[constants.API_VERSION_HEADER] == str(constants.API_VERSION), \
+        f'API version header mismatch: expected {constants.API_VERSION}, got {headers[constants.API_VERSION_HEADER]}'
+
+    assert constants.VERSION_HEADER in headers, \
+        f'Missing {constants.VERSION_HEADER} header in request'
+    expected_version = versions.get_local_readable_version()
+    assert headers[constants.VERSION_HEADER] == expected_version, \
+        f'Version header mismatch: expected {expected_version}, got {headers[constants.VERSION_HEADER]}'

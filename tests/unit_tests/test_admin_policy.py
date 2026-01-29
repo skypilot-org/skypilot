@@ -17,6 +17,7 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
@@ -434,6 +435,171 @@ def test_user_request_encode_decode(task):
         assert decoded_request.at_client_side == False
         assert decoded_request.user == models.User(id='123', name='test')
         assert decoded_request.request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+
+
+def test_user_request_encode_decode_with_client_version(task):
+    """Test that client version fields are correctly serialized and
+    deserialized."""
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        user_request = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=False,
+            user=models.User(id='123', name='test'),
+            client_api_version=31,
+            client_version='1.0.0')
+        encoded_request = user_request.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert decoded_request.client_api_version == 31
+        assert decoded_request.client_version == '1.0.0'
+
+        # Test with None values (simulating client-side or old clients)
+        user_request_no_version = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=True,
+            user=None,
+            client_api_version=None,
+            client_version=None)
+        encoded_request = user_request_no_version.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert decoded_request.client_api_version is None
+        assert decoded_request.client_version is None
+
+
+def test_apply_passes_client_version_from_contextvars(add_example_policy_paths,
+                                                      task):
+    """Test that admin_policy_utils.apply() passes client version info from
+    contextvars to the UserRequest."""
+    # Create a simple policy that captures the UserRequest
+    captured_requests = []
+
+    class CaptureVersionPolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    # Set version info in contextvars (simulating what middleware does)
+    versions.set_remote_api_version(31)
+    versions.set_remote_version('1.0.0')
+
+    try:
+        with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                        return_value=CaptureVersionPolicy()):
+            with mock.patch('sky.utils.common_utils.get_current_user',
+                            return_value=models.User(id='123', name='test')):
+                os.environ[
+                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+                        POLICY_PATH, 'add_labels.yaml')
+                importlib.reload(skypilot_config)
+
+                admin_policy_utils.apply(task,
+                                         request_name=request_names.
+                                         AdminPolicyRequestName.CLUSTER_LAUNCH,
+                                         at_client_side=False)
+
+        assert len(captured_requests) == 1
+        assert captured_requests[0].client_api_version == 31
+        assert captured_requests[0].client_version == '1.0.0'
+    finally:
+        # Clean up contextvars
+        versions.set_remote_api_version(None)
+        versions.set_remote_version('unknown')
+
+
+def test_apply_no_client_version_at_client_side(add_example_policy_paths, task):
+    """Test that client version is None when at_client_side=True."""
+    captured_requests = []
+
+    class CaptureVersionPolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    # Even if contextvars are set, client version should be None for
+    # client-side
+    versions.set_remote_api_version(31)
+    versions.set_remote_version('1.0.0')
+
+    try:
+        with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                        return_value=CaptureVersionPolicy()):
+            os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+                POLICY_PATH, 'add_labels.yaml')
+            importlib.reload(skypilot_config)
+
+            admin_policy_utils.apply(task,
+                                     request_name=request_names.
+                                     AdminPolicyRequestName.CLUSTER_LAUNCH,
+                                     at_client_side=True)
+
+        assert len(captured_requests) == 1
+        assert captured_requests[0].client_api_version is None
+        assert captured_requests[0].client_version is None
+    finally:
+        # Clean up contextvars
+        versions.set_remote_api_version(None)
+        versions.set_remote_version('unknown')
+
+
+def test_reject_old_clients_policy(add_example_policy_paths, task):
+    """Test RejectOldClientsPolicy rejects old clients."""
+    from example_policy.skypilot_policy import RejectOldClientsPolicy
+
+    policy = RejectOldClientsPolicy()
+
+    # Test that old API version is rejected
+    user_request = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        client_api_version=20,  # Below MIN_REQUIRED_API_VERSION (25)
+        client_version='0.5.0')
+    with pytest.raises(RuntimeError, match='Client API version 20'):
+        policy.apply(user_request)
+
+    # Test that None client_api_version is rejected (very old clients)
+    user_request_no_version = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        client_api_version=None,
+        client_version=None)
+    with pytest.raises(RuntimeError, match='Client version information is not'):
+        policy.apply(user_request_no_version)
+
+    # Test that new API version is accepted
+    user_request_new = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        client_api_version=30,  # Above MIN_REQUIRED_API_VERSION (25)
+        client_version='1.0.0')
+    result = policy.apply(user_request_new)
+    assert result.task is not None
+
+    # Test that client-side application is allowed (no version check)
+    user_request_client_side = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=True,
+        client_api_version=None,
+        client_version=None)
+    result = policy.apply(user_request_client_side)
+    assert result.task is not None
 
 
 def test_restful_policy(add_example_policy_paths, task):
