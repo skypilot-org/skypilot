@@ -2008,7 +2008,7 @@ def test_managed_jobs_system_logs(generic_cloud: str):
             'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}" | sed "s|^~/|$HOME/|") && '
             'echo "Log path: $log_path" && '
             'test -d "$log_path" && '
-            'test -f "$log_path/controller.log"',
+            'test -f "$log_path/controller_$UUID.log"',
 
             # Test that --system and --controller flags are mutually exclusive
             'sky jobs logs --system --controller 2>&1 | grep -i "Cannot specify both"',
