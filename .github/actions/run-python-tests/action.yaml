@@ -66,6 +66,8 @@ runs:
         BUILDKITE_ANALYTICS_TOKEN: ${{ inputs.buildkite-analytics-token }}
       run: |
         source ~/test-env/bin/activate
+        # Clean up any accumulated state from previous test setup to prevent slowdowns
+        rm -rf ~/.sky/api_server/ ~/sky_logs/api_server/ 2>/dev/null || true
         if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
         else
