@@ -2346,7 +2346,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     login_node_host = login_node_ssh_config['hostname']
     login_node_port = int(login_node_ssh_config['port'])
     login_node_user = login_node_ssh_config['user']
-    login_node_key = login_node_ssh_config['private_key']
+    login_node_key = login_node_ssh_config.get('private_key', None)
     login_node_proxy_command = login_node_ssh_config.get('proxycommand', None)
     login_node_proxy_jump = login_node_ssh_config.get('proxyjump', None)
 

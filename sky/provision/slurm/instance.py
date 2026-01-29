@@ -122,7 +122,7 @@ def _create_virtual_instance(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
     partition = slurm_utils.get_partition_from_config(provider_config)
@@ -238,6 +238,8 @@ def _create_virtual_instance(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
+        # Allow ssh-agent and default key fallback for Slurm.
+        disable_identities_only=True,
     )
 
     remote_home_dir = login_node_runner.get_remote_home_dir()
@@ -497,7 +499,7 @@ def query_instances(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
@@ -595,7 +597,7 @@ def get_cluster_info(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
@@ -689,7 +691,7 @@ def terminate_instances(
         ssh_host = ssh_config_dict['hostname']
         ssh_port = int(ssh_config_dict['port'])
         ssh_user = ssh_config_dict['user']
-        ssh_private_key = ssh_config_dict['private_key']
+        ssh_private_key = ssh_config_dict.get('private_key', None)
         ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
         ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
@@ -801,7 +803,7 @@ def get_command_runners(
     login_node_ssh_hostname = login_node_ssh_config['hostname']
     login_node_ssh_port = int(login_node_ssh_config.get('port', 22))
     login_node_ssh_user = login_node_ssh_config['user']
-    login_node_ssh_private_key = login_node_ssh_config['private_key']
+    login_node_ssh_private_key = login_node_ssh_config.get('private_key', None)
     login_node_ssh_proxy_command = login_node_ssh_config.get(
         'proxycommand', None)
     login_node_ssh_proxy_jump = login_node_ssh_config.get('proxyjump', None)
@@ -823,6 +825,8 @@ def get_command_runners(
         ssh_proxy_jump=login_node_ssh_proxy_jump,
         ssh_control_name=ssh_control_name,
         enable_interactive_auth=True,
+        # Allow ssh-agent and default key fallback for Slurm.
+        disable_identities_only=True,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
@@ -857,7 +861,9 @@ def get_command_runners(
             ssh_proxy_command=login_node_ssh_proxy_command,
             ssh_control_name=ssh_control_name,
             container_args=container_args,
-            enable_interactive_auth=True) for instance_info in instances
+            enable_interactive_auth=True,
+            # Allow ssh-agent and default key fallback for Slurm.
+            disable_identities_only=True) for instance_info in instances
     ]
 
     return runners

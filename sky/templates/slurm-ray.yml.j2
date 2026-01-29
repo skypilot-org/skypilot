@@ -17,7 +17,9 @@ provider:
     hostname: {{ssh_hostname}}
     port: {{ssh_port}}
     user: {{ssh_user}}
+{% if slurm_private_key is not none %}
     private_key: {{slurm_private_key}}
+{% endif %}
 {% if slurm_proxy_command is not none %}
     proxycommand: {{slurm_proxy_command | tojson }}
 {% endif %}
