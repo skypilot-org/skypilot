@@ -553,15 +553,19 @@ class Task:
         if (env_file_config := config.pop('env_file', None)):
             env_file_envs: Dict[str, Optional[str]] = {}
             # Validate env_file type.
-            if not isinstance(env_file_config, (str, list)):
+            if isinstance(env_file_config, str):
+                env_files: List[str] = [env_file_config]
+            elif isinstance(env_file_config, list):
+                if not all(isinstance(item, str) for item in env_file_config):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Invalid `env_file` list: '
+                                         'must contain only strings.')
+                env_files = env_file_config
+            else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Invalid env_file type: {type(env_file_config)}. '
-                        'Must be str or list of str.')
-
-            # generalize for both str and list of str
-            env_files: List[str] = [env_file_config] if isinstance(
-                env_file_config, str) else env_file_config
+                        f'Invalid `env_file` type: {type(env_file_config)}. '
+                        'Must be a string or a list of strings.')
 
             for ef in env_files:
                 env_file_path = os.path.expanduser(ef)

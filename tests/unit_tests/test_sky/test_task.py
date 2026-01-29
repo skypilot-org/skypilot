@@ -246,7 +246,7 @@ def test_from_yaml_config_env_file_invalid_type():
             'invalid': 'type'
         },  # Should be str or list
     }
-    with pytest.raises(ValueError, match='Invalid env_file type'):
+    with pytest.raises(ValueError, match='Invalid `env_file` type'):
         task.Task.from_yaml_config(config)
 
 
