@@ -4,7 +4,9 @@ from unittest import mock
 
 import pytest
 
+from sky import exceptions
 from sky import models
+from sky.utils import status_lib
 from sky.utils import volume
 
 
@@ -214,3 +216,76 @@ class TestVolumeMount:
         assert volume_mount.volume_config.region is None
         assert volume_mount.volume_config.zone is None
         assert volume_mount.volume_config.name_on_cloud == ''
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_found(self, mock_get_volume):
+        """Test resolve with a valid volume."""
+        mock_volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='us-central1',
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': mock_volume_config,
+            'status': status_lib.VolumeStatus.READY,
+        }
+
+        volume_mount = volume.VolumeMount.resolve('/data', 'test-volume')
+
+        assert volume_mount.path == '/data'
+        assert volume_mount.volume_name == 'test-volume'
+        assert volume_mount.volume_config == mock_volume_config
+        assert volume_mount.is_ephemeral is False
+        mock_get_volume.assert_called_once_with('test-volume')
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_not_found(self, mock_get_volume):
+        """Test resolve with a non-existent volume."""
+        mock_get_volume.return_value = None
+
+        with pytest.raises(exceptions.VolumeNotFoundError) as exc_info:
+            volume.VolumeMount.resolve('/data', 'non-existent-volume')
+
+        assert 'non-existent-volume' in str(exc_info.value)
+        assert 'not found' in str(exc_info.value)
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_not_ready_without_error_message(
+            self, mock_get_volume):
+        """Test resolve with a volume that is not ready (no error message)."""
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': None,
+            'status': status_lib.VolumeStatus.NOT_READY,
+        }
+
+        with pytest.raises(exceptions.VolumeNotReadyError) as exc_info:
+            volume.VolumeMount.resolve('/data', 'test-volume')
+
+        assert 'test-volume' in str(exc_info.value)
+        assert 'not ready' in str(exc_info.value)
+        assert 'Error:' not in str(exc_info.value)
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_not_ready_with_error_message(self, mock_get_volume):
+        """Test resolve with a volume that is not ready (with error message)."""
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': None,
+            'status': status_lib.VolumeStatus.NOT_READY,
+            'error_message': 'Storage quota exceeded',
+        }
+
+        with pytest.raises(exceptions.VolumeNotReadyError) as exc_info:
+            volume.VolumeMount.resolve('/data', 'test-volume')
+
+        assert 'test-volume' in str(exc_info.value)
+        assert 'not ready' in str(exc_info.value)
+        assert 'Error: Storage quota exceeded' in str(exc_info.value)
