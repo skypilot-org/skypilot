@@ -234,7 +234,7 @@ class TestRcloneFlushScript:
     def test_flush_script_contains_elapsed_time(self):
         """Test that flush script reports elapsed time in status messages."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should track and report elapsed time
         assert 'FLUSH_START_TIME=$(date +%s)' in flush_script
@@ -244,7 +244,7 @@ class TestRcloneFlushScript:
     def test_flush_script_shows_cache_status(self):
         """Test that flush script extracts and shows vfs cache status."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should extract cache status from log
         assert 'CACHE_STATUS=' in flush_script
@@ -254,7 +254,7 @@ class TestRcloneFlushScript:
     def test_flush_script_shows_uploading_files(self):
         """Test that flush script shows files currently being uploaded."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should extract uploading files from log
         assert 'UPLOADING_FILES=' in flush_script
@@ -266,7 +266,7 @@ class TestRcloneFlushScript:
     def test_flush_script_has_fallback_output(self):
         """Test that flush script falls back to last log line if parsing fails."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should have fallback to last line
         assert 'LAST_LINE=' in flush_script
@@ -277,7 +277,7 @@ class TestRcloneFlushScript:
     def test_flush_script_shows_completion_time(self):
         """Test that flush script shows total time when upload completes."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should report total flush time on completion
         assert 'TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))' in flush_script
@@ -286,7 +286,7 @@ class TestRcloneFlushScript:
     def test_flush_script_output_message_formats(self):
         """Test that all output message variants are present."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Format 1: cache status + uploading files
         assert (
@@ -312,7 +312,7 @@ class TestRcloneFlushScript:
             container_name=None,
         )
 
-        ray_script = ray_codegen._get_rclone_flush_script()
-        slurm_script = slurm_codegen._get_rclone_flush_script()
+        ray_script = ray_codegen.get_rclone_flush_script()
+        slurm_script = slurm_codegen.get_rclone_flush_script()
 
         assert ray_script == slurm_script
