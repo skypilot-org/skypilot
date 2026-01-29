@@ -129,6 +129,10 @@ class SlurmClient:
                 ssh_proxy_command=ssh_proxy_command,
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
+                # Slurm clusters are user-controlled environments where SSH
+                # authentication may rely on ssh-agent or default key locations.
+                # Disable IdentitiesOnly to allow SSH to fall back to these.
+                disable_identities_only=True,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:

@@ -208,8 +208,17 @@ def ssh_options_list(
     disable_control_master: Optional[bool] = False,
     escape_percent_expand: bool = False,
     ssh_log_file: Optional[str] = None,
+    disable_identities_only: bool = False,
 ) -> List[str]:
-    """Returns a list of sane options for 'ssh'."""
+    """Returns a list of sane options for 'ssh'.
+
+    Args:
+        disable_identities_only: If True, do not set IdentitiesOnly=yes. This
+            allows SSH to use keys from ssh-agent and default key locations
+            (~/.ssh/id_rsa, etc.) in addition to any explicitly specified key.
+            Useful for user-controlled environments like Slurm clusters where
+            authentication may rely on ssh-agent or default key locations.
+    """
     if connect_timeout is None:
         connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
@@ -232,8 +241,10 @@ def ssh_options_list(
         #   Warning: Permanently added 'xx.xx.xx.xx' (EDxxx) to the list of
         #   known hosts.
         'LogLevel': 'ERROR',
-        # Try fewer extraneous key pairs.
-        'IdentitiesOnly': 'yes',
+        # Try fewer extraneous key pairs. This is disabled for user-controlled
+        # environments (e.g., Slurm clusters) where SSH authentication may rely
+        # on ssh-agent or default key locations.
+        'IdentitiesOnly': None if disable_identities_only else 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
         'ExitOnForwardFailure': 'yes',
@@ -884,6 +895,7 @@ class SSHCommandRunner(CommandRunner):
         disable_control_master: Optional[bool] = False,
         port_forward_execute_remote_command: Optional[bool] = False,
         enable_interactive_auth: bool = False,
+        disable_identities_only: bool = False,
     ):
         """Initialize SSHCommandRunner.
 
@@ -916,6 +928,10 @@ class SSHCommandRunner(CommandRunner):
                 add -N to the port forwarding command. This is useful if you
                 want to run a command on the remote machine to make sure the
                 SSH tunnel is established.
+            disable_identities_only: If True, do not set IdentitiesOnly=yes.
+                This allows SSH to use keys from ssh-agent and default key
+                locations in addition to any explicitly specified key. Useful
+                for user-controlled environments like Slurm clusters.
         """
         super().__init__(node)
         ip, port = node
@@ -928,6 +944,7 @@ class SSHCommandRunner(CommandRunner):
         self.disable_control_master = (
             disable_control_master or
             control_master_utils.should_disable_control_master())
+        self.disable_identities_only = disable_identities_only
         # Ensure SSH key is available. For SkyPilot-managed keys, create from
         # database. For external keys (e.g., Slurm clusters), verify existence.
         if ssh_private_key is not None and _is_skypilot_managed_key(
@@ -965,7 +982,9 @@ class SSHCommandRunner(CommandRunner):
                                        ssh_proxy_command=inner_proxy_command,
                                        port=inner_proxy_port,
                                        disable_control_master=self.
-                                       disable_control_master) +
+                                       disable_control_master,
+                                       disable_identities_only=self.
+                                       disable_identities_only) +
                 ['-W', '%h:%p', f'{ssh_user}@{ip}'])
         else:
             self.ip = ip
@@ -1043,7 +1062,9 @@ class SSHCommandRunner(CommandRunner):
             port=self.port,
             connect_timeout=connect_timeout,
             disable_control_master=self.disable_control_master,
-            ssh_log_file=ssh_log_file) + [f'{self.ssh_user}@{self.ip}']
+            ssh_log_file=ssh_log_file,
+            disable_identities_only=self.disable_identities_only,
+        ) + [f'{self.ssh_user}@{self.ip}']
 
     def _retry_with_interactive_auth(
             self, session_id: str, command: List[str], log_path: str,
@@ -1382,7 +1403,8 @@ class SSHCommandRunner(CommandRunner):
                 ssh_proxy_jump=self._ssh_proxy_jump,
                 docker_ssh_proxy_command=docker_ssh_proxy_command,
                 port=self.port,
-                disable_control_master=self.disable_control_master))
+                disable_control_master=self.disable_control_master,
+                disable_identities_only=self.disable_identities_only))
         rsh_option = f'ssh {ssh_options}'
         self._rsync(source,
                     target,
