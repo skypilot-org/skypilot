@@ -145,6 +145,11 @@ def encode_status_kubernetes(
 def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
     for job in jobs:
         job['status'] = job['status'].value
+        # Serialize handle like we do for clusters in encode_status
+        if 'handle' in job and job['handle'] is not None:
+            handle = serialize_utils.prepare_handle_for_backwards_compatibility(
+                job['handle'])
+            job['handle'] = pickle_and_encode(handle)
     return jobs
 
 
@@ -167,6 +172,11 @@ def encode_jobs_queue_v2(
     jobs_dict = [job.model_dump(by_alias=True) for job in jobs]
     for job in jobs_dict:
         job['status'] = job['status'].value
+        # Serialize handle like we do for clusters in encode_status
+        if 'handle' in job and job['handle'] is not None:
+            handle = serialize_utils.prepare_handle_for_backwards_compatibility(
+                job['handle'])
+            job['handle'] = pickle_and_encode(handle)
     if total is None:
         return jobs_dict
     return {
