@@ -155,6 +155,7 @@ Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
+Yotta = clouds.Yotta
 
 __all__ = [
     '__version__',
@@ -192,6 +193,7 @@ __all__ = [
     'JobStatus',
     'ManagedJobStatus',
     'StatusRefreshMode',
+    'Yotta',
     # APIs
     'Dag',
     'Task',
