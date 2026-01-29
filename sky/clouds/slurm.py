@@ -61,9 +61,6 @@ class Slurm(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     _SSH_CONFIG_KEY_MAPPING = {
-        # Note: 'identityfile' (IdentityFile) is intentionally not listed here
-        # because it is optional. Users can rely on ssh-agent or default key
-        # locations for Slurm cluster authentication.
         'user': 'User',
         'hostname': 'HostName',
     }
