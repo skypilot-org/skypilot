@@ -677,7 +677,10 @@ app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # auth user.
 app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
-if str(enable_basic_auth).lower() == 'true':
+disable_basic_auth_middleware = os.environ.get(
+    constants.SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE, 'false')
+if (str(enable_basic_auth).lower() == 'true' and
+        str(disable_basic_auth_middleware).lower() != 'true'):
     app.add_middleware(BasicAuthMiddleware)
 # Bearer token middleware should always be present to handle service account
 # authentication

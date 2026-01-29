@@ -167,7 +167,7 @@ def wait_until_job_status(
 
 def check_logs(job_id: int, expected_pattern: str):
     """Check that job logs contain the expected pattern.
-    
+
     Args:
         job_id: The job ID to check logs for.
         expected_pattern: The pattern to grep for in the logs.
@@ -223,7 +223,7 @@ def check_num_running_jobs(job_names: List[str],
                            expected_count: int,
                            timeout: int = 30):
     """Check that exactly expected_count jobs are in RUNNING state.
-    
+
     Args:
         job_names: List of job names to check.
         expected_count: Expected number of jobs in RUNNING state.
@@ -1308,12 +1308,12 @@ def test_pools_heterogeneous_any_of(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     """Test resource-aware scheduling with heterogeneous job requirements.
-    
+
     This test validates that jobs with any_of resources (T4 or A100) can be
     scheduled on a worker with only T4s. The scheduler should recognize that
     T4s are available and schedule jobs accordingly, even though A100s are
     also specified as an option.
-    
+
     Test scenario:
     - Pool: 1 worker with g4dn.12xlarge (4 T4 GPUs)
     - Job: Requests any_of T4:1 or A100:1
@@ -1327,11 +1327,11 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     pool_config = textwrap.dedent(f"""
     pool:
         workers: 1
-    
+
     resources:
         instance_type: g4dn.12xlarge
         infra: aws
-    
+
     setup: |
         echo "Pool worker setup complete"
     """)
@@ -1340,10 +1340,10 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
     job_name_prefix = f'{name}-job'
     job_config = textwrap.dedent(f"""
     name: {job_name_prefix}
-    
+
     resources:
         accelerators: {{'T4:1', 'A100:1'}}
-    
+
     run: |
         echo "Job running with GPU:"
         nvidia-smi --query-gpu=name --format=csv,noheader
@@ -1724,12 +1724,12 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
 
-    # Pool with 2 CPUs and 4GB memory, single worker
+    # Pool with 2 CPUs and 8GB memory, single worker
     pool_config = basic_pool_conf(
         num_workers=2,
         infra=generic_cloud,
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
     def _get_job_config(job_name: str) -> str:
@@ -1737,12 +1737,12 @@ def test_pool_resource_contention_two_workers(generic_cloud: str):
             job_name=job_name,
             run_cmd=f'echo "Job {job_name} running" && sleep infinity',
             cpus='2',
-            memory='4GB',
+            memory='8GB',
         )
 
     num_jobs = 4
 
-    # Four jobs, each taking 2 CPUs and 4GB memory (only two can fit)
+    # Four jobs, each taking 2 CPUs and 8GB memory (only two can fit)
     job_names = [f'{name}-job-{i}' for i in range(num_jobs)]
     job_configs = [_get_job_config(job_name) for job_name in job_names]
 
@@ -1870,28 +1870,28 @@ def test_pool_resource_reclamation(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
 
-    # Pool with 2 CPUs and 4GB memory, single worker
+    # Pool with 2 CPUs and 8GB memory, single worker
     pool_config = basic_pool_conf(
         num_workers=1,
         infra=generic_cloud,
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
-    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit initially)
+    # Two jobs, each taking 2 CPUs and 8GB memory (can't both fit initially)
     job_name_1 = f'{name}-job-1'
     job_name_2 = f'{name}-job-2'
     job_config_1 = basic_job_conf(
         job_name=job_name_1,
         run_cmd='echo "hi"',
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
     job_config_2 = basic_job_conf(
         job_name=job_name_2,
         run_cmd='echo "hi"',
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
     with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
@@ -1935,15 +1935,15 @@ def test_pool_resource_fallback_to_unaware(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     pool_name = f'{name}-pool'
 
-    # Pool with 2 CPUs and 4GB memory, single worker
+    # Pool with 2 CPUs and 8GB memory, single worker
     pool_config = basic_pool_conf(
         num_workers=1,
         infra=generic_cloud,
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
 
-    # Two jobs, each taking 2 CPUs and 4GB memory (can't both fit initially)
+    # Two jobs, each taking 2 CPUs and 8GB memory (can't both fit initially)
     resource_aware_job_name = f'{name}-job-1'
     resource_unaware_job_name = f'{name}-job-2'
 
@@ -1951,7 +1951,7 @@ def test_pool_resource_fallback_to_unaware(generic_cloud: str):
         job_name=resource_aware_job_name,
         run_cmd='echo "hi"',
         cpus='2',
-        memory='4GB',
+        memory='8GB',
     )
     resource_unaware_job_config = basic_job_conf(
         job_name=resource_unaware_job_name,
@@ -2084,7 +2084,7 @@ def test_pool_fractional_gpu_scheduling(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
     """Test that when no resources are specified, only 1 job runs per worker.
-    
+
     This test validates that jobs without resource specifications are
     limited to 1 job per worker. The test:
     1. Launches a pool with 1 worker
@@ -2158,7 +2158,7 @@ def test_pool_one_job_per_worker_no_resources(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
     """Test that secrets provided via CLI are preserved when updating pool workers.
-    
+
     This test:
     1. Creates a pool with a secret defined as null in YAML but set via CLI
     2. Verifies the secret is accessible in setup commands on worker 1
@@ -2237,7 +2237,7 @@ def test_pool_secrets_preserved_on_worker_update(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pools_num_jobs_rank(generic_cloud: str):
     """Test that SKYPILOT_JOB_RANK is correctly set for jobs launched with --num-jobs.
-    
+
     Launches 3 jobs with --num-jobs 3, waits for each to succeed, and verifies
     that each job's logs show the correct rank (which should be job_id - 1).
     """

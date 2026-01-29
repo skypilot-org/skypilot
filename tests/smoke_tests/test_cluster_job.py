@@ -541,6 +541,8 @@ def test_multi_echo(generic_cloud: str):
         # Slurm and Kubernetes do not support spot instances
         use_spot = False
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
 
     # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
     is_remote = smoke_tests_utils.is_remote_server_test()
@@ -669,6 +671,8 @@ def test_multi_echo(generic_cloud: str):
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1746,6 +1750,8 @@ def test_cancel_azure():
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -2001,13 +2007,14 @@ def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     accelerator = smoke_tests_utils.get_available_gpus()
     name = smoke_tests_utils.get_cluster_name()
+    gpus_arg = f'{accelerator}:1' if accelerator else 'none'
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg}',
             f'sky logs {name} 1 --status',
             # Try exec to run again and check if the logs are printed
-            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1 | grep "Hello 100"',
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg} | grep "Hello 100"',
             # Make sure ssh is working with custom username
             f'ssh {name} echo hi | grep hi',
         ],
