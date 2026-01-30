@@ -649,10 +649,25 @@ def _parse_override_params(
 
 def _check_yaml_only(
         entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]], bool, str]:
-    """Checks if entrypoint is a readable YAML file without confirmation.
+    """Checks if entrypoint is a readable YAML file, URL, or cloud storage path.
+
+    Supports:
+      - Local files: /path/to/file.yaml, ~/file.yaml
+      - HTTP/HTTPS URLs: https://example.com/file.yaml
+      - Cloud storage: s3://bucket/file.yaml, gs://bucket/file.yaml,
+        az://container/file.yaml
 
     Args:
-        entrypoint: Path to a YAML file.
+        entrypoint: Path to a YAML file. Can be a local file path, HTTP/HTTPS
+            URL, or cloud storage URL.
+
+    Returns:
+        is_yaml: Whether the entrypoint is a YAML file/URL/cloud storage path.
+        result: The YAML content.
+        yaml_file_provided: Whether the entrypoint is a YAML file/URL/cloud
+            storage path.
+        invalid_reason: The reason why the entrypoint is not accessible or
+            parseable as YAML.
     """
     is_yaml = True
     config: Optional[List[Dict[str, Any]]] = None
@@ -661,50 +676,64 @@ def _check_yaml_only(
     yaml_file_provided = (len(shell_splits) == 1 and
                           (shell_splits[0].endswith('yaml') or
                            shell_splits[0].endswith('.yml')))
-    invalid_reason = ''
-    try:
-        with open(entrypoint, 'r', encoding='utf-8') as f:
-            try:
-                config = list(yaml_utils.safe_load_all(f))
-                if config:
-                    # FIXME(zongheng): in a chain DAG YAML it only returns the
-                    # first section. OK for downstream but is weird.
-                    result = config[0]
-                else:
-                    result = {}
-                if isinstance(result, str):
-                    # 'sky exec cluster ./my_script.sh'
-                    is_yaml = False
-            except yaml.YAMLError as e:
-                if yaml_file_provided:
-                    logger.debug(e)
-                    detailed_error = f'\nYAML Error: {e}\n'
-                    invalid_reason = ('contains an invalid configuration. '
-                                      'Please check syntax.\n'
-                                      f'{detailed_error}')
-                is_yaml = False
 
-    except OSError:
+    # Check if entrypoint is a URL
+    is_url = yaml_utils.is_url(entrypoint)
+    if is_url:
+        yaml_file_provided = True
+
+    invalid_reason = ''
+
+    # Try to read and parse YAML (handles both URLs and local files)
+    try:
+        config = yaml_utils.read_yaml_all(entrypoint)
+        if config:
+            # FIXME(zongheng): in a chain DAG YAML it only returns the
+            # first section. OK for downstream but is weird.
+            result = config[0]
+        else:
+            result = {}
+        if isinstance(result, str):
+            # 'sky exec cluster ./my_script.sh'
+            is_yaml = False
+    except yaml.YAMLError as e:
         if yaml_file_provided:
-            entry_point_path = os.path.expanduser(entrypoint)
-            if not os.path.exists(entry_point_path):
-                invalid_reason = ('does not exist. Please check if the path'
-                                  ' is correct.')
-            elif not os.path.isfile(entry_point_path):
-                invalid_reason = ('is not a file. Please check if the path'
-                                  ' is correct.')
+            logger.debug(e)
+            detailed_error = f'\nYAML Error: {e}\n'
+            invalid_reason = ('contains an invalid configuration. '
+                              'Please check syntax.\n'
+                              f'{detailed_error}')
+        is_yaml = False
+    except (ValueError, Exception) as e:  # pylint: disable=broad-except
+        # Handle URL download failures and local file access errors
+        if yaml_file_provided:
+            if is_url:
+                invalid_reason = f'failed to download or is not accessible: {e}'
             else:
-                invalid_reason = ('yaml.safe_load() failed. Please check if the'
-                                  ' path is correct.')
+                entry_point_path = os.path.expanduser(entrypoint)
+                if not os.path.exists(entry_point_path):
+                    invalid_reason = ('does not exist. Please check if the path'
+                                      ' is correct.')
+                elif not os.path.isfile(entry_point_path):
+                    invalid_reason = ('is not a file. Please check if the path'
+                                      ' is correct.')
+                else:
+                    invalid_reason = (
+                        'yaml.safe_load() failed. Please check if the'
+                        ' path is correct.')
         is_yaml = False
     return is_yaml, result, yaml_file_provided, invalid_reason
 
 
 def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
-    """Checks if entrypoint is a readable YAML file.
+    """Checks if entrypoint is a readable YAML file, URL, or cloud storage path.
+
+    Supports local files, HTTP/HTTPS URLs, and cloud storage (s3://, gs://,
+    az://).
 
     Args:
-        entrypoint: Path to a YAML file.
+        entrypoint: Path to a YAML file. Can be a local file path, HTTP/HTTPS
+            URL, or cloud storage URL.
     """
     is_yaml, result, yaml_file_provided, invalid_reason = _check_yaml_only(
         entrypoint)
