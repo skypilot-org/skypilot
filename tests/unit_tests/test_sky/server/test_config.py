@@ -206,58 +206,75 @@ auth:
             os.unlink(temp_path)
 
 
+def _mock_server_config(config_dict):
+    """Helper to create a mock for load_server_config."""
+    from sky.utils import config_utils
+    return config_utils.Config.from_dict(
+        config_dict) if config_dict else config_utils.Config()
+
+
 class TestLoadExternalProxyConfig:
-    """Test cases for load_external_proxy_config function."""
+    """Test cases for load_external_proxy_config function.
+
+    These tests mock load_server_config directly to avoid race conditions
+    in parallel test execution. Environment variables are mocked without
+    clear=True to avoid affecting other parallel tests.
+    """
+
+    def setup_method(self):
+        """Clear the lru_cache before each test."""
+        config.load_external_proxy_config.cache_clear()
+
+    def teardown_method(self):
+        """Clear the lru_cache after each test."""
+        config.load_external_proxy_config.cache_clear()
 
     def test_load_from_server_yaml(self):
         """Test loading configuration from server.yaml file."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: true
-    header_name: x-amzn-oidc-data
-    header_format: jwt
-    jwt_identity_claim: email
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config({
+            'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                    'header_name': 'x-amzn-oidc-data',
+                    'header_format': 'jwt',
+                    'jwt_identity_claim': 'email',
+                }
+            }
+        })
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(os.environ, {}, clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            assert proxy_config.enabled is True
-            assert proxy_config.header_name == 'x-amzn-oidc-data'
-            assert proxy_config.header_format == 'jwt'
-            assert proxy_config.jwt_identity_claim == 'email'
-        finally:
-            os.unlink(temp_path)
+        assert proxy_config.enabled is True
+        assert proxy_config.header_name == 'x-amzn-oidc-data'
+        assert proxy_config.header_format == 'jwt'
+        assert proxy_config.jwt_identity_claim == 'email'
 
     def test_load_from_server_yaml_disabled(self):
         """Test loading disabled configuration from server.yaml."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: false
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config(
+            {'auth': {
+                'external_proxy': {
+                    'enabled': False,
+                }
+            }})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(os.environ, {}, clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            assert proxy_config.enabled is False
-        finally:
-            os.unlink(temp_path)
+        assert proxy_config.enabled is False
 
     def test_default_enabled_when_no_config_and_no_builtin_auth(self):
         """Test that external proxy is enabled by default for backward compat.
@@ -265,9 +282,15 @@ auth:
         When no config file exists and no built-in auth is enabled, external
         proxy auth should be enabled to support legacy ingress oauth2-proxy.
         """
-        with mock.patch.object(config, 'SERVER_CONFIG_PATH',
-                               '/nonexistent/path'):
-            with mock.patch.dict(os.environ, {}, clear=True):
+        mock_config = _mock_server_config({})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
                 proxy_config = config.load_external_proxy_config()
 
         # Enabled by default for backward compatibility
@@ -275,10 +298,15 @@ auth:
 
     def test_default_disabled_when_basic_auth_enabled(self):
         """Test that external proxy is disabled when basic auth is enabled."""
-        with mock.patch.object(config, 'SERVER_CONFIG_PATH',
-                               '/nonexistent/path'):
-            with mock.patch.dict(os.environ, {'ENABLE_BASIC_AUTH': 'true'},
-                                 clear=True):
+        mock_config = _mock_server_config({})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': 'true',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
                 proxy_config = config.load_external_proxy_config()
 
         # Disabled because built-in basic auth is enabled
@@ -286,11 +314,15 @@ auth:
 
     def test_default_disabled_when_oauth2_proxy_on_server_enabled(self):
         """Test that external proxy is disabled when oauth2-proxy on server."""
-        with mock.patch.object(config, 'SERVER_CONFIG_PATH',
-                               '/nonexistent/path'):
-            with mock.patch.dict(os.environ,
-                                 {'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'true'},
-                                 clear=True):
+        mock_config = _mock_server_config({})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': 'true',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
                 proxy_config = config.load_external_proxy_config()
 
         # Disabled because oauth2-proxy on API server is enabled
@@ -298,105 +330,94 @@ auth:
 
     def test_explicit_enabled_overrides_builtin_auth_check(self):
         """Test that explicit enabled=true overrides built-in auth check."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: true
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config(
+            {'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                }
+            }})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            # Even with basic auth enabled, explicit config takes precedence
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': 'true',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                # Even with basic auth enabled, explicit config takes precedence
-                with mock.patch.dict(os.environ, {'ENABLE_BASIC_AUTH': 'true'},
-                                     clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            assert proxy_config.enabled is True
-        finally:
-            os.unlink(temp_path)
+        assert proxy_config.enabled is True
 
     def test_explicit_disabled_when_no_builtin_auth(self):
         """Test that explicit enabled=false is respected."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: false
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config(
+            {'auth': {
+                'external_proxy': {
+                    'enabled': False,
+                }
+            }})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(os.environ, {}, clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            # Explicit false is respected even without built-in auth
-            assert proxy_config.enabled is False
-        finally:
-            os.unlink(temp_path)
+        # Explicit false is respected even without built-in auth
+        assert proxy_config.enabled is False
 
     def test_legacy_env_var_overrides_header_name(self):
         """Test that legacy env var overrides header_name from config."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: true
-    header_name: x-from-yaml
-    header_format: plaintext
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config({
+            'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                    'header_name': 'x-from-yaml',
+                    'header_format': 'plaintext',
+                }
+            }
+        })
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': 'X-From-Env',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(
-                        os.environ, {'SKYPILOT_AUTH_USER_HEADER': 'X-From-Env'},
-                        clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            # Legacy env var should override header_name
-            assert proxy_config.header_name == 'X-From-Env'
-        finally:
-            os.unlink(temp_path)
+        # Legacy env var should override header_name
+        assert proxy_config.header_name == 'X-From-Env'
 
     def test_legacy_env_var_with_jwt_format_raises_error(self):
         """Test that legacy env var with JWT format raises ValueError."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: true
-    header_name: x-amzn-oidc-data
-    header_format: jwt
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config({
+            'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                    'header_name': 'x-amzn-oidc-data',
+                    'header_format': 'jwt',
+                }
+            }
+        })
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': 'X-From-Env',
+                    }):
+                with pytest.raises(ValueError) as exc_info:
+                    config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(
-                        os.environ, {'SKYPILOT_AUTH_USER_HEADER': 'X-From-Env'},
-                        clear=True):
-                    with pytest.raises(ValueError) as exc_info:
-                        config.load_external_proxy_config()
-
-            assert 'header_format is "jwt"' in str(exc_info.value)
-            assert 'SKYPILOT_AUTH_USER_HEADER' in str(exc_info.value)
-        finally:
-            os.unlink(temp_path)
+        assert 'header_format is "jwt"' in str(exc_info.value)
+        assert 'SKYPILOT_AUTH_USER_HEADER' in str(exc_info.value)
 
     def test_empty_server_yaml_defaults_to_enabled(self):
         """Test that empty server.yaml defaults to enabled for backward compat.
@@ -405,22 +426,19 @@ auth:
         is active, external proxy should be enabled for backward compatibility
         with legacy ingress oauth2-proxy setups.
         """
-        yaml_content = '{}'
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config({})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(os.environ, {}, clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            # Enabled by default for backward compatibility
-            assert proxy_config.enabled is True
-        finally:
-            os.unlink(temp_path)
+        # Enabled by default for backward compatibility
+        assert proxy_config.enabled is True
 
     def test_empty_server_yaml_disabled_when_basic_auth(self):
         """Test that empty server.yaml with basic auth returns disabled.
@@ -428,51 +446,46 @@ auth:
         When server.yaml exists but doesn't set enabled, and built-in basic
         auth is active, external proxy should be disabled.
         """
-        yaml_content = '{}'
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config({})
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': 'true',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(os.environ, {'ENABLE_BASIC_AUTH': 'true'},
-                                     clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            # Disabled because built-in basic auth is enabled
-            assert proxy_config.enabled is False
-        finally:
-            os.unlink(temp_path)
+        # Disabled because built-in basic auth is enabled
+        assert proxy_config.enabled is False
 
     def test_partial_server_yaml_uses_defaults_for_missing(self):
         """Test that partial config uses defaults for missing fields."""
-        yaml_content = """
-auth:
-  external_proxy:
-    enabled: true
-    header_name: x-custom-header
-"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
-                                         delete=False) as f:
-            f.write(yaml_content)
-            f.flush()
-            temp_path = f.name
+        mock_config = _mock_server_config({
+            'auth': {
+                'external_proxy': {
+                    'enabled': True,
+                    'header_name': 'x-custom-header',
+                }
+            }
+        })
+        with mock.patch('sky.server.config.load_server_config',
+                        return_value=mock_config):
+            with mock.patch.dict(
+                    os.environ, {
+                        'ENABLE_BASIC_AUTH': '',
+                        'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED': '',
+                        'SKYPILOT_AUTH_USER_HEADER': '',
+                    }):
+                proxy_config = config.load_external_proxy_config()
 
-        try:
-            with mock.patch.object(config, 'SERVER_CONFIG_PATH', temp_path):
-                with mock.patch.dict(os.environ, {}, clear=True):
-                    proxy_config = config.load_external_proxy_config()
-
-            # Custom value from yaml
-            assert proxy_config.header_name == 'x-custom-header'
-            assert proxy_config.enabled is True
-            # Defaults for missing fields
-            assert proxy_config.header_format == 'plaintext'
-            assert proxy_config.jwt_identity_claim == 'sub'
-        finally:
-            os.unlink(temp_path)
+        # Custom value from yaml
+        assert proxy_config.header_name == 'x-custom-header'
+        assert proxy_config.enabled is True
+        # Defaults for missing fields
+        assert proxy_config.header_format == 'plaintext'
+        assert proxy_config.jwt_identity_claim == 'sub'
 
 
 class TestExtractIdentityFromJwt:
