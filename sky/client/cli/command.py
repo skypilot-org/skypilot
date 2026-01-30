@@ -62,6 +62,7 @@ from sky.client import sdk
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
+from sky.jobs.client import sdk as jobs_sdk
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -2571,7 +2572,21 @@ def cancel(
         if all:
             job_identity_str = 'all your jobs'
         if jobs:
-            jobs_str = ' '.join(map(str, jobs))
+            req = jobs_sdk.queue_v2(refresh=False,
+                                    skip_finished=False,
+                                    all_users=all_users,
+                                    job_ids=jobs,
+                                    fields=['job_id', 'job_name'])
+            job_records, _, _, _ = sdk.get(req)
+            names = [
+                f'{r.get("job_id")} (name: {r.get("job_name")})'
+                if r.get('job_name') else r.get('job_id') for r in job_records
+            ]
+            if names:
+                jobs_str = ', '.join(map(str, names))
+            else:
+                jobs_str = ', '.join(map(str, jobs))
+
             plural = 's' if len(jobs) > 1 else ''
             connector = ' and ' if job_identity_str else ''
             job_identity_str += f'{connector}job{plural} {jobs_str}'
