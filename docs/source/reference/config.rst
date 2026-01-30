@@ -123,6 +123,9 @@ Below is the configuration syntax and some example values. See detailed explanat
       map-migrated: my-value
       Owner: user-unique-name
     :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
+    :ref:`vpc_names <config-yaml-aws-vpc-names>`:
+      - skypilot-vpc-1
+      - skypilot-vpc-2
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
     :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -693,6 +696,24 @@ VPC to use in each region (optional).
 If this is set, SkyPilot will only provision in regions that contain a VPC
 with this name (provisioner automatically looks for such regions).
 Regions without a VPC with this name will not be used to launch nodes.
+
+Default: ``null`` (use the default VPC in each region).
+
+Deprecated: use ``aws.vpc_names`` instead.
+
+.. _config-yaml-aws-vpc-names:
+
+``aws.vpc_names``
+~~~~~~~~~~~~~~~~~
+
+VPCs to use in each region (optional).
+
+If this is set, SkyPilot will attempt each VPC for failover in regions
+that contain the attempted VPCs (provisioner automatically looks for such
+regions). Regions without any matching VPCs will not be used to launch nodes.
+
+It is possible to set either a ``string`` (one VPC), or a ``list`` (multiple
+target VPCs).
 
 Default: ``null`` (use the default VPC in each region).
 

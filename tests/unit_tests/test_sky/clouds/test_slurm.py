@@ -437,16 +437,19 @@ class TestCreateVirtualInstance:
         assert written_script is not None, "Script was not written"
         return written_script
 
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
     def test_container_script_format(self, mock_ssh_runner, mock_slurm_client,
-                                     mock_get_partition_info):
+                                     mock_get_partition_info,
+                                     mock_get_proctrack_type):
         """Test that sbatch provision script for containers is correct."""
         from sky.provision import common
 
         self._setup_mocks(mock_ssh_runner, mock_slurm_client,
                           mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
 
         config = common.ProvisionConfig(
             provider_config={
@@ -477,17 +480,20 @@ class TestCreateVirtualInstance:
         written_script = self._run_and_capture_script('test-cluster', config)
         assert_sbatch_matches_snapshot('containers', written_script)
 
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
     def test_non_container_script_format(self, mock_ssh_runner,
                                          mock_slurm_client,
-                                         mock_get_partition_info):
+                                         mock_get_partition_info,
+                                         mock_get_proctrack_type):
         """Test that sbatch provision script without containers is correct."""
         from sky.provision import common
 
         self._setup_mocks(mock_ssh_runner, mock_slurm_client,
                           mock_get_partition_info, 'cpus')
+        mock_get_proctrack_type.return_value = 'cgroup'
 
         config = common.ProvisionConfig(
             provider_config={
