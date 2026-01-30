@@ -189,7 +189,7 @@ Admin CLI
 --------
 
 .. _sky-gpus:
-.. click:: sky.client.cli.command:gpus
+.. click:: sky.client.cli.command:gpus_cli
    :prog: sky gpus
    :nested: full
 

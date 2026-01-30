@@ -4618,13 +4618,13 @@ def _show_gpus_impl(
         click.echo()
 
 
-@cli.group(cls=_NaturalOrderGroup)
-def gpus():  # pylint: disable=redefined-outer-name
+@cli.group('gpus', cls=_NaturalOrderGroup)
+def gpus_cli():
     """SkyPilot GPU/Accelerator CLI."""
     pass
 
 
-@gpus.command('list', cls=_DocumentedCodeCommand)
+@gpus_cli.command('list', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
 @flags.all_option('Show details of all GPU/TPU/accelerator offerings.')
@@ -4707,7 +4707,7 @@ def gpus_list(
     _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
 
 
-@gpus.command('label', cls=_DocumentedCodeCommand)
+@gpus_cli.command('label', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.option('--context',
               '-c',
