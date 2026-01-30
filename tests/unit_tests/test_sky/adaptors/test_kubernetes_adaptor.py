@@ -83,8 +83,8 @@ def test_watch_cleanup(monkeypatch):
 
     class FakeWatch:
 
-        def __init__(self, api_client=None):
-            self._api_client = api_client
+        def __init__(self, return_type=None):
+            self._raw_return_type = return_type
 
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 
