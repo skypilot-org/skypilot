@@ -1120,6 +1120,11 @@ class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
             decision = 'SCALE_DOWN_TO_ZERO'
         elif queue_length > self.queue_length_threshold:
             # Scale up by 1
+            # TODO(lloyd): we probably want support for scaling up by more than
+            # 1 in the future. We are punting on this currently because without
+            # an understanding of the workload the right number of replicas to
+            # scale up by is not clear and the user can just tweak the upscale
+            # delay to control the rate of scaling up.
             target_num_replicas = current_num_replicas + 1
             decision = 'SCALE_UP'
         elif queue_length < self.queue_length_threshold:
