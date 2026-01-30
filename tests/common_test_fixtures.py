@@ -631,4 +631,14 @@ def skyignore_dir():
 def reset_global_state():
     """Reset global state before each test."""
     annotations.is_on_api_server = True
+    # Clear global caches that can leak state between tests.
+    # These caches can be polluted by tests that modify the config file
+    # (e.g., test_api_login sets api_server.endpoint to a test URL).
+    server_common.get_server_url.cache_clear()
+    server_common.is_api_server_local.cache_clear()
+    server_common.get_dashboard_url.cache_clear()
     yield
+    # Clear again after the test to prevent pollution to subsequent tests
+    server_common.get_server_url.cache_clear()
+    server_common.is_api_server_local.cache_clear()
+    server_common.get_dashboard_url.cache_clear()
