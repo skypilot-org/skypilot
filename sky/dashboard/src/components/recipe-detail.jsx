@@ -404,7 +404,10 @@ export function RecipeDetail() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/recipes" className="text-sky-blue hover:text-sky-blue-bright flex items-center">
+          <Link
+            href="/recipes"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+          >
             <ArrowLeftIcon className="h-4 w-4 mr-1.5" />
             <span>Back</span>
           </Link>
