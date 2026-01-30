@@ -395,7 +395,7 @@ mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky
 srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
 # Marker file to indicate we're in a Slurm cluster.
 touch {slurm_marker_file}
-# Store proctrack type for executor's barrier logic.
+# Store proctrack type for task executor to read.
 echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
