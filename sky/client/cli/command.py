@@ -782,7 +782,8 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
             body = payloads.RecipeGetBody(recipe_name=recipe_name)
             response = server_common.make_authenticated_request(
                 'POST', '/recipes/get', json=json.loads(body.model_dump_json()))
-            request_id = server_common.get_request_id(response)
+            request_id: server_common.RequestId[Optional[Dict[
+                str, Any]]] = server_common.get_request_id(response)
             recipe = sdk.get(request_id)
         except requests_lib.exceptions.ConnectionError as e:
             raise click.UsageError(
@@ -5672,10 +5673,11 @@ def jobs_pool_apply(
             'Cannot specify both --workers and POOL_YAML. Please use one of '
             'them.')
 
-    recipe_yaml = _get_recipe_yaml(pool_yaml[0])
-    if recipe_yaml is not None:
-        click.secho(f'Recipe to run: ', fg='cyan', nl=False)
-        pool_yaml = (recipe_yaml,)
+    if pool_yaml is not None and len(pool_yaml) > 0:
+        recipe_yaml = _get_recipe_yaml(pool_yaml[0])
+        if recipe_yaml is not None:
+            click.secho('Recipe to run: ', fg='cyan', nl=False)
+            pool_yaml = (recipe_yaml,)
 
     if pool_yaml is None or len(pool_yaml) == 0:
         if pool is None:

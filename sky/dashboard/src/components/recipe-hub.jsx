@@ -147,8 +147,7 @@ function RecipeCard({ recipe }) {
 
             {/* Authored by */}
             <div className="text-sm text-gray-500 truncate">
-              Authored by{' '}
-              <UserName name={recipe.user_name || recipe.user_id} />
+              Authored by <UserName name={recipe.user_name || recipe.user_id} />
             </div>
 
             {/* Last updated info - only show for editable recipes */}
