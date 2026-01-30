@@ -195,9 +195,7 @@ def test_recipe_volume_apply(volume_recipe: str):
         'recipe_volume_apply',
         [
             # Create volume using recipe reference
-            f's=$(sky volumes apply -y -n {volume_name} --infra kubernetes recipes:{volume_recipe}); '
-            'echo "$s"; '
-            'echo "$s" | grep -i "volume"',
+            f'sky volumes apply -y -n {volume_name} --infra kubernetes recipes:{volume_recipe}',
             # Verify volume was created
             f'sky volumes ls | grep "{volume_name}"',
         ],

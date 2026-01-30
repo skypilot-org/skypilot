@@ -4855,6 +4855,12 @@ def volumes_apply(
     volume_config_dict: Dict[str, Any] = {}
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
+
+        # Check if the entrypoint is a recipe reference
+        recipe_yaml = _get_recipe_yaml(entrypoint_str)
+        if recipe_yaml is not None:
+            entrypoint_str = recipe_yaml
+
         is_yaml, yaml_config, yaml_file_provided, invalid_reason = (
             _check_yaml_only(entrypoint_str))
         if not is_yaml:
