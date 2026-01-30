@@ -144,7 +144,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '33'  # Add better support for launching multiple jobs at once.
+SKYLET_VERSION = '34'  # Add fields to ManagedJobInfo proto for GPU metrics.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -665,5 +665,14 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
 
+# Slurm marker file for proctrack type detection.
+# Used by the executor to conditionally apply multi-node barrier.
+SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
+
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
+
+SSD_LOCAL_DISK = 'ssd'
+HDD_LOCAL_DISK = 'hdd'
+
+LOCAL_DISK_TYPES = {SSD_LOCAL_DISK, HDD_LOCAL_DISK}
