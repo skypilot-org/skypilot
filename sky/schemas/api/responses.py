@@ -204,6 +204,7 @@ class ManagedJobRecord(ResponseBaseModel):
     pool: Optional[str] = None
     pool_hash: Optional[str] = None
     current_cluster_name: Optional[str] = None
+    cluster_name_on_cloud: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
     labels: Optional[Dict[str, str]] = None
