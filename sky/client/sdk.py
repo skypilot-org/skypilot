@@ -1234,6 +1234,10 @@ def down(
             jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
@@ -1286,6 +1290,10 @@ def stop(
             cluster, or a TPU VM Pod cluster, or the managed jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
