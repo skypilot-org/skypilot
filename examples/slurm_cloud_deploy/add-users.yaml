@@ -1,0 +1,264 @@
+num_nodes: 2  # Must match the number in deploy.yaml
+
+envs:
+  USERS: "alice bob"  # List of users to create or update
+
+run: |
+  set -e  # Exit on error, but don't print every command
+  
+  # Get username - works on both AWS (ubuntu) and other clouds
+  USERNAME=$(whoami)
+  echo "Running as user: $USERNAME"
+  echo "Node rank: $SKYPILOT_NODE_RANK"
+  echo "Users to setup: $USERS"
+
+  # Define barrier function
+  create_barrier() {
+    local barrier_name=$1
+    local barrier_file="/tmp/${barrier_name}_barrier"
+    
+    if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+      # Controller node creates and distributes barrier file
+      echo "Creating barrier: $barrier_name"
+      touch $barrier_file
+      for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+        echo "Distributing barrier to: $node"
+        scp -o StrictHostKeyChecking=no $barrier_file $node:$barrier_file
+      done
+    else
+      # Non-controller nodes wait for barrier file
+      echo "Waiting for barrier: $barrier_name"
+      while [ ! -f "$barrier_file" ]; do
+        echo "Waiting for $barrier_name barrier..."
+        sleep 5
+      done
+      echo "Barrier $barrier_name received"
+    fi
+  }
+
+  echo "Adding users to all nodes with NFS home directories..."
+
+  # Make sure NFS mount exists
+  if [ ! -d "/mnt" ]; then
+    if [ "$SKYPILOT_NODE_RANK" != "0" ]; then
+      CONTROLLER_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+      echo "Attempting to mount NFS from controller ($CONTROLLER_IP)..."
+      sudo mkdir -p /mnt
+      sudo mount -t nfs $CONTROLLER_IP:/mnt /mnt || true
+      sleep 2
+    fi
+    
+    # Check again after mount attempt
+    if [ ! -d "/mnt" ]; then
+      echo "ERROR: /mnt directory not found. Please make sure the cluster was deployed with deploy.yaml first."
+      exit 1
+    fi
+  fi
+  
+  # Verify NFS is working on controller
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    echo "Verifying NFS is working..."
+    echo "test-$(date)" | sudo tee /mnt/nfs-test-file > /dev/null
+    echo "NFS test file created at /mnt/nfs-test-file"
+    
+    # Ensure /mnt has proper permissions
+    echo "Checking /mnt permissions"
+    sudo chmod 755 /mnt
+  fi
+  
+  # Synchronize between controller and workers
+  create_barrier "nfs_setup"
+  
+  # Verify NFS on workers
+  if [ "$SKYPILOT_NODE_RANK" != "0" ]; then
+    if [ -f "/mnt/nfs-test-file" ]; then
+      echo "NFS working, test file found"
+    else
+      echo "ERROR: NFS not working properly. Test file not visible."
+      exit 1
+    fi
+  fi
+
+  # Track users added vs updated
+  declare -a new_users=()
+  declare -a updated_users=()
+
+  # Create add_user function with better error handling
+  add_user() {
+    local user=$1
+    echo "Setting up user: $user"
+    
+    # Check if user exists
+    if id "$user" &>/dev/null; then
+      echo "User $user already exists, updating settings"
+      # Create home dir if needed
+      if [ ! -d "/mnt/$user" ]; then
+        echo "Creating missing home directory for $user"
+        sudo mkdir -p "/mnt/$user"
+        sudo chown "$user:$user" "/mnt/$user"
+        sudo chmod 700 "/mnt/$user"
+      fi
+      
+      # Update home directory
+      CURRENT_HOME=$(getent passwd "$user" | cut -d: -f6)
+      if [ "$CURRENT_HOME" != "/mnt/$user" ]; then
+        echo "Updating home directory to /mnt/$user"
+        sudo usermod -d "/mnt/$user" "$user"
+      fi
+      
+      # Add to sudo group
+      if ! sudo groups "$user" | grep -q "\bsudo\b"; then
+        sudo usermod -aG sudo "$user"
+      fi
+      
+      return 0  # User was updated
+    else
+      echo "Creating new user: $user"
+      # Create user with home in /mnt
+      sudo useradd -m -d "/mnt/$user" -s /bin/bash "$user"
+      
+      # Set password to username (for testing)
+      echo "Setting password for $user"
+      echo "$user:$user" | sudo chpasswd
+      
+      # Add to sudo group
+      echo "Adding $user to sudo group"
+      sudo usermod -aG sudo "$user"
+      
+      return 1  # User was created
+    fi
+  }
+
+  # Setup SSH for a user
+  setup_ssh() {
+    local user=$1
+    echo "Setting up SSH for user: $user"
+    
+    # Create SSH directory
+    sudo mkdir -p "/mnt/$user/.ssh"
+    
+    # Handle existing keys properly
+    if [ -f "/mnt/$user/.ssh/id_rsa" ]; then
+      echo "SSH keys for $user already exist, checking configuration"
+      
+      # If authorized_keys doesn't exist, create it
+      if [ ! -f "/mnt/$user/.ssh/authorized_keys" ]; then
+        echo "Creating authorized_keys from existing public key"
+        if [ -f "/mnt/$user/.ssh/id_rsa.pub" ]; then
+          sudo cp "/mnt/$user/.ssh/id_rsa.pub" "/mnt/$user/.ssh/authorized_keys"
+        else
+          echo "WARNING: Private key exists but public key missing - generating public key"
+          sudo ssh-keygen -y -f "/mnt/$user/.ssh/id_rsa" | sudo tee "/mnt/$user/.ssh/id_rsa.pub" > /dev/null
+          sudo cp "/mnt/$user/.ssh/id_rsa.pub" "/mnt/$user/.ssh/authorized_keys"
+        fi
+      fi
+    else
+      echo "Generating new SSH keys for $user"
+      # Remove any existing keys to avoid prompts
+      sudo rm -f "/mnt/$user/.ssh/id_rsa" "/mnt/$user/.ssh/id_rsa.pub"
+      
+      # Generate new keys
+      sudo ssh-keygen -t rsa -f "/mnt/$user/.ssh/id_rsa" -N "" -q
+      sudo cp "/mnt/$user/.ssh/id_rsa.pub" "/mnt/$user/.ssh/authorized_keys"
+    fi
+    
+    # Fix permissions
+    sudo chown -R "$user:$user" "/mnt/$user/.ssh"
+    sudo chmod 700 "/mnt/$user/.ssh"
+    sudo chmod 600 "/mnt/$user/.ssh/id_rsa" 2>/dev/null || true
+    sudo chmod 644 "/mnt/$user/.ssh/id_rsa.pub" 2>/dev/null || true
+    sudo chmod 644 "/mnt/$user/.ssh/authorized_keys"
+  }
+
+  # Process users on controller node
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    echo "Processing users on controller node"
+    for user in $USERS; do
+      if add_user "$user"; then
+        updated_users+=("$user")
+        echo "User $user was updated"
+      else
+        new_users+=("$user")
+        echo "User $user was newly created"
+      fi
+      
+      setup_ssh "$user"
+    done
+    
+    # Create marker file
+    echo "$(date): Users setup complete" | sudo tee /mnt/users-setup-complete > /dev/null
+  fi
+  
+  # Synchronize before processing worker nodes
+  create_barrier "controller_users_done"
+  
+  # Process users on worker nodes
+  if [ "$SKYPILOT_NODE_RANK" != "0" ]; then
+    echo "Processing users on worker node"
+    for user in $USERS; do
+      if ! add_user "$user"; then
+        echo "New user $user created on worker"
+      else
+        echo "Existing user $user updated on worker"
+      fi
+    done
+  fi
+  
+  # Synchronize before account sync
+  create_barrier "workers_users_done"
+  
+  # Sync user accounts for consistent UIDs
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    echo "Synchronizing user accounts across nodes"
+    sudo cp /etc/passwd /tmp/passwd.tmp
+    sudo cp /etc/group /tmp/group.tmp
+    sudo cp /etc/shadow /tmp/shadow.tmp
+    sudo chown $USERNAME:$USERNAME /tmp/passwd.tmp /tmp/group.tmp /tmp/shadow.tmp
+    
+    for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+      echo "Syncing account files to $node"
+      scp -o StrictHostKeyChecking=no /tmp/passwd.tmp $node:/tmp/passwd
+      scp -o StrictHostKeyChecking=no /tmp/group.tmp $node:/tmp/group
+      scp -o StrictHostKeyChecking=no /tmp/shadow.tmp $node:/tmp/shadow
+      ssh -o StrictHostKeyChecking=no $node "sudo cp /tmp/passwd /etc/passwd && sudo cp /tmp/group /etc/group && sudo cp /tmp/shadow /etc/shadow && sudo rm /tmp/passwd /tmp/group /tmp/shadow"
+    done
+    
+    sudo rm /tmp/passwd.tmp /tmp/group.tmp /tmp/shadow.tmp
+  fi
+  
+  # Final synchronization
+  create_barrier "account_sync_done"
+  
+  # Display summary
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    echo ""
+    echo "=== USER SETUP SUMMARY ==="
+    
+    if [ ${#new_users[@]} -gt 0 ]; then
+      echo "New users created:"
+      for user in "${new_users[@]}"; do
+        echo "  - $user (home: /mnt/$user)"
+      done
+    else
+      echo "No new users created"
+    fi
+    
+    if [ ${#updated_users[@]} -gt 0 ]; then
+      echo "Existing users updated:"
+      for user in "${updated_users[@]}"; do
+        echo "  - $user (home: /mnt/$user)"
+      done
+    fi
+    
+    echo ""
+    echo "All users have:"
+    echo "  - NFS home directories at /mnt/<username>"
+    echo "  - SSH keys for passwordless access"
+    echo "  - Sudo access (can be removed if needed)"
+    echo "  - Default password = username (change for production)"
+    echo ""
+    echo "Users can log in from any node with their credentials"
+  fi
+  
+  echo "User setup completed successfully on node $SKYPILOT_NODE_RANK"
+  exit 0
