@@ -662,8 +662,12 @@ class Resources:
 
     @property
     def local_disk(self) -> Optional[str]:
-        # TODO (kyuds): add instance type thingy.
-        return self._local_disk
+        if self._local_disk is not None:
+            return self._local_disk
+        if self.cloud is not None and self._instance_type is not None:
+            return self.cloud.get_local_disk_spec_from_instance_type(
+                self._instance_type)
+        return None
 
     @property
     def ports(self) -> Optional[List[str]]:
@@ -1609,8 +1613,21 @@ class Resources:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'No enabled cloud supports local disk selection. '
-                        'To fix: enable a cloud that supports this feature.'
-                    )
+                        'To fix: enable a cloud that supports this feature.')
+        if self._instance_type is not None:
+            # The assertion should be true because we have already executed
+            # _try_validate_instance_type() before this method.
+            # The _try_validate_instance_type() method infers and sets
+            # self.cloud if self.instance_type is not None.
+            assert self.cloud is not None
+            instance_spec = self.cloud.get_local_disk_spec_from_instance_type(
+                self._instance_type)
+            if not resources_utils.local_disk_satisfied(self._local_disk,
+                                                        instance_spec):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Specified instance type {self._instance_type} does '
+                        f'not have specified local disk {self._local_disk}.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -1840,7 +1857,9 @@ class Resources:
         if self.local_disk is not None:
             if other.local_disk is None:
                 return False
-            # TODO (kyuds): compare local_disk.
+            if not resources_utils.local_disk_satisfied(self.local_disk,
+                                                        other.local_disk):
+                return False
 
         if check_ports:
             if self.ports is not None:

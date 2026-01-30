@@ -364,6 +364,15 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        """Returns the local disk specs from instance type, if any."""
+        del instance_type  # unused
+        return None
+
+    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,

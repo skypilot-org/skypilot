@@ -105,6 +105,70 @@ class ClusterName:
         return self.display_name
 
 
+def parse_local_disk_str(local_disk: str) -> Tuple[str, float, bool]:
+    """Parse a normalized local_disk string.
+
+    Args:
+        local_disk: Normalized form 'mode:size[+]' (e.g., 'nvme:1000+')
+
+    Returns:
+        Tuple of (mode, size, at_least) where:
+        - mode: 'nvme' or 'ssd'
+        - size: size in GB as float
+        - at_least: True if '+' suffix was present
+    """
+    parts = local_disk.split(':')
+    mode = parts[0]
+    size_str = parts[1]
+    at_least = size_str.endswith('+')
+    if at_least:
+        size_str = size_str[:-1]
+    size = float(size_str)
+    return (mode, size, at_least)
+
+
+def local_disk_satisfied(requested: Optional[str],
+                         launched: Optional[str]) -> bool:
+    #  pylint: disable=line-too-long
+    """Check if launched local disk satisfies the requested requirement.
+
+    Used by Resources.less_demanding_than() to validate that a task's
+    local disk requirement can be satisfied by a cluster's local disk.
+
+    Args:
+        requested: The task's local_disk requirement
+            (normalized form 'mode:size[+]')
+        launched: The cluster's local_disk (normalized form 'mode:size[+]')
+
+    Returns:
+        True if the launched local disk satisfies the requested requirement.
+
+    Examples:
+        >>> local_disk_satisfied('nvme:500+', 'nvme:1000')  # True (1000 >= 500)
+        >>> local_disk_satisfied('nvme:1000+', 'nvme:500')  # False (500 < 1000)
+        >>> local_disk_satisfied('ssd:500+', 'nvme:1000')   # True (nvme satisfies ssd)
+        >>> local_disk_satisfied('nvme:500+', 'ssd:1000')   # False (ssd doesn't satisfy nvme)
+        >>> local_disk_satisfied('nvme:500', 'nvme:500')    # True (exact match)
+        >>> local_disk_satisfied('nvme:500', 'nvme:600')    # False (exact, no match)
+    """
+    if requested is None:
+        return True
+    if launched is None:
+        return False
+    req_mode, req_size, req_at_least = parse_local_disk_str(requested)
+    launched_mode, launched_size, _ = parse_local_disk_str(launched)
+
+    if req_mode == 'nvme' and launched_mode != 'nvme':
+        return False
+    if req_mode == 'ssd' and launched_mode not in ('ssd', 'nvme'):
+        return False
+
+    if req_at_least:
+        return launched_size >= req_size
+    else:
+        return abs(launched_size - req_size) < 1.0  # for float approx.
+
+
 def check_port_str(port: str) -> None:
     if not port.isdigit():
         with ux_utils.print_exception_no_traceback():
