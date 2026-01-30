@@ -1156,7 +1156,6 @@ Default: see the yaml below.
       enabled: false
       headerName: 'X-Auth-Request-Email'
       headerFormat: 'plaintext'
-      jwtIdentityClaim: 'sub'
 
 .. _helm-values-auth-externalProxy-enabled:
 
@@ -1178,12 +1177,7 @@ Default: ``false``
 ``auth.externalProxy.headerName``
 '''''''''''''''''''''''''''''''''
 
-The HTTP header name containing the user identity. Common values include:
-
-- ``X-Auth-Request-Email``: Default header set by oauth2-proxy
-- ``X-Forwarded-User``: Common header for forwarded user identity
-- ``x-amzn-oidc-data``: AWS ALB OIDC JWT token header
-- ``X-MS-CLIENT-PRINCIPAL-NAME``: Azure App Service / Front Door header
+The HTTP header name containing the user identity.
 
 Default: ``'X-Auth-Request-Email'``
 
@@ -1191,7 +1185,7 @@ Default: ``'X-Auth-Request-Email'``
 
   auth:
     externalProxy:
-      headerName: 'x-amzn-oidc-data'
+      headerName: 'X-WEBAUTH-USER'
 
 .. _helm-values-auth-externalProxy-headerFormat:
 
@@ -1203,11 +1197,7 @@ The format of the header value. Available options:
 - ``plaintext``: The header value is the user identity directly (e.g., ``user@example.com``)
 - ``jwt``: The header value is a JWT token from which the identity should be extracted using ``jwtIdentityClaim``
 
-Use ``jwt`` when integrating with load balancers that pass OIDC tokens (e.g., AWS ALB with OIDC authentication).
-
-.. note::
-
-  When using ``jwt`` format, the API server decodes the JWT without verification. The proxy is trusted to have already validated the token. This is the standard pattern for trusted proxy architectures where the proxy handles authentication and the backend trusts headers from the proxy.
+Use ``jwt`` when integrating with load balancers that pass JWT tokens.
 
 Default: ``'plaintext'``
 
@@ -1222,11 +1212,7 @@ Default: ``'plaintext'``
 ``auth.externalProxy.jwtIdentityClaim``
 '''''''''''''''''''''''''''''''''''''''
 
-The JWT claim to extract the user identity from when ``headerFormat`` is ``jwt``. Common claims include:
-
-- ``sub``: Subject claim (unique user identifier)
-- ``email``: User's email address
-- ``preferred_username``: User's preferred username
+The JWT claim to extract the user identity from when ``headerFormat`` is ``jwt``.
 
 Only used when ``headerFormat`` is ``jwt``.
 
