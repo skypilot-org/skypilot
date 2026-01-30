@@ -731,7 +731,7 @@ def _check_recipe_reference(entrypoint: str) -> Tuple[bool, Optional[str]]:
         contains the name of the recipe to fetch from the Recipe Hub.
     """
     # Pattern matches 'recipes:<valid-recipe-name>'
-    # Recipe names must start with a letter, can contain letters, numbers,
+    # Recipe names must start with a letter, and can contain letters, numbers,
     # and dashes, and must end with an alphanumeric character.
     pattern = re.compile(r'^recipes:(' + constants.RECIPE_NAME_VALID_REGEX +
                          r')$')
