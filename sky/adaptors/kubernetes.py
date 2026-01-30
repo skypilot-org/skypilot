@@ -328,7 +328,9 @@ def custom_resources_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 @wrap_kubernetes_client
 def watch(context: Optional[str] = None):
-    return kubernetes.watch.Watch(api_client=_get_api_client(context))
+    w = kubernetes.watch.Watch()
+    w._api_client = _get_api_client(context)  # pylint: disable=protected-access
+    return w
 
 
 def api_exception():
