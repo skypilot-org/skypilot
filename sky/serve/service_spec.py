@@ -281,6 +281,9 @@ class SkyServiceSpec:
         if policy_section is None or simplified_policy_section is not None:
             if simplified_policy_section is not None:
                 min_replicas = simplified_policy_section
+            elif workers_config is not None:
+                # Use workers_config from pool dict if available
+                min_replicas = workers_config
             else:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
             # For pools with autoscaling set the relevant config values.
