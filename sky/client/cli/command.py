@@ -26,6 +26,7 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
+import json
 import os
 import pathlib
 import re
@@ -67,10 +68,10 @@ from sky.client.cli import utils as cli_utils
 from sky.jobs.state import ManagedJobStatus
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
-from sky.recipes import core as recipes_core
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -763,6 +764,8 @@ def _pop_and_ignore_fields_in_override_params(
 def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     """Checks if entrypoint is a recipe reference and returns the recipe YAML.
 
+    Fetches the recipe content from the API server.
+
     Args:
         entrypoint: The entrypoint string to check.
 
@@ -772,12 +775,30 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     is_recipe, recipe_name = _check_recipe_reference(entrypoint)
     if is_recipe:
         assert recipe_name is not None  # For mypy
-        click.secho(f'Recipe to run: ', fg='cyan', nl=False)
+        click.secho('Recipe to run: ', fg='cyan', nl=False)
         click.secho(recipe_name)
         try:
-            content, _ = recipes_core.get_recipe_content(recipe_name)
-        except ValueError as e:
-            raise click.UsageError(str(e))
+            # Make API request to fetch recipe from server
+            body = payloads.RecipeGetBody(recipe_name=recipe_name)
+            response = server_common.make_authenticated_request(
+                'POST', '/recipes/get', json=json.loads(body.model_dump_json()))
+            request_id = server_common.get_request_id(response)
+            recipe = sdk.get(request_id)
+        except requests_lib.exceptions.ConnectionError as e:
+            raise click.UsageError(
+                f'Failed to connect to API server to fetch recipe '
+                f'{recipe_name!r}: {e}') from e
+        except Exception as e:
+            # Handle errors from the API server (e.g., recipe not found)
+            raise click.UsageError(str(e)) from e
+
+        if recipe is None:
+            raise click.UsageError(f'Recipe not found: {recipe_name}')
+
+        content = recipe.get('content')
+        if content is None:
+            raise click.UsageError(f'Recipe {recipe_name!r} has no content')
+
         # Write to temp file and treat as YAML
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
                                          delete=False) as f:
@@ -786,6 +807,7 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
     else:
         logger.debug(f'Not a recipe reference: {entrypoint}')
     return None
+
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
@@ -5643,7 +5665,7 @@ def jobs_pool_apply(
         raise click.UsageError(
             'Cannot specify both --workers and POOL_YAML. Please use one of '
             'them.')
-    
+
     recipe_yaml = _get_recipe_yaml(pool_yaml[0])
     if recipe_yaml is not None:
         click.secho(f'Recipe to run: ', fg='cyan', nl=False)
