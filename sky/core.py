@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
@@ -20,6 +21,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.backends import task_codegen
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -716,8 +718,84 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
     return message
 
 
+def _graceful_job_cancel(handle: backends.ResourceHandle,
+                         backend: backends.Backend,
+                         cluster_name: str,
+                         timeout: Optional[int] = None,
+                         terminate: bool = True) -> None:
+    """Stop jobs and flush rclone uploads on all nodes in parallel."""
+    op = 'shutdown' if terminate else 'stop'
+    if (not isinstance(handle, backends.CloudVmRayResourceHandle) or
+            not isinstance(backend, backends.CloudVmRayBackend)):
+        logger.warning(f'Graceful {op} only available for '
+                       'CloudVmRayBackend. Skipping...')
+        return
+
+    # Kill all running jobs on the cluster
+    logger.info(f'Graceful {op} enabled. Terminating user jobs on '
+                f'{cluster_name}...')
+    try:
+        backend.cancel_jobs(handle, jobs=None, cancel_all=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to cancel jobs: {e}')
+
+    # Flush rclone uploads on all nodes in parallel
+    logger.info('Flushing MOUNT_CACHED uploads on all nodes of '
+                f'{cluster_name!r}...')
+
+    # Get the flush script
+    flush_script = task_codegen.TaskCodeGen().get_rclone_flush_script()
+
+    # Wrap with timeout if specified
+    if timeout:
+        flush_script = f'timeout {timeout} bash -c {shlex.quote(flush_script)}'
+
+    runners = handle.get_command_runners()
+    node_args = [(i, runner) for i, runner in enumerate(runners)]
+    errors = []
+    logger.debug(f'Waiting for uploads on {len(runners)} node(s)...')
+
+    def run_flush_on_node(args):
+        """Run flush script on a single node."""
+        node_id, runner = args
+        try:
+            returncode, stdout, stderr = runner.run(
+                flush_script,
+                stream_logs=False,
+                require_outputs=True,
+            )
+            return (node_id, returncode, stdout, stderr)
+        except Exception as e:  # pylint: disable=broad-except
+            return (node_id, -1, '', str(e))
+
+    parallel_results = subprocess_utils.run_in_parallel(
+        run_flush_on_node,
+        node_args,
+        num_threads=len(runners),
+    )
+
+    for node_id, returncode, _, stderr in parallel_results:
+        if returncode == 0:
+            logger.debug(f'Node {node_id}: uploads flushed successfully')
+        elif returncode == 124:  # timeout exit code
+            logger.warning(f'Node {node_id}: flush timed out after {timeout}s')
+            errors.append(f'Node {node_id}: timeout')
+        else:
+            logger.warning(
+                f'Node {node_id}: flush failed (rc={returncode}): {stderr}')
+            errors.append(f'Node {node_id}: {stderr}')
+
+    if errors:
+        logger.warning(f'Some nodes had flush errors: {errors}')
+    else:
+        logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
+
+
 @usage_lib.entrypoint
-def down(cluster_name: str, purge: bool = False) -> None:
+def down(cluster_name: str,
+         purge: bool = False,
+         graceful: bool = False,
+         graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tears down a cluster.
 
@@ -733,6 +811,10 @@ def down(cluster_name: str, purge: bool = False) -> None:
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHE data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
@@ -745,14 +827,24 @@ def down(cluster_name: str, purge: bool = False) -> None:
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    if graceful:
+        _graceful_job_cancel(handle,
+                             backend,
+                             cluster_name,
+                             graceful_timeout,
+                             terminate=True)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
     backend.teardown(handle, terminate=True, purge=purge)
 
 
 @usage_lib.entrypoint
-def stop(cluster_name: str, purge: bool = False) -> None:
+def stop(cluster_name: str,
+         purge: bool = False,
+         graceful: bool = False,
+         graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stops a cluster.
 
@@ -771,6 +863,10 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             certain manual troubleshooting scenarios; with it set, it is the
             user's responsibility to ensure there are no leaked instances and
             related resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHE data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
@@ -811,6 +907,13 @@ def stop(cluster_name: str, purge: bool = False) -> None:
                 f'  {_stop_not_supported_message(handle.launched_resources)}.\n'
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {cluster_name}') from e
+
+    if graceful:
+        _graceful_job_cancel(handle,
+                             backend,
+                             cluster_name,
+                             graceful_timeout,
+                             terminate=False)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)

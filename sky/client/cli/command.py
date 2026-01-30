@@ -2615,6 +2615,15 @@ def cancel(
 @flags.all_option('Stop all existing clusters.')
 @flags.all_users_option('Stop all existing clusters for all users.')
 @flags.yes_option()
+@click.option('--graceful',
+              is_flag=True,
+              default=False,
+              help=('Wait for MOUNT_CACHED uploads to complete before '
+                    'terminating. Will still terminate the current task.'))
+@click.option('--graceful-timeout',
+              type=int,
+              default=None,
+              help='Timeout in seconds for `--graceful` flag.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def stop(
@@ -2622,6 +2631,8 @@ def stop(
     all: bool,  # pylint: disable=redefined-builtin
     all_users: bool,
     yes: bool,
+    graceful: bool,
+    graceful_timeout: Optional[int],
     async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -2658,6 +2669,8 @@ def stop(
                            all_users=all_users,
                            down=False,
                            no_confirm=yes,
+                           graceful=graceful,
+                           graceful_timeout=graceful_timeout,
                            async_call=async_call)
 
 
@@ -3035,6 +3048,15 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
+@click.option('--graceful',
+              is_flag=True,
+              default=False,
+              help=('Wait for MOUNT_CACHED uploads to complete before '
+                    'terminating. Will still terminate the current task.'))
+@click.option('--graceful-timeout',
+              type=int,
+              default=None,
+              help='Timeout in seconds for `--graceful` flag.')
 @_add_click_options(flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
@@ -3043,6 +3065,8 @@ def down(
     all_users: bool,
     yes: bool,
     purge: bool,
+    graceful: bool,
+    graceful_timeout: Optional[int],
     async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -3079,6 +3103,8 @@ def down(
                            down=True,
                            no_confirm=yes,
                            purge=purge,
+                           graceful=graceful,
+                           graceful_timeout=graceful_timeout,
                            async_call=async_call)
 
 
@@ -3240,6 +3266,8 @@ def _down_or_stop_clusters(
         down: bool = False,  # pylint: disable=redefined-outer-name
         no_confirm: bool = True,
         purge: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
         idle_minutes_to_autostop: Optional[int] = None,
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
         async_call: bool = False) -> None:
@@ -3257,6 +3285,10 @@ def _down_or_stop_clusters(
         down: If True, tear down the clusters.
         no_confirm: If True, skip the confirmation prompt.
         purge: If True, forcefully remove the clusters from the cluster table.
+        graceful: If True, cancel the user task, but block until MOUNT_CACHE
+            finishes uploads.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
         idle_minutes_to_autostop: The number of minutes to wait before
             automatically stopping the cluster.
         wait_for: Determines the condition for resetting the idleness timer.
@@ -3440,9 +3472,15 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    request_id = sdk.down(name, purge=purge)
+                    request_id = sdk.down(name,
+                                          purge=purge,
+                                          graceful=graceful,
+                                          graceful_timeout=graceful_timeout)
                 else:
-                    request_id = sdk.stop(name, purge=purge)
+                    request_id = sdk.stop(name,
+                                          purge=purge,
+                                          graceful=graceful,
+                                          graceful_timeout=graceful_timeout)
                 request_ids.append(request_id)
                 progress.stop()
                 _async_call_or_wait(

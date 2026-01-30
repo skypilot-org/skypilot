@@ -314,6 +314,8 @@ class ExecBody(RequestBody):
 class StopOrDownBody(RequestBody):
     cluster_name: str
     purge: bool = False
+    graceful: bool = False
+    graceful_timeout: Optional[int] = None
 
 
 class StatusBody(RequestBody):
