@@ -96,6 +96,11 @@ Below is the available helm value keys and the default value of each key:
       :ref:`cookie-expire <helm-values-auth-oauth-cookie-expire>`: null
     :ref:`serviceAccount <helm-values-auth-serviceAccount>`:
       :ref:`enabled <helm-values-auth-serviceAccount-enabled>`: null
+    :ref:`externalProxy <helm-values-auth-externalProxy>`:
+      :ref:`enabled <helm-values-auth-externalProxy-enabled>`: false
+      :ref:`headerName <helm-values-auth-externalProxy-headerName>`: 'X-Auth-Request-Email'
+      :ref:`headerFormat <helm-values-auth-externalProxy-headerFormat>`: 'plaintext'
+      :ref:`jwtIdentityClaim <helm-values-auth-externalProxy-jwtIdentityClaim>`: 'sub'
 
   :ref:`storage <helm-values-storage>`:
     :ref:`enabled <helm-values-storage-enabled>`: true
@@ -1130,6 +1135,95 @@ Default: ``null``
   auth:
     serviceAccount:
       enabled: true
+
+.. _helm-values-auth-externalProxy:
+
+``auth.externalProxy``
+^^^^^^^^^^^^^^^^^^^^^^
+
+Configuration for trusting an external authentication proxy in front of the API server. Use this when your infrastructure has a reverse proxy or load balancer that handles authentication (e.g., AWS ALB with Cognito, Azure Front Door with Azure AD, or a custom ingress controller with authentication middleware).
+
+When enabled, the API server extracts user identity from the HTTP header set by the proxy. The proxy is trusted to have already authenticated the user.
+
+This is mutually exclusive with :ref:`auth.oauth <helm-values-auth-oauth>` and :ref:`ingress.oauth2-proxy <helm-values-ingress-oauth2-proxy>`.
+
+Default: see the yaml below.
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      enabled: false
+      headerName: 'X-Auth-Request-Email'
+      headerFormat: 'plaintext'
+
+.. _helm-values-auth-externalProxy-enabled:
+
+``auth.externalProxy.enabled``
+''''''''''''''''''''''''''''''
+
+Enable external proxy authentication. When enabled, the API server will extract user identity from the header specified by ``headerName``.
+
+Default: ``false``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      enabled: true
+
+.. _helm-values-auth-externalProxy-headerName:
+
+``auth.externalProxy.headerName``
+'''''''''''''''''''''''''''''''''
+
+The HTTP header name containing the user identity.
+
+Default: ``'X-Auth-Request-Email'``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      headerName: 'X-WEBAUTH-USER'
+
+.. _helm-values-auth-externalProxy-headerFormat:
+
+``auth.externalProxy.headerFormat``
+'''''''''''''''''''''''''''''''''''
+
+The format of the header value. Available options:
+
+- ``plaintext``: The header value is the user identity directly (e.g., ``user@example.com``)
+- ``jwt``: The header value is a JWT token from which the identity should be extracted using ``jwtIdentityClaim``
+
+Use ``jwt`` when integrating with load balancers that pass JWT tokens.
+
+Default: ``'plaintext'``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      headerFormat: 'jwt'
+
+.. _helm-values-auth-externalProxy-jwtIdentityClaim:
+
+``auth.externalProxy.jwtIdentityClaim``
+'''''''''''''''''''''''''''''''''''''''
+
+The JWT claim to extract the user identity from when ``headerFormat`` is ``jwt``.
+
+Only used when ``headerFormat`` is ``jwt``.
+
+Default: ``'sub'``
+
+.. code-block:: yaml
+
+  auth:
+    externalProxy:
+      headerFormat: 'jwt'
+      jwtIdentityClaim: 'email'
 
 
 .. _helm-values-storage:

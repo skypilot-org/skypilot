@@ -89,13 +89,16 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 5 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 6 --status',  # Ensure the job succeeded.
+            # Check SKYPILOT_USER is set
+            f'sky exec {name} \'[[ ! -z "$SKYPILOT_USER" ]] && echo "SKYPILOT_USER=$SKYPILOT_USER"\'',
+            f'sky logs {name} 7 --status',  # Ensure the job succeeded.
             # Test '-c' for exec
             f'sky exec -c {name} echo',
-            f'sky logs {name} 7 --status',
-            f'sky exec echo -c {name}',
             f'sky logs {name} 8 --status',
+            f'sky exec echo -c {name}',
+            f'sky logs {name} 9 --status',
             f'sky exec -c {name} echo hi test',
-            f'sky logs {name} 9 | grep "hi test"',
+            f'sky logs {name} 10 | grep "hi test"',
             f'sky exec {name} && exit 1 || true',
             f'sky exec -c {name} && exit 1 || true',
             f's=$(sky cost-report --all) && echo $s && echo $s | grep {name} && echo $s | grep "Total Cost"',
@@ -2439,3 +2442,21 @@ def test_docker_pass_redacted(generic_cloud: str):
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+@pytest.mark.no_auto_retry
+def test_slurm_multi_node_proctrack():
+    """Test Slurm multi-node against proctrack/cgroup behaviour."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_multi_node_proctrack',
+        [
+            f'sky launch -y -c {name} --infra slurm --num-nodes 2 tests/test_yamls/slurm_bg_proc.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 | grep "SUCCESS"',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout('slurm'),
+    )
+    smoke_tests_utils.run_one_test(test)

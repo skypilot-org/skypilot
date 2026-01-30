@@ -519,7 +519,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     pool_hash=job.get('pool_hash'),
                     links=job.get('links'),
                     # Primary/auxiliary task support (None for non-job-groups)
-                    is_primary_in_job_group=job.get('is_primary_in_job_group'))
+                    is_primary_in_job_group=job.get('is_primary_in_job_group'),
+                    # Fields populated from cluster handle
+                    zone=job.get('zone'),
+                    labels=job.get('labels'),
+                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
