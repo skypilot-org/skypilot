@@ -663,5 +663,9 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
 
+# Slurm marker file for proctrack type detection.
+# Used by the executor to conditionally apply multi-node barrier.
+SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
+
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')

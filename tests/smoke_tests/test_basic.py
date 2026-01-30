@@ -2363,6 +2363,7 @@ def test_docker_pass_redacted(generic_cloud: str):
 
 
 @pytest.mark.slurm
+@pytest.mark.no_auto_retry
 def test_slurm_multi_node_proctrack():
     """Test Slurm multi-node against proctrack/cgroup behaviour."""
     name = smoke_tests_utils.get_cluster_name()

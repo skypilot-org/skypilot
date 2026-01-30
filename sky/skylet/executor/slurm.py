@@ -15,7 +15,21 @@ import time
 import colorama
 import hostlist
 
+from sky.skylet import constants
 from sky.skylet.log_lib import run_bash_command_with_log
+
+
+def _is_proctrack_cgroup_enabled() -> bool:
+    proctrack_file = os.path.join(os.path.expanduser('~'),
+                                  constants.SLURM_PROCTRACK_TYPE_FILE)
+    try:
+        with open(proctrack_file, 'r', encoding='utf-8') as f:
+            proctrack_type = f.read().strip()
+            return proctrack_type == 'cgroup'
+    except (FileNotFoundError, IOError):
+        # If file doesn't exist or can't be read,
+        # default to True to be conservative.
+        return True
 
 
 def _get_ip_address() -> str:
@@ -175,15 +189,15 @@ def main():
                                            stream_logs=True,
                                            streaming_prefix=prefix)
 
-    # TODO(kevin): Only do this if proctrack/cgroup is enabled.
-    # https://slurm.schedmd.com/cgroups.html#proctrack
     # For multi-node Slurm jobs (one task per node), we need to wait for all
     # tasks to complete before any task exits, because Slurm's proctrack/cgroup
     # kills all processes in a task's cgroup when that task's main process
     # exits. If one task exits early, child processes (e.g., Ray workers) get
     # killed even while other tasks are still running.
     # This ensures all tasks wait until every task has completed before exiting.
-    if num_nodes > 1 and not args.is_setup:
+    # Only needed when proctrack/cgroup is enabled.
+    # https://slurm.schedmd.com/cgroups.html#proctrack
+    if num_nodes > 1 and not args.is_setup and _is_proctrack_cgroup_enabled():
         slurm_job_id = os.environ['SLURM_JOB_ID']
         slurm_step_id = os.environ['SLURM_STEP_ID']
         run_done_dir = os.path.expanduser(

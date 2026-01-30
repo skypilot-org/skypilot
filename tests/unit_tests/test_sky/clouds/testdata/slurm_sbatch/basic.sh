@@ -42,6 +42,8 @@ mkdir -p /home/testuser/.sky_clusters/test-cluster-no-container/sky_logs /home/t
 srun --nodes=1 mkdir -p /tmp/test-cluster-no-container
 # Marker file to indicate we're in a Slurm cluster.
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.sky_slurm_cluster
+# Store proctrack type for executor's barrier logic.
+echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster-no-container/.sky_proctrack_type
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster-no-container/.hushlogin
 

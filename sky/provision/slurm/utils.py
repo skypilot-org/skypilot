@@ -31,6 +31,8 @@ _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
                                re.IGNORECASE)
 
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
+# Proctrack type is highly unlikely to change.
+_SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -95,6 +97,38 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
                      f'{common_utils.format_exception(e)}')
 
     return nodes_info
+
+
+def get_proctrack_type(cluster: str) -> Optional[str]:
+    """Get the ProctrackType setting from Slurm configuration."""
+    cache_key = f'slurm:proctrack_type:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm proctrack type found in cache ({cache_key})')
+        return cached
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        ssh_config_dict['identityfile'][0],
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+    )
+    proctrack_type = client.get_proctrack_type()
+
+    if proctrack_type is not None:
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, proctrack_type,
+                time.time() + _SLURM_PROCTRACK_TYPE_CACHE_TTL)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache slurm proctrack type for {cluster}: '
+                         f'{common_utils.format_exception(e)}')
+
+    return proctrack_type
 
 
 class SlurmInstanceType:

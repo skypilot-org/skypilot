@@ -625,3 +625,22 @@ class SlurmClient:
             at the end of the name.
         """
         return [partition.name for partition in self.get_partitions_info()]
+
+    def get_proctrack_type(self) -> Optional[str]:
+        """Get the ProctrackType from Slurm configuration.
+
+        Returns:
+            The proctrack type (e.g., 'cgroup', 'linuxproc', 'pgid'),
+            or None if it cannot be determined.
+        """
+        cmd = 'scontrol show config | grep -i "^ProctrackType"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.warning(f'Failed to get ProctrackType: {stderr}')
+            return None
+
+        # Parse output like "ProctrackType           = proctrack/cgroup"
+        match = re.search(r'ProctrackType\s*=\s*proctrack/(\w+)', stdout)
+        if match:
+            return match.group(1)
+        return None

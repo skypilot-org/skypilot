@@ -13,6 +13,7 @@ from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -137,6 +138,8 @@ def _create_virtual_instance(
     )
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+
+    proctrack_type = slurm_utils.get_proctrack_type(slurm_cluster)
     partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
     if partition_info is None:
         raise ValueError(f'Partition info for {partition} not found '
@@ -381,6 +384,8 @@ mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky
 srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
 # Marker file to indicate we're in a Slurm cluster.
 touch {slurm_marker_file}
+# Store proctrack type for executor's barrier logic.
+echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
