@@ -2,6 +2,7 @@
 
 import dataclasses
 import enum
+import functools
 import os
 from typing import Literal, Optional
 
