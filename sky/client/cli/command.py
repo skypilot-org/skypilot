@@ -26,7 +26,6 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
-import json
 import os
 import pathlib
 import re
