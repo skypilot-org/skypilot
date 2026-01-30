@@ -126,7 +126,8 @@ class TestEncodeJobsQueue:
 
         assert len(result) == 1
         encoded_job = result[0]
-        assert encoded_job['status'] == managed_jobs.ManagedJobStatus.RUNNING.value
+        assert encoded_job[
+            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
 
         # Handle should be serialized to a string
         assert isinstance(encoded_job['handle'], str)
@@ -176,7 +177,8 @@ class TestEncodeJobsQueue:
 
         assert len(result) == 1
         encoded_job = result[0]
-        assert encoded_job['status'] == managed_jobs.ManagedJobStatus.RUNNING.value
+        assert encoded_job[
+            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
 
         # Handle should be serialized to a string
         assert isinstance(encoded_job['handle'], str)
@@ -201,8 +203,7 @@ class TestEncodeJobsQueue:
             },
         )
 
-        result = encoders.encode_jobs_queue_v2(
-            ([job], 1, {'RUNNING': 1}, 1))
+        result = encoders.encode_jobs_queue_v2(([job], 1, {'RUNNING': 1}, 1))
 
         assert isinstance(result, dict)
         assert result['total'] == 1

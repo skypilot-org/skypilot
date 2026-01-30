@@ -192,6 +192,7 @@ def test_job_recovery_skips_autostopping():
 
 # Tests for handle serialization in managed job queue
 
+
 class TestHandleSerialization:
     """Tests for handle serialization/deserialization in job queue."""
 
@@ -235,8 +236,10 @@ class TestHandleSerialization:
         deserialized = utils._deserialize_handle_from_json(serialized)
 
         # Check attributes are preserved
-        assert deserialized['stable_internal_external_ips'] == original['stable_internal_external_ips']
-        assert deserialized['cluster_name_on_cloud'] == original['cluster_name_on_cloud']
+        assert deserialized['stable_internal_external_ips'] == original[
+            'stable_internal_external_ips']
+        assert deserialized['cluster_name_on_cloud'] == original[
+            'cluster_name_on_cloud']
         assert deserialized['launched_nodes'] == original['launched_nodes']
 
 
@@ -257,22 +260,21 @@ class TestPopulateJobRecordFromHandle:
         mock_handle.launched_resources.zone = 'us-east-1a'
         mock_handle.launched_resources.accelerators = None
         mock_handle.launched_resources.labels = {}
-        
+
         job = {}
-        
+
         # Mock the resources_utils function
-        with mock.patch('sky.jobs.utils.resources_utils.get_readable_resources_repr',
-                       return_value=('1x[CPU:1]', '1x[CPU:1+]')):
-            utils._populate_job_record_from_handle(
-                job=job,
-                cluster_name='test-cluster',
-                handle=mock_handle
-            )
-        
+        with mock.patch(
+                'sky.jobs.utils.resources_utils.get_readable_resources_repr',
+                return_value=('1x[CPU:1]', '1x[CPU:1+]')):
+            utils._populate_job_record_from_handle(job=job,
+                                                   cluster_name='test-cluster',
+                                                   handle=mock_handle)
+
         # Check handle is set
         assert 'handle' in job
         assert job['handle'] is mock_handle
-        
+
         # Check other fields are also set
         assert job['cluster_resources'] == '1x[CPU:1]'
         assert job['cloud'] == 'AWS'

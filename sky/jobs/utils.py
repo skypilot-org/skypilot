@@ -5,11 +5,13 @@ jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import asyncio
+import base64
 import collections
 from datetime import datetime
 import enum
 import os
 import pathlib
+import pickle
 import re
 import shlex
 import textwrap
@@ -118,7 +120,8 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
-    # The cluster resource handle (contains IPs, SSH ports, cluster metadata)
+    # The cluster resource handle (contains IPs, SSH ports,
+    # cluster metadata, etc.)
     'handle',
 ]
 
@@ -1449,8 +1452,6 @@ def _serialize_handle_for_json(handle: Any) -> Optional[str]:
     """
     if handle is None:
         return None
-    import base64
-    import pickle
     return base64.b64encode(pickle.dumps(handle)).decode('utf-8')
 
 
@@ -1474,7 +1475,7 @@ def dump_managed_job_queue(
                                    pool_match, page, limit, user_hashes,
                                    statuses, fields, sort_by, sort_order)
     # Serialize handles for JSON transport - they will be deserialized
-    # on the client side in load_managed_job_queue
+    # in load_managed_job_queue
     for job in result.get('jobs', []):
         if 'handle' in job and job['handle'] is not None:
             job['handle'] = _serialize_handle_for_json(job['handle'])
@@ -1598,7 +1599,7 @@ def _populate_job_record_from_handle(
         *, job: Dict[str, Any], cluster_name: str,
         handle: 'backends.CloudVmRayResourceHandle') -> None:
     """Populate the job record from the handle."""
-    del cluster_name  # Unused.
+    del cluster_name
     resources_str_simple, resources_str_full = (
         resources_utils.get_readable_resources_repr(handle,
                                                     simplified_only=False))
@@ -1865,8 +1866,6 @@ def _deserialize_handle_from_json(handle_str: Optional[str]) -> Any:
     """
     if handle_str is None:
         return None
-    import base64
-    import pickle
     return pickle.loads(base64.b64decode(handle_str.encode('utf-8')))
 
 
