@@ -335,20 +335,16 @@ def load_server_config() -> config_utils.Config:
                                  config_path)
     return config_utils.Config.from_dict(config_data)
 
+
 @functools.lru_cache(maxsize=1)
 def load_external_proxy_config() -> ExternalProxyConfig:
-    """Load external proxy configuration from server.yaml or legacy env var.
-
-    Configuration is loaded with the following priority (highest first):
-    1. ~/.sky/server.yaml file (mounted via ConfigMap in Helm deployments)
-    2. Legacy SKYPILOT_AUTH_USER_HEADER env var (backward compatibility)
+    """Load external proxy configuration.
 
     Returns:
         ExternalProxyConfig with the resolved configuration.
 
     Raises:
-        ValueError: If both JWT header format and legacy header env var are set,
-            as this is considered a configuration error.
+        ValueError: If both JWT header format and legacy header env var are set
     """
     server_config = load_server_config()
 
