@@ -85,7 +85,7 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
             if recipe_type == RecipeType.POOL:
                 # Pool YAMLs should have a 'pool' section
                 if 'pool' not in config:
-                    raise ValueError('Pool YAML must contain a \'pool\''
+                    raise ValueError('Pool YAML must contain a \'pool\' '
                                      'section. Example:\n  pool:\n    name: '
                                      'my-pool')
 
