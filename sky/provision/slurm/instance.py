@@ -13,6 +13,7 @@ from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
 from sky.provision.slurm import utils as slurm_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -122,7 +123,7 @@ def _create_virtual_instance(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
     partition = slurm_utils.get_partition_from_config(provider_config)
@@ -137,6 +138,8 @@ def _create_virtual_instance(
     )
 
     slurm_cluster = slurm_utils.get_slurm_cluster_from_config(provider_config)
+
+    proctrack_type = slurm_utils.get_proctrack_type(slurm_cluster)
     partition_info = slurm_utils.get_partition_info(slurm_cluster, partition)
     if partition_info is None:
         raise ValueError(f'Partition info for {partition} not found '
@@ -238,6 +241,8 @@ def _create_virtual_instance(
         ssh_proxy_command=ssh_proxy_command,
         ssh_proxy_jump=ssh_proxy_jump,
         enable_interactive_auth=True,
+        # Allow ssh-agent and default key fallback for Slurm.
+        disable_identities_only=True,
     )
 
     remote_home_dir = login_node_runner.get_remote_home_dir()
@@ -285,8 +290,11 @@ def _create_virtual_instance(
         #   /dev/shm is inherited from the host
         # See:
         # https://github.com/NVIDIA/enroot/blob/main/conf/hooks/10-devices.sh
+        host_ccache_dir = '/tmp/ccache_$(id -u)'
+        container_ccache_dir = '/var/cache/ccache'
         container_mounts = ','.join([
             f'{remote_home_dir}:{remote_home_dir}',
+            f'{host_ccache_dir}:{container_ccache_dir}',
         ])
         # Add sudo alias to bashrc since we're already root in the container.
         # This allows scripts with 'sudo' commands to work without modification.
@@ -294,9 +302,12 @@ def _create_virtual_instance(
         # so modifying bashrc doesn't affect non-containerized sessions.
         container_init_script = """\
 set -e
+echo "[container-init] Starting..."
+INIT_START=$SECONDS
 apt-get update
 apt-get install -y ca-certificates rsync curl git wget fuse
 echo 'alias sudo=""' >> ~/.bashrc
+echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 """
         container_marker_file = (f'{sky_cluster_home_dir}/'
                                  f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
@@ -309,10 +320,12 @@ echo 'alias sudo=""' >> ~/.bashrc
             f'{container_init_script}'
             f'touch {container_init_done_dir}/$SLURM_PROCID && sleep infinity')
         container_block = (
-            f'echo "Initializing container {container_name} on all nodes..."\n'
+            f'srun --nodes={num_nodes} mkdir -p {host_ccache_dir}\n'
+            f'CONTAINER_START=$SECONDS\n'
+            f'echo "[container] Initializing {container_name} on all nodes"\n'
             f'rm -rf {container_init_done_dir}\n'
             f'mkdir -p {container_init_done_dir}\n'
-            f'srun --overlap --label --unbuffered '
+            f'srun --overlap {"--label " if num_nodes > 1 else ""}--unbuffered '
             f'--nodes={num_nodes} --ntasks-per-node=1 '
             f'--container-image={shlex.quote(container_image)} '
             f'--container-name={shlex.quote(container_name)}:create '
@@ -329,6 +342,7 @@ echo 'alias sudo=""' >> ~/.bashrc
             f'  fi\n'
             f'  sleep 1\n'
             f'done\n'
+            f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
             f'touch {container_marker_file} {ready_signal}')
 
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
@@ -381,6 +395,8 @@ mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky
 srun --nodes={num_nodes} mkdir -p {skypilot_runtime_dir}
 # Marker file to indicate we're in a Slurm cluster.
 touch {slurm_marker_file}
+# Store proctrack type for task executor to read.
+echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.SLURM_PROCTRACK_TYPE_FILE}
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
@@ -488,7 +504,7 @@ def query_instances(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
@@ -586,7 +602,7 @@ def get_cluster_info(
     ssh_host = ssh_config_dict['hostname']
     ssh_port = int(ssh_config_dict['port'])
     ssh_user = ssh_config_dict['user']
-    ssh_key = ssh_config_dict['private_key']
+    ssh_key = ssh_config_dict.get('private_key', None)
     ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
     ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
@@ -680,7 +696,7 @@ def terminate_instances(
         ssh_host = ssh_config_dict['hostname']
         ssh_port = int(ssh_config_dict['port'])
         ssh_user = ssh_config_dict['user']
-        ssh_private_key = ssh_config_dict['private_key']
+        ssh_private_key = ssh_config_dict.get('private_key', None)
         ssh_proxy_command = ssh_config_dict.get('proxycommand', None)
         ssh_proxy_jump = ssh_config_dict.get('proxyjump', None)
 
@@ -792,7 +808,7 @@ def get_command_runners(
     login_node_ssh_hostname = login_node_ssh_config['hostname']
     login_node_ssh_port = int(login_node_ssh_config.get('port', 22))
     login_node_ssh_user = login_node_ssh_config['user']
-    login_node_ssh_private_key = login_node_ssh_config['private_key']
+    login_node_ssh_private_key = login_node_ssh_config.get('private_key', None)
     login_node_ssh_proxy_command = login_node_ssh_config.get(
         'proxycommand', None)
     login_node_ssh_proxy_jump = login_node_ssh_config.get('proxyjump', None)
@@ -814,6 +830,8 @@ def get_command_runners(
         ssh_proxy_jump=login_node_ssh_proxy_jump,
         ssh_control_name=ssh_control_name,
         enable_interactive_auth=True,
+        # Allow ssh-agent and default key fallback for Slurm.
+        disable_identities_only=True,
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
@@ -848,7 +866,9 @@ def get_command_runners(
             ssh_proxy_command=login_node_ssh_proxy_command,
             ssh_control_name=ssh_control_name,
             container_args=container_args,
-            enable_interactive_auth=True) for instance_info in instances
+            enable_interactive_auth=True,
+            # Allow ssh-agent and default key fallback for Slurm.
+            disable_identities_only=True) for instance_info in instances
     ]
 
     return runners

@@ -27,6 +27,8 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.server import config as server_config
+from sky.server import plugin_utils
+from sky.server import plugins
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -567,10 +569,25 @@ def shared_controller_vars_to_fill(
 
 
 def controller_only_vars_to_fill(controller: Controllers) -> Dict[str, str]:
+    # Get plugins config and wheel file mounts/commands together to ensure
+    # consistency between the uploaded wheel paths and installation commands.
+    # Only upload plugins specified in remote_plugins.yaml - plugins in
+    # plugins.yaml are intended for local API server use only.
+    local_plugins_config_path = None
+    plugin_wheel_file_mounts, plugins_wheel_install_commands = (
+        plugin_utils.get_plugin_mounts_and_commands())
+    if plugin_wheel_file_mounts and plugins_wheel_install_commands:
+        local_plugins_config_path = (
+            plugin_utils.get_filtered_plugins_config_path())
     vars_to_fill: Dict[str, Any] = {
         'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
         'cloud_dependencies_installation_commands':
             _get_cloud_dependencies_installation_commands(controller),
+        # Plugin-related template variables
+        'local_plugins_config_path': local_plugins_config_path,
+        'remote_plugins_config_path': plugins.REMOTE_PLUGINS_CONFIG_PATH,
+        'plugin_wheel_file_mounts': plugin_wheel_file_mounts,
+        'plugins_wheel_install_commands': plugins_wheel_install_commands,
     }
     env_vars: Dict[str, Any] = {
         env.env_key: str(int(env.get())) for env in env_options.Options

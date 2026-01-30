@@ -59,6 +59,8 @@ import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import dashboardCache from '@/lib/cache';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { checkGrafanaAvailability } from '@/utils/grafana';
+import { GPUMetricsSection } from '@/components/GPUMetricsSection';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
 import PropTypes from 'prop-types';
 
@@ -82,6 +84,13 @@ function JobDetails() {
   const [logNodes, setLogNodes] = useState([]);
   const [logExtractedLinks, setLogExtractedLinks] = useState({});
   const isMobile = useMobile();
+
+  // GPU metrics state
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+  // GPU metrics task selection for job groups
+  const [gpuMetricsTaskIndex, setGpuMetricsTaskIndex] = useState(0);
+  const GPU_METRICS_EXPANDED_KEY = 'skypilot-jobs-gpu-metrics-expanded';
+
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
     if (!loading && isInitialLoad) {
@@ -101,6 +110,15 @@ function JobDetails() {
       }
     }
     fetchPoolsData();
+  }, []);
+
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+    checkGrafana();
   }, []);
 
   // Function to scroll to a specific section
@@ -178,6 +196,8 @@ function JobDetails() {
       setRefreshLogsFlag((prev) => prev + 1);
       // Trigger controller logs refresh
       setRefreshControllerLogsFlag((prev) => prev + 1);
+      // Trigger GPU metrics refresh
+      setGpuMetricsRefreshTrigger((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -193,6 +213,38 @@ function JobDetails() {
   const handleControllerLogsRefresh = () => {
     setRefreshControllerLogsFlag((prev) => prev + 1);
   };
+
+  // Get all tasks for this job (supports multi-task jobs) - computed early for GPU metrics
+  const allTasksForGpuMetrics = useMemo(() => {
+    return (
+      jobData?.jobs?.filter((item) => String(item.id) === String(jobId)) || []
+    );
+  }, [jobData, jobId]);
+
+  // Determine which tasks have GPU metrics (Kubernetes, not pool, has cluster_name_on_cloud)
+  const tasksWithGpuMetrics = useMemo(() => {
+    return allTasksForGpuMetrics.map((task, index) => ({
+      index,
+      task,
+      hasMetrics:
+        task.full_infra?.includes('Kubernetes') &&
+        !task.pool &&
+        task.cluster_name_on_cloud,
+    }));
+  }, [allTasksForGpuMetrics]);
+
+  const hasAnyTaskWithGpuMetrics = tasksWithGpuMetrics.some(
+    (t) => t.hasMetrics
+  );
+
+  // Get the currently selected task for GPU metrics
+  const gpuMetricsTask =
+    allTasksForGpuMetrics[gpuMetricsTaskIndex] || allTasksForGpuMetrics[0];
+
+  // Get cluster name for GPU metrics from selected task
+  const gpuMetricsClusterName =
+    gpuMetricsTask?.cluster_name_on_cloud ||
+    allTasksForGpuMetrics[0]?.cluster_name_on_cloud;
 
   if (!router.isReady) {
     return <div>Loading...</div>;
@@ -469,20 +521,60 @@ function JobDetails() {
               </div>
             )}
 
-            {/* GPU Metrics Plugin Slot */}
-            <PluginSlot
-              name="jobs.detail.gpu-metrics"
-              context={{
-                jobId: detailJobData.id,
-                jobName: detailJobData.name,
-                jobData: detailJobData,
-                pool: detailJobData.pool,
-                userHash: detailJobData.user_hash,
-                infra: detailJobData.full_infra || detailJobData.infra,
-                refreshTrigger: refreshTrigger,
-              }}
-              wrapperClassName="mt-6"
-            />
+            {/* GPU Metrics Section - Show for Kubernetes managed jobs with cluster_name_on_cloud */}
+            {isGrafanaAvailable && hasAnyTaskWithGpuMetrics && (
+              <GPUMetricsSection
+                clusterNameOnCloud={gpuMetricsClusterName}
+                displayName={
+                  isMultiTask
+                    ? `${gpuMetricsTask?.task || gpuMetricsTask?.name || detailJobData.name} (Task ${gpuMetricsTaskIndex})`
+                    : gpuMetricsTask?.task ||
+                      gpuMetricsTask?.name ||
+                      detailJobData.name
+                }
+                storageKey={GPU_METRICS_EXPANDED_KEY}
+                noMetricsMessage={
+                  gpuMetricsTask?.pool
+                    ? 'GPU metrics are not available for pool jobs.'
+                    : !gpuMetricsTask?.full_infra?.includes('Kubernetes')
+                      ? 'GPU metrics are only available for Kubernetes tasks.'
+                      : 'No GPU metrics available for this task.'
+                }
+                headerExtra={
+                  isMultiTask && (
+                    <Select
+                      onValueChange={(value) =>
+                        setGpuMetricsTaskIndex(parseInt(value, 10))
+                      }
+                      value={String(gpuMetricsTaskIndex)}
+                    >
+                      <SelectTrigger
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label="Task"
+                        className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm ml-4"
+                      >
+                        <SelectValue placeholder="Select Task" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tasksWithGpuMetrics.map(
+                          ({ index, task, hasMetrics }) => (
+                            <SelectItem
+                              key={index}
+                              value={String(index)}
+                              disabled={!hasMetrics}
+                            >
+                              Task {index}
+                              {task.task ? `: ${task.task}` : ''}
+                              {!hasMetrics ? ' (no metrics)' : ''}
+                            </SelectItem>
+                          )
+                        )}
+                      </SelectContent>
+                    </Select>
+                  )
+                }
+              />
+            )}
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
@@ -498,10 +590,10 @@ function JobDetails() {
                         value={String(selectedTaskIndex)}
                       >
                         <SelectTrigger
-                          aria-label="Job"
+                          aria-label="Task"
                           className="focus:ring-0 focus:ring-offset-0 h-8 w-auto min-w-[160px] text-sm"
                         >
-                          <SelectValue placeholder="Select Job" />
+                          <SelectValue placeholder="Select Task" />
                         </SelectTrigger>
                         <SelectContent>
                           {allTasks.map((task, index) => (
@@ -509,7 +601,7 @@ function JobDetails() {
                               key={task.task_job_id || index}
                               value={String(index)}
                             >
-                              Job {index}
+                              Task {index}
                               {task.task ? `: ${task.task}` : ''}
                             </SelectItem>
                           ))}
