@@ -39,6 +39,8 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_DISK_SIZE_GB = 256
 
+DEFAULT_LOCAL_DISK_SIZE_GB = '100+'
+
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
@@ -163,6 +165,7 @@ class Resources:
         disk_size: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
+        local_disk: Optional[str] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
@@ -414,6 +417,7 @@ class Resources:
         self._set_autostop_config(autostop)
         self._set_priority(priority)
         self._set_volumes(volumes)
+        self._set_local_disk(local_disk)
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -494,6 +498,10 @@ class Resources:
         if self.network_tier is not None:
             network_tier = f', network_tier={self.network_tier.value}'
 
+        local_disk = ''
+        if self._local_disk is not None:
+            local_disk = f', local_disk={self._local_disk}'
+
         disk_size = ''
         if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -513,7 +521,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{network_tier}{disk_size}{ports}')
+            f'{disk_tier}{network_tier}{disk_size}{local_disk}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -650,6 +658,11 @@ class Resources:
     @property
     def network_tier(self) -> Optional[resources_utils.NetworkTier]:
         return self._network_tier
+    
+    @property
+    def local_disk(self) -> Optional[str]:
+        # TODO (kyuds): add instance type thingy.
+        return self._local_disk
 
     @property
     def ports(self) -> Optional[List[str]]:
@@ -981,6 +994,51 @@ class Resources:
 
             valid_volumes.append(volume)
         self._volumes = valid_volumes
+
+    def _set_local_disk(self, local_disk: Optional[str]) -> None:
+        if local_disk is None:
+            self._local_disk = None
+            return
+
+        local_disk = str(local_disk).lower().strip()
+        parts = local_disk.split(':')
+
+        def _check_size(size_str: str) -> None:
+            size_to_check = size_str.rstrip('+')
+            try:
+                size = float(size_to_check)
+                if size <= 0:
+                    raise ValueError()
+            except ValueError:
+                raise ValueError(
+                    f'Invalid local_disk: {local_disk!r}. '
+                    'Expected "mode:size[+]", "mode", or "size[+]". Mode '
+                    'must be "nvme" or "ssd", size must be positive (GB), '
+                    'optionally with "+".')
+
+        if len(parts) == 1:
+            part = parts[0]
+            if part.rstrip('+') in ('nvme', 'ssd'):
+                mode = part
+                size_str = DEFAULT_DISK_SIZE_GB
+            else:
+                mode = 'nvme'
+                _check_size(part)
+        elif len(parts) == 2:
+            mode, size_str = parts
+            if mode not in ('nvme', 'ssd'):
+                raise ValueError(
+                    f'Invalid local_disk mode: {mode!r}. '
+                    f'Must be "nvme" or "ssd".')
+            _check_size(size_str)
+        else:
+            raise ValueError(
+                f'Invalid local_disk format: {local_disk!r}. '
+                f'Expected "mode:size[+]", "mode", or "size[+]". '
+                f'Examples: "nvme:1000+", "ssd:500", "nvme", "1000+".')
+
+        # Store in normalized canonical form: mode:size[+]
+        self._local_disk = f'{mode}:{size_str}'
 
     def override_autostop_config(
             self,
@@ -1954,6 +2012,7 @@ class Resources:
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             network_tier=override.pop('network_tier', self.network_tier),
+            local_disk=override.pop('local_disk', self._local_disk),
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
