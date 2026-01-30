@@ -140,17 +140,17 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
     api_key = config['api_key']
     api_url = config['api_url']
 
-    logger.info('Fetching Mithril instance types...')
+    logger.debug('Fetching Mithril instance types...')
     instance_types = fetch_instance_types(api_key, api_url)
-    logger.info('Found %d instance types.', len(instance_types))
+    logger.debug('Found %d instance types.', len(instance_types))
 
-    logger.info('Fetching pricing for each instance type...')
+    logger.debug('Fetching pricing for each instance type...')
     instance_pricing: Dict[str, float] = {}
     for inst in instance_types:
         instance_pricing[inst['fid']] = fetch_instance_pricing(
             api_key, api_url, inst['fid'])
 
-    logger.info('Fetching spot availability...')
+    logger.debug('Fetching spot availability...')
     availability = fetch_spot_availability(api_key, api_url)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
