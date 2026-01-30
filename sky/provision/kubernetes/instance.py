@@ -1012,10 +1012,9 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # Extract pod name from the error message.
             # The error message is expected to match:
             # object is being deleted: pods "<podname>" already exists
-            pod_name = re.findall(r'pods "([^"]+)"', error_message)
-            assert len(
-                pod_name) == 1, f'Expected 1 pod name, got {len(pod_name)}'
-            pod_name = pod_name[0]
+            match = re.search(r'pods "([^"]+)"', error_message)
+            assert match, f'Could not extract pod name from: {error_message}'
+            pod_name = match.group(1)
             logger.info(
                 f'Pod {pod_name} from previous cluster is still being deleted. '
                 'Force deleting it and retrying pod creation.')
@@ -1028,10 +1027,9 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                     namespace,
                     _request_timeout=config_lib.DELETION_TIMEOUT,
                     grace_period_seconds=0)
-            except Exception as retry_exception:
+            except Exception as delete_exception:
                 logger.warning(
-                    f'Failed to force delete pod {pod_name}: {retry_exception}')
-                raise retry_exception
+                    f'Failed to force delete pod {pod_name}, but proceeding to retry creation. Error: {delete_exception}')
             try:
                 pod = kubernetes.core_api(context).create_namespaced_pod(
                     namespace, pod_spec)
@@ -1039,9 +1037,9 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                     f'Pod {pod.metadata.name} created successfully '
                     'after force deleting the pod from previous cluster.')
                 return pod
-            except Exception as retry_exception:
+            except kubernetes.api_exception() as retry_exception:
                 logger.warning(
-                    f'Failed to create pod {pod_name}: {retry_exception}')
+                    f'Failed to create pod {pod_name} on retry: {retry_exception}')
                 raise retry_exception
         else:
             # Re-raise the exception if it's a different error
