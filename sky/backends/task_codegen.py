@@ -131,6 +131,7 @@ class TaskCodeGen:
             CANCELLED_RETURN_CODE = 137
             """))
 
+    @staticmethod
     def get_rclone_flush_script(self) -> str:
         """Generate rclone flush script for cached storage mounts.
 

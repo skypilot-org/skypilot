@@ -744,7 +744,7 @@ def _graceful_job_cancel(handle: backends.ResourceHandle,
                 f'{cluster_name!r}...')
 
     # Get the flush script
-    flush_script = task_codegen.TaskCodeGen().get_rclone_flush_script()
+    flush_script = task_codegen.TaskCodeGen.get_rclone_flush_script()
 
     # Wrap with timeout if specified
     if timeout:
