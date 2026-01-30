@@ -294,6 +294,12 @@ spec:
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
+        {{- if or .Values.auth.externalProxy.enabled (eq (include "skypilot.ingressOAuthEnabled" .) "true") }}
+        - name: skypilot-server-config
+          mountPath: /root/.sky/.server.yaml
+          subPath: server.yaml
+          readOnly: true
+        {{- end }}
         {{- if .Values.apiService.sshNodePools }}
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
@@ -759,6 +765,11 @@ spec:
       - name: skypilot-config
         configMap:
           name: {{ $fullName }}-config
+      {{- if or .Values.auth.externalProxy.enabled (eq (include "skypilot.ingressOAuthEnabled" .) "true") }}
+      - name: skypilot-server-config
+        configMap:
+          name: {{ $fullName }}-server-config
+      {{- end }}
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:

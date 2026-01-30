@@ -15,24 +15,13 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
+from sky.server import constants as server_constants
 from sky.server import middleware_utils
 from sky.server.auth import loopback
 from sky.users import permission
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# We do not support setting these in config.yaml because:
-# 1. config.yaml can be updated dynamically, but auth middleware does not
-#    support hot reload yet.
-# 2. If we introduce hot reload for auth middleware, bad config might
-#    invalidate all authenticated sessions and thus cannot be rolled back
-#    by API users.
-# TODO(aylei): we should introduce server.yaml for static server admin config,
-# which is more structured than multiple environment variables and can be less
-# confusing to users.
-OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
-OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 
 
 @middleware_utils.websocket_aware
@@ -41,11 +30,12 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.enabled: bool = (os.getenv(OAUTH2_PROXY_ENABLED_ENV_VAR,
-                                        'false') == 'true')
+        self.enabled: bool = (os.getenv(
+            server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, 'false') == 'true')
         self.proxy_base: str = ''
         if self.enabled:
-            proxy_base = os.getenv(OAUTH2_PROXY_BASE_URL_ENV_VAR)
+            proxy_base = os.getenv(
+                server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR)
             if not proxy_base:
                 raise ValueError('OAuth2 Proxy is enabled but base_url is not '
                                  'set')
