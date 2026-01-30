@@ -10,6 +10,9 @@ By default, the controller for both Managed Jobs and Sky Serve runs as a single 
 
 To enhance resilience and ensure controller plane continuity, we offer a high availability mode for the controller, which automatically recovers from failures.
 
+.. tip::
+  If you are using :ref:`consolidation mode <jobs-consolidation-mode>` (running the controller within the API server), the controller automatically inherits high availability from the API server. The ``high_availability`` field described on this page is for standalone controllers running on Kubernetes and has no effect when consolidation mode is enabled.
+
 High availability mode for the controller offers several key advantages:
 
 * **Automated Recovery:** The controller automatically restarts via Kubernetes Deployments if it encounters crashes or node failures.
