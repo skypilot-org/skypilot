@@ -1,5 +1,5 @@
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.10.18-slim AS gcloud-apt-install
+FROM python:3.10.19-slim AS gcloud-apt-install
 
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
@@ -14,7 +14,7 @@ RUN apt-get update && \
 
 
 # Stage 2: Process the source code for INSTALL_FROM_SOURCE
-FROM python:3.10.18-slim AS process-source
+FROM python:3.10.19-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
@@ -52,7 +52,7 @@ RUN cd /skypilot && \
 
 
 # Stage 3: Main image
-FROM python:3.10.18-slim
+FROM python:3.10.19-slim
 
 ARG INSTALL_FROM_SOURCE=true
 
