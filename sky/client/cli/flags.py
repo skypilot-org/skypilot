@@ -62,7 +62,9 @@ GRACEFUL_OPTIONS = [
     click.option('--graceful-timeout',
                  type=int,
                  default=None,
-                 help='Timeout in seconds for `--graceful` flag.'),
+                 help=('Timeout in seconds for `--graceful` flag. When not '
+                       'set, will wait for MOUNT_CACHED uploads until they are '
+                       'finished.')),
 ]
 
 TASK_OPTIONS = [
