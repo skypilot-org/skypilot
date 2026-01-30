@@ -61,7 +61,6 @@ class Slurm(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     _SSH_CONFIG_KEY_MAPPING = {
-        'identityfile': 'IdentityFile',
         'user': 'User',
         'hostname': 'HostName',
     }
@@ -381,7 +380,7 @@ class Slurm(clouds.Cloud):
             'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
-            'slurm_private_key': ssh_config_dict['identityfile'][0],
+            'slurm_private_key': slurm_utils.get_identity_file(ssh_config_dict),
             'slurm_sshd_host_key_filename':
                 (slurm_utils.SLURM_SSHD_HOST_KEY_FILENAME),
             'slurm_cluster_name_env_var':
@@ -508,7 +507,7 @@ class Slurm(clouds.Cloud):
                     ssh_config_dict['hostname'],
                     int(ssh_config_dict.get('port', 22)),
                     ssh_config_dict['user'],
-                    ssh_config_dict['identityfile'][0],
+                    slurm_utils.get_identity_file(ssh_config_dict),
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
                 info = client.info()

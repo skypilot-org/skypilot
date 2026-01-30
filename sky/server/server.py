@@ -677,7 +677,10 @@ app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # auth user.
 app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
-if str(enable_basic_auth).lower() == 'true':
+disable_basic_auth_middleware = os.environ.get(
+    constants.SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE, 'false')
+if (str(enable_basic_auth).lower() == 'true' and
+        str(disable_basic_auth_middleware).lower() != 'true'):
     app.add_middleware(BasicAuthMiddleware)
 # Bearer token middleware should always be present to handle service account
 # authentication
@@ -1202,6 +1205,16 @@ async def unzip_file(zip_file_path: pathlib.Path,
                     original_path = os.path.normpath(member.filename)
                     new_path = client_file_mounts_dir / original_path.lstrip(
                         '/')
+
+                    # Security check: ensure extracted path stays within target
+                    # directory to prevent Zip Slip attacks (path traversal via
+                    # malicious "../" sequences in archive member names).
+                    resolved_path = new_path.resolve()
+                    if not _is_relative_to(resolved_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(
+                            f'Zip member {member.filename!r} would extract '
+                            'outside target directory. Aborted.')
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
@@ -2333,7 +2346,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     login_node_host = login_node_ssh_config['hostname']
     login_node_port = int(login_node_ssh_config['port'])
     login_node_user = login_node_ssh_config['user']
-    login_node_key = login_node_ssh_config['private_key']
+    login_node_key = login_node_ssh_config.get('private_key', None)
     login_node_proxy_command = login_node_ssh_config.get('proxycommand', None)
     login_node_proxy_jump = login_node_ssh_config.get('proxyjump', None)
 

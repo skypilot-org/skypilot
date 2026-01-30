@@ -243,6 +243,27 @@ def terminate_instances(
 
 
 @_route_to_cloud_impl
+def cleanup_cluster_resources(
+    provider_name: str,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Cleanup all cloud resources for a cluster (services, etc.).
+
+    Called during post-teardown to ensure resources are cleaned up even when
+    instances were deleted externally. Currently only Kubernetes needs this
+    to clean up orphaned services.
+
+    Args:
+        provider_name: Name of the cloud provider
+        cluster_name_on_cloud: The cluster name on cloud
+        provider_config: Provider configuration dictionary
+    """
+    # Default implementation does nothing - only Kubernetes overrides this
+    del provider_name, cluster_name_on_cloud, provider_config
+
+
+@_route_to_cloud_impl
 def cleanup_custom_multi_network(
     provider_name: str,
     cluster_name_on_cloud: str,

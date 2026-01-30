@@ -541,6 +541,8 @@ def test_multi_echo(generic_cloud: str):
         # Slurm and Kubernetes do not support spot instances
         use_spot = False
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
 
     # Determine timeout for 15 running jobs check: 2 min for remote server, single check for local
     is_remote = smoke_tests_utils.is_remote_server_test()
@@ -669,6 +671,8 @@ def test_multi_echo(generic_cloud: str):
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -1746,6 +1750,8 @@ def test_cancel_azure():
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not accelerator:
+            pytest.fail(f'No GPUs available for {generic_cloud}.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
@@ -2001,13 +2007,14 @@ def test_kubernetes_custom_image(image_id):
     """Test Kubernetes custom image"""
     accelerator = smoke_tests_utils.get_available_gpus()
     name = smoke_tests_utils.get_cluster_name()
+    gpus_arg = f'{accelerator}:1' if accelerator else 'none'
     test = smoke_tests_utils.Test(
         'test-kubernetes-custom-image',
         [
-            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --retry-until-up -y tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg}',
             f'sky logs {name} 1 --status',
             # Try exec to run again and check if the logs are printed
-            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {accelerator}:1 | grep "Hello 100"',
+            f'sky exec {name} tests/test_yamls/test_custom_image.yaml --infra kubernetes/none --image-id {image_id} --gpus {gpus_arg} | grep "Hello 100"',
             # Make sure ssh is working with custom username
             f'ssh {name} echo hi | grep hi',
         ],
@@ -2620,6 +2627,16 @@ def test_scp_autodown():
     smoke_tests_utils.run_one_test(test)
 
 
+def _get_k8s_service_cleanup_check_cmd(name: str, name_on_cloud: str) -> str:
+    """Returns the command to check that Kubernetes services are cleaned up."""
+    return smoke_tests_utils.run_cloud_cmd_on_cluster(
+        name,
+        f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name || true); '
+        'echo "Services: [$services]"; '
+        'if [ -n "$services" ]; then echo "ERROR: services still exist"; exit 1; '
+        'else echo "OK: services cleaned up"; fi')
+
+
 # ---------- Testing Recovery on Kubernetes ----------
 @pytest.mark.kubernetes
 def test_kubernetes_recovery():
@@ -2630,6 +2647,8 @@ def test_kubernetes_recovery():
     head = f'{name_on_cloud}-head'
     worker2 = f'{name_on_cloud}-worker2'
     worker3 = f'{name_on_cloud}-worker3'
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
     test = smoke_tests_utils.Test(
         'kubernetes_pod_recovery',
         [
@@ -2662,9 +2681,89 @@ def test_kubernetes_recovery():
             # Check status
             f'sky status -r {name} --no-show-pools --no-show-services --no-show-managed-jobs',
         ],
-        f'sky down -y {name} && '
+        f'sky down -y {name} && {service_cleanup_check} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_service_cleanup_on_down():
+    """Test that Kubernetes services are cleaned up when running sky down
+    after pods have been externally deleted."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
+    test = smoke_tests_utils.Test(
+        'kubernetes_service_cleanup_on_down',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch cluster
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 2 echo hello',
+            # Verify services exist
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name); '
+                'echo "Services before deletion: [$services]"; '
+                'if [ -z "$services" ]; then echo "ERROR: no services found"; exit 1; fi'
+            ),
+            # Delete all pods externally (simulating external deletion)
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl delete pod -l ray-cluster-name={name_on_cloud} --wait'
+            ),
+            # Run sky down - this should clean up services even though pods are gone
+            f'sky down -y {name}',
+            # Verify services are cleaned up
+            service_cleanup_check,
+        ],
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_service_cleanup_on_status_refresh():
+    """Test that Kubernetes services are cleaned up by the status refresh
+    daemon after pods have been externally deleted."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    service_cleanup_check = _get_k8s_service_cleanup_check_cmd(
+        name, name_on_cloud)
+    test = smoke_tests_utils.Test(
+        'kubernetes_service_cleanup_on_status_refresh',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            # Launch cluster
+            f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ --num-nodes 2 echo hello',
+            # Verify services exist
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'services=$(kubectl get svc -l skypilot-cluster-name={name_on_cloud} -o name); '
+                'echo "Services before deletion: [$services]"; '
+                'if [ -z "$services" ]; then echo "ERROR: no services found"; exit 1; fi'
+            ),
+            # Delete all pods externally (simulating external deletion)
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl delete pod -l ray-cluster-name={name_on_cloud} --wait'
+            ),
+            # Wait for status refresh to detect termination and clean up
+            # The status refresh daemon runs periodically and should detect
+            # that all pods are gone, triggering post_teardown_cleanup
+            f'sleep 90',
+            # Verify cluster is removed from sky status
+            f'sky status {name} --no-show-pools --no-show-services --no-show-managed-jobs 2>&1 | grep -q "not found"',
+            # Verify services are cleaned up
+            service_cleanup_check,
+        ],
+        f'sky down -y {name} || true; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 

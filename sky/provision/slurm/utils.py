@@ -63,6 +63,14 @@ def get_slurm_ssh_config() -> SSHConfig:
     return slurm_config
 
 
+def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
+    """Get the first identity file from SSH config, or None if not specified."""
+    identity_files = ssh_config_dict.get('identityfile')
+    if identity_files:
+        return identity_files[0]
+    return None
+
+
 @annotations.lru_cache(scope='request')
 def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
     cache_key = f'slurm:nodes_info:{cluster}'
@@ -77,7 +85,7 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
@@ -313,7 +321,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
@@ -494,7 +502,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
             ssh_config_dict['hostname'],
             int(ssh_config_dict.get('port', 22)),
             ssh_config_dict['user'],
-            ssh_config_dict['identityfile'][0],
+            get_identity_file(ssh_config_dict),
             ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
             ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         )
@@ -542,7 +550,7 @@ def _get_slurm_node_info_list(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
-        slurm_config_dict['identityfile'][0],
+        get_identity_file(slurm_config_dict),
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
     )
@@ -690,7 +698,7 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             slurm_config_dict['hostname'],
             int(slurm_config_dict.get('port', 22)),
             slurm_config_dict['user'],
-            slurm_config_dict['identityfile'][0],
+            get_identity_file(slurm_config_dict),
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
         )
@@ -735,7 +743,7 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
-    cluster_name_on_cloud: str,  # pylint: disable=unused-argument
+    cluster_name_on_cloud: str,
     is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
@@ -757,10 +765,56 @@ def srun_sshd_command(
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
+    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
+    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
+    # to a file and sourcing it.
+
     if is_container_image:
-        # Container SSH requires dropbear support. See the stacked PR.
-        raise NotImplementedError(
-            'Container SSH is not yet supported in this branch.')
+        # Dropbear + socat bridge for container mode.
+        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
+        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
+        # provides pipes. socat bridges stdin/stdout to a TCP socket.
+        ssh_bootstrap_cmd = (
+            # Find dropbear in PATH
+            'DROPBEAR=$(command -v dropbear); '
+            'if [ -z "$DROPBEAR" ]; then '
+            'echo "dropbear not found" >&2; exit 1; fi; '
+            # Find a free port in the ephemeral range
+            'while :; do '
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
+            'done; '
+            # Start dropbear and wait for it to bind
+            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'for i in $(seq 1 50); do '
+            'ss -tlnp 2>/dev/null | grep -q ":$PORT.*pid=$DROPBEAR_PID" '
+            '&& break; sleep 0.1; done; '
+            'if ! ss -tlnp 2>/dev/null | '
+            'grep -q ":$PORT.*pid=$DROPBEAR_PID"; then '
+            'echo "Error: Timed out waiting for dropbear to start." >&2; '
+            'exit 1; fi; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
+        return shlex.join([
+            'srun',
+            '--overlap',
+            '--quiet',
+            '--unbuffered',
+            '--jobid',
+            job_id,
+            '--nodes=1',
+            '--ntasks=1',
+            '--ntasks-per-node=1',
+            '-w',
+            target_node,
+            '--container-remap-root',
+            f'--container-name='
+            f'{pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash',
+            '-c',
+            ssh_bootstrap_cmd,
+        ])
 
     # Non-container: OpenSSH sshd
     return shlex.join([
