@@ -634,7 +634,6 @@ def _parse_override_params(
             override_params['network_tier'] = None
         else:
             override_params['network_tier'] = network_tier
-    logger.info(f'!!!!!!! {local_disk}')
     if local_disk is not None:
         if local_disk.lower() == 'none':
             override_params['local_disk'] = None

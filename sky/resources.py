@@ -2100,8 +2100,8 @@ class Resources:
                         'disk_tier'] != resources_utils.DiskTier.BEST:
                     features.add(
                         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
-        # if self._local_disk is not None:
-        #     features.add(clouds.CloudImplementationFeatures.LOCAL_DISK)
+        if self._local_disk is not None:
+            features.add(clouds.CloudImplementationFeatures.LOCAL_DISK)
         return features
 
     @staticmethod
@@ -2432,6 +2432,7 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         if self.network_tier is not None:
             config['network_tier'] = self.network_tier.value
+        add_if_not_none('local_disk', self._local_disk)
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
         if self.volumes is not None:
