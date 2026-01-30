@@ -720,6 +720,14 @@ class AWS(clouds.Cloud):
         return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
 
     @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_local_disk_from_instance_type(instance_type,
+                                                         clouds='aws')
+
+    @classmethod
     def get_vcpus_mem_from_instance_type(
         cls,
         instance_type: str,

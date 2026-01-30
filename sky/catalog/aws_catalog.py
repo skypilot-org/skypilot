@@ -275,6 +275,11 @@ def get_arch_from_instance_type(instance_type: str) -> Optional[str]:
     return common.get_arch_from_instance_type_impl(_get_df(), instance_type)
 
 
+def get_local_disk_from_instance_type(instance_type: str) -> Optional[str]:
+    return common.get_local_disk_from_instance_type_impl(
+        _get_df(), instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,

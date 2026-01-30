@@ -556,6 +556,36 @@ def get_arch_from_instance_type_impl(
     return arch
 
 
+def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
+                                           instance_type: str) -> Optional[str]:
+    df = _get_instance_type(df, instance_type, None)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
+    row = df.iloc[0]
+
+    if 'LocalDiskType' not in row or pd.isna(row['LocalDiskType']):
+        return None
+
+    mode = row['LocalDiskType']
+    if mode != 'ssd':
+        return None  # We don't support HDDs right now.
+
+    if pd.isna(row.get('LocalDiskSize')) or pd.isna(row.get('LocalDiskCount')):
+        # Should we raise error instead?
+        return None
+
+    total_size = float(row['LocalDiskSize']) * float(row['LocalDiskCount'])
+
+    nvme_supported = row.get('NVMeSupported', False)
+    if pd.isna(nvme_supported):
+        nvme_supported = False
+    if nvme_supported:
+        mode = 'nvme'
+
+    return f'{mode}:{int(total_size)}'
+
+
 def get_instance_type_for_accelerator_impl(
     df: 'pd.DataFrame',
     acc_name: str,
