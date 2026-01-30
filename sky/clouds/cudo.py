@@ -77,6 +77,8 @@ class Cudo(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on Cudo.'
             ),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}')
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 

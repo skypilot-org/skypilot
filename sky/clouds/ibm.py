@@ -58,6 +58,8 @@ class IBM(clouds.Cloud):
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
                 ('Customized multiple network interfaces are not supported on '
                  f'{cls._REPR}.'),
+            clouds.CloudImplementationFeatures.LOCAL_DISK:
+                (f'Local disk is not supported on {cls._REPR}'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (

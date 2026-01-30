@@ -47,6 +47,8 @@ class Slurm(clouds.Cloud):
             'controllers is not '
             'well tested with '
             'Slurm.',
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

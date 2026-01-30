@@ -87,6 +87,8 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is not supported in this Kubernetes '
              'cluster.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'

@@ -227,7 +227,8 @@ TASK_OPTIONS = [
 
         4. ``--local-disk 1000+``: NVMe (default) with at least 1TB.
 
-        Note: Local storage is ephemeral and lost when the instance terminates.""",
+        Note: Local storage is ephemeral and lost when the instance terminates.
+        """,
     ),
 ]
 

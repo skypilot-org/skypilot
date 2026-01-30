@@ -72,6 +72,8 @@ class Seeweb(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Custom multi-network not supported. '
              'Seeweb does not support custom multi-network.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []

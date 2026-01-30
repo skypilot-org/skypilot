@@ -63,6 +63,8 @@ class Shadeform(clouds.Cloud):
             'Docker images not supported on Shadeform yet.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Custom multiple network interfaces not supported.',
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            'Local disk is not supported on Shadeform.',
     }
     # yapf: enable
 

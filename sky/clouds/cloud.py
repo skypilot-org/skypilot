@@ -58,6 +58,9 @@ class CloudImplementationFeatures(enum.Enum):
     # Pod/VM can have customized multiple network interfaces
     # e.g. GCP GPUDirect TCPX
     CUSTOM_MULTI_NETWORK = 'custom_multi_network'
+    # Some cloud providers provide additional, directly connected
+    # storage devices to VMs (eg: AWS Instance Storage).
+    LOCAL_DISK = 'local_disk'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.

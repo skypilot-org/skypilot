@@ -634,6 +634,7 @@ def _parse_override_params(
             override_params['network_tier'] = None
         else:
             override_params['network_tier'] = network_tier
+    logger.info(f'!!!!!!! {local_disk}')
     if local_disk is not None:
         if local_disk.lower() == 'none':
             override_params['local_disk'] = None
@@ -1392,7 +1393,9 @@ def exec(
         network_tier=network_tier,
         local_disk=local_disk,
         ports=ports,
-        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'local_disk', 'ports'],
+        field_to_ignore=[
+            'cpus', 'memory', 'disk_size', 'disk_tier', 'local_disk', 'ports'
+        ],
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
@@ -6358,8 +6361,8 @@ def serve_update(
         secret_file: Optional[Dict[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-        disk_tier: Optional[str], network_tier: Optional[str], local_disk: Optional[str], mode: str,
-        yes: bool, async_call: bool):
+        disk_tier: Optional[str], network_tier: Optional[str],
+        local_disk: Optional[str], mode: str, yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.

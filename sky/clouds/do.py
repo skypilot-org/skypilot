@@ -43,6 +43,8 @@ class DO(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported in '
              f'{_REPR}.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}')
     }
     # DO maximum node name length defined as <= 255
     # https://docs.digitalocean.com/reference/api/api-reference/#operation/droplets_create

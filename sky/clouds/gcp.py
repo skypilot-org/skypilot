@@ -248,6 +248,8 @@ class GCP(clouds.Cloud):
             HIGH_AVAILABILITY_CONTROLLERS] = (
                 f'High availability controllers are not supported on {cls._REPR}.'
             )
+        unsupported[clouds.CloudImplementationFeatures.
+                    LOCAL_DISK] = f'Local disk is not supported on {cls._REPR}'
 
         return unsupported
 

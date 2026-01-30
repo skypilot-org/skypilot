@@ -145,7 +145,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 28
+    _VERSION = 29
 
     def __init__(
         self,
@@ -431,6 +431,7 @@ class Resources:
         self._try_validate_volumes()
         self._try_validate_ports()
         self._try_validate_labels()
+        self._try_validate_local_disk()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -658,7 +659,7 @@ class Resources:
     @property
     def network_tier(self) -> Optional[resources_utils.NetworkTier]:
         return self._network_tier
-    
+
     @property
     def local_disk(self) -> Optional[str]:
         # TODO (kyuds): add instance type thingy.
@@ -1009,27 +1010,27 @@ class Resources:
                 size = float(size_to_check)
                 if size <= 0:
                     raise ValueError()
-            except ValueError:
+            except ValueError as exc:
                 raise ValueError(
                     f'Invalid local_disk: {local_disk!r}. '
                     'Expected "mode:size[+]", "mode", or "size[+]". Mode '
                     'must be "nvme" or "ssd", size must be positive (GB), '
-                    'optionally with "+".')
+                    'optionally with "+".') from exc
 
         if len(parts) == 1:
             part = parts[0]
             if part.rstrip('+') in ('nvme', 'ssd'):
                 mode = part
-                size_str = DEFAULT_DISK_SIZE_GB
+                size_str = DEFAULT_LOCAL_DISK_SIZE_GB
             else:
                 mode = 'nvme'
-                _check_size(part)
+                size_str = part
+                _check_size(size_str)
         elif len(parts) == 2:
             mode, size_str = parts
             if mode not in ('nvme', 'ssd'):
-                raise ValueError(
-                    f'Invalid local_disk mode: {mode!r}. '
-                    f'Must be "nvme" or "ssd".')
+                raise ValueError(f'Invalid local_disk mode: {mode!r}. '
+                                 f'Must be "nvme" or "ssd".')
             _check_size(size_str)
         else:
             raise ValueError(
@@ -1586,6 +1587,31 @@ class Resources:
                     'The following labels are invalid:'
                     '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
+    def _try_validate_local_disk(self) -> None:
+        if self._local_disk is None:
+            return
+
+        if self.cloud is not None:
+            self.cloud.check_features_are_supported(
+                self, {clouds.CloudImplementationFeatures.LOCAL_DISK})
+        else:
+            at_least_one_cloud_supports = False
+            for cloud in sky_check.get_cached_enabled_clouds_or_refresh(
+                    sky_cloud.CloudCapability.COMPUTE,
+                    raise_if_no_cloud_access=True):
+                try:
+                    cloud.check_features_are_supported(
+                        self, {clouds.CloudImplementationFeatures.LOCAL_DISK})
+                    at_least_one_cloud_supports = True
+                except exceptions.NotSupportedError:
+                    pass
+            if not at_least_one_cloud_supports:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'No enabled cloud supports local disk selection. '
+                        'To fix: enable a cloud that supports this feature.'
+                    )
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -1810,6 +1836,11 @@ class Resources:
                 return False
             if not self.network_tier <= other.network_tier:
                 return False
+
+        if self.local_disk is not None:
+            if other.local_disk is None:
+                return False
+            # TODO (kyuds): compare local_disk.
 
         if check_ports:
             if self.ports is not None:
@@ -2069,6 +2100,8 @@ class Resources:
                         'disk_tier'] != resources_utils.DiskTier.BEST:
                     features.add(
                         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        # if self._local_disk is not None:
+        #     features.add(clouds.CloudImplementationFeatures.LOCAL_DISK)
         return features
 
     @staticmethod
@@ -2336,6 +2369,7 @@ class Resources:
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
+        resources_fields['local_disk'] = config.pop('local_disk', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
@@ -2362,6 +2396,9 @@ class Resources:
             # although it will end up being an int, we don't know at this point
             # if it has units or not, so we store it as a string
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
+        if resources_fields['local_disk'] is not None:
+            # may be integer by only specifying exact size.
+            resources_fields['local_disk'] = str(resources_fields['local_disk'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
 
@@ -2592,6 +2629,9 @@ class Resources:
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
+
+        if version < 29:
+            self._local_disk = None
 
         self.__dict__.update(state)
 

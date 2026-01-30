@@ -42,6 +42,8 @@ class PrimeIntellect(clouds.Cloud):
             ('Custom image not supported yet.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Custom docker image not supported yet.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            ('Local disk is not supported yet.'),
     }
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
