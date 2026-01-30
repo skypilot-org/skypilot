@@ -2615,16 +2615,7 @@ def cancel(
 @flags.all_option('Stop all existing clusters.')
 @flags.all_users_option('Stop all existing clusters for all users.')
 @flags.yes_option()
-@click.option('--graceful',
-              is_flag=True,
-              default=False,
-              help=('Wait for MOUNT_CACHED uploads to complete before '
-                    'terminating. Will still terminate the current task.'))
-@click.option('--graceful-timeout',
-              type=int,
-              default=None,
-              help='Timeout in seconds for `--graceful` flag.')
-@_add_click_options(flags.COMMON_OPTIONS)
+@_add_click_options(flags.GRACEFUL_OPTIONS + flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
@@ -3048,16 +3039,7 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
-@click.option('--graceful',
-              is_flag=True,
-              default=False,
-              help=('Wait for MOUNT_CACHED uploads to complete before '
-                    'terminating. Will still terminate the current task.'))
-@click.option('--graceful-timeout',
-              type=int,
-              default=None,
-              help='Timeout in seconds for `--graceful` flag.')
-@_add_click_options(flags.COMMON_OPTIONS)
+@_add_click_options(flags.GRACEFUL_OPTIONS + flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
