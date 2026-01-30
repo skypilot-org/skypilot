@@ -178,8 +178,8 @@ cloud_dependencies: Dict[str, List[str]] = {
     # timeout of AzureCliCredential.
     'azure': [
         AZURE_CLI,
-        # azure-core 1.38.0+ required for CVE-2026-21226
-        'azure-core>=1.38.0',
+        # TODO(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
+        'azure-core>=1.31.0',
         'azure-identity>=1.19.0',
         'azure-mgmt-network>=27.0.0',
         'azure-mgmt-compute>=33.0.0',
@@ -232,9 +232,9 @@ cloud_dependencies: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'primeintellect': [],  # No dependencies needed for primeintellect
-    # azure-core 1.38.0+ required for CVE-2026-21226
-    'do': ['pydo>=0.3.0', 'azure-core>=1.38.0', 'azure-common'],
-    'vast': ['vastai-sdk>=0.1.17'],
+    # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
+    'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
+    'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
