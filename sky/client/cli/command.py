@@ -781,7 +781,7 @@ def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
             # Make API request to fetch recipe from server
             body = payloads.RecipeGetBody(recipe_name=recipe_name)
             response = server_common.make_authenticated_request(
-                'POST', '/recipes/get', json=json.loads(body.model_dump_json()))
+                'POST', '/recipes/get', json=body.model_dump())
             request_id: server_common.RequestId[Optional[Dict[
                 str, Any]]] = server_common.get_request_id(response)
             recipe = sdk.get(request_id)
