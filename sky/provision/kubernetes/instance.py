@@ -1004,6 +1004,44 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                    pod_spec,
                                    details=error_message,
                                    extra_msg=extra_message))
+        elif (e.status == 409 and
+              re.match(r'^object is being deleted: pods \".+\" already exists$',
+                       error_message)):
+            # Pod from a previous cluster with the same name is
+            # still being deleted.
+            # Extract pod name from the error message.
+            # The error message is expected to match:
+            # object is being deleted: pods "<podname>" already exists
+            match = re.search(r'pods "([^"]+)"', error_message)
+            assert match, f'Could not extract pod name from: {error_message}'
+            pod_name = match.group(1)
+            logger.info(
+                f'Pod {pod_name} from previous cluster is still being deleted. '
+                'Force deleting it and retrying pod creation.')
+            try:
+                # Since the pod is already being deleted,
+                # we can try force deleting it to make sure it's deleted,
+                # then retry the pod creation.
+                kubernetes.core_api(context).delete_namespaced_pod(
+                    pod_name,
+                    namespace,
+                    _request_timeout=config_lib.DELETION_TIMEOUT,
+                    grace_period_seconds=0)
+            except kubernetes.api_exception() as delete_exception:
+                logger.warning(
+                    f'Failed to force delete pod {pod_name}, but proceeding '
+                    f'to retry creation. Error: {delete_exception}')
+            try:
+                pod = kubernetes.core_api(context).create_namespaced_pod(
+                    namespace, pod_spec)
+                logger.info(
+                    f'Pod {pod.metadata.name} created successfully '
+                    'after force deleting the pod from previous cluster.')
+                return pod
+            except kubernetes.api_exception() as retry_exception:
+                logger.warning(f'Failed to create pod {pod_name} on retry: '
+                               f'{retry_exception}')
+                raise retry_exception
         else:
             # Re-raise the exception if it's a different error
             raise e
