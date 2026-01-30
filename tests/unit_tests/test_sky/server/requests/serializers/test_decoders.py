@@ -114,7 +114,8 @@ class TestDecodeJobsQueue:
 
         # Legacy format returns same as queue_v2
         assert len(result) == 1
-        assert result[0].handle['cluster_name_on_cloud'] == 'test-cluster-legacy'
+        assert result[0].handle[
+            'cluster_name_on_cloud'] == 'test-cluster-legacy'
 
 
 class TestDecodeManagedJobHandle:
