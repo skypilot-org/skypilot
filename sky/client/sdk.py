@@ -1215,7 +1215,7 @@ def down(
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
-        graceful: Cancel the user's task but block until MOUNT_CACHE data is
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
             fully uploaded. This helps with preserving user data integrity.
         graceful_timeout: If not None, sets a timeout for the graceful option
             above (in seconds).
