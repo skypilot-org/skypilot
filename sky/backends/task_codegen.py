@@ -132,7 +132,7 @@ class TaskCodeGen:
             """))
 
     @staticmethod
-    def get_rclone_flush_script(self) -> str:
+    def get_rclone_flush_script(cls) -> str:
         """Generate rclone flush script for cached storage mounts.
 
         This script blocks job completion until all storage mounted with
