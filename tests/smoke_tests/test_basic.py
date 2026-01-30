@@ -1371,7 +1371,9 @@ def unreachable_context():
         # TODO(aylei): There is a implicit API server restart before starting
         # smoke tests in CI pipeline. We should move that to fixture to make
         # the test coherent.
-        'sky api stop || true && sky api start',
+        # Run sky check after restart to populate the enabled clouds cache
+        # synchronously, avoiding race with the background on-boot check.
+        'sky api stop || true && sky api start && sky check kubernetes',
         shell=True,
         check=True)
 
@@ -1452,7 +1454,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'output=$(sky show-gpus --infra kubernetes/{context}) && echo "$output" && ! echo "$output" | grep H100',
                 # H100 should be displayed as long as it is available in one of the contexts
                 'output=$(sky show-gpus --infra kubernetes) && echo "$output" && echo "$output" | grep H100',
-                f'sky launch -y -c {name}-1 --cpus 1 echo hi',
+                f'sky launch -y -c {name}-1 --cpus 1 --infra kubernetes echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
                 f'sky status -v {name}-1 | grep "{context}"',
@@ -1474,7 +1476,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'kubectl config use-context {unreachable_context}',
                 f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
-                f'sky launch -y -c {name}-5 --cpus 1 echo hi',
+                f'sky launch -y -c {name}-5 --cpus 1 --infra kubernetes echo hi',
                 # switch back to kind-skypilot where GPU cluster is launched
                 f'kubectl config use-context kind-skypilot',
                 # test if sky status-kubernetes shows H100
