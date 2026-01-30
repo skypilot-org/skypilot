@@ -4,7 +4,7 @@ import os
 import pathlib
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from urllib import parse as urlparse
 import uuid
 
@@ -1306,6 +1306,7 @@ def cancel(name: Optional[str] = None,
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str],
               job_id: Optional[int],
+              system: Optional[Union[uuid.UUID, Literal[True]]],
               follow: bool,
               controller: bool,
               refresh: bool,
@@ -1329,6 +1330,9 @@ def tail_logs(name: Optional[str],
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    if system is not None and (name is not None or job_id is not None):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both system and name or job_id.')
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -1336,6 +1340,8 @@ def tail_logs(name: Optional[str],
         job_name_or_id_str = str(job_id)
     elif name is not None:
         job_name_or_id_str = f'-n {name}'
+    elif system is not None:
+        job_name_or_id_str = f'--system {system}'
     else:
         job_name_or_id_str = ''
     handle = _maybe_restart_controller(
@@ -1352,6 +1358,7 @@ def tail_logs(name: Optional[str],
     return backend.tail_managed_job_logs(handle,
                                          job_id=job_id,
                                          job_name=name,
+                                         system=system,
                                          follow=follow,
                                          controller=controller,
                                          tail=tail,
@@ -1364,6 +1371,7 @@ def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
+        system: Optional[Union[uuid.UUID, Literal[True]]],
         local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     """Sync down logs of managed jobs.
 
@@ -1379,6 +1387,9 @@ def download_logs(
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
+    if system is not None and (name is not None or job_id is not None):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both system and name or job_id.')
 
     jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
     job_name_or_id_str = ''
@@ -1386,8 +1397,13 @@ def download_logs(
         job_name_or_id_str = str(job_id)
     elif name is not None:
         job_name_or_id_str = f'-n {name}'
+    elif system is True:
+        job_name_or_id_str = '--system'
+    elif system is not None:
+        job_name_or_id_str = f'--system {system}'
     else:
         job_name_or_id_str = ''
+
     handle = _maybe_restart_controller(
         refresh,
         stopped_message=(
@@ -1402,6 +1418,7 @@ def download_logs(
     return backend.sync_down_managed_job_logs(handle,
                                               job_id=job_id,
                                               job_name=name,
+                                              system=system,
                                               controller=controller,
                                               local_dir=local_dir)
 

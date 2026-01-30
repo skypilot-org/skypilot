@@ -18,8 +18,9 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, Tuple, Union)
+import uuid
 
 import colorama
 import psutil
@@ -4617,15 +4618,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               handle: CloudVmRayResourceHandle,
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
+                              system: Optional[Union[uuid.UUID,
+                                                     Literal[True]]] = None,
                               controller: bool = False,
                               follow: bool = True,
                               tail: Optional[int] = None,
                               task: Optional[Union[str, int]] = None) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
+        # we can't send a UUID or else it will cause an import error so we
+        # convert it to a string before sending over. also don't want to add
+        # an import in codegen since it would increase the time to load the
+        # module.
+        system_safe = str(system) if isinstance(system, uuid.UUID) else system
         # TODO(kevin): Migrate stream_logs to gRPC
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
-            job_name, job_id, follow, controller, tail, task)
+            job_name, job_id, follow, controller, tail, task, system_safe)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
@@ -4651,6 +4659,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle: CloudVmRayResourceHandle,
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
+            system: Optional[Union[uuid.UUID, Literal[True]]] = None,
             controller: bool = False,
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for a managed job.
@@ -4659,6 +4668,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle: The handle to the cluster.
             job_id: The job ID to sync down logs for.
             job_name: The job name to sync down logs for.
+            system: The system UUID to sync down logs for or True to sync all
+                    active logs.
             controller: Whether to sync down logs for the controller.
             local_dir: The local directory to sync down logs to.
 
@@ -4668,7 +4679,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # if job_name and job_id should not both be specified
         assert job_name is None or job_id is None, (job_name, job_id)
 
-        if job_id is None:
+        if system is True:
+            code = managed_jobs.ManagedJobCodeGen.get_alive_controller_uuids()
+            returncode, job_ids_payload, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync down logs.',
+                                               stderr)
+            system_array = message_utils.decode_payload(job_ids_payload)
+        elif system is not None:
+            system_array = [str(system)]
+        else:
+            system_array = None
+
+        if job_id is None and system_array is None:
             # get the job_id
             # if job_name is None, get all job_ids
             # TODO: Only get the latest job_id, since that's the only one we use
@@ -4718,15 +4746,27 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # list should aready be in descending order
             job_id = job_ids[0]
 
-        if isinstance(handle, LocalResourcesHandle):
+        # Get the log directory path for the job.
+        # For system logs, we use the UUID directly as the path component.
+        # For regular jobs, we fetch the log dir from the remote.
+        log_dir: Optional[str] = None
+
+        if system_array is not None:
+            # For system logs, we'll iterate over system_array directly below.
+            # Check for empty array now to give a clear error message.
+            if not system_array:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching log directories found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
+        elif isinstance(handle, LocalResourcesHandle) and job_id is not None:
             # In consolidation mode, we don't submit a ray job, therefore no
             # run_timestamp is available. We use a dummy run_timestamp here.
-            run_timestamps = {
-                job_id: f'managed-jobs-consolidation-mode-{job_id}'
-            }
+            log_dir = f'managed-jobs-consolidation-mode-{job_id}'
         else:
-            # get the run_timestamp
-            # the function takes in [job_id]
+            # safe to ignore type, since job_id can only be None if
+            # system is set and we already checked that
+            assert job_id is not None, job_id
             use_legacy = not handle.is_grpc_enabled_with_flag
             if not use_legacy:
                 try:
@@ -4737,18 +4777,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             lambda: SkyletClient(handle.get_grpc_channel(
                             )).get_log_dirs_for_jobs(log_dirs_request)))
                     job_log_dirs = log_dirs_response.job_log_dirs
-                    # Convert back to the expected format
-                    # {job_id: run_timestamp}
-                    run_timestamps = {}
-                    for jid, log_dir in job_log_dirs.items():
-                        run_timestamps[int(jid)] = log_dir
+                    log_dir = job_log_dirs.get(job_id)
                 except exceptions.SkyletMethodNotImplementedError:
                     use_legacy = True
 
             if use_legacy:
                 code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(
                     [str(job_id)])
-                returncode, run_timestamps_payload, stderr = self.run_on_head(
+                returncode, log_dirs_payload, stderr = self.run_on_head(
                     handle,
                     code,
                     stream_logs=False,
@@ -4757,30 +4793,77 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 subprocess_utils.handle_returncode(returncode, code,
                                                    'Failed to sync logs.',
                                                    stderr)
-                # returns with a dict of {job_id: run_timestamp}
-                run_timestamps = message_utils.decode_payload(
-                    run_timestamps_payload)
-        if not run_timestamps:
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        'No matching log directories found'
-                        f'{colorama.Style.RESET_ALL}')
-            return {}
+                # Returns a dict of {job_id: log_dir}.
+                legacy_log_dirs: Dict[str, str] = message_utils.decode_payload(
+                    log_dirs_payload)
+                log_dir = legacy_log_dirs.get(str(job_id))
 
-        run_timestamp = list(run_timestamps.values())[0]
-        job_id = list(run_timestamps.keys())[0]
+            if not log_dir:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching log directories found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
 
-        # If run_timestamp contains the full path with SKY_LOGS_DIRECTORY,
+        # Now, either system_array is non-empty or log_dir is is non-empty.
+        assert system_array or log_dir, (system_array, log_dir)
+
+        # If log_dir contains the full path with SKY_LOGS_DIRECTORY,
         # strip the prefix to get just the relative part to avoid duplication
         # when constructing local paths.
-        if run_timestamp.startswith(constants.SKY_LOGS_DIRECTORY):
-            run_timestamp = run_timestamp[len(constants.SKY_LOGS_DIRECTORY
-                                             ):].lstrip('/')
+        if log_dir is not None and log_dir.startswith(
+                constants.SKY_LOGS_DIRECTORY):
+            log_dir = log_dir[len(constants.SKY_LOGS_DIRECTORY):].lstrip('/')
         local_log_dir = ''
-        if controller:  # download controller logs
+
+        def _rsync_down(args) -> None:
+            """Rsync down logs from remote nodes.
+
+            Args:
+                args: A tuple of (runner, local_log_dir, remote_log,
+                    target_name) where target_name is the local filename.
+            """
+            (runner, local_log_dir, remote_log, target_name) = args
+            try:
+                os.makedirs(os.path.expanduser(local_log_dir), exist_ok=True)
+                runner.rsync(
+                    source=remote_log,
+                    target=f'{local_log_dir}/{target_name}',
+                    up=False,
+                    stream_logs=False,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+                    # Raised by rsync_down. Remote log dir may not exist
+                    # since the job can be run on some part of the nodes.
+                    logger.debug(f'{runner.node_id} does not have the tasks/*.')
+                else:
+                    raise
+
+        if system_array is not None:
+            # All system logs go to a shared directory, each with its own file.
+            local_log_dir = os.path.join(local_dir, 'jobs_controller')
+            os.makedirs(os.path.expanduser(local_log_dir), exist_ok=True)
+            runners = handle.get_command_runners()
+
+            for system_uuid in system_array:
+                remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
+                                          f'controller_{system_uuid}.log')
+                target_name = f'controller_{system_uuid}.log'
+
+                logger.debug(f'{colorama.Fore.CYAN}'
+                             f'System {system_uuid} local log: '
+                             f'{local_log_dir}/{target_name}'
+                             f'{colorama.Style.RESET_ALL}')
+
+                parallel_args = [(runner, local_log_dir, remote_log,
+                                  target_name) for runner in runners]
+                subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
+        elif controller:  # download controller logs
+            # log_dir is guaranteed set for non-system paths
+            assert log_dir is not None, log_dir
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
-            local_log_dir = os.path.join(local_dir, 'managed_jobs',
-                                         run_timestamp)
+            local_log_dir = os.path.join(local_dir, 'managed_jobs', log_dir)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
 
@@ -4790,38 +4873,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             runners = handle.get_command_runners()
 
-            def _rsync_down(args) -> None:
-                """Rsync down logs from remote nodes.
-
-                Args:
-                    args: A tuple of (runner, local_log_dir, remote_log_dir)
-                """
-                (runner, local_log_dir, remote_log) = args
-                try:
-                    os.makedirs(os.path.expanduser(local_log_dir),
-                                exist_ok=True)
-                    runner.rsync(
-                        source=remote_log,
-                        target=f'{local_log_dir}/controller.log',
-                        up=False,
-                        stream_logs=False,
-                    )
-                except exceptions.CommandError as e:
-                    if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
-                        # Raised by rsync_down. Remote log dir may not exist
-                        # since the job can be run on some part of the nodes.
-                        logger.debug(
-                            f'{runner.node_id} does not have the tasks/*.')
-                    else:
-                        raise
-
-            parallel_args = [
-                (runner, local_log_dir, remote_log) for runner in runners
-            ]
+            parallel_args = [(runner, local_log_dir, remote_log,
+                              'controller.log') for runner in runners]
             subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         else:  # download job logs
-            local_log_dir = os.path.join(local_dir, 'managed_jobs',
-                                         run_timestamp)
+            # log_dir and job_id are guaranteed set for non-system paths
+            assert log_dir is not None, log_dir
+            assert job_id is not None, job_id
+            local_log_dir = os.path.join(local_dir, 'managed_jobs', log_dir)
             os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
                         exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
@@ -4831,7 +4890,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 job_name=None,
                 job_id=int(job_id),
                 follow=False,
-                controller=False)
+                controller=False,
+                system=None)
             # With the stdin=subprocess.DEVNULL, the ctrl-c will not
             # kill the process, so we need to handle it manually here.
             if threading.current_thread() is threading.main_thread():
@@ -4849,10 +4909,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
 
+        if system_array is not None:
+            # All the controller process logs go to the same dir, but we include
+            # all the system ids for the UX.
+            logger.debug(f'{colorama.Fore.CYAN}'
+                         f'All system logs: {local_log_dir}'
+                         f'{colorama.Style.RESET_ALL}')
+            return {system_uuid: local_log_dir for system_uuid in system_array}
+
+        assert job_id is not None
+        return_id = job_id
         logger.debug(f'{colorama.Fore.CYAN}'
-                     f'Job {job_id} logs: {local_log_dir}'
+                     f'Job {return_id} logs: {local_log_dir}'
                      f'{colorama.Style.RESET_ALL}')
-        return {str(job_id): local_log_dir}
+        return {str(return_id): local_log_dir}
 
     def teardown_no_lock(self,
                          handle: CloudVmRayResourceHandle,

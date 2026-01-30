@@ -1,7 +1,9 @@
 """Async SDK functions for managed jobs."""
 import asyncio
+import functools
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, overload, Tuple, Union
+import uuid
 
 from sky import backends
 from sky import sky_logging
@@ -103,11 +105,13 @@ async def cancel(
 
 
 @usage_lib.entrypoint
-async def tail_logs(cluster_name: str,
-                    job_id: Optional[int],
-                    follow: bool,
-                    tail: int = 0,
-                    output_stream: Optional['io.TextIOBase'] = None) -> int:
+async def tail_logs(
+        cluster_name: str,
+        job_id: Optional[int],
+        follow: bool,
+        tail: int = 0,
+        output_stream: Optional['io.TextIOBase'] = None,
+        system: Optional[Union[uuid.UUID, Literal[True]]] = None) -> int:
     """Async version of tail_logs() that tails the logs of a job."""
     return await asyncio.to_thread(
         sdk.tail_logs,
@@ -116,19 +120,49 @@ async def tail_logs(cluster_name: str,
         follow,
         tail,
         output_stream,
+        system,
     )
+
+
+@overload
+async def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    *,
+    system: Union[uuid.UUID, Literal[True]],
+) -> Dict[str, str]:
+    ...
+
+
+@overload
+async def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: None = None,
+) -> Dict[int, str]:
+    ...
 
 
 @usage_lib.entrypoint
 async def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: Optional[Union[uuid.UUID, Literal[True]]] = None,
+) -> Union[Dict[int, str], Dict[str, str]]:
     """Async version of download_logs() that syncs down logs of managed jobs."""
-    return await asyncio.to_thread(sdk.download_logs, name, job_id, refresh,
-                                   controller, local_dir)
+    # this makes mypy happy bc typing with overloaded functions is annoying
+    return await asyncio.to_thread(
+        functools.partial(sdk.download_logs, name, job_id, refresh, controller,
+                          local_dir, system))
 
 
 @usage_lib.entrypoint

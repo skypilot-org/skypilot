@@ -1967,6 +1967,62 @@ def test_managed_jobs_exit_code_recovery_single(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+@pytest.mark.no_vast  # Uses unsatisfiable machines
+@pytest.mark.no_hyperbolic  # Uses unsatisfiable machines
+@pytest.mark.no_shadeform  # Uses unsatisfiable machines
+def test_managed_jobs_system_logs(generic_cloud: str):
+    """Test system logs functionality for managed job controllers."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-managed-jobs-system-logs',
+        [
+            # Launch a managed job
+            f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=335),
+
+            # List all active system UUIDs (should show at least one)
+            's=$(sky jobs logs --system) && echo "$s" && test -n "$s"',
+
+            # Get the UUID and view its logs
+            's=$(sky jobs logs --system) && '
+            'UUID=$(echo "$s" | tail -n 1) && '
+            'echo "System UUID: $UUID" && '
+            'test -n "$UUID" && '
+            's=$(sky jobs logs --system $UUID --no-follow) && '
+            'echo "$s" && '
+            # Controller logs should contain controller information
+            'echo "$s" | grep -E "controller"',
+
+            # Test sync down system logs
+            's=$(sky jobs logs --system) && '
+            'UUID=$(echo "$s" | tail -n 1) && '
+            's=$(SKYPILOT_DEBUG=0 sky jobs logs --system $UUID --sync-down) && '
+            'echo "$s" && '
+            # Parse the log path and verify it exists
+            'log_path=$(echo "$s" | grep -E "Controller process .* logs: " | '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}" | sed "s|^~/|$HOME/|") && '
+            'echo "Log path: $log_path" && '
+            'test -d "$log_path" && '
+            'test -f "$log_path/controller_$UUID.log"',
+
+            # Test that --system and --controller flags are mutually exclusive
+            'sky jobs logs --system --controller 2>&1 | grep -i "Cannot specify both"',
+
+            # Test that --system and job name are mutually exclusive
+            f'sky jobs logs --system -n {name} 2>&1 | grep -i "Cannot specify both"',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_remote_server
 @pytest.mark.managed_jobs
 def test_managed_job_labels_in_queue(generic_cloud: str):

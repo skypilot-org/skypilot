@@ -1,7 +1,9 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (Any, Dict, List, Literal, Optional, overload, Sequence,
+                    Tuple, Union)
+import uuid
 
 import click
 
@@ -342,24 +344,28 @@ def cancel(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-def tail_logs(name: Optional[str] = None,
-              job_id: Optional[int] = None,
-              follow: bool = True,
-              controller: bool = False,
-              refresh: bool = False,
-              tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None,
-              task: Optional[Union[str, int]] = None) -> Optional[int]:
+def tail_logs(
+        name: Optional[str] = None,
+        job_id: Optional[int] = None,
+        follow: bool = True,
+        controller: bool = False,
+        refresh: bool = False,
+        tail: Optional[int] = None,
+        output_stream: Optional['io.TextIOBase'] = None,
+        task: Optional[Union[str, int]] = None,
+        system: Optional[Union[uuid.UUID,
+                               Literal[True]]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
-    You can provide either a job name or a job ID to tail logs. If both are not
-    provided, the logs of the latest job will be shown.
+    You can provide either a job name or a job ID or a system UUID to tail
+    logs. If none are not provided, the logs of the latest job will be shown.
 
     Args:
         name: Name of the managed job to tail logs.
         job_id: ID of the managed job to tail logs.
         follow: Whether to follow the logs.
         controller: Whether to tail logs from the jobs controller.
+        system: UUID of the system to tail logs.
         refresh: Whether to restart the jobs controller if it is stopped.
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
@@ -379,6 +385,11 @@ def tail_logs(name: Optional[str] = None,
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    version = versions.get_remote_api_version()
+    if version is not None and version < 32 and system is not None:
+        raise ValueError('system is not supported in your API server. '
+                         'Please upgrade to a newer API server to use this '
+                         'feature.')
     body = payloads.JobsLogsBody(
         name=name,
         job_id=job_id,
@@ -387,6 +398,7 @@ def tail_logs(name: Optional[str] = None,
         refresh=refresh,
         tail=tail,
         task=task,
+        system=system,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -405,14 +417,41 @@ def tail_logs(name: Optional[str] = None,
                                get_result=follow)
 
 
+@overload
+def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    *,
+    system: Union[uuid.UUID, Literal[True]],
+) -> Dict[str, str]:
+    ...
+
+
+@overload
+def download_logs(
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: None = None,
+) -> Dict[int, str]:
+    ...
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
+    name: Optional[str],
+    job_id: Optional[int],
+    refresh: bool,
+    controller: bool,
+    local_dir: str = constants.SKY_LOGS_DIRECTORY,
+    system: Optional[Union[uuid.UUID, Literal[True]]] = None,
+) -> Union[Dict[int, str], Dict[str, str]]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -423,18 +462,27 @@ def download_logs(
         refresh: Whether to restart the jobs controller if it is stopped.
         controller: Whether to sync down logs from the jobs controller.
         local_dir: Local directory to sync down logs.
+        system: UUID of the system to sync down logs or True to sync all active
+                logs.
 
     Returns:
-        A dictionary mapping job ID to the local path.
+        A dictionary mapping job ID or system UUID to the local path.
 
     Request Raises:
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
 
+    version = versions.get_remote_api_version()
+    if version is not None and version < 32 and system is not None:
+        raise ValueError('system is not supported in your API server. '
+                         'Please upgrade to a newer API server to use this '
+                         'feature.')
+
     body = payloads.JobsDownloadLogsBody(
         name=name,
         job_id=job_id,
+        system=system,
         refresh=refresh,
         controller=controller,
         local_dir=local_dir,
@@ -449,10 +497,16 @@ def download_logs(
     job_id_remote_path_dict = sdk.stream_and_get(request_id)
     remote2local_path_dict = client_common.download_logs_from_api_server(
         job_id_remote_path_dict.values())
-    return {
-        int(job_id): remote2local_path_dict[remote_path]
-        for job_id, remote_path in job_id_remote_path_dict.items()
-    }
+    if system is not None:
+        return {
+            system_id: remote2local_path_dict[remote_path]
+            for system_id, remote_path in job_id_remote_path_dict.items()
+        }
+    else:
+        return {
+            int(job_id): remote2local_path_dict[remote_path]
+            for job_id, remote_path in job_id_remote_path_dict.items()
+        }
 
 
 spot_launch = common_utils.deprecated_function(
