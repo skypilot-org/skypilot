@@ -151,6 +151,11 @@ def docker_start_cmds(
     env_flags = ' '.join(
         ['-e {name}={val}'.format(name=k, val=v) for k, v in env_vars.items()])
 
+    # Check if network option is already specified in user_options to avoid
+    # "network host is specified multiple times" error.
+    has_network_option = any(
+        opt.startswith('--net=') or opt.startswith('--network=') or
+        opt == '--net' or opt == '--network' for opt in user_options)
     user_options_str = ' '.join(user_options)
     docker_run = [
         docker_cmd,
@@ -162,14 +167,18 @@ def docker_start_cmds(
         '-it',
         env_flags,
         user_options_str,
-        '--net=host',
+    ]
+    # Only add --net=host if not already specified in user options
+    if not has_network_option:
+        docker_run.append('--net=host')
+    docker_run.extend([
         # SkyPilot: Add following options to enable fuse.
         '--cap-add=SYS_ADMIN',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
         '--entrypoint=/bin/bash',
         image,
-    ]
+    ])
     return ' '.join(docker_run)
 
 
