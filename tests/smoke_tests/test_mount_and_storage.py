@@ -219,14 +219,13 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     return test_commands, clean_command
 
 
-def _storage_mount_cached_test_command_generator(
-        f1: TextIO,
-        f2: TextIO,
-        cluster_name: str,
-        storage_name: str,
-        cloud: str,
-        image_id: Optional[str] = None,
-        graceful: bool = False):
+def _storage_mount_cached_test_command_generator(f1: TextIO,
+                                                 f2: TextIO,
+                                                 cluster_name: str,
+                                                 storage_name: str,
+                                                 cloud: str,
+                                                 image_id: Optional[str] = None,
+                                                 graceful: bool = False):
     assert cloud in ['aws', 'gcp', 'azure', 'kubernetes', 'slurm']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mount_cached.yaml.j2').read_text()
