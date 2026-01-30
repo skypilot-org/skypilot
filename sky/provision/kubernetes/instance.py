@@ -1027,9 +1027,10 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                     namespace,
                     _request_timeout=config_lib.DELETION_TIMEOUT,
                     grace_period_seconds=0)
-            except Exception as delete_exception:
+            except kubernetes.api_exception() as delete_exception:
                 logger.warning(
-                    f'Failed to force delete pod {pod_name}, but proceeding to retry creation. Error: {delete_exception}')
+                    f'Failed to force delete pod {pod_name}, but proceeding '
+                    f'to retry creation. Error: {delete_exception}')
             try:
                 pod = kubernetes.core_api(context).create_namespaced_pod(
                     namespace, pod_spec)
@@ -1038,8 +1039,8 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                     'after force deleting the pod from previous cluster.')
                 return pod
             except kubernetes.api_exception() as retry_exception:
-                logger.warning(
-                    f'Failed to create pod {pod_name} on retry: {retry_exception}')
+                logger.warning(f'Failed to create pod {pod_name} on retry: '
+                               f'{retry_exception}')
                 raise retry_exception
         else:
             # Re-raise the exception if it's a different error
