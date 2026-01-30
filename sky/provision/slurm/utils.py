@@ -121,7 +121,7 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
     )
