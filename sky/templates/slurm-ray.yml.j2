@@ -1,4 +1,5 @@
 {% set user = ssh_user if image_id is none else 'root' %}
+{% set has_image = image_id is not none %}
 cluster_name: {{cluster_name_on_cloud}}
 
 # The maximum number of workers nodes to launch in addition to the head node.
@@ -77,11 +78,10 @@ setup_commands:
     {%- for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
     {%- endfor %}
-{% if image_id is not none %}
-    # When using containers, setup commands run on both host AND container.
-    # SSH setup only needs to run on the container, if using containers.
-    if [ "$(id -u)" = "0" ]; then
-{% endif %}
+    # SSH setup: authorized_keys, host key, and bashrc for interactive sessions.
+    # - Non-container: always run (for the normal user)
+    # - Container: only run inside container (when root), not on the host
+    if [ {{ 'true' if not has_image else 'false' }} ] || [ "$(id -u)" = "0" ]; then
     # Generate host key for sshd -i if not exists
     mkdir -p ~{{user}}/.ssh && chmod 700 ~{{user}}/.ssh
     [ -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} ] || ssh-keygen -t ed25519 -f ~{{user}}/.ssh/{{slurm_sshd_host_key_filename}} -N "" -q
@@ -103,9 +103,7 @@ setup_commands:
     fi
     SKYPILOT_SSH_RC
     grep -q "source ~/.sky_ssh_rc" ~{{user}}/.bashrc 2>/dev/null || (echo "" >> ~{{user}}/.bashrc && echo "source ~/.sky_ssh_rc" >> ~{{user}}/.bashrc)
-{% if image_id is not none %}
     fi
-{% endif %}
     {{ setup_sky_dirs_commands }}
     {{ conda_installation_commands }}
     {{ uv_installation_commands }}
