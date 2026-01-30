@@ -222,41 +222,6 @@ def test_recipe_not_found(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Recipe Invalid Name Error ----------
-def test_recipe_invalid_name():
-    """Test that creating a recipe with invalid name gives a clear error."""
-    test = smoke_tests_utils.Test(
-        'recipe_invalid_name',
-        [
-            # Try to create recipe with invalid name (contains underscore)
-            lambda: _test_invalid_recipe_name('invalid_name'),
-            # Try to create recipe with invalid name (contains dot)
-            lambda: _test_invalid_recipe_name('invalid.name'),
-            # Try to create recipe with invalid name (starts with number)
-            lambda: _test_invalid_recipe_name('123invalid'),
-        ],
-        None,
-        timeout=30,
-    )
-    smoke_tests_utils.run_one_test(test)
-
-
-def _test_invalid_recipe_name(name: str):
-    """Helper to test that an invalid recipe name raises an error."""
-    from sky import exceptions
-    try:
-        recipes_core.create_recipe(
-            name=name,
-            content='resources:\n  cpus: 1',
-            recipe_type=RecipeType.CLUSTER,
-            user_id='test-user',
-        )
-        raise AssertionError(
-            f'Expected InvalidRecipeNameError for name: {name}')
-    except exceptions.InvalidRecipeNameError:
-        print(f'Correctly rejected invalid recipe name: {name}')
-
-
 # ---------- Recipe Duplicate Name Error ----------
 def test_recipe_duplicate_name():
     """Test that creating a recipe with a duplicate name raises an error."""

@@ -5,7 +5,9 @@ import textwrap
 
 import pytest
 
+from sky import exceptions
 from sky.recipes import core as recipes_core
+from sky.utils import common_utils
 
 
 class TestRecipeValidation:
@@ -314,3 +316,54 @@ class TestRecipeValidation:
         """).strip()
         with pytest.raises(ValueError, match='Invalid volume YAML'):
             recipes_core._validate_skypilot_yaml(invalid_volume_yaml, 'volume')
+
+
+class TestRecipeNameValidation:
+    """Tests for recipe name validation.
+
+    These tests validate the recipe name format directly using
+    check_recipe_name_is_valid to avoid any database interaction.
+    """
+
+    def test_invalid_name_with_underscore(self):
+        """Test that recipe names with underscores are rejected."""
+        with pytest.raises(exceptions.InvalidRecipeNameError):
+            common_utils.check_recipe_name_is_valid('invalid_name')
+
+    def test_invalid_name_with_dot(self):
+        """Test that recipe names with dots are rejected."""
+        with pytest.raises(exceptions.InvalidRecipeNameError):
+            common_utils.check_recipe_name_is_valid('invalid.name')
+
+    def test_invalid_name_starts_with_number(self):
+        """Test that recipe names starting with numbers are rejected."""
+        with pytest.raises(exceptions.InvalidRecipeNameError):
+            common_utils.check_recipe_name_is_valid('123invalid')
+
+    def test_invalid_name_with_spaces(self):
+        """Test that recipe names with spaces are rejected."""
+        with pytest.raises(exceptions.InvalidRecipeNameError):
+            common_utils.check_recipe_name_is_valid('invalid name')
+
+    def test_invalid_name_ends_with_dash(self):
+        """Test that recipe names ending with dash are rejected."""
+        with pytest.raises(exceptions.InvalidRecipeNameError):
+            common_utils.check_recipe_name_is_valid('invalid-name-')
+
+    def test_invalid_name_starts_with_dash(self):
+        """Test that recipe names starting with dash are rejected."""
+        with pytest.raises(exceptions.InvalidRecipeNameError):
+            common_utils.check_recipe_name_is_valid('-invalid-name')
+
+    def test_valid_name_simple(self):
+        """Test that simple valid names are accepted."""
+        # Should not raise
+        common_utils.check_recipe_name_is_valid('valid-name')
+        common_utils.check_recipe_name_is_valid('validname')
+        common_utils.check_recipe_name_is_valid('valid123')
+
+    def test_valid_name_with_numbers(self):
+        """Test that names with numbers in the middle are accepted."""
+        # Should not raise
+        common_utils.check_recipe_name_is_valid('my-recipe-v2')
+        common_utils.check_recipe_name_is_valid('llama3-70b-finetune')
