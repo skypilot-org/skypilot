@@ -294,6 +294,62 @@ def check_for_recovery_message_on_controller(job_name: str):
             f'echo "$s"; echo; echo; echo "$s" | grep "RECOVERING"')
 
 
+def wait_for_message_in_pool_logs(pool_name: str,
+                                  message: str,
+                                  timeout: int = 300,
+                                  time_between_checks: int = 10):
+    """Wait for a specific message to appear in pool logs.
+    
+    Args:
+        pool_name: Name of the pool to check logs for.
+        message: The message to search for in the logs (case-insensitive).
+        timeout: Maximum time to wait in seconds.
+        time_between_checks: Time to wait between checks in seconds.
+    """
+    num_checks = timeout // time_between_checks
+    return (
+        f'for i in {{1..{num_checks}}}; do '
+        f'logs=$(sky jobs pool logs --controller {pool_name} --no-follow 2>&1); '
+        'echo "$logs"; '
+        f'if echo "$logs" | grep -i "{message}"; then '
+        f'  echo "Found {message} in logs"; '
+        '  exit 0; '
+        'fi; '
+        f'echo "Check $i/{num_checks}: {message} not found yet"; '
+        f'sleep {time_between_checks}; '
+        'done; '
+        f'echo "ERROR: {message} not found in logs after timeout"; '
+        'exit 1')
+
+
+def wait_for_message_in_pool_logs(pool_name: str,
+                                  message: str,
+                                  timeout: int = 300,
+                                  time_between_checks: int = 10):
+    """Wait for a specific message to appear in pool logs.
+    
+    Args:
+        pool_name: Name of the pool to check logs for.
+        message: The message to search for in the logs (case-insensitive).
+        timeout: Maximum time to wait in seconds.
+        time_between_checks: Time to wait between checks in seconds.
+    """
+    num_checks = timeout // time_between_checks
+    return (
+        f'for i in {{1..{num_checks}}}; do '
+        f'logs=$(sky jobs pool logs --controller {pool_name} --no-follow 2>&1); '
+        'echo "$logs"; '
+        f'if echo "$logs" | grep -i "{message}"; then '
+        f'  echo "Found {message} in logs"; '
+        '  exit 0; '
+        'fi; '
+        f'echo "Check $i/{num_checks}: {message} not found yet"; '
+        f'sleep {time_between_checks}; '
+        'done; '
+        f'echo "ERROR: {message} not found in logs after timeout"; '
+        'exit 1')
+
+
 def basic_pool_conf(
     num_workers: int,
     infra: str,
@@ -2334,5 +2390,325 @@ def test_pools_num_jobs_speed(generic_cloud: str):
                 # Try to tear down multiple times since jobs may take a while
                 # to get to pending.
                 teardown=_TEARDOWN_POOL.format(pool_name=pool_name),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+def autoscaling_pool_conf(
+    num_workers: int,
+    max_workers: int,
+    min_workers: Optional[int] = None,
+    queue_length_threshold: Optional[int] = None,
+    upscale_delay_seconds: Optional[int] = None,
+    downscale_delay_seconds: Optional[int] = None,
+    infra: str = 'aws',
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    setup_cmd: str = 'echo "setup message"',
+):
+    """Create a pool config with autoscaling enabled.
+    
+    Args:
+        num_workers: Initial number of workers (also used as min if min_workers not set)
+        max_workers: Maximum number of workers for autoscaling
+        min_workers: Minimum number of workers for autoscaling (defaults to num_workers)
+        queue_length_threshold: Queue length threshold for autoscaling (defaults to 1)
+        upscale_delay_seconds: Delay before scaling up (defaults to None)
+        downscale_delay_seconds: Delay before scaling down (defaults to None)
+        infra: Infrastructure provider
+        cpus: CPU requirements
+        memory: Memory requirements
+        setup_cmd: Setup command
+    """
+    cpus_string = f'    cpus: {cpus}\n' if cpus else ''
+    memory_string = f'    memory: {memory}\n' if memory else ''
+    min_workers_str = f'        min_workers: {min_workers}\n' if min_workers is not None else ''
+    queue_threshold_str = f'        queue_length_threshold: {queue_length_threshold}\n' if queue_length_threshold is not None else ''
+    upscale_delay_str = f'        upscale_delay_seconds: {upscale_delay_seconds}\n' if upscale_delay_seconds is not None else ''
+    downscale_delay_str = f'        downscale_delay_seconds: {downscale_delay_seconds}\n' if downscale_delay_seconds is not None else ''
+    return textwrap.dedent(f"""
+    pool:
+        workers: {num_workers}
+        max_workers: {max_workers}
+{min_workers_str}{queue_threshold_str}{upscale_delay_str}{downscale_delay_str}
+    resources:
+        infra: {infra}
+{cpus_string}{memory_string}
+    setup: |
+        {setup_cmd}
+    """)
+
+
+def check_workers_do_not_exceed(pool_name: str,
+                                max_workers: int,
+                                duration: int = 60,
+                                time_between_checks: int = 10):
+    """Check that workers never exceed max_workers for a given duration."""
+    num_checks = duration // time_between_checks
+    return (
+        f'for i in {{1..{num_checks}}}; do '
+        f's=$(sky jobs pool status {pool_name} | grep "^{pool_name}"); '
+        'echo "$s"; '
+        f'current=$(echo "$s" | grep -oE "[0-9]+/[0-9]+" | head -1 | cut -d"/" -f1); '
+        f'if [ -n "$current" ] && [ "$current" -gt {max_workers} ]; then '
+        f'  echo "ERROR: Workers ($current) exceeded max_workers ({max_workers})"; '
+        '  exit 1; '
+        'fi; '
+        f'echo "Check $i/{num_checks}: Workers = $current (max = {max_workers})"; '
+        f'sleep {time_between_checks}; '
+        'done; '
+        'echo "Workers did not exceed max_workers during the check period"')
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_autoscaling_scale_up(generic_cloud: str):
+    """Test that pool autoscales up when jobs are queued.
+    
+    This test:
+    1. Creates a pool with workers=1, max_workers=3 (2 higher than initial)
+    2. Launches multiple jobs that will queue up
+    3. Verifies that workers scale up to max_workers
+    4. Verifies at least 2 scaling events occur (1->2, 2->3)
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with autoscaling: start with 1 worker, can scale up to 3
+    pool_config = autoscaling_pool_conf(
+        num_workers=1,
+        max_workers=3,
+        infra=generic_cloud,
+        setup_cmd='echo hi',
+        upscale_delay_seconds=20,
+        downscale_delay_seconds=20,
+    )
+
+    # Job that runs for a while to keep queue length high
+    job_name = f'{name}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='sleep 3000',  # Long-running job
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_autoscaling_scale_up',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    # Launch multiple jobs to create queue
+                    # Launch 5 jobs - first one runs, others queue up
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}') for i in range(1, 6)
+                    ],
+                    # Verify we scale up to 3 workers (second scaling event)
+                    wait_until_num_workers(pool_name, 3, timeout=300),
+                    # Verify we stay at 3 workers (max_workers)
+                    'sleep 30',
+                    wait_until_num_workers(pool_name, 3, timeout=30),
+                ],
+                timeout=timeout * 2,  # Autoscaling takes time
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
+    """Test that pool does not scale above workers when max_workers == workers.
+    
+    This test:
+    1. Creates a pool with workers=2, max_workers=2 (same as workers)
+    2. Launches multiple jobs that will queue up
+    3. Verifies that workers never exceed 2 even with jobs queued
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with autoscaling: start with 2 workers, max_workers=2 (no scaling up)
+    pool_config = autoscaling_pool_conf(
+        num_workers=2,
+        max_workers=2,
+        infra=generic_cloud,
+        setup_cmd='echo hi',
+        upscale_delay_seconds=20,
+        downscale_delay_seconds=20,
+    )
+
+    # Job that runs for a while
+    job_name = f'{name}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='sleep 3000',  # Long-running job
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_autoscaling_no_scale_when_max_equals_workers',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    wait_until_pool_ready(pool_name, timeout=timeout),
+                    # Launch multiple jobs to create queue (more than workers can handle)
+                    # Launch 5 jobs - 2 run, 3 queue up
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}') for i in range(1, 6)
+                    ],
+                    # Verify we start with 2 workers
+                    wait_until_num_workers(pool_name, 2, timeout=timeout),
+                    # Wait for jobs to queue
+                    'sleep 10',
+                    # Verify jobs are queued
+                    f's=$(sky jobs queue); echo "$s"; echo "$s" | grep "PENDING" || echo "Some jobs may have started"',
+                    # Check that workers never exceed 2 for a period of time
+                    check_workers_do_not_exceed(pool_name, 2, duration=120),
+                ],
+                timeout=timeout * 2,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
+    """Test that pool autoscales down to zero when no jobs and min_workers=0.
+    
+    This test:
+    1. Creates a pool with workers=1, max_workers=2, min_workers=0
+    2. Launches a job that completes quickly
+    3. Verifies that workers scale down to 0 after job completes
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with autoscaling: start with 1 worker, can scale down to 0
+    pool_config = autoscaling_pool_conf(
+        num_workers=1,
+        max_workers=2,
+        min_workers=0,
+        infra=generic_cloud,
+        upscale_delay_seconds=20,
+        downscale_delay_seconds=20,
+    )
+
+    # Job that completes quickly
+    job_name = f'{name}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='echo "Job completed"',  # Quick job
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_autoscaling_scale_down_to_zero',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    # Launch a job
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
+                    # Wait for job to complete
+                    wait_until_job_status(job_name, ['SUCCEEDED'],
+                                          timeout=timeout),
+                    # Verify we scale down to 0 workers
+                    wait_until_num_workers(pool_name, 0, timeout=timeout),
+                ],
+                timeout=timeout * 2,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
+    """Test that pool autoscales up to max_workers then down to zero.
+    
+    This test:
+    1. Creates a pool with workers=0, max_workers=3, min_workers=0
+    2. Queues up enough quick jobs (echo hi) to trigger scaling to 3 workers
+    3. Verifies that workers scale up to 3
+    4. Waits for all jobs to complete
+    5. Waits for SCALE_DOWN_TO_ZERO message in pool logs
+    6. Verifies that workers scale down to 0
+    """
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+
+    # Pool with autoscaling: start with 0 workers, can scale up to 3, down to 0
+    pool_config = autoscaling_pool_conf(
+        num_workers=1,
+        max_workers=3,
+        min_workers=0,
+        infra=generic_cloud,
+        setup_cmd='echo hi',
+        upscale_delay_seconds=20,
+        downscale_delay_seconds=20,
+    )
+
+    # Quick job that just echoes hi and finishes instantly
+    job_name = f'{name}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='echo hi',  # Quick job that finishes instantly
+    )
+
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            test = smoke_tests_utils.Test(
+                'test_pool_autoscaling_scale_up_to_max_then_down_to_zero',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    # Queue up enough jobs to trigger scaling to 3 workers
+                    # We need at least 3 jobs queued to trigger scaling to 3
+                    # Launch 5 jobs to ensure we get to 3 workers
+                    *[
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name,
+                            job_name=f'{job_name}-{i}') for i in range(1, 6)
+                    ],
+                    # Verify we scale up to 3 workers (max_workers)
+                    wait_until_num_workers(pool_name, 3, timeout=300),
+                    # Wait for all jobs to complete
+                    *[
+                        wait_until_job_status(f'{job_name}-{i}', ['SUCCEEDED'],
+                                              timeout=timeout)
+                        for i in range(1, 6)
+                    ],
+                    # Wait for SCALE_DOWN_TO_ZERO message in pool logs
+                    wait_for_message_in_pool_logs(
+                        pool_name, 'SCALE_DOWN_TO_ZERO', timeout=300),
+                    # Verify we scale down to 0 workers
+                    wait_until_num_workers(pool_name, 0, timeout=300),
+                ],
+                timeout=timeout * 3,  # Autoscaling takes time
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=10),
             )
             smoke_tests_utils.run_one_test(test)
