@@ -258,11 +258,13 @@ def _create_virtual_instance(
     # between registry and path. See:
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
+    # Default to ~/.sky/container_cache which is typically on shared storage
+    # (NFS) on Slurm clusters. Users can override or disable (set to null).
     container_cache_path_config = skypilot_config.get_effective_region_config(
         cloud='slurm',
         region=region,
         keys=('container_cache_path',),
-        default_value=None)
+        default_value='~/.sky/container_cache')
     # Commands to run before container initialization (e.g., cache import)
     container_cache_block = ''
     # Whether to use shell variable $CONTAINER_IMAGE (for caching with fallback)

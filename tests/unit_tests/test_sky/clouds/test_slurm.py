@@ -487,19 +487,30 @@ class TestCreateVirtualInstance:
         assert written_script is not None, "Script was not written"
         return written_script
 
+    @patch('sky.provision.slurm.instance.skypilot_config.'
+           'get_effective_region_config')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
     def test_container_script_format(self, mock_ssh_runner, mock_slurm_client,
                                      mock_get_partition_info,
-                                     mock_get_proctrack_type):
+                                     mock_get_proctrack_type,
+                                     mock_get_region_config):
         """Test that sbatch provision script for containers is correct."""
         from sky.provision import common
 
         self._setup_mocks(mock_ssh_runner, mock_slurm_client,
                           mock_get_partition_info, 'gpu')
         mock_get_proctrack_type.return_value = 'cgroup'
+
+        # Disable container caching for this test to match existing snapshot
+        def get_region_config_side_effect(cloud, region, keys, default_value):
+            if keys == ('container_cache_path',):
+                return None
+            return default_value
+
+        mock_get_region_config.side_effect = get_region_config_side_effect
 
         config = common.ProvisionConfig(
             provider_config={
