@@ -131,7 +131,8 @@ class TaskCodeGen:
             CANCELLED_RETURN_CODE = 137
             """))
 
-    def _get_rclone_flush_script(self) -> str:
+    @staticmethod
+    def get_rclone_flush_script() -> str:
         """Generate rclone flush script for cached storage mounts.
 
         This script blocks job completion until all storage mounted with
@@ -613,7 +614,7 @@ class RayCodeGen(TaskCodeGen):
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
-        rclone_flush_script = self._get_rclone_flush_script()
+        rclone_flush_script = self.get_rclone_flush_script()
         unset_ray_env_vars = ' && '.join(
             [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
         self._code += [
@@ -812,7 +813,7 @@ class SlurmCodeGen(TaskCodeGen):
                                          for k, v in env_vars.items())
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
-        rclone_flush_script = self._get_rclone_flush_script()
+        rclone_flush_script = self.get_rclone_flush_script()
         streaming_msg = self._get_job_started_msg()
         has_setup_cmd = self._setup_cmd is not None
 
