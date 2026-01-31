@@ -12,7 +12,7 @@ clouds_with_ray = ['ibm', 'docker', 'scp']
 
 install_requires = [
     # wheel 0.46.2+ required for CVE-2026-24049
-    'wheel>=0.46.2',
+    'wheel>=0.46.3',
     'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
     'pip',
     'cachetools',
