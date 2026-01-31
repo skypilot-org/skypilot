@@ -46,35 +46,27 @@ touch /home/testuser/.sky_clusters/test-cluster-cached/.sky_slurm_cluster
 echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster-cached/.sky_proctrack_type
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster-cached/.hushlogin
-# Container image caching
-CACHE_DIR='/shared/container_cache'
-CACHE_SQSH='/shared/container_cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh'
-FALLBACK_IMAGE='nvcr.io#nvidia/pytorch:24.01-py3'
+# Ensure container image is cached on each compute node
+echo "[cache] Ensuring image cache on all nodes..."
+CACHE_START=$SECONDS
+srun --nodes=1 --ntasks-per-node=1 bash -c 'CACHE_DIR='"'"'/shared/container_cache'"'"'
+CACHE_SQSH='"'"'/shared/container_cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh'"'"'
 mkdir -p "$CACHE_DIR"
 if [ -f "$CACHE_SQSH" ]; then
-  echo "[cache] Using cached image: $CACHE_SQSH"
-  CONTAINER_IMAGE="$CACHE_SQSH"
+  echo "[cache] Node $SLURM_NODEID: Using cached image"
 else
-  echo "[cache] Importing container image to cache..."
+  echo "[cache] Node $SLURM_NODEID: Importing image..."
   CACHE_START=$SECONDS
-  # Use a temp file and atomic move to avoid partial files
   CACHE_SQSH_TMP="$CACHE_SQSH.tmp.$$"
-  if enroot import -o "$CACHE_SQSH_TMP" docker://nvcr.io#nvidia/pytorch:24.01-py3; then
-    mv "$CACHE_SQSH_TMP" "$CACHE_SQSH"
-    echo "[cache] Image cached in $((SECONDS - CACHE_START))s: $CACHE_SQSH"
-    CONTAINER_IMAGE="$CACHE_SQSH"
-  else
-    rm -f "$CACHE_SQSH_TMP"
-    echo "[cache] Failed to import image, falling back to direct pull"
-    CONTAINER_IMAGE="$FALLBACK_IMAGE"
-  fi
-fi
+  enroot import -o "$CACHE_SQSH_TMP" docker://nvcr.io#nvidia/pytorch:24.01-py3 && mv "$CACHE_SQSH_TMP" "$CACHE_SQSH" && echo "[cache] Node $SLURM_NODEID: Cached in $((SECONDS - CACHE_START))s" || { rm -f "$CACHE_SQSH_TMP"; echo "[cache] Node $SLURM_NODEID: Import failed"; exit 1; }
+fi'
+echo "[cache] All nodes ready in $((SECONDS - CACHE_START))s"
 srun --nodes=1 mkdir -p /tmp/ccache_$(id -u)
 CONTAINER_START=$SECONDS
 echo "[container] Initializing test-cluster-cached on all nodes"
 rm -rf /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done
 mkdir -p /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done
-srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image="$CONTAINER_IMAGE" --container-name=test-cluster-cached:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='/shared/container_cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh' --container-name=test-cluster-cached:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
 apt-get update

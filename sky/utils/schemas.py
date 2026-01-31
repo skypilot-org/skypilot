@@ -1506,9 +1506,9 @@ def get_config_schema():
                     'type': 'integer',
                 },
                 'container_cache_path': {
-                    # Path to cache container images as .sqsh files.
-                    # Must be on a shared filesystem accessible by all nodes.
-                    # Defaults to ~/.sky/container_cache. Set to null to disable.
+                    # Path to cache container images as .sqsh files on each node.
+                    # Defaults to /tmp/sky_container_cache (node-local).
+                    # Set to null to disable caching.
                     'type': ['string', 'null'],
                 },
             }
