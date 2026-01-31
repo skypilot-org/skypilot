@@ -269,8 +269,11 @@ def _create_virtual_instance(
         default_value='/tmp/sky_container_cache')
     # Commands to ensure cached image exists on each compute node
     container_cache_block = ''
-    # The container image argument for --container-image
+    # The container image argument for --container-image.
+    # Can be a path string or a shell variable reference like "$CACHE_SQSH".
     container_image_for_pyxis: Optional[str] = None
+    # Whether container_image_for_pyxis is a shell variable (don't quote it)
+    container_image_is_shell_var = False
 
     if container_image is not None:
         if container_image.endswith('.sqsh'):
@@ -290,9 +293,9 @@ def _create_virtual_instance(
 
             # Check if container caching is enabled
             if container_cache_path_config is not None:
-                # Build the cache path for this image (deterministic)
-                cache_sqsh_path = slurm_utils.get_container_cache_path(
-                    container_cache_path_config, container_image)
+                # Build the cache filename for this image (deterministic)
+                cache_sqsh_filename = slurm_utils.get_container_cache_filename(
+                    container_image)
                 # For enroot import, we use '#' separator for non-Docker Hub
                 # registries (e.g., docker://nvcr.io#nvidia/pytorch:24.01-py3)
                 enroot_image_url = pyxis_container_image
@@ -301,9 +304,13 @@ def _create_virtual_instance(
                 # This runs via srun on all nodes before container initialization.
                 # Each node independently checks/imports, enabling node-local
                 # caching which is faster than shared NFS.
+                #
+                # Cache is per-user (via $(id -u)) to avoid permission issues
+                # when multiple users share the same compute nodes.
                 cache_import_script = (
-                    f'CACHE_DIR={shlex.quote(container_cache_path_config)}\n'
-                    f'CACHE_SQSH={shlex.quote(cache_sqsh_path)}\n'
+                    f'CACHE_BASE={shlex.quote(container_cache_path_config)}\n'
+                    f'CACHE_DIR="$CACHE_BASE/$(id -u)"\n'
+                    f'CACHE_SQSH="$CACHE_DIR/{cache_sqsh_filename}"\n'
                     f'mkdir -p "$CACHE_DIR"\n'
                     f'if [ -f "$CACHE_SQSH" ]; then\n'
                     f'  echo "[cache] Node $SLURM_NODEID: Using cached image"\n'
@@ -319,19 +326,28 @@ def _create_virtual_instance(
                     f'{{ rm -f "$CACHE_SQSH_TMP"; '
                     f'echo "[cache] Node $SLURM_NODEID: Import failed"; '
                     f'exit 1; }}\n'
-                    f'fi')
+                    f'fi\n'
+                    # Export CACHE_SQSH so parent script can use it
+                    f'echo "$CACHE_SQSH"')
 
+                # The cache block sets CACHE_SQSH variable for use in container
+                # initialization. We capture the path from srun output since the
+                # path includes $(id -u) which is evaluated at runtime.
                 container_cache_block = (
                     f'# Ensure container image is cached on each compute node\n'
+                    f'# Cache is per-user to avoid permission issues\n'
+                    f'CACHE_BASE={shlex.quote(container_cache_path_config)}\n'
+                    f'CACHE_SQSH="$CACHE_BASE/$(id -u)/{cache_sqsh_filename}"\n'
                     f'echo "[cache] Ensuring image cache on all nodes..."\n'
                     f'CACHE_START=$SECONDS\n'
                     f'srun --nodes={num_nodes} --ntasks-per-node=1 '
-                    f'bash -c {shlex.quote(cache_import_script)}\n'
+                    f'bash -c {shlex.quote(cache_import_script)} > /dev/null\n'
                     f'echo "[cache] All nodes ready in $((SECONDS - '
                     f'CACHE_START))s"\n')
 
-                # Use the cached .sqsh file (guaranteed to exist after srun)
-                container_image_for_pyxis = cache_sqsh_path
+                # Use shell variable for container image (computed at runtime)
+                container_image_for_pyxis = '$CACHE_SQSH'
+                container_image_is_shell_var = True
             else:
                 # No caching - use pyxis format directly
                 container_image_for_pyxis = pyxis_container_image
@@ -384,7 +400,12 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'{container_init_script}'
             f'touch {container_init_done_dir}/$SLURM_PROCID && sleep infinity')
 
-        container_image_arg = shlex.quote(container_image_for_pyxis)
+        # When caching is enabled, container_image_for_pyxis is a shell variable
+        # (e.g., $CACHE_SQSH) that should be expanded, not quoted.
+        if container_image_is_shell_var:
+            container_image_arg = f'"{container_image_for_pyxis}"'
+        else:
+            container_image_arg = shlex.quote(container_image_for_pyxis)
 
         container_block = (
             f'{container_cache_block}'

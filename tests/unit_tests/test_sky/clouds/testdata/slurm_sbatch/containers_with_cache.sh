@@ -47,10 +47,14 @@ echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster-cached/.sky_proctrack_
 # Suppress login messages.
 touch /home/testuser/.sky_clusters/test-cluster-cached/.hushlogin
 # Ensure container image is cached on each compute node
+# Cache is per-user to avoid permission issues
+CACHE_BASE='/shared/container_cache'
+CACHE_SQSH="$CACHE_BASE/$(id -u)/nvcr.io+nvidia+pytorch+24.01-py3.sqsh"
 echo "[cache] Ensuring image cache on all nodes..."
 CACHE_START=$SECONDS
-srun --nodes=1 --ntasks-per-node=1 bash -c 'CACHE_DIR='"'"'/shared/container_cache'"'"'
-CACHE_SQSH='"'"'/shared/container_cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh'"'"'
+srun --nodes=1 --ntasks-per-node=1 bash -c 'CACHE_BASE='"'"'/shared/container_cache'"'"'
+CACHE_DIR="$CACHE_BASE/$(id -u)"
+CACHE_SQSH="$CACHE_DIR/nvcr.io+nvidia+pytorch+24.01-py3.sqsh"
 mkdir -p "$CACHE_DIR"
 if [ -f "$CACHE_SQSH" ]; then
   echo "[cache] Node $SLURM_NODEID: Using cached image"
@@ -59,14 +63,15 @@ else
   CACHE_START=$SECONDS
   CACHE_SQSH_TMP="$CACHE_SQSH.tmp.$$"
   enroot import -o "$CACHE_SQSH_TMP" docker://nvcr.io#nvidia/pytorch:24.01-py3 && mv "$CACHE_SQSH_TMP" "$CACHE_SQSH" && echo "[cache] Node $SLURM_NODEID: Cached in $((SECONDS - CACHE_START))s" || { rm -f "$CACHE_SQSH_TMP"; echo "[cache] Node $SLURM_NODEID: Import failed"; exit 1; }
-fi'
+fi
+echo "$CACHE_SQSH"' > /dev/null
 echo "[cache] All nodes ready in $((SECONDS - CACHE_START))s"
 srun --nodes=1 mkdir -p /tmp/ccache_$(id -u)
 CONTAINER_START=$SECONDS
 echo "[container] Initializing test-cluster-cached on all nodes"
 rm -rf /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done
 mkdir -p /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done
-srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='/shared/container_cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh' --container-name=test-cluster-cached:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image="$CACHE_SQSH" --container-name=test-cluster-cached:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
 apt-get update

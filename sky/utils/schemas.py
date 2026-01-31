@@ -1506,7 +1506,8 @@ def get_config_schema():
                     'type': 'integer',
                 },
                 'container_cache_path': {
-                    # Path to cache container images as .sqsh files on each node.
+                    # Base path to cache container images as .sqsh files.
+                    # Per-user subdirectories are created automatically (<path>/<uid>/).
                     # Defaults to /tmp/sky_container_cache (node-local).
                     # Set to null to disable caching.
                     'type': ['string', 'null'],
