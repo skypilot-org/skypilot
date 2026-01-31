@@ -627,6 +627,27 @@ def skyignore_dir():
         yield temp_dir
 
 
+def _safe_reload_config():
+    """Safely reload config, handling cases where config file doesn't exist.
+
+    Some tests set SKYPILOT_CONFIG env var to a temp file that may be deleted
+    before other tests run. This function handles that case gracefully.
+    """
+    # If SKYPILOT_CONFIG points to a non-existent file, temporarily unset it
+    env_var_name = 'SKYPILOT_CONFIG'
+    original_value = os.environ.get(env_var_name)
+    if original_value and not os.path.exists(original_value):
+        del os.environ[env_var_name]
+        try:
+            skypilot_config.reload_config()
+        finally:
+            # Restore the original value (even though file doesn't exist)
+            # in case the test that set it is still running
+            os.environ[env_var_name] = original_value
+    else:
+        skypilot_config.reload_config()
+
+
 @pytest.fixture(autouse=True)
 def reset_global_state():
     """Reset global state before each test."""
@@ -639,11 +660,11 @@ def reset_global_state():
     server_common.get_dashboard_url.cache_clear()
     # Reload config from default paths to reset any in-memory config changes
     # from previous tests that might have modified the config.
-    skypilot_config.reload_config()
+    _safe_reload_config()
     yield
     # Clear again after the test to prevent pollution to subsequent tests
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
     # Reload config again to reset any changes made by this test
-    skypilot_config.reload_config()
+    _safe_reload_config()
