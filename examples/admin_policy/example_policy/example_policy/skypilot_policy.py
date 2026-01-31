@@ -167,6 +167,43 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
             skypilot_config=user_request.skypilot_config)
 
 
+class AddVolumesPolicy(sky.AdminPolicy):
+    """Example policy: automatically adds volumes to tasks.
+
+    This policy demonstrates server-side volume mounting for administrative
+    use cases like compliance, shared data access, and centralized storage.
+    """
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Adds predefined volumes to the task.
+        
+        This policy automatically adds organizational volumes for:
+        - /mnt/data0: Shared data volume (pvc0)
+        
+        The policy preserves existing file mounts and respects user overrides.
+        Controller tasks (managed job/serve controllers) are skipped.
+        """
+        task = user_request.task
+        
+        # Skip controller tasks to avoid mounting volumes on job controllers
+        if hasattr(task, 'is_controller_task') and task.is_controller_task():
+            return sky.MutatedUserRequest(
+                task=task, skypilot_config=user_request.skypilot_config)
+        
+        # Define the volumes to add
+        volumes_to_add = {
+            '/mnt/data0': 'pvc0'  # Mount path -> Volume name
+        }
+        
+        # Set volumes on the task (this overwrites existing volumes as designed)
+        task.set_volumes(volumes_to_add)
+        
+        return sky.MutatedUserRequest(
+            task=task, skypilot_config=user_request.skypilot_config)
+
+
 class SetMaxAutostopIdleMinutesPolicy(sky.AdminPolicy):
     """Example policy: set max autostop idle minutes for all tasks."""
 
