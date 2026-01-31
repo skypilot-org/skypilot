@@ -18,6 +18,7 @@ import requests
 import sky
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
@@ -43,7 +44,6 @@ logger = sky_logging.init_logger("sky.pytest")
 
 @pytest.fixture
 def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
-    from sky import skypilot_config
     region = 'us-east-2'
     if skypilot_config.loaded():
         ssh_proxy_command = skypilot_config.get_nested(
@@ -637,8 +637,13 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # Reload config from default paths to reset any in-memory config changes
+    # from previous tests that might have modified the config.
+    skypilot_config.reload_config()
     yield
     # Clear again after the test to prevent pollution to subsequent tests
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # Reload config again to reset any changes made by this test
+    skypilot_config.reload_config()
