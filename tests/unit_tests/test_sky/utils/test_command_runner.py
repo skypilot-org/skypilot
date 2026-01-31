@@ -114,7 +114,19 @@ def _generate_host_key():
 
 
 class TestSSHCommandRunnerInteractiveAuth:
-    """Test SSHCommandRunner with mock SSH server requiring interactive auth."""
+    """Test SSHCommandRunner with mock SSH server requiring interactive auth.
+
+    This test verifies the `_retry_with_interactive_auth` workflow where:
+    1. The client (runner) connects to a mock SSH server requiring keyboard-interactive auth.
+    2. The runner spawns a PTY and passes the master fd to a handler via a Unix socket.
+    3. The handler (simulated here) reads the auth prompt from the PTY and writes the response.
+    4. The mock server authenticates the client, accepts the command execution, and returns exit status 0.
+
+    Crucially, this test handles synchronization to prevent deadlocks:
+    - The server waits for the 'exec' request event before sending an exit status.
+    - The server immediately closes the channel after sending status 0 to ensure the OpenSSH client receives EOF and terminates.
+    - The test waits for the client to finish successfully before signaling the server to shut down.
+    """
 
     @pytest.fixture(autouse=True)
     def mock_ssh_server(self):
@@ -132,7 +144,11 @@ class TestSSHCommandRunnerInteractiveAuth:
         self.ssh_server = MockSSHServer(exec_event=self.exec_event,
                                         expected_code='123456')
 
+        # Ensure the server is ready before yielding
+        server_ready = threading.Event()
+
         def run_server():
+            server_ready.set()
             conn, _ = server_socket.accept()
             transport = paramiko.Transport(conn)
             transport.add_server_key(host_key)
@@ -172,13 +188,22 @@ class TestSSHCommandRunnerInteractiveAuth:
         server_thread = threading.Thread(target=run_server, daemon=True)
         server_thread.start()
 
+        # Wait for the server to be ready before yielding
+        server_ready.wait(timeout=5)
+
         yield
 
         server_socket.close()
         server_thread.join(timeout=2)
 
     def test_interactive_auth_via_pty_and_unix_socket(self):
-        """Test that SSHCommandRunner's interactive auth flow works."""
+        """Test that SSHCommandRunner's interactive auth flow works.
+        This tests the actual _retry_with_interactive_auth code path:
+        1. SSH command is run with PTY for interactive auth
+        2. PTY master fd is passed to handler via Unix socket
+        3. Handler writes auth code to PTY
+        4. SSH authenticates successfully
+        """
         session_id = 'test-session-123'
 
         # Create SSHCommandRunner pointing to mock server
@@ -189,6 +214,11 @@ class TestSSHCommandRunnerInteractiveAuth:
             ssh_control_name=None,
         )
 
+        # Thread to simulate websocket handler:
+        # - Connect to Unix socket
+        # - Receive PTY master fd
+        # - Write auth code to PTY
+        # - Send OK signal
         auth_handler_done = threading.Event()
         auth_error = []
 
@@ -214,25 +244,26 @@ class TestSSHCommandRunnerInteractiveAuth:
                 pty_master_fd = interactive_utils.recv_fd(sock)
 
                 # Wait for and read prompt from SSH
+                # Use select to wait for data to be available
                 prompt_data = b''
-                deadline = time.time() + 5.0
+                deadline = time.time() + 5.0  # 5 second timeout
 
                 while time.time() < deadline:
+                    # Check if data is available to read
                     readable, _, _ = select.select([pty_master_fd], [], [], 0.1)
                     if readable:
                         try:
                             chunk = os.read(pty_master_fd, 1024)
                             if chunk:
                                 prompt_data += chunk
+                                # Check if we got the full prompt
                                 if b'Verification code:' in prompt_data:
                                     break
                         except OSError:
                             break
 
-                # Check that we actually got the prompt
-                # RELAXED ASSERTION: Avoid checking strict \r or username prefixes
-                assert b'Verification code: ' in prompt_data, \
-                    f'Expected prompt not found in: {prompt_data!r}'
+                assert prompt_data == b'\r(testuser@127.0.0.1) Verification code: ', \
+                    f'Expected exact prompt, got: {prompt_data!r}'
 
                 # Write auth code
                 os.write(pty_master_fd, b'123456\n')
@@ -243,7 +274,7 @@ class TestSSHCommandRunnerInteractiveAuth:
             except Exception as e:
                 auth_error.append(str(e))
             finally:
-                # Cleanup
+                # Cleanup - fd may already be closed if SSH exited
                 try:
                     if sock is not None:
                         sock.close()
@@ -260,19 +291,21 @@ class TestSSHCommandRunnerInteractiveAuth:
                                           daemon=True)
         handler_thread.start()
 
+        # Build SSH command that would trigger interactive auth
+        # We call _retry_with_interactive_auth directly
         with tempfile.NamedTemporaryFile(mode='w', suffix='.log',
                                          delete=False) as f:
             log_path = f.name
 
         try:
-            # Build SSH command
+            # Build SSH command using the actual runner's method
             ssh_command = runner.ssh_base_command(
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
                 port_forward=None,
                 connect_timeout=30,
             )
 
-            # Force keyboard-interactive
+            # Add options to skip host key checking and force keyboard-interactive
             ssh_command = (ssh_command[:1] + [
                 '-o',
                 'StrictHostKeyChecking=no',
@@ -301,10 +334,14 @@ class TestSSHCommandRunnerInteractiveAuth:
             auth_handler_done.wait(timeout=10)
             self.server_done.wait(timeout=5)
 
+            # Verify auth was attempted with correct code
             assert self.ssh_server.auth_attempts == [['123456']], \
                 f'Expected auth with 123456, got {self.ssh_server.auth_attempts}'
 
+            # Check no errors in auth handler
             assert not auth_error, f'Auth handler errors: {auth_error}'
+
+            # Result is just the return code when require_outputs=False
             assert result == 0, f'SSH failed with code {result}'
 
         finally:
