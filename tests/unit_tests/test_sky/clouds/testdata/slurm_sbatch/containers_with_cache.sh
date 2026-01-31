@@ -1,0 +1,95 @@
+#!/bin/bash
+#SBATCH --job-name=test-cluster-cached
+#SBATCH --output=.sky_provision/slurm-%j.out
+#SBATCH --error=.sky_provision/slurm-%j.out
+#SBATCH --nodes=1
+#SBATCH --time=7-00:00:00
+#SBATCH --wait-all-nodes=1
+# Let the job be terminated rather than requeued implicitly.
+#SBATCH --no-requeue
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --gres=gpu:A100:2
+
+# Cleanup function to remove cluster dirs on job termination.
+cleanup() {
+    # The Skylet is daemonized, so it is not automatically terminated when
+    # the Slurm job is terminated, we need to kill it manually.
+    echo "Terminating Skylet..."
+    if [ -f "/tmp/test-cluster-cached/.sky/skylet_pid" ]; then
+        kill $(cat "/tmp/test-cluster-cached/.sky/skylet_pid") 2>/dev/null || true
+    fi
+    echo "Cleaning up sky directories..."
+    # Remove the per-node enroot container, if it exists.
+    # This is only needed when container_scope=global.
+    # When container_scope=job, named containers are removed automatically
+    # at the end of the Slurm job, see: https://github.com/NVIDIA/pyxis/wiki/Setup#slurm-epilog
+    srun --nodes=1 --ntasks-per-node=1 enroot remove -f pyxis_test-cluster-cached 2>/dev/null || true
+    # Clean up sky runtime directory on each node.
+    # NOTE: We can do this because --nodes for both this srun and the
+    # sbatch is the same number. Otherwise, there are no guarantees
+    # that this srun will run on the same subset of nodes as the srun
+    # that created the sky directories.
+    srun --nodes=1 rm -rf /tmp/test-cluster-cached
+    rm -rf /home/testuser/.sky_clusters/test-cluster-cached
+    exit 0
+}
+trap cleanup TERM
+
+# Create sky home directory and subdirectories for the cluster.
+mkdir -p /home/testuser/.sky_clusters/test-cluster-cached/sky_logs /home/testuser/.sky_clusters/test-cluster-cached/sky_workdir /home/testuser/.sky_clusters/test-cluster-cached/.sky
+# Create sky runtime directory on each node.
+srun --nodes=1 mkdir -p /tmp/test-cluster-cached
+# Marker file to indicate we're in a Slurm cluster.
+touch /home/testuser/.sky_clusters/test-cluster-cached/.sky_slurm_cluster
+# Store proctrack type for task executor to read.
+echo 'cgroup' > /home/testuser/.sky_clusters/test-cluster-cached/.sky_proctrack_type
+# Suppress login messages.
+touch /home/testuser/.sky_clusters/test-cluster-cached/.hushlogin
+# Container image caching
+CACHE_DIR='/shared/container_cache'
+CACHE_SQSH='/shared/container_cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh'
+FALLBACK_IMAGE='nvcr.io#nvidia/pytorch:24.01-py3'
+mkdir -p "$CACHE_DIR"
+if [ -f "$CACHE_SQSH" ]; then
+  echo "[cache] Using cached image: $CACHE_SQSH"
+  CONTAINER_IMAGE="$CACHE_SQSH"
+else
+  echo "[cache] Importing container image to cache..."
+  CACHE_START=$SECONDS
+  # Use a temp file and atomic move to avoid partial files
+  CACHE_SQSH_TMP="$CACHE_SQSH.tmp.$$"
+  if enroot import -o "$CACHE_SQSH_TMP" docker://nvcr.io#nvidia/pytorch:24.01-py3; then
+    mv "$CACHE_SQSH_TMP" "$CACHE_SQSH"
+    echo "[cache] Image cached in $((SECONDS - CACHE_START))s: $CACHE_SQSH"
+    CONTAINER_IMAGE="$CACHE_SQSH"
+  else
+    rm -f "$CACHE_SQSH_TMP"
+    echo "[cache] Failed to import image, falling back to direct pull"
+    CONTAINER_IMAGE="$FALLBACK_IMAGE"
+  fi
+fi
+srun --nodes=1 mkdir -p /tmp/ccache_$(id -u)
+CONTAINER_START=$SECONDS
+echo "[container] Initializing test-cluster-cached on all nodes"
+rm -rf /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done
+mkdir -p /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done
+srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image="$CONTAINER_IMAGE" --container-name=test-cluster-cached:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+echo "[container-init] Starting..."
+INIT_START=$SECONDS
+apt-get update
+apt-get install -y ca-certificates rsync curl git wget fuse
+echo '"'"'alias sudo=""'"'"' >> ~/.bashrc
+echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
+touch /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &
+while true; do
+  num_ready=$(ls -1 /home/testuser/.sky_clusters/test-cluster-cached/.sky_container_init_done 2>/dev/null | wc -l)
+  if [ "$num_ready" -ge "1" ]; then
+    break
+  fi
+  sleep 1
+done
+echo "[container] Ready in $((SECONDS - CONTAINER_START))s"
+touch /home/testuser/.sky_clusters/test-cluster-cached/.sky_slurm_container /home/testuser/.sky_clusters/test-cluster-cached/.sky_sbatch_ready
+
+wait

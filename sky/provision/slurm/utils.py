@@ -847,3 +847,53 @@ def srun_sshd_command(
         '-o',
         f'AcceptEnv={constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}',
     ])
+
+
+def get_container_cache_filename(container_image: str) -> str:
+    """Generate a cache filename for a container image.
+
+    Converts the container image URL to a valid filename suitable for
+    storing as a .sqsh file. The filename format follows enroot's import
+    naming convention: registry+path+tag.sqsh
+
+    Args:
+        container_image: Container image URL (e.g., 'nvcr.io/nvidia/pytorch:24.01-py3')
+
+    Returns:
+        A valid filename for the cached .sqsh file (e.g., 'nvcr.io+nvidia+pytorch+24.01-py3.sqsh')
+    """
+    # Parse the image into registry, path, and tag components
+    # Format: [registry/]path[:tag]
+    # Examples:
+    #   - nvcr.io/nvidia/pytorch:24.01-py3 -> nvcr.io+nvidia+pytorch+24.01-py3.sqsh
+    #   - ubuntu:22.04 -> ubuntu+22.04.sqsh
+    #   - myimage -> myimage.sqsh
+
+    # Split tag from the image
+    if ':' in container_image.split('/')[-1]:
+        image_base, tag = container_image.rsplit(':', 1)
+    else:
+        image_base = container_image
+        tag = 'latest'
+
+    # Replace slashes with + (following enroot convention)
+    cache_name = image_base.replace('/', '+')
+
+    # Add tag
+    cache_name = f'{cache_name}+{tag}.sqsh'
+
+    return cache_name
+
+
+def get_container_cache_path(cache_dir: str, container_image: str) -> str:
+    """Get the full path to a cached container image.
+
+    Args:
+        cache_dir: Directory where cached images are stored.
+        container_image: Container image URL.
+
+    Returns:
+        Full path to the cached .sqsh file.
+    """
+    filename = get_container_cache_filename(container_image)
+    return os.path.join(cache_dir, filename)

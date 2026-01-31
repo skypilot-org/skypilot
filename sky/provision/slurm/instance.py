@@ -258,11 +258,23 @@ def _create_virtual_instance(
     # between registry and path. See:
     # https://github.com/NVIDIA/pyxis/wiki/Usage#registry-syntax
     container_image = resources.get('image_id')
+    container_cache_path_config = skypilot_config.get_effective_region_config(
+        cloud='slurm',
+        region=region,
+        keys=('container_cache_path',),
+        default_value=None)
+    # Commands to run before container initialization (e.g., cache import)
+    container_cache_block = ''
+    # Whether to use shell variable $CONTAINER_IMAGE (for caching with fallback)
+    use_container_image_var = False
+
     if container_image is not None:
         if container_image.endswith('.sqsh'):
             # Local .sqsh file, use path directly.
             pass
         else:
+            # Convert registry format for pyxis (non-Docker Hub registries)
+            pyxis_container_image = container_image
             parts = container_image.split('/', 1)
             if len(parts) > 1:
                 maybe_domain, maybe_path = parts
@@ -270,7 +282,54 @@ def _create_virtual_instance(
                                       ':' in maybe_domain or
                                       maybe_domain == 'localhost')
                 if is_custom_registry:
-                    container_image = f'{maybe_domain}#{maybe_path}'
+                    pyxis_container_image = f'{maybe_domain}#{maybe_path}'
+
+            # Check if container caching is enabled
+            if container_cache_path_config is not None:
+                use_container_image_var = True
+                # Build the cache path for this image
+                cache_sqsh_path = slurm_utils.get_container_cache_path(
+                    container_cache_path_config, container_image)
+                # Build commands to import image to cache if not exists.
+                # The import is done on the login node before the container
+                # initialization block, so the cached .sqsh file is available
+                # to all compute nodes via the shared filesystem.
+                #
+                # For enroot import, we use '#' separator for non-Docker Hub
+                # registries (e.g., docker://nvcr.io#nvidia/pytorch:24.01-py3)
+                # Same format as pyxis.
+                enroot_image_url = pyxis_container_image
+
+                container_cache_block = (
+                    f'# Container image caching\n'
+                    f'CACHE_DIR={shlex.quote(container_cache_path_config)}\n'
+                    f'CACHE_SQSH={shlex.quote(cache_sqsh_path)}\n'
+                    f'FALLBACK_IMAGE={shlex.quote(pyxis_container_image)}\n'
+                    f'mkdir -p "$CACHE_DIR"\n'
+                    f'if [ -f "$CACHE_SQSH" ]; then\n'
+                    f'  echo "[cache] Using cached image: $CACHE_SQSH"\n'
+                    f'  CONTAINER_IMAGE="$CACHE_SQSH"\n'
+                    f'else\n'
+                    f'  echo "[cache] Importing container image to cache..."\n'
+                    f'  CACHE_START=$SECONDS\n'
+                    f'  # Use a temp file and atomic move to avoid partial files\n'
+                    f'  CACHE_SQSH_TMP="$CACHE_SQSH.tmp.$$"\n'
+                    f'  if enroot import -o "$CACHE_SQSH_TMP" '
+                    f'docker://{enroot_image_url}; then\n'
+                    f'    mv "$CACHE_SQSH_TMP" "$CACHE_SQSH"\n'
+                    f'    echo "[cache] Image cached in $((SECONDS - '
+                    f'CACHE_START))s: $CACHE_SQSH"\n'
+                    f'    CONTAINER_IMAGE="$CACHE_SQSH"\n'
+                    f'  else\n'
+                    f'    rm -f "$CACHE_SQSH_TMP"\n'
+                    f'    echo "[cache] Failed to import image, '
+                    f'falling back to direct pull"\n'
+                    f'    CONTAINER_IMAGE="$FALLBACK_IMAGE"\n'
+                    f'  fi\n'
+                    f'fi\n')
+            else:
+                # No caching - use pyxis format directly
+                container_image = pyxis_container_image
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
 
     # Build the sbatch script
@@ -319,7 +378,17 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
         container_cmd = shlex.quote(
             f'{container_init_script}'
             f'touch {container_init_done_dir}/$SLURM_PROCID && sleep infinity')
+
+        # When caching is enabled, use $CONTAINER_IMAGE shell variable
+        # (set by container_cache_block) for fallback support.
+        # Otherwise, use the hardcoded container image path.
+        if use_container_image_var:
+            container_image_arg = '"$CONTAINER_IMAGE"'
+        else:
+            container_image_arg = shlex.quote(container_image)
+
         container_block = (
+            f'{container_cache_block}'
             f'srun --nodes={num_nodes} mkdir -p {host_ccache_dir}\n'
             f'CONTAINER_START=$SECONDS\n'
             f'echo "[container] Initializing {container_name} on all nodes"\n'
@@ -327,7 +396,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'mkdir -p {container_init_done_dir}\n'
             f'srun --overlap {"--label " if num_nodes > 1 else ""}--unbuffered '
             f'--nodes={num_nodes} --ntasks-per-node=1 '
-            f'--container-image={shlex.quote(container_image)} '
+            f'--container-image={container_image_arg} '
             f'--container-name={shlex.quote(container_name)}:create '
             f'--container-mounts="{container_mounts}" '
             f'--container-remap-root '

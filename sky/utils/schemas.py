@@ -1505,6 +1505,12 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'container_cache_path': {
+                    # Path to cache container images as .sqsh files.
+                    # Must be on a shared filesystem accessible by all nodes.
+                    # If not set, container images are pulled fresh each time.
+                    'type': 'string',
+                },
             }
         },
         'oci': {

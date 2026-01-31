@@ -348,6 +348,56 @@ class TestGRESGPUParsing:
         assert gpu_count == expected_count
 
 
+class TestContainerCacheUtils:
+    """Test container caching utility functions."""
+
+    @pytest.mark.parametrize(
+        'container_image,expected_filename',
+        [
+            # Standard registry with tag
+            ('nvcr.io/nvidia/pytorch:24.01-py3',
+             'nvcr.io+nvidia+pytorch+24.01-py3.sqsh'),
+            # Docker Hub with tag
+            ('ubuntu:22.04', 'ubuntu+22.04.sqsh'),
+            # Docker Hub without tag (defaults to latest)
+            ('ubuntu', 'ubuntu+latest.sqsh'),
+            # Multi-level path
+            ('gcr.io/google-containers/busybox:1.27',
+             'gcr.io+google-containers+busybox+1.27.sqsh'),
+            # No registry, just image name with tag
+            ('myimage:v1.0', 'myimage+v1.0.sqsh'),
+            # Image with special characters in tag
+            ('nvcr.io/nvidia/pytorch:24.01-py3-igpu',
+             'nvcr.io+nvidia+pytorch+24.01-py3-igpu.sqsh'),
+            # Localhost registry
+            ('localhost:5000/myimage:latest',
+             'localhost:5000+myimage+latest.sqsh'),
+        ])
+    def test_get_container_cache_filename(self, container_image,
+                                          expected_filename):
+        """Test that cache filename generation is correct."""
+        filename = slurm_utils.get_container_cache_filename(container_image)
+        assert filename == expected_filename
+
+    @pytest.mark.parametrize(
+        'cache_dir,container_image,expected_path',
+        [
+            # Standard case
+            ('/shared/cache', 'nvcr.io/nvidia/pytorch:24.01-py3',
+             '/shared/cache/nvcr.io+nvidia+pytorch+24.01-py3.sqsh'),
+            # Home directory
+            ('~/.sky/container_cache', 'ubuntu:22.04',
+             '~/.sky/container_cache/ubuntu+22.04.sqsh'),
+            # Trailing slash in cache dir
+            ('/shared/cache/', 'myimage:v1', '/shared/cache//myimage+v1.sqsh'),
+        ])
+    def test_get_container_cache_path(self, cache_dir, container_image,
+                                      expected_path):
+        """Test that cache path generation is correct."""
+        path = slurm_utils.get_container_cache_path(cache_dir, container_image)
+        assert path == expected_path
+
+
 SBATCH_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'slurm_sbatch'
 
 
@@ -521,3 +571,60 @@ class TestCreateVirtualInstance:
         written_script = self._run_and_capture_script(
             'test-cluster-no-container', config)
         assert_sbatch_matches_snapshot('basic', written_script)
+
+    @patch('sky.provision.slurm.instance.skypilot_config.'
+           'get_effective_region_config')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
+    @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
+    @patch('sky.provision.slurm.instance.slurm.SlurmClient')
+    @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
+    def test_container_with_caching(self, mock_ssh_runner, mock_slurm_client,
+                                    mock_get_partition_info,
+                                    mock_get_proctrack_type,
+                                    mock_get_region_config):
+        """Test sbatch script with container caching enabled."""
+        from sky.provision import common
+
+        self._setup_mocks(mock_ssh_runner, mock_slurm_client,
+                          mock_get_partition_info, 'gpu')
+        mock_get_proctrack_type.return_value = 'cgroup'
+
+        # Configure mock to return cache path for container_cache_path
+        def get_region_config_side_effect(cloud, region, keys, default_value):
+            if keys == ('container_cache_path',):
+                return '/shared/container_cache'
+            if keys == ('provision_timeout',):
+                return None
+            return default_value
+
+        mock_get_region_config.side_effect = get_region_config_side_effect
+
+        config = common.ProvisionConfig(
+            provider_config={
+                'ssh': {
+                    'hostname': 'login.example.com',
+                    'port': '22',
+                    'user': 'testuser',
+                    'private_key': '/path/to/key',
+                },
+                'cluster': 'test-slurm',
+                'partition': 'gpu',
+            },
+            authentication_config={},
+            docker_config={},
+            node_config={
+                'cpus': 4,
+                'memory': 16,
+                'accelerator_type': 'A100',
+                'accelerator_count': 2,
+                'image_id': 'nvcr.io/nvidia/pytorch:24.01-py3',
+            },
+            count=1,
+            tags={},
+            resume_stopped_nodes=False,
+            ports_to_open_on_launch=None,
+        )
+
+        written_script = self._run_and_capture_script('test-cluster-cached',
+                                                      config)
+        assert_sbatch_matches_snapshot('containers_with_cache', written_script)
