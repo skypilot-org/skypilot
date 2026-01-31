@@ -1,0 +1,15 @@
+# Basic Cluster Template
+resources:
+  # 8x NVIDIA A100 GPU
+  accelerators: A100:8
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "Running setup."
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "Hello, SkyPilot!"
+  conda env list
