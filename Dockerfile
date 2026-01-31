@@ -104,8 +104,6 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
     # Upgrade setuptools in base image to mitigate CVE-2024-6345
     ~/.local/bin/uv pip install --system --upgrade setuptools==78.1.1 && \
-    # Upgrade wheel in base image to mitigate CVE-2026-24049
-    ~/.local/bin/uv pip install --system --upgrade wheel==0.46.2 && \
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv && \
     apt-get clean && \
