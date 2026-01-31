@@ -1,5 +1,6 @@
 """Unit tests for sky.utils.command_runner."""
 
+from contextlib import suppress
 import os
 import select
 import socket
@@ -148,6 +149,9 @@ class TestSSHCommandRunnerInteractiveAuth:
                         # This unblocks runner.run() so it returns 0.
                         # Echo back the command to show auth worked
                         channel.send_exit_status(0)
+                        # 3. CRITICAL FIX: Close the channel (send EOF) immediately.
+                        # OpenSSH client waits for EOF before exiting.
+                        channel.close()
                     else:
                         print("Timeout waiting for exec request")
 
@@ -156,7 +160,11 @@ class TestSSHCommandRunnerInteractiveAuth:
                 except Exception as e:
                     print(f'Server logic error: {e}')
                 finally:
-                    channel.close()
+
+                    # Ensure channel is closed with suppressing exceptions
+                    with suppress(Exception):
+                        channel.close()
+
                     transport.close()
 
             self.server_done.set()
