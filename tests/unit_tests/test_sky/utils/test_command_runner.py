@@ -108,19 +108,20 @@ def _generate_host_key():
 class TestSSHCommandRunnerInteractiveAuth:
     """Test SSHCommandRunner with mock SSH server requiring interactive auth."""
 
-    @pytest.fixture
+    @pytest.fixture(autouse=True)
     def mock_ssh_server(self):
-        """Start a mock SSH server and return (port, server_instance)."""
+        """Start a mock SSH server and set attributes on the test class."""
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server_socket.bind(('127.0.0.1', 0))
         server_socket.listen(1)
-        port = server_socket.getsockname()[1]
+        self.port = server_socket.getsockname()[1]
 
         host_key = _generate_host_key()
-        ssh_server = MockSSHServer(expected_code='123456')
+        self.ssh_server = MockSSHServer(expected_code='123456')
         server_ready = threading.Event()
-        server_done = threading.Event()
+        self.server_done = threading.Event()
+        self.ssh_session_finished = threading.Event()
 
         def run_server():
             server_ready.set()
@@ -129,29 +130,32 @@ class TestSSHCommandRunnerInteractiveAuth:
                 conn, _ = server_socket.accept()
                 transport = paramiko.Transport(conn)
                 transport.add_server_key(host_key)
-                transport.start_server(server=ssh_server)
+                transport.start_server(server=self.ssh_server)
 
                 # Wait for channel (exec request)
                 channel = transport.accept(timeout=30)
                 if channel:
-                    time.sleep(0.5)
+                    # Wait for the test to signal that the SSH session is over
+                    # before closing the server-side channel and transport. This
+                    # prevents the server from shutting down prematurely.
+                    self.ssh_session_finished.wait(timeout=15)
                     channel.close()
                 transport.close()
             except Exception as e:
                 print(f'Server error: {e}')
             finally:
-                server_done.set()
+                self.server_done.set()
 
         server_thread = threading.Thread(target=run_server, daemon=True)
         server_thread.start()
         server_ready.wait(timeout=5)
 
-        yield port, ssh_server, server_done
+        yield
 
         server_socket.close()
         server_thread.join(timeout=2)
 
-    def test_interactive_auth_via_pty_and_unix_socket(self, mock_ssh_server):
+    def test_interactive_auth_via_pty_and_unix_socket(self):
         """Test that SSHCommandRunner's interactive auth flow works.
 
         This tests the actual _retry_with_interactive_auth code path:
@@ -160,12 +164,11 @@ class TestSSHCommandRunnerInteractiveAuth:
         3. Handler writes auth code to PTY
         4. SSH authenticates successfully
         """
-        port, ssh_server, server_done = mock_ssh_server
         session_id = 'test-session-123'
 
         # Create SSHCommandRunner pointing to mock server
         runner = command_runner.SSHCommandRunner(
-            node=('127.0.0.1', port),
+            node=('127.0.0.1', self.port),
             ssh_user='testuser',
             ssh_private_key=None,
             ssh_control_name=None,
@@ -284,13 +287,17 @@ class TestSSHCommandRunnerInteractiveAuth:
                 executable='/bin/bash',
             )
 
+            # Signal to the mock server that the SSH session is complete, so it
+            # can safely close the connection.
+            self.ssh_session_finished.set()
+
             # Wait for everything to complete
             auth_handler_done.wait(timeout=10)
-            server_done.wait(timeout=5)
+            self.server_done.wait(timeout=5)
 
             # Verify auth was attempted with correct code
-            assert ssh_server.auth_attempts == [['123456']], \
-                f'Expected auth with 123456, got {ssh_server.auth_attempts}'
+            assert self.ssh_server.auth_attempts == [['123456']], \
+                f'Expected auth with 123456, got {self.ssh_server.auth_attempts}'
 
             # Check no errors in auth handler
             assert not auth_error, f'Auth handler errors: {auth_error}'
