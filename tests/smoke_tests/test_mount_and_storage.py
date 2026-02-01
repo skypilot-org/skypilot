@@ -219,13 +219,13 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     return test_commands, clean_command
 
 
-def _storage_mount_cached_test_command_generator(
-        f1: TextIO,
-        f2: TextIO,
-        cluster_name: str,
-        storage_name: str,
-        cloud: str,
-        image_id: Optional[str] = None):
+def _storage_mount_cached_test_command_generator(f1: TextIO,
+                                                 f2: TextIO,
+                                                 cluster_name: str,
+                                                 storage_name: str,
+                                                 cloud: str,
+                                                 image_id: Optional[str] = None,
+                                                 graceful: bool = False):
     assert cloud in ['aws', 'gcp', 'azure', 'kubernetes', 'slurm']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mount_cached.yaml.j2').read_text()
@@ -257,7 +257,7 @@ def _storage_mount_cached_test_command_generator(
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {image_id_arg} {write_file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
-        f'sky down -y {cluster_name}',
+        f'sky down -y {cluster_name}{" --graceful" if graceful else ""}',
         f'sky launch -y -c {cluster_name} --infra {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {image_id_arg} {check_file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
     ]
@@ -312,6 +312,7 @@ def test_aws_storage_mounts_arm64():
 
 
 @pytest.mark.aws
+@pytest.mark.parametrize('graceful', [False, True])
 @pytest.mark.parametrize(
     'ami',
     [
@@ -342,14 +343,14 @@ def test_aws_storage_mounts_arm64():
         # --output text --region us-east-2
         'ami-0a5a5b7e2278263e5'  # Amazon Linux 2023 (yum)
     ])
-def test_aws_storage_mounts_cached(ami: Optional[str]):
+def test_aws_storage_mounts_cached(ami: Optional[str], graceful: bool):
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'aws'
     storage_name = f'sky-test-{int(time.time())}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
         with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
             test_commands, clean_command = _storage_mount_cached_test_command_generator(
-                f1, f2, name, storage_name, cloud)
+                f1, f2, name, storage_name, cloud, graceful=graceful)
 
             for i, cmd in enumerate(test_commands):
                 if cmd.startswith('sky launch') and '--infra aws' in cmd:

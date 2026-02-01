@@ -482,9 +482,12 @@ async def start(
 async def down(
         cluster_name: str,
         purge: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of down() that tears down a cluster."""
-    request_id = await asyncio.to_thread(sdk.down, cluster_name, purge)
+    request_id = await asyncio.to_thread(sdk.down, cluster_name, purge,
+                                         graceful, graceful_timeout)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -496,9 +499,12 @@ async def down(
 async def stop(
         cluster_name: str,
         purge: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of stop() that stops a cluster."""
-    request_id = await asyncio.to_thread(sdk.stop, cluster_name, purge)
+    request_id = await asyncio.to_thread(sdk.stop, cluster_name, purge,
+                                         graceful, graceful_timeout)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:

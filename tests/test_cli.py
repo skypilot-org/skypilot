@@ -726,11 +726,11 @@ def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
 
     names = ["sky-ok-1", "sky-nebius-fail", "sky-ok-2"]
 
-    def fake_down(name, purge=False):
+    def fake_down(name, purge=False, graceful=False, graceful_timeout=None):
         if name == "sky-nebius-fail":
             raise DummyCloudError()
 
-    def fake_stop(name, purge=False):
+    def fake_stop(name, purge=False, graceful=False, graceful_timeout=None):
         return fake_down(name, purge=purge)
 
     def fake_autostop(name, idle_minutes, wait_for, down):
