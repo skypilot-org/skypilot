@@ -62,6 +62,7 @@ export const CLOUDS_LIST = [
   'Paperspace',
   'DO',
   'Nebius',
+  'Verda',
 ];
 
 export const CLOUD_CANONICALIZATIONS = Object.fromEntries([
