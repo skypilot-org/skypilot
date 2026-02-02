@@ -1,5 +1,6 @@
 """ Yotta Cloud. """
 
+import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -13,9 +14,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
 
-_CREDENTIAL_FILES = [
-    'credentials',
-]
+CREDENTIAL_FILE = '~/.yotta/credentials'
 
 _CLOUD = 'yotta'
 _BASE_IMAGE = (
@@ -290,24 +289,24 @@ class Yotta(clouds.Cloud):
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to
         Yotta's compute service."""
+        msg = ('Failed to access Yotta Cloud with credentials. '
+               'To configure credentials, go to:\n    '
+               '  https://console.yottalabs.ai \n    '
+               'to obtain an API key, then add save the contents '
+               f'to {CREDENTIAL_FILE} \n')
+        if not os.path.exists(os.path.expanduser(CREDENTIAL_FILE)):
+            return False, msg
+
         try:
             valid = yotta_client.check_api_key()
-            assert valid, ('Invalid Yotta API key.')
-        except AssertionError:
-            return False, ('Failed to access Yotta Cloud'
-                           ' with credentials. '
-                           'To configure credentials, go to:\n    '
-                           '  https://console.yottalabs.ai \n    '
-                           'to obtain an API key, '
-                           'then add save the contents '
-                           'to ~/.yotta/credentials \n')
-        return True, None
+            if not valid:
+                return False, msg
+            return True, None
+        except Exception as e:  # pylint: disable=broad-except
+            return False, str(e)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
-            f'~/.yotta/{filename}': f'~/.yotta/{filename}'
-            for filename in _CREDENTIAL_FILES
-        }
+        return {CREDENTIAL_FILE: CREDENTIAL_FILE}
 
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
@@ -325,4 +324,5 @@ class Yotta(clouds.Cloud):
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
         # TODO: use 0.0 for now to allow all images. We should change this to
         # return the docker image size.
+        del image_id, region  # unused
         return 0.0

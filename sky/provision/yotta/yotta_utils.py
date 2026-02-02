@@ -10,11 +10,11 @@ import uuid
 import requests
 
 from sky import sky_logging
+from sky.clouds import yotta
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
-CREDENTIALS_FILE_PATH = os.path.expanduser('~/.yotta/credentials')
 ENDPOINT = 'https://api.yottalabs.ai/openapi'
 API_KEY_HEADER = 'X-API-KEY'
 CLUSTER_NOT_FOUND_CODE = 44003
@@ -39,12 +39,6 @@ class ClusterStatusEnum(enum.Enum):
     TERMINATED = 'TERMINATED'
 
 
-class CloudType(enum.Enum):
-    """cloud type."""
-    SECURE = 1
-    COMMUNITY = 2
-
-
 class ClusterTypeEnum(enum.Enum):
     """Cluster type."""
     PRIVATE = 1
@@ -61,13 +55,15 @@ def get_key_suffix():
 
 
 def _load_credentials() -> Tuple[str, str]:
-    """Reads the credentials file and returns userId and apikey."""
-    if not os.path.isfile(CREDENTIALS_FILE_PATH):
+    """Reads the credentials file and returns orgId and apiKey."""
+    credentials_file_path = os.path.expanduser(yotta.CREDENTIAL_FILE)
+
+    if not os.path.isfile(credentials_file_path):
         raise FileNotFoundError(
-            f'Credentials file not found at {CREDENTIALS_FILE_PATH}')
+            f'Credentials file not found at {credentials_file_path}')
 
     try:
-        with open(CREDENTIALS_FILE_PATH, 'r', encoding='utf-8') as f:
+        with open(credentials_file_path, 'r', encoding='utf-8') as f:
             credentials = {}
             for line in f:
                 if '=' in line:
@@ -80,14 +76,14 @@ def _load_credentials() -> Tuple[str, str]:
         if not org_id or not api_key:
             raise ValueError(
                 f'Missing orgId or apikey in credentials'
-                f' file: {CREDENTIALS_FILE_PATH}. '
+                f' file: {credentials_file_path}. '
                 'Please ensure the file contains \'orgId=<your_org_id>\' and '
                 '\'apikey=<your_api_key>\'.')
 
         return org_id, api_key
     except Exception as e:
         raise ValueError(
-            f'Error reading credentials file: {CREDENTIALS_FILE_PATH}. {e}'
+            f'Error reading credentials file: {credentials_file_path}. {e}'
         ) from e
 
 
@@ -166,7 +162,7 @@ class YottaClient:
 
     def list_instances(self,
                        cluster_name_on_cloud: str) -> Dict[str, Dict[str, Any]]:
-        url = f'{ENDPOINT}/v1/pods/cluster/pods/list'
+        url = f'{ENDPOINT}/v1/skypilot/cluster/pods/list'
         all_records: List[Dict[str, Any]] = []
         request_data = {
             'clusterName': cluster_name_on_cloud,
@@ -209,7 +205,7 @@ class YottaClient:
                        image_name: str, ports: Optional[List[int]],
                        disk_size: int, public_key: str, ssh_user: str,
                        node_num: int) -> str:
-        url = f'{ENDPOINT}/v1/pods/cluster/create'
+        url = f'{ENDPOINT}/v1/skypilot/cluster/create'
         expose = []
         if ports is not None:
             for p in ports:
@@ -246,7 +242,7 @@ class YottaClient:
         return response.json()['data']['clusterId']
 
     def get_cluster_status(self, cluster_id: str) -> str:
-        url = f'{ENDPOINT}/v1/pods/cluster/status/{cluster_id}'
+        url = f'{ENDPOINT}/v1/skypilot/cluster/status/{cluster_id}'
         response = requests.get(url, headers={API_KEY_HEADER: self.api_key})
         logger.debug(f'Getting cluster status for {cluster_id}, '
                      f'response: {response.json()}')
@@ -257,7 +253,7 @@ class YottaClient:
                image_name: str, docker_login_config: Optional[Dict[str, Any]],
                ports: Optional[List[int]], public_key: str) -> str:
         """Launches an instance with the given parameters."""
-        url = f'{ENDPOINT}/v1/pods/cluster/create/pod'
+        url = f'{ENDPOINT}/v1/skypilot/cluster/create/pod'
 
         setup_cmd = f"""\
             prefix_cmd() {{
@@ -288,7 +284,7 @@ class YottaClient:
             sleep infinity\
             """
         # Use base64 to deal with the tricky quoting
-        # issues caused by runpod API.
+        # issues caused by Yotta API.
         encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
 
         docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
@@ -334,7 +330,7 @@ class YottaClient:
 
     def terminate_instances(self, cluster_name: str):
         """Terminate instances."""
-        url = f'{ENDPOINT}/v1/pods/cluster/release'
+        url = f'{ENDPOINT}/v1/skypilot/cluster/release'
         request_data = {'clusterName': cluster_name}
         response = requests.post(url=url,
                                  headers={API_KEY_HEADER: self.api_key},

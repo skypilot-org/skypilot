@@ -21,6 +21,14 @@ HEAD_NODE_SUFFIX = '-head'
 WORKER_NODE_SUFFIX = '-worker'
 
 
+def _format_instances(instances: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return [{
+        'id': inst_id,
+        'podName': inst.get('podName'),
+        'status': inst.get('status')
+    } for inst_id, inst in instances.items()]
+
+
 def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[PodStatusEnum]] = None,
                       head_only: bool = False) -> Dict[str, Any]:
@@ -156,7 +164,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     # Wait for instances to be ready.
     while True:
         instances = _filter_instances(cluster_name_on_cloud)
-        logger.debug(f'Waiting for instances to be ready: {instances}')
+        logger.debug(f'Waiting for instances to be ready: '
+                     f'{_format_instances(instances)}')
         ready_instance_cnt = 0
 
         for instance_id, instance in instances.items():
@@ -218,7 +227,7 @@ def terminate_instances(
             instances = _filter_instances(cluster_name_on_cloud)
             logger.debug(
                 f'Cluster {cluster_name_on_cloud} terminate_instances: '
-                f'{instances}.')
+                f'{_format_instances(instances)}.')
             all_terminated = all(
                 instance.get('status') in
                 [PodStatusEnum.TERMINATED.value, PodStatusEnum.FAILED.value]
@@ -315,7 +324,7 @@ def query_ports(
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
     del head_ip, provider_config  # Unused.
-    # RunPod ports sometimes take a while to be ready.
+    # Yotta ports sometimes take a while to be ready.
     start_time = time.time()
     ports_to_query = resources_utils.port_ranges_to_set(ports)
     while True:

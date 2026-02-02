@@ -181,6 +181,7 @@ __all__ = [
     'Hyperbolic',
     'Shadeform',
     'Seeweb',
+    'Yotta',
     'Optimizer',
     'OptimizeTarget',
     'backends',
@@ -193,7 +194,6 @@ __all__ = [
     'JobStatus',
     'ManagedJobStatus',
     'StatusRefreshMode',
-    'Yotta',
     # APIs
     'Dag',
     'Task',
