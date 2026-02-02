@@ -1208,7 +1208,9 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False,
            all_users: bool = False,
-           pool: Optional[str] = None) -> None:
+           pool: Optional[str] = None,
+           graceful: bool = False,
+           graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -1218,6 +1220,7 @@ def cancel(name: Optional[str] = None,
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
+    del graceful, graceful_timeout  # TODO (kyuds): implement
     with rich_utils.safe_status(
             ux_utils.spinner_message('Cancelling managed jobs')):
         job_ids = [] if job_ids is None else job_ids

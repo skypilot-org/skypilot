@@ -579,6 +579,8 @@ class JobsCancelBody(RequestBody):
     all: bool = False
     all_users: bool = False
     pool: Optional[str] = None
+    graceful: bool = False
+    graceful_timeout: Optional[int] = None
 
 
 class JobsLogsBody(RequestBody):
