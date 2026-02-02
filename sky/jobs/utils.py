@@ -806,11 +806,14 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
                       current_workspace: Optional[str] = None,
-                      user_hash: Optional[str] = None) -> str:
+                      user_hash: Optional[str] = None,
+                      graceful: bool = False,
+                      graceful_timeout: Optional[int] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
     """
+    del graceful, graceful_timeout  # TODO (kyuds): implement.
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
             None, user_hash, all_users)
@@ -896,7 +899,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
 
 def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None) -> str:
+                       current_workspace: Optional[str] = None,
+                       graceful: bool = False,
+                       graceful_timeout: Optional[int] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -905,7 +910,10 @@ def cancel_job_by_name(job_name: str,
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    msg = cancel_jobs_by_id(job_ids,
+                            current_workspace=current_workspace,
+                            graceful=graceful,
+                            graceful_timeout=graceful_timeout)
     return f'{job_name!r} {msg}'
 
 
@@ -2442,7 +2450,9 @@ class ManagedJobCodeGen:
     @classmethod
     def cancel_jobs_by_id(cls,
                           job_ids: Optional[List[int]],
-                          all_users: bool = False) -> str:
+                          all_users: bool = False,
+                          graceful: bool = False,
+                          graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
@@ -2455,15 +2465,26 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        else:
+        elif managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
+        else:
+            msg = utils.cancel_jobs_by_id(
+                {job_ids},
+                all_users={all_users},
+                current_workspace={active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
 
     @classmethod
-    def cancel_job_by_name(cls, job_name: str) -> str:
+    def cancel_job_by_name(cls,
+                           job_name: str,
+                           graceful: bool = False,
+                           graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 4:
@@ -2471,8 +2492,15 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_job_by_name({job_name!r})
-        else:
+        elif managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
+        else:
+            msg = utils.cancel_job_by_name(
+                {job_name!r},
+                {active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)

@@ -262,20 +262,24 @@ class GetAllJobIdsByNameResponse(_message.Message):
     def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
 
 class CancelJobsRequest(_message.Message):
-    __slots__ = ("current_workspace", "user_hash", "all_users", "job_ids", "job_name", "pool_name")
+    __slots__ = ("current_workspace", "user_hash", "all_users", "job_ids", "job_name", "pool_name", "graceful", "graceful_timeout")
     CURRENT_WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     USER_HASH_FIELD_NUMBER: _ClassVar[int]
     ALL_USERS_FIELD_NUMBER: _ClassVar[int]
     JOB_IDS_FIELD_NUMBER: _ClassVar[int]
     JOB_NAME_FIELD_NUMBER: _ClassVar[int]
     POOL_NAME_FIELD_NUMBER: _ClassVar[int]
+    GRACEFUL_FIELD_NUMBER: _ClassVar[int]
+    GRACEFUL_TIMEOUT_FIELD_NUMBER: _ClassVar[int]
     current_workspace: str
     user_hash: str
     all_users: bool
     job_ids: JobIds
     job_name: str
     pool_name: str
-    def __init__(self, current_workspace: _Optional[str] = ..., user_hash: _Optional[str] = ..., all_users: bool = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., job_name: _Optional[str] = ..., pool_name: _Optional[str] = ...) -> None: ...
+    graceful: bool
+    graceful_timeout: int
+    def __init__(self, current_workspace: _Optional[str] = ..., user_hash: _Optional[str] = ..., all_users: bool = ..., job_ids: _Optional[_Union[JobIds, _Mapping]] = ..., job_name: _Optional[str] = ..., pool_name: _Optional[str] = ..., graceful: bool = ..., graceful_timeout: _Optional[int] = ...) -> None: ...
 
 class CancelJobsResponse(_message.Message):
     __slots__ = ("message",)

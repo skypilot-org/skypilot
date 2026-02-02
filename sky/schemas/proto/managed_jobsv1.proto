@@ -163,6 +163,9 @@ message CancelJobsRequest {
     string job_name = 5;
     string pool_name = 6;
   }
+
+  optional bool graceful = 7;
+  optional int64 graceful_timeout = 8;
 }
 
 message CancelJobsResponse {

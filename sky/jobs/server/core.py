@@ -1220,7 +1220,6 @@ def cancel(name: Optional[str] = None,
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
         RuntimeError: failed to cancel the job.
     """
-    del graceful, graceful_timeout  # TODO (kyuds): implement
     with rich_utils.safe_status(
             ux_utils.spinner_message('Cancelling managed jobs')):
         job_ids = [] if job_ids is None else job_ids
@@ -1280,10 +1279,13 @@ def cancel(name: Optional[str] = None,
         if use_legacy:
             if all_users or all or job_ids:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    job_ids, all_users=all_users)
+                    job_ids,
+                    all_users=all_users,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
-                    name)
+                    name, graceful=graceful, graceful_timeout=graceful_timeout)
             else:
                 assert pool is not None, (job_ids, name, pool, all)
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(
