@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.provision.yotta.yotta_utils import CREDENTIAL_FILE
 from sky.provision.yotta.yotta_utils import yotta_client
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -13,8 +14,6 @@ from sky.utils import resources_utils
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky.utils import volume as volume_lib
-
-CREDENTIAL_FILE = '~/.yotta/credentials'
 
 _CLOUD = 'yotta'
 _BASE_IMAGE = (

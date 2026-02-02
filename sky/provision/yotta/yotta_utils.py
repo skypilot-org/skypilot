@@ -10,7 +10,6 @@ import uuid
 import requests
 
 from sky import sky_logging
-from sky.clouds import yotta
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
@@ -18,6 +17,7 @@ logger = sky_logging.init_logger(__name__)
 ENDPOINT = 'https://api.yottalabs.ai/openapi'
 API_KEY_HEADER = 'X-API-KEY'
 CLUSTER_NOT_FOUND_CODE = 44003
+CREDENTIAL_FILE = '~/.yotta/credentials'
 
 
 class PodStatusEnum(enum.Enum):
@@ -56,7 +56,7 @@ def get_key_suffix():
 
 def _load_credentials() -> Tuple[str, str]:
     """Reads the credentials file and returns orgId and apiKey."""
-    credentials_file_path = os.path.expanduser(yotta.CREDENTIAL_FILE)
+    credentials_file_path = os.path.expanduser(CREDENTIAL_FILE)
 
     if not os.path.isfile(credentials_file_path):
         raise FileNotFoundError(
