@@ -136,6 +136,8 @@ message ManagedJobInfo {
   map<string, string> labels = 33;
   // Name of the cluster on the cloud provider (populated from cluster handle)
   optional string cluster_name_on_cloud = 34;
+  // Pickled ResourceHandle for cluster networking info
+  optional bytes handle = 35;
 }
 
 message GetJobTableResponse {

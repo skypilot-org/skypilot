@@ -1,6 +1,7 @@
 """gRPC service implementations for skylet."""
 
 import os
+import pickle
 from typing import List, Optional
 
 import grpc
@@ -523,7 +524,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Fields populated from cluster handle
                     zone=job.get('zone'),
                     labels=job.get('labels'),
-                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'))
+                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'),
+                    # Serialize handle if present
+                    handle=pickle.dumps(job.get('handle'))
+                    if job.get('handle') is not None else None)
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
