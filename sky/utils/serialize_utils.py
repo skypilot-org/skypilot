@@ -14,3 +14,16 @@ def prepare_handle_for_backwards_compatibility(
         handle = copy.deepcopy(handle)
         handle.skylet_ssh_tunnel = None
     return handle
+
+
+def prune_managed_job_handle(handle: typing.Any) -> typing.Any:
+    """Prune a managed job handle for less data transfer."""
+    if handle is None:
+        return None
+    handle = copy.deepcopy(handle)
+    if hasattr(handle, 'skylet_ssh_tunnel'):
+        handle.skylet_ssh_tunnel = None
+    if (hasattr(handle, 'cached_cluster_info') and
+            handle.cached_cluster_info is not None):
+        handle.cached_cluster_info.provider_config = None
+    return handle
