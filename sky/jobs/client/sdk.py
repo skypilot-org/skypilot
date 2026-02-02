@@ -334,8 +334,8 @@ def cancel(
         logger.warning('`--graceful` is ignored because the server does '
                        'not support it yet.')
     if graceful and pool is not None:
-        logger.info('Pools are not cleaned up after job cancel, so '
-                    '`--graceful` is ignored.')
+        logger.warning('Pools are not cleaned up after job cancel, so '
+                       '`--graceful` is ignored.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
