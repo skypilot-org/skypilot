@@ -123,6 +123,8 @@ def volume_recipe():
 
 
 # ---------- Recipe Cluster Launch ----------
+# We assume that the recipe db is locally hosted.
+@pytest.mark.no_remote_server
 def test_recipe_cluster_launch(generic_cloud: str, cluster_recipe: str):
     """Test launching a cluster using recipes:<name> syntax."""
     name = smoke_tests_utils.get_cluster_name()
@@ -142,6 +144,8 @@ def test_recipe_cluster_launch(generic_cloud: str, cluster_recipe: str):
 
 
 # ---------- Recipe Managed Job Launch ----------
+# We assume that the recipe db is locally hosted.
+@pytest.mark.no_remote_server
 def test_recipe_managed_job_launch(generic_cloud: str, job_recipe: str):
     """Test launching a managed job using recipes:<name> syntax."""
     name = smoke_tests_utils.get_cluster_name()
@@ -166,6 +170,7 @@ def test_recipe_managed_job_launch(generic_cloud: str, job_recipe: str):
 
 
 # ---------- Recipe Pool Launch ----------
+# We assume that the recipe db is locally hosted.
 @pytest.mark.no_remote_server  # Pool tests may have resource conflicts
 def test_recipe_pool_launch(generic_cloud: str, pool_recipe: str):
     """Test creating a job pool using recipes:<name> syntax."""
@@ -187,6 +192,8 @@ def test_recipe_pool_launch(generic_cloud: str, pool_recipe: str):
 
 # ---------- Recipe Volume Apply (Kubernetes only) ----------
 @pytest.mark.kubernetes
+# We assume that the recipe db is locally hosted.
+@pytest.mark.no_remote_server
 def test_recipe_volume_apply(volume_recipe: str):
     """Test creating a volume using recipes:<name> syntax (Kubernetes only)."""
     name = smoke_tests_utils.get_cluster_name()
