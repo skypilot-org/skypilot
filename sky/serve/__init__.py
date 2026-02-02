@@ -1,6 +1,7 @@
 """Modules for SkyServe services."""
 import os
 
+from sky.serve.client.sdk import apply
 from sky.serve.client.sdk import down
 from sky.serve.client.sdk import status
 from sky.serve.client.sdk import sync_down_logs
@@ -28,26 +29,10 @@ from sky.serve.service_spec import SkyServiceSpec
 os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
 
 __all__ = [
-    'down',
-    'ENDPOINT_PROBE_INTERVAL_SECONDS',
-    'format_service_table',
-    'generate_replica_cluster_name',
-    'generate_service_name',
-    'INITIAL_VERSION',
-    'LB_CONTROLLER_SYNC_INTERVAL_SECONDS',
-    'LB_POLICIES',
-    'ReplicaStatus',
-    'ServiceComponent',
-    'sync_down_logs',
-    'ServiceStatus',
-    'ServeCodeGen',
-    'SkyServiceSpec',
-    'SKYSERVE_METADATA_DIR',
-    'status',
-    'terminate_replica',
-    'tail_logs',
-    'up',
-    'update',
-    'UpdateMode',
-    'DEFAULT_UPDATE_MODE',
+    'down', 'ENDPOINT_PROBE_INTERVAL_SECONDS', 'format_service_table',
+    'generate_replica_cluster_name', 'generate_service_name', 'INITIAL_VERSION',
+    'LB_CONTROLLER_SYNC_INTERVAL_SECONDS', 'LB_POLICIES', 'ReplicaStatus',
+    'ServiceComponent', 'sync_down_logs', 'ServiceStatus', 'ServeCodeGen',
+    'SkyServiceSpec', 'SKYSERVE_METADATA_DIR', 'status', 'terminate_replica',
+    'tail_logs', 'up', 'update', 'UpdateMode', 'DEFAULT_UPDATE_MODE', 'apply'
 ]

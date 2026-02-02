@@ -10,6 +10,7 @@ from sky.backends import backend_utils
 from sky.serve import serve_rpc_utils
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import controller_utils
 from sky.utils import subprocess_utils
@@ -63,6 +64,20 @@ def update(task: Optional['sky.Task'],
             task is None.
     """
     return impl.update(task, service_name, mode, pool=False, workers=workers)
+
+
+def apply(request_id: str, body: payloads.ServeApplyBody) -> None:  # pylint: disable=unused-argument
+    """Apply a config to a service."""
+    # Convert YAML string to Task object
+    kwargs = body.to_kwargs()
+    task = kwargs.pop('task')
+
+    # Call the backend implementation
+    impl.apply(task=task,
+               service_name=body.service_name,
+               mode=serve_utils.UpdateMode(body.mode),
+               workers=None,
+               pool=False)
 
 
 @usage_lib.entrypoint

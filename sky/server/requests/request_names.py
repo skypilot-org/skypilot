@@ -58,6 +58,7 @@ class RequestName(str, enum.Enum):
     # Serve requests
     SERVE_UP = 'serve.up'
     SERVE_UPDATE = 'serve.update'
+    SERVE_APPLY = 'serve.apply'
     SERVE_DOWN = 'serve.down'
     SERVE_TERMINATE_REPLICA = 'serve.terminate_replica'
     SERVE_STATUS = 'serve.status'
@@ -122,6 +123,7 @@ class AdminPolicyRequestName(str, enum.Enum):
     # but is defined here for admin policy application
     SERVE_LAUNCH_CONTROLLER = 'serve.launch_controller'
     SERVE_UPDATE = RequestName.SERVE_UPDATE.value
+    SERVE_APPLY = 'serve.apply'
     # serve launch replica request is not stored in the request db,
     # but is defined here for admin policy application
     SERVE_LAUNCH_REPLICA = 'serve.launch_replica'

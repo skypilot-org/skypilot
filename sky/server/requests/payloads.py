@@ -32,6 +32,7 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.serve import serve_utils
 from sky.server import common
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -630,6 +631,24 @@ class ServeUpdateBody(RequestBody):
     task: str
     service_name: str
     mode: serve.UpdateMode
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
+        assert len(
+            dag.tasks) == 1, ('Must only specify one task in the DAG for '
+                              'a service.', dag)
+        kwargs['task'] = dag.tasks[0]
+        return kwargs
+
+
+class ServeApplyBody(RequestBody):
+    """The request body for the serve apply endpoint."""
+    task: str
+    service_name: str
+    mode: str = serve_utils.DEFAULT_UPDATE_MODE.value  # type: ignore
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()

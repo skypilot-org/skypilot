@@ -51,6 +51,21 @@ async def update(
     )
 
 
+@router.post('/apply')
+async def apply(
+    request: fastapi.Request,
+    apply_body: payloads.ServeApplyBody,
+) -> None:
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.SERVE_APPLY,
+        request_body=apply_body,
+        func=core.apply,
+        schedule_type=api_requests.ScheduleType.LONG,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
+
+
 @router.post('/down')
 async def down(
     request: fastapi.Request,
