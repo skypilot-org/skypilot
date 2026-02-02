@@ -2372,6 +2372,11 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Deserialize handle from bytes (MessageToDict converts bytes to base64)
+    if job_proto.handle:
+        job_dict['handle'] = pickle.loads(job_proto.handle)
+    else:
+        job_dict['handle'] = None
     return job_dict
 
 
