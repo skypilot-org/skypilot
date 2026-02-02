@@ -1254,7 +1254,9 @@ def cancel(name: Optional[str] = None,
             current_workspace = skypilot_config.get_active_workspace()
             try:
                 request = managed_jobsv1_pb2.CancelJobsRequest(
-                    current_workspace=current_workspace)
+                    current_workspace=current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
 
                 if all_users or all or job_ids:
                     request.all_users = all_users
