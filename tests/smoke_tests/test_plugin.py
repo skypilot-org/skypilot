@@ -45,6 +45,7 @@ def test_plugin(generic_cloud: str):
 
 
 @pytest.mark.managed_jobs
+@pytest.mark.no_dependency
 @pytest.mark.no_remote_server  # Restart required so API picks up plugin upload config
 def test_plugin_upload_to_jobs_controller(generic_cloud: str):
     """Smoke test that plugin wheels are uploaded and installed on the jobs controller.
