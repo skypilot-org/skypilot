@@ -142,11 +142,10 @@ def encode_status_kubernetes(
 
 
 def _serialize_job_handle(job: Dict[str, Any]) -> None:
-    """Serialize handle in a job dict for backwards compatibility."""
+    """Serialize handle in a job dict."""
     if 'handle' in job and job['handle'] is not None:
-        handle = serialize_utils.prepare_handle_for_backwards_compatibility(
-            job['handle'])
-        job['handle'] = pickle_and_encode(handle)
+        job['handle'] = pickle_and_encode(
+            serialize_utils.prune_managed_job_handle(job['handle']))
 
 
 @register_encoder('jobs.queue')
