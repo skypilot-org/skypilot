@@ -148,6 +148,8 @@ class UserSignal(enum.Enum):
 def terminate_cluster(
     cluster_name: str,
     max_retry: int = 6,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
@@ -167,7 +169,9 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            core.down(cluster_name)
+            core.down(cluster_name,
+                      graceful=graceful,
+                      graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
@@ -813,7 +817,6 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
     If job_ids is None, cancel all jobs.
     """
-    del graceful, graceful_timeout  # TODO (kyuds): implement.
     if job_ids is None:
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
             None, user_hash, all_users)
@@ -863,12 +866,21 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 with signal_file.open('w', encoding='utf-8') as f:
                     f.write(UserSignal.CANCEL.value)
                     f.flush()
+            if graceful:
+                logger.warning(f'Job {job_id} is on legacy controller, '
+                               'graceful shutdown not supported.')
         else:
             # New controller process.
             try:
                 signal_file = pathlib.Path(
                     managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                signal_file.touch()
+                if graceful:
+                    content = 'graceful'
+                    if graceful_timeout is not None:
+                        content = f'graceful:{graceful_timeout}'
+                    signal_file.write_text(content, encoding='utf-8')
+                else:
+                    signal_file.touch()
             except OSError as e:
                 logger.error(f'Failed to cancel job {job_id}: {e}')
                 # Don't add it to the to be cancelled job ids
