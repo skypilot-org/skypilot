@@ -218,6 +218,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
@@ -233,7 +234,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory, disk_tier, region, zone)
+                               memory, disk_tier, local_disk, region, zone)
 
 
 def get_accelerators_from_instance_type(
@@ -265,6 +266,7 @@ def get_instance_type_for_accelerator(
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
+    local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
@@ -276,7 +278,7 @@ def get_instance_type_for_accelerator(
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
                                acc_name, acc_count, cpus, memory, use_spot,
-                               region, zone)
+                               local_disk, region, zone)
 
 
 def get_accelerator_hourly_cost(

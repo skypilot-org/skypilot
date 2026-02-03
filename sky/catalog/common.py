@@ -17,6 +17,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -475,6 +476,33 @@ def _filter_with_mem(df: 'pd.DataFrame',
         return df[df['MemoryGiB'] >= df['vCPUs'] * memory]
     else:
         return df[df['MemoryGiB'] == memory]
+
+
+def filter_with_local_disk(df: 'pd.DataFrame',
+                           local_disk: Optional[str]) -> 'pd.DataFrame':
+    if local_disk is None:
+        return df
+
+    local_disk = local_disk.lower()
+    mode, size, at_least = resources_utils.parse_local_disk_str(local_disk)
+
+    # Disk Type
+    if mode not in ('nvme', 'ssd'):
+        raise ValueError('Local disk should be either nvme or ssd. '
+                         f'Got {local_disk}.')
+    df = df[df['LocalDiskType'] == 'ssd']  # SSD is always required.
+    if mode == 'nvme':
+        df = df[df['NVMeSupported'] == True]  # pylint: disable=singleton-comparison
+
+    # Disk Size
+    total_disk = df['LocalDiskSize'].fillna(0) * df['LocalDiskCount'].fillna(0)
+
+    if at_least:
+        df = df[total_disk >= size]
+    else:
+        df = df[abs(total_disk - size) < 1.0]
+
+    return df
 
 
 def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
