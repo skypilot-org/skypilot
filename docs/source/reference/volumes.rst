@@ -240,7 +240,7 @@ In addition to using SkyPilot volumes, you can also mount `Kubernetes volumes <h
 2. Specifying a global (per Kubernetes context) volume to be mounted on all SkyPilot clusters.
 3. Accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in `SkyPilot config <https://docs.skypilot.co/en/latest/reference/config.html>`_.
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :ref:`SkyPilot config <config-yaml>`.
 
 .. tab-set::
 
