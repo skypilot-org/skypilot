@@ -166,12 +166,14 @@ class DO(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for DO."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='DO')
@@ -255,6 +257,7 @@ class DO(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -272,6 +275,7 @@ class DO(clouds.Cloud):
              use_spot=resources.use_spot,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='DO',

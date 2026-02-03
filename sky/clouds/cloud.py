@@ -378,10 +378,11 @@ class Cloud:
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory,
-        disk tier, region, and zone.
+        disk tier, local disk, region, and zone.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
@@ -393,6 +394,11 @@ class Cloud:
 
         If disk_tier=DiskTier.MEDIUM, this method returns the default instance
         type that support medium disk tier.
+
+        If local_disk='nvme:300+', this method returns the default instance
+        type that supports NVMe compatible 300GB+ on-instance storage. This is
+        different from disk_tier in that local disks are directly attached to
+        underlying VMs.
 
         When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default

@@ -154,6 +154,7 @@ class Vast(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional[resources_utils.DiskTier] = None,
+            local_disk: Optional[str] = None,
             region: Optional[str] = None,
             zone: Optional[str] = None,
             datacenter_only: bool = False) -> Optional[str]:
@@ -164,6 +165,7 @@ class Vast(clouds.Cloud):
             cpus=cpus,
             memory=memory,
             disk_tier=disk_tier,
+            local_disk=local_disk,
             region=region,
             zone=zone,
             datacenter_only=datacenter_only)
@@ -264,6 +266,7 @@ class Vast(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone,
                 datacenter_only=datacenter_only)
@@ -283,6 +286,7 @@ class Vast(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              memory=resources.memory,

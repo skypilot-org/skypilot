@@ -385,11 +385,12 @@ class Kubernetes(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional['resources_utils.DiskTier'] = None,
+            local_disk: Optional[str] = None,
             region: Optional[str] = None,
             zone: Optional[str] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier, region, zone  # Unused.
+        del disk_tier, region, zone, local_disk  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -906,6 +907,7 @@ class Kubernetes(clouds.Cloud):
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier,
+            local_disk=resources.local_disk,
             region=resources.region,
             zone=resources.zone)
 
