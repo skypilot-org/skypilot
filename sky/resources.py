@@ -39,8 +39,6 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_DISK_SIZE_GB = 256
 
-DEFAULT_LOCAL_DISK_SIZE_GB = '100+'
-
 RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
@@ -1004,46 +1002,8 @@ class Resources:
         if local_disk is None:
             self._local_disk = None
             return
-
-        local_disk = str(local_disk).lower().strip()
-        parts = local_disk.split(':')
-
-        def _check_size(size_str: str) -> None:
-            size_to_check = size_str.rstrip('+')
-            try:
-                size = float(size_to_check)
-                if size <= 0:
-                    raise ValueError()
-            except ValueError as exc:
-                raise ValueError(
-                    f'Invalid local_disk: {local_disk!r}. '
-                    'Expected "mode:size[+]", "mode", or "size[+]". Mode '
-                    'must be "nvme" or "ssd", size must be positive (GB), '
-                    'optionally with "+".') from exc
-
-        if len(parts) == 1:
-            part = parts[0]
-            if part.rstrip('+') in ('nvme', 'ssd'):
-                mode = part
-                size_str = DEFAULT_LOCAL_DISK_SIZE_GB
-            else:
-                mode = 'nvme'
-                size_str = part
-                _check_size(size_str)
-        elif len(parts) == 2:
-            mode, size_str = parts
-            if mode not in ('nvme', 'ssd'):
-                raise ValueError(f'Invalid local_disk mode: {mode!r}. '
-                                 f'Must be "nvme" or "ssd".')
-            _check_size(size_str)
-        else:
-            raise ValueError(
-                f'Invalid local_disk format: {local_disk!r}. '
-                f'Expected "mode:size[+]", "mode", or "size[+]". '
-                f'Examples: "nvme:1000+", "ssd:500", "nvme", "1000+".')
-
-        # Store in normalized canonical form: mode:size[+]
-        self._local_disk = f'{mode}:{size_str}'
+        # Validate and normalize to canonical form: mode:size[+]
+        self._local_disk = resources_utils.normalize_local_disk(local_disk)
 
     def override_autostop_config(
             self,
