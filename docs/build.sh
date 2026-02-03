@@ -60,7 +60,7 @@ if [ "$AUTO_BUILD" = true ]; then
         --ignore "**/llms.txt" \
         --port ${PORT:-8000}
 else
-    rm -rf build docs
+    rm -rf build
     
     # Set build environment (only if not already set by GitHub Actions)
     if [ -z "$SPHINX_BUILD_PRODUCTION" ]; then
