@@ -91,6 +91,8 @@ Below is the configuration syntax and some example values. See detailed explanat
       max_run_duration: 10m
     :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
       - echo "hello world!"
+    :ref:`high_availability <config-yaml-kubernetes-high-availability>`:
+      :ref:`storage_class_name <config-yaml-kubernetes-high-availability-storage-class-name>`: my-storage-class
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
@@ -1559,6 +1561,30 @@ This can also be configured per-context using ``context_configs``:
     context_configs:
       prod-cluster:
         set_pod_resource_limits: 2.0
+
+.. _config-yaml-kubernetes-high-availability:
+
+``kubernetes.high_availability``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Kubernetes cloud configuration for High Availability controller setup (optional). For more details, see :ref:`high-availability-controller`.
+
+.. _config-yaml-kubernetes-high-availability-storage-class-name:
+
+``kubernetes.high_availability.storage_class_name``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Storage class name for controller's PVC if your Kubernetes cluster has a specific storage class defined (optional).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    high_availability:
+      storage_class_name: my-storage-class
+
+For more details, see :ref:`high-availability-controller`.
 
 .. _config-yaml-kubernetes-context-configs:
 
