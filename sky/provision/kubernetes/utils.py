@@ -86,6 +86,8 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     - NEBIUS: Nebius clusters with InfiniBand support for high-throughput,
       low-latency networking
     - COREWEAVE: CoreWeave clusters with InfiniBand support.
+    - LIGHTNING_AI: Lightning AI clusters with InfiniBand support for
+      high-performance networking
     - NONE: Standard clusters without specialized networking optimizations
 
     The network configurations align with corresponding VM-based
@@ -101,6 +103,7 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
     NEBIUS = 'nebius'
     COREWEAVE = 'coreweave'
     TOGETHER = 'together'
+    LIGHTNING_AI = 'lightning_ai'
     AWS_EFA = 'aws_efa'
     NONE = 'none'
 
@@ -125,6 +128,13 @@ class KubernetesHighPerformanceNetworkType(enum.Enum):
                 'NCCL_SOCKET_IFNAME': 'eth0',
                 'NCCL_IB_HCA': 'ibp',
                 # Restrict UCX to TCP to avoid unneccsary errors. NCCL doesn't use UCX
+                'UCX_TLS': 'tcp',
+                'UCX_NET_DEVICES': 'eth0',
+            }
+        elif self == KubernetesHighPerformanceNetworkType.LIGHTNING_AI:
+            # Lightning AI cluster with InfiniBand - use InfiniBand optimizations
+            return {
+                'NCCL_IB_HCA': 'mlx5',
                 'UCX_TLS': 'tcp',
                 'UCX_NET_DEVICES': 'eth0',
             }
