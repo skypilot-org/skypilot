@@ -182,7 +182,7 @@ class AddVolumesPolicy(sky.AdminPolicy):
         This policy automatically adds organizational volumes for:
         - /mnt/data0: Shared data volume (pvc0)
         
-        The policy preserves existing file mounts and respects user overrides.
+        This policy overwrites any existing volumes on the task.
         Controller tasks (managed job/serve controllers) are skipped.
         """
         task = user_request.task
