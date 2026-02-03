@@ -32,12 +32,14 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
-# We will select from the following three instance families:
+# We will select from the following six instance families. The suffix
+# 'd' denotes that instance storage is attached:
 _DEFAULT_INSTANCE_FAMILY = [
     # This is the latest general-purpose instance family as of Mar 2023.
     # CPU: Intel Ice Lake 8375C.
     # Memory: 4 GiB RAM per 1 vCPU;
     'm6i',
+    'm6id',
     # This is the latest general-purpose instance family as of Jul 2025.
     # CPU: Intel Sapphire Rapids.
     # Memory: 4 GiB RAM per 1 vCPU;
@@ -46,6 +48,7 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8375C
     # Memory: 8 GiB RAM per 1 vCPU;
     'r6i',
+    'r6id',
     # This is the latest memory-optimized instance family as of Jul 2025.
     # CPU: Intel Sapphire Rapids.
     # Memory: 8 GiB RAM per 1 vCPU;
@@ -54,6 +57,7 @@ _DEFAULT_INSTANCE_FAMILY = [
     # CPU: Intel Ice Lake 8375C
     # Memory: 2 GiB RAM per 1 vCPU;
     'c6i',
+    'c6id',
     # This is the latest compute-optimized instance family as of Jul 2025.
     # CPU: Intel Sapphire Rapids.
     # Memory: 2 GiB RAM per 1 vCPU;
