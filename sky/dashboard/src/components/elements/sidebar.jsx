@@ -725,6 +725,7 @@ export function TopBar() {
                     </Link>
                     <PluginSlot
                       name="user-menu"
+                      wrapperClassName="contents"
                       context={{
                         closeDropdown: () => setIsDropdownOpen(false),
                       }}
