@@ -57,6 +57,8 @@ class Yotta(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported yet on '
              'Yotta.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            ('Specifying local disks are not supported on Yotta.'),
     }
 
     _MAX_CLUSTER_NAME_LEN_LIMIT = 255
