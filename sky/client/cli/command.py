@@ -4177,8 +4177,16 @@ def show_gpus(
                         sdk.slurm_node_info(slurm_cluster_name=cluster_name))
                        for cluster_name in slurm_cluster_names]
 
+        failed_clusters = []
         for cluster_name, request_id in request_ids:
-            nodes_info = sdk.stream_and_get(request_id)
+            try:
+                nodes_info = sdk.stream_and_get(request_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # Log and skip this cluster instead of failing the entire query
+                logger.warning(f'Skipping Slurm cluster {cluster_name!r} '
+                               f'node info due to error: {e}')
+                failed_clusters.append(cluster_name)
+                continue
 
             for node_info in nodes_info:
                 node_table.add_row([
@@ -4192,7 +4200,9 @@ def show_gpus(
                 ])
 
         slurm_per_node_msg = 'Slurm per node accelerator availability'
-        # Optional: Add hint message if needed, similar to k8s
+        if failed_clusters:
+            slurm_per_node_msg += (f' (skipped unreachable clusters: '
+                                   f'{", ".join(failed_clusters)})')
 
         return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
                 f'{slurm_per_node_msg}'

@@ -1648,18 +1648,21 @@ def realtime_slurm_gpu_availability(
                     case_sensitive=False,
                 ))
         except exceptions.NotSupportedError as e:
-            logger.error(f'Failed to query Slurm GPU availability: {e}')
-            raise
+            # Log and skip this cluster instead of failing the entire query
+            logger.warning(f'Skipping Slurm cluster {slurm_cluster_name!r}: '
+                           f'{e}')
+            return []
         except ValueError as e:
-            # Re-raise ValueError if no GPUs are found matching the filters
-            logger.error(f'Error querying Slurm GPU availability: {e}')
-            raise
+            # No GPUs found matching the filters for this cluster
+            logger.debug(f'No matching GPUs in Slurm cluster '
+                         f'{slurm_cluster_name!r}: {e}')
+            return []
         except Exception as e:
-            logger.error(
-                'Error querying Slurm GPU availability: '
+            # Log and skip this cluster instead of failing the entire query
+            logger.warning(
+                f'Skipping Slurm cluster {slurm_cluster_name!r} due to error: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-            raise ValueError(
-                f'Error querying Slurm GPU availability: {e}') from e
+            return []
 
         # --- Format the output ---
         realtime_gpu_availability_list: List[
