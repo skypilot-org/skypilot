@@ -38,6 +38,10 @@ KV_CACHE_DB_NAME = 'kv_cache_db'
 KV_CACHE_VERSION = '001'  # initial kv_cache table for AWS AMIs
 KV_CACHE_LOCK_PATH = f'~/.sky/locks/.{KV_CACHE_DB_NAME}.lock'
 
+RECIPES_DB_NAME = 'recipes_db'
+RECIPES_VERSION = '001'
+RECIPES_LOCK_PATH = f'~/.sky/locks/.{RECIPES_DB_NAME}.lock'
+
 
 @contextlib.contextmanager
 def db_lock(db_name: str):

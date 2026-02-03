@@ -396,6 +396,11 @@ USING_REMOTE_API_SERVER_ENV_VAR = (
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 
+# Recipe names: letters, numbers, and dashes only (no underscores or dots).
+# Must start with a letter, end with an alphanumeric character.
+RECIPE_NAME_VALID_REGEX = r'[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?'
+RECIPE_NAME_MAX_LENGTH = 40
+
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
@@ -590,7 +595,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

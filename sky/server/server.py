@@ -56,6 +56,7 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
+from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -789,6 +790,7 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
@@ -2703,6 +2705,13 @@ async def serve_dashboard(full_path: str):
                                        'plugins', '[...slug].html')
         if os.path.isfile(plugin_catchall):
             return fastapi.responses.FileResponse(plugin_catchall)
+
+    # Serve recipe detail page for any /recipes/* paths (dynamic route)
+    if full_path.startswith('recipes/') and full_path != 'recipes/':
+        recipe_page = os.path.join(server_constants.DASHBOARD_DIR, 'recipes',
+                                   '[recipe].html')
+        if os.path.isfile(recipe_page):
+            return fastapi.responses.FileResponse(recipe_page)
 
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs

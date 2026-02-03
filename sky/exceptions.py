@@ -425,6 +425,16 @@ class InvalidClusterNameError(Exception):
     pass
 
 
+class InvalidRecipeNameError(Exception):
+    """Raised when the recipe name is invalid."""
+    pass
+
+
+class RecipeAlreadyExistsError(Exception):
+    """Raised when attempting to create a recipe with an existing name."""
+    pass
+
+
 class CloudUserIdentityError(Exception):
     """Raised when the cloud identity is invalid."""
     pass

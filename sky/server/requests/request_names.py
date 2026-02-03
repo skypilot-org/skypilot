@@ -77,6 +77,13 @@ class RequestName(str, enum.Enum):
     # SSH node pools requests
     SSH_NODE_POOLS_UP = 'ssh_node_pools.up'
     SSH_NODE_POOLS_DOWN = 'ssh_node_pools.down'
+    # Recipes requests
+    RECIPE_LIST = 'recipes.list'
+    RECIPE_GET = 'recipes.get'
+    RECIPE_CREATE = 'recipes.create'
+    RECIPE_UPDATE = 'recipes.update'
+    RECIPE_DELETE = 'recipes.delete'
+    RECIPE_PIN = 'recipes.pin'
     # Internal request daemons
     REQUEST_DAEMON_STATUS_REFRESH = 'status-refresh'
     REQUEST_DAEMON_VOLUME_REFRESH = 'volume-refresh'
