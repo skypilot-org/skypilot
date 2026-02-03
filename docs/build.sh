@@ -39,8 +39,6 @@ if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
     sky show-gpus H100:8 > source/compute/show-gpus-h100-8.txt
 fi
 
-rm -rf build docs
-
 # Add command line argument parsing
 AUTO_BUILD=false
 while [[ "$#" -gt 0 ]]; do
