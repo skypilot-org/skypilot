@@ -115,7 +115,6 @@ class TestApiInfo:
         assert 'client' in data
         assert 'server' in data
         assert 'user' in data
-        assert 'workspace' in data
 
     def test_api_info_json_output_structure(self):
         """Test api_info JSON output has expected structure."""
@@ -144,9 +143,6 @@ class TestApiInfo:
 
         # Check user
         assert data['user'] == 'alice'
-
-        # Check workspace
-        assert data['workspace'] == 'default'
 
     def test_api_info_json_output_long_option(self):
         """Test api_info with --output json."""

@@ -498,7 +498,6 @@ class TestCheckJsonOutput:
                 'reason': 'GCP credentials not found.'
             }],
             'enabled_clouds': ['AWS'],
-            'workspace': 'default'
         }
 
         monkeypatch.setattr('sky.client.sdk.check',
@@ -516,7 +515,6 @@ class TestCheckJsonOutput:
         parsed = json.loads(result.output)
         assert 'clouds' in parsed
         assert 'enabled_clouds' in parsed
-        assert 'workspace' in parsed
 
     def test_cli_check_json_output_with_kubernetes_contexts(self, monkeypatch):
         """Test that JSON output includes Kubernetes contexts."""
@@ -539,7 +537,6 @@ class TestCheckJsonOutput:
                 }]
             }],
             'enabled_clouds': ['Kubernetes'],
-            'workspace': 'default'
         }
 
         monkeypatch.setattr('sky.client.sdk.check',
@@ -583,7 +580,6 @@ class TestCheckJsonOutput:
                 }]
             }],
             'enabled_clouds': ['Slurm'],
-            'workspace': 'default'
         }
 
         monkeypatch.setattr('sky.client.sdk.check',
@@ -619,7 +615,6 @@ class TestCheckJsonOutput:
                 'reason': "Azure CLI not installed. Run 'pip install azure-cli'."
             }],
             'enabled_clouds': [],
-            'workspace': 'default'
         }
 
         monkeypatch.setattr('sky.client.sdk.check',
@@ -710,7 +705,6 @@ class TestCheckForJson:
         assert isinstance(result, dict)
         assert 'clouds' in result
         assert 'enabled_clouds' in result
-        assert 'workspace' in result
 
     def test_check_for_json_enabled_cloud_structure(self, monkeypatch):
         """Test the structure of an enabled cloud in JSON output."""

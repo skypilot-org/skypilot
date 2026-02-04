@@ -463,8 +463,7 @@ def check_for_json(
                 },
                 ...
             ],
-            "enabled_clouds": ["AWS", "Kubernetes"],
-            "workspace": "default"
+            "enabled_clouds": ["AWS", "Kubernetes"]
         }
     """
     # pylint: disable=import-outside-toplevel
@@ -593,7 +592,6 @@ def check_for_json(
     return {
         'clouds': cloud_results,
         'enabled_clouds': enabled_cloud_names,
-        'workspace': target_workspace
     }
 
 

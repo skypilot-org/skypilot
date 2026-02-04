@@ -7212,7 +7212,6 @@ def api_info(output_format: str):
 
     # JSON output mode
     if output_format == flags.OUTPUT_FORMAT_JSON:
-        workspace = skypilot_config.get_active_workspace()
         output_data = {
             'client': {
                 'version': sky.__version__,
@@ -7226,7 +7225,6 @@ def api_info(output_format: str):
                 'api_version': api_server_info.api_version,
             },
             'user': user.name,
-            'workspace': workspace,
         }
         click.echo(json.dumps(output_data, indent=2))
         return
