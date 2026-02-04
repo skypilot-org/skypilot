@@ -1,7 +1,7 @@
 """Slurm."""
 
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
@@ -317,7 +317,7 @@ class Slurm(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del cluster_name, dryrun, volume_mounts  # Unused.
         if region is not None:
             cluster = region.name
