@@ -28,6 +28,49 @@ _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
 # Default timeout for waiting for job nodes to be allocated, in seconds.
 _SLURM_DEFAULT_PROVISION_TIMEOUT = 10
 
+# Slurm job reasons that indicate legitimate queueing (waiting for resources).
+# When a job is pending with one of these reasons, the provision timeout
+# should NOT count down, as the job is making normal progress through the queue.
+# Reference: https://slurm.schedmd.com/job_reason_codes.html
+_SLURM_QUEUEING_REASONS = frozenset({
+    # Primary reason: waiting for resources to become available
+    'Resources',
+    # Job is queued behind higher priority jobs
+    'Priority',
+    # Required nodes are temporarily unavailable
+    'ReqNodeNotAvail',
+    # Job has a scheduled start time in the future
+    'BeginTime',
+    # Job is waiting for a reservation
+    'Reservation',
+    # Waiting for other array tasks to complete (normal array behavior)
+    'JobArrayTaskLimit',
+    # Nodes are being cleaned up from previous job
+    'Cleaning',
+    # Waiting for scheduling cycle
+    'WaitingForScheduling',
+    # Just submitted, not yet evaluated
+    'None',
+})
+
+# Slurm job reasons that indicate blocking conditions that won't resolve
+# by waiting. When a job is pending with one of these reasons, we should
+# fail fast with a helpful error message rather than waiting for timeout.
+# These typically indicate configuration issues, quota limits, or policy
+# violations that require user intervention.
+_SLURM_BLOCKING_REASON_PREFIXES = (
+    # Account/Association limits - user/account quota exceeded
+    'AssocGrp',
+    'AssocMax',
+    # QOS limits - quality of service policy violations
+    'QOS',
+    # Invalid configuration
+    'Invalid',
+    # Partition limits
+    'PartitionNodeLimit',
+    'PartitionTimeLimit',
+)
+
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
 hostlist = common.LazyImport('hostlist',
@@ -387,23 +430,72 @@ class SlurmClient:
 
         return output if output != 'None' else None
 
+    def _is_queueing_reason(self, reason: Optional[str]) -> bool:
+        """Check if job reason indicates legitimate queueing.
+
+        Args:
+            reason: The Slurm job reason string.
+
+        Returns:
+            True if the reason indicates the job is legitimately waiting
+            in the queue (e.g., waiting for resources), False if the reason
+            indicates a blocking condition or is unknown.
+        """
+        if reason is None:
+            return True  # No reason yet, assume queueing
+        return reason in _SLURM_QUEUEING_REASONS
+
+    def _is_blocking_reason(self, reason: Optional[str]) -> bool:
+        """Check if job reason indicates a blocking condition.
+
+        Blocking conditions are issues that won't resolve by waiting,
+        such as quota limits, policy violations, or configuration errors.
+
+        Args:
+            reason: The Slurm job reason string.
+
+        Returns:
+            True if the reason indicates a blocking condition that requires
+            user intervention.
+        """
+        if reason is None:
+            return False
+        return reason.startswith(_SLURM_BLOCKING_REASON_PREFIXES)
+
     @timeline.event
     def wait_for_job_nodes(self, job_id: str, timeout: int) -> None:
         """Wait for a Slurm job to have nodes allocated.
 
+        The timeout only counts when the job is pending for reasons other
+        than legitimate queueing (e.g., waiting for resources). This prevents
+        jobs from timing out while they're making normal progress through
+        the queue.
+
         Args:
             job_id: The Slurm job ID.
-            timeout: Maximum time to wait in seconds.
+            timeout: Maximum time to wait in seconds. Only counts while
+                the job is pending for non-queueing reasons.
         """
-        start_time = time.time()
         last_state = None
+        last_reason = None
+        # Track time spent in non-queueing states (counts toward timeout)
+        blocking_time = 0.0
+        last_check_time = time.time()
 
-        while time.time() - start_time < timeout:
+        while blocking_time < timeout:
+            current_time = time.time()
             state = self.get_job_state(job_id)
+            reason = self.get_job_reason(job_id) if state == 'PENDING' else None
 
-            if state != last_state:
-                logger.debug(f'Job {job_id} state: {state}')
+            # Log state/reason changes
+            if state != last_state or reason != last_reason:
+                if reason:
+                    logger.debug(
+                        f'Job {job_id} state: {state}, reason: {reason}')
+                else:
+                    logger.debug(f'Job {job_id} state: {state}')
                 last_state = state
+                last_reason = reason
 
             if state is None:
                 raise RuntimeError(f'Job {job_id} not found. It may have been '
@@ -413,7 +505,26 @@ class SlurmClient:
                 raise RuntimeError(
                     f'Job {job_id} terminated with state {state} '
                     'before nodes were allocated.')
-            # TODO(kevin): Log reason for pending.
+
+            # Check for blocking reasons that won't resolve by waiting
+            if state == 'PENDING' and self._is_blocking_reason(reason):
+                raise RuntimeError(
+                    f'Job {job_id} is blocked with reason: {reason}. '
+                    'This condition will not resolve by waiting. '
+                    'Please check your account limits, QOS policies, '
+                    'or cluster configuration.')
+
+            # Only count time toward timeout if NOT in a queueing state
+            if state == 'PENDING' and self._is_queueing_reason(reason):
+                # Job is legitimately waiting in queue, don't count toward timeout
+                logger.debug(f'Job {job_id} is queueing (reason: {reason}), '
+                             'not counting toward timeout')
+            else:
+                # Job is not queueing (running, configuring, or unknown pending
+                # reason) - count this time toward the timeout
+                blocking_time += current_time - last_check_time
+
+            last_check_time = current_time
 
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
@@ -431,8 +542,10 @@ class SlurmClient:
             # Wait before checking again
             time.sleep(2)
 
-        raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
-                           f'{timeout} seconds. Last state: {last_state}')
+        raise TimeoutError(
+            f'Job {job_id} did not get nodes allocated within {timeout} '
+            f'seconds of non-queueing time. Last state: {last_state}, '
+            f'last reason: {last_reason}')
 
     @timeline.event
     def get_job_nodes(
