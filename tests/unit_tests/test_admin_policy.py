@@ -50,6 +50,8 @@ def task():
 @pytest.fixture
 def add_volumes_policy_cls(add_example_policy_paths):
     """Fixture to provide AddVolumesPolicy class after path setup."""
+    # Import here because example_policy is not on sys.path until
+    # add_example_policy_paths fixture adds it.
     from example_policy.skypilot_policy import AddVolumesPolicy
     return AddVolumesPolicy
 
