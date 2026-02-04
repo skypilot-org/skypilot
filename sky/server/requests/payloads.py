@@ -190,6 +190,8 @@ class CheckBody(RequestBody):
     clouds: Optional[Tuple[str, ...]] = None
     verbose: bool = False
     workspace: Optional[str] = None
+    # Output format: 'table' (default human-readable) or 'json' (machine-readable)
+    output_format: str = 'table'
 
 
 class EnabledCloudsBody(RequestBody):

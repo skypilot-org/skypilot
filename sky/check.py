@@ -3,7 +3,7 @@ import collections
 import os
 import traceback
 from types import ModuleType
-from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import click
 import colorama
@@ -380,7 +380,25 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
-) -> Dict[str, List[str]]:
+    output_format: str = 'table',
+) -> Union[Dict[str, List[str]], Dict[str, Any]]:
+    """Check cloud credentials and return enabled clouds.
+
+    Args:
+        quiet: Suppress output.
+        verbose: Show verbose output.
+        clouds: List of clouds to check. If None, check all clouds.
+        workspace: Workspace to check. If None, check the active workspace.
+        output_format: Output format - 'table' (default) or 'json'.
+
+    Returns:
+        If output_format is 'table': Dict mapping workspace to list of
+            enabled cloud names.
+        If output_format is 'json': Dict with structured data for JSON output.
+    """
+    if output_format == 'json':
+        return check_for_json(clouds=clouds, workspace=workspace)
+
     enabled_clouds_by_workspace: Dict[str,
                                       List[str]] = collections.defaultdict(list)
     capabilities_result = check_capabilities(quiet, verbose, clouds,
@@ -404,6 +422,249 @@ def check(
         enabled_clouds_by_workspace[ws_name] = list(
             enabled_clouds_with_capabilities.keys())
     return enabled_clouds_by_workspace
+
+
+def check_for_json(
+    clouds: Optional[Iterable[str]] = None,
+    workspace: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Check cloud credentials and return structured data for JSON output.
+
+    This function performs credential checking similar to check_capabilities()
+    but returns all data in a structured format suitable for JSON serialization.
+
+    Args:
+        clouds: List of clouds to check. If None, check all clouds.
+        workspace: Workspace to check. If None, use the active workspace.
+
+    Returns:
+        A dict with the following structure:
+        {
+            "clouds": [
+                {
+                    "cloud": "AWS",
+                    "enabled": true,
+                    "capabilities": ["compute", "storage"],
+                    "reason": null
+                },
+                {
+                    "cloud": "Kubernetes",
+                    "enabled": true,
+                    "capabilities": ["compute"],
+                    "reason": null,
+                    "contexts": [
+                        {
+                            "name": "context-name",
+                            "enabled": true,
+                            "note": "optional note"
+                        }
+                    ]
+                },
+                ...
+            ],
+            "enabled_clouds": ["AWS", "Kubernetes"],
+            "workspace": "default"
+        }
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.provision.slurm import utils as slurm_utils
+    from sky.workspaces import core
+
+    available_workspaces = list(core.get_workspaces().keys())
+    target_workspace = workspace or skypilot_config.get_active_workspace()
+
+    if target_workspace not in available_workspaces:
+        target_workspace = constants.SKYPILOT_DEFAULT_WORKSPACE
+
+    def get_all_clouds() -> Tuple[str, ...]:
+        return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
+                     [cloudflare.NAME, coreweave.NAME])
+
+    def get_cloud_tuple(
+            cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
+        if cloud_name.lower().startswith('cloudflare'):
+            return cloudflare.NAME, cloudflare
+        elif cloud_name.lower().startswith('coreweave'):
+            return coreweave.NAME, coreweave
+        else:
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+            assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
+            return repr(cloud_obj), cloud_obj
+
+    if clouds is not None:
+        cloud_list = list(clouds)
+    else:
+        cloud_list = list(get_all_clouds())
+
+    clouds_to_check = [get_cloud_tuple(c) for c in cloud_list]
+
+    # Get allowed clouds from config
+    config_allowed_cloud_names = sorted([
+        get_cloud_tuple(c)[0] for c in skypilot_config.get_nested((
+            'allowed_clouds',), get_all_clouds())
+    ])
+
+    # Filter out workspace-disabled clouds
+    workspace_disabled_clouds = []
+    with skypilot_config.local_active_workspace_ctx(target_workspace):
+        for cloud in config_allowed_cloud_names:
+            cloud_config = skypilot_config.get_workspace_cloud(
+                cloud, workspace=target_workspace)
+            if cloud_config.get('disabled', False):
+                workspace_disabled_clouds.append(cloud)
+
+    config_allowed_cloud_names = [
+        c for c in config_allowed_cloud_names
+        if c not in workspace_disabled_clouds
+    ]
+
+    # Check each cloud
+    cloud_results: List[Dict[str, Any]] = []
+    enabled_cloud_names: List[str] = []
+
+    with skypilot_config.local_active_workspace_ctx(target_workspace):
+        for cloud_repr, cloud_obj in clouds_to_check:
+            cloud_entry: Dict[str, Any] = {
+                'cloud': cloud_repr,
+                'enabled': False,
+                'capabilities': [],
+                'reason': None
+            }
+
+            # Check if cloud is allowed
+            if cloud_repr not in config_allowed_cloud_names:
+                cloud_entry['reason'] = (
+                    f'{cloud_repr} is not included in allowed_clouds '
+                    'in ~/.sky/config.yaml')
+                cloud_results.append(cloud_entry)
+                continue
+
+            # Check capabilities
+            enabled_capabilities = []
+            disabled_reasons = []
+
+            for capability in sky_cloud.ALL_CAPABILITIES:
+                try:
+                    ok, reason = cloud_obj.check_credentials(capability)
+                    if ok:
+                        enabled_capabilities.append(capability.value)
+                    elif reason:
+                        if isinstance(reason, dict):
+                            # For K8s/SSH/Slurm, reason is a dict
+                            # We'll handle context details separately
+                            pass
+                        else:
+                            disabled_reasons.append(str(reason).strip())
+                except exceptions.NotSupportedError:
+                    # Capability not supported by this cloud
+                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    disabled_reasons.append(str(e))
+
+            cloud_entry['capabilities'] = enabled_capabilities
+            cloud_entry['enabled'] = len(enabled_capabilities) > 0
+
+            if cloud_entry['enabled']:
+                enabled_cloud_names.append(cloud_repr)
+            elif disabled_reasons:
+                cloud_entry['reason'] = disabled_reasons[0]
+
+            # Add Kubernetes contexts if applicable
+            if cloud_repr == repr(sky_clouds.Kubernetes()):
+                contexts_data = _get_kubernetes_contexts_for_json()
+                if contexts_data:
+                    cloud_entry['contexts'] = contexts_data
+
+            # Add Slurm clusters if applicable
+            if cloud_repr == repr(sky_clouds.Slurm()):
+                clusters_data = _get_slurm_clusters_for_json(slurm_utils)
+                if clusters_data:
+                    cloud_entry['clusters'] = clusters_data
+
+            # Add SSH node pools if applicable
+            if cloud_repr == repr(sky_clouds.SSH()):
+                node_pools_data = _get_ssh_node_pools_for_json()
+                if node_pools_data:
+                    cloud_entry['node_pools'] = node_pools_data
+
+            cloud_results.append(cloud_entry)
+
+    return {
+        'clouds': cloud_results,
+        'enabled_clouds': enabled_cloud_names,
+        'workspace': target_workspace
+    }
+
+
+def _get_kubernetes_contexts_for_json() -> List[Dict[str, Any]]:
+    """Get Kubernetes contexts with their status for JSON output."""
+    contexts_data: List[Dict[str, Any]] = []
+    try:
+        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        for context in existing_contexts:
+            ctx_entry: Dict[str, Any] = {
+                'name': context,
+                'enabled': False,
+                'note': None
+            }
+            try:
+                ok, reason = sky_clouds.Kubernetes._check_single_context(
+                    context)
+                ctx_entry['enabled'] = ok
+                if reason:
+                    # Extract note from reason string
+                    reason_str = str(reason)
+                    if 'Note:' in reason_str:
+                        note_part = reason_str.split('Note:', 1)[1].strip()
+                        ctx_entry['note'] = note_part
+                    elif 'enabled' not in reason_str.lower():
+                        ctx_entry['note'] = reason_str
+            except Exception:  # pylint: disable=broad-except
+                pass
+            contexts_data.append(ctx_entry)
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return contexts_data
+
+
+def _get_slurm_clusters_for_json(
+        slurm_utils: ModuleType) -> List[Dict[str, Any]]:
+    """Get Slurm clusters with their partitions for JSON output."""
+    clusters_data: List[Dict[str, Any]] = []
+    try:
+        existing_clusters = sky_clouds.Slurm.existing_allowed_clusters(
+            silent=True)
+        for cluster in existing_clusters:
+            cluster_entry: Dict[str, Any] = {
+                'name': cluster,
+                'enabled': True,
+                'partitions': []
+            }
+            try:
+                partitions = slurm_utils.get_partitions(cluster)
+                cluster_entry['partitions'] = partitions
+            except Exception:  # pylint: disable=broad-except
+                cluster_entry['enabled'] = False
+            clusters_data.append(cluster_entry)
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return clusters_data
+
+
+def _get_ssh_node_pools_for_json() -> List[Dict[str, Any]]:
+    """Get SSH node pools for JSON output."""
+    node_pools_data: List[Dict[str, Any]] = []
+    try:
+        existing_pools = sky_clouds.SSH.existing_allowed_contexts()
+        for pool in existing_pools:
+            pool_entry: Dict[str, Any] = {
+                'name': common_utils.removeprefix(pool, 'ssh-'),
+                'enabled': True
+            }
+            node_pools_data.append(pool_entry)
+    except Exception:  # pylint: disable=broad-except
+        pass
+    return node_pools_data
 
 
 def get_cached_enabled_clouds_or_refresh(

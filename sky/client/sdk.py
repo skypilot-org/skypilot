@@ -16,8 +16,7 @@ import logging
 import os
 import subprocess
 import typing
-from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
-                    TypeVar, Union)
+from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, TypeVar, Union
 from urllib import parse as urlparse
 
 import click
@@ -192,21 +191,25 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
 def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
-    workspace: Optional[str] = None
-) -> server_common.RequestId[Dict[str, List[str]]]:
+    workspace: Optional[str] = None,
+    output_format: str = 'table'
+) -> server_common.RequestId[Union[Dict[str, List[str]], Dict[str, Any]]]:
     """Checks the credentials to enable clouds.
 
     Args:
         infra: The infra to check.
         verbose: Whether to show verbose output.
         workspace: The workspace to check. If None, all workspaces will be
-        checked.
+            checked.
+        output_format: Output format - 'table' (default) or 'json'.
 
     Returns:
         The request ID of the check request.
 
     Request Returns:
-        None
+        If output_format is 'table': Dict mapping workspace to list of
+            enabled cloud names.
+        If output_format is 'json': Dict with structured data for JSON output.
     """
     if infra_list is None:
         clouds = None
@@ -226,7 +229,8 @@ def check(
         clouds = tuple(specified_clouds)
     body = payloads.CheckBody(clouds=clouds,
                               verbose=verbose,
-                              workspace=workspace)
+                              workspace=workspace,
+                              output_format=output_format)
     response = server_common.make_authenticated_request(
         'POST', '/check', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
