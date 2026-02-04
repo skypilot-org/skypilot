@@ -607,7 +607,8 @@ class Kubernetes(clouds.Cloud):
             cloud='kubernetes',
             region=context,
             keys=('remote_identity',),
-            default_value=schemas.get_default_remote_identity('kubernetes'))
+            default_value=schemas.get_default_remote_identity('kubernetes'),
+            override_configs=resources.cluster_config_overrides)
 
         if isinstance(remote_identity, dict):
             # If remote_identity is a dict, use the service account for the
@@ -623,13 +624,16 @@ class Kubernetes(clouds.Cloud):
 
         lc = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
         sa = schemas.RemoteIdentityOptions.SERVICE_ACCOUNT.value
+        no_upload = schemas.RemoteIdentityOptions.NO_UPLOAD.value
 
-        if k8s_service_account_name == lc or k8s_service_account_name == sa:
+        if k8s_service_account_name in (lc, sa, no_upload):
             # Use the default service account if remote identity is not set.
             # For LOCAL_CREDENTIALS, this is for in-cluster authentication
             # which needs a serviceaccount (specifically for SSH node pools
             # which uses in-cluster authentication internally, and we would
             # like to support exec-auth when the user is also using SSH infra)
+            # For NO_UPLOAD, we don't upload credentials but still need a
+            # service account for pod creation.
             k8s_service_account_name = (
                 kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME)
 
@@ -1234,7 +1238,9 @@ class Kubernetes(clouds.Cloud):
                             return (
                                 KubernetesHighPerformanceNetworkType.TOGETHER,
                                 None)
-                        if label_key.startswith('k8s.io/cloud-provider-aws'):
+                        if label_key.startswith(
+                            ('k8s.io/cloud-provider-aws', 'topology.k8s.aws',
+                             'topology.ebs.csi.aws.com')):
                             network_type = (
                                 KubernetesHighPerformanceNetworkType.AWS_EFA)
                             metadata: Optional[Dict[str, Any]] = None

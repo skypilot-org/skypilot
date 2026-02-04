@@ -144,11 +144,11 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '32'  # new fields in jobs/managed jobs service for job groups
+SKYLET_VERSION = '34'  # Add fields to ManagedJobInfo proto for GPU metrics.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 5  # add wait_for param to set_autostop
+SKYLET_LIB_VERSION = 6  # Add better support for launching many jobs at once.
 SKYLET_VERSION_FILE = '.sky/skylet_version'
 SKYLET_LOG_FILE = '.sky/skylet.log'
 SKYLET_PID_FILE = '.sky/skylet_pid'
@@ -396,6 +396,11 @@ USING_REMOTE_API_SERVER_ENV_VAR = (
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 
+# Recipe names: letters, numbers, and dashes only (no underscores or dots).
+# Must start with a letter, end with an alphanumeric character.
+RECIPE_NAME_VALID_REGEX = r'[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?'
+RECIPE_NAME_MAX_LENGTH = 40
+
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
@@ -478,6 +483,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'provision_timeout'),
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
+    ('kubernetes', 'remote_identity'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -571,6 +577,8 @@ ENV_VAR_DB_CONNECTION_URI = (f'{SKYPILOT_ENV_VAR_PREFIX}DB_CONNECTION_URI')
 ENV_VAR_ENABLE_BASIC_AUTH = 'ENABLE_BASIC_AUTH'
 SKYPILOT_INITIAL_BASIC_AUTH = 'SKYPILOT_INITIAL_BASIC_AUTH'
 SKYPILOT_INGRESS_BASIC_AUTH_ENABLED = 'SKYPILOT_INGRESS_BASIC_AUTH_ENABLED'
+SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE = (
+    'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE')
 ENV_VAR_ENABLE_SERVICE_ACCOUNTS = 'ENABLE_SERVICE_ACCOUNTS'
 
 # Enable debug logging for requests.
@@ -587,7 +595,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
@@ -662,5 +670,14 @@ ENV_VAR_LOOP_LAG_THRESHOLD_MS = (SKYPILOT_ENV_VAR_PREFIX +
 ARM64_ARCH = 'arm64'
 X86_64_ARCH = 'x86_64'
 
+# Slurm marker file for proctrack type detection.
+# Used by the executor to conditionally apply multi-node barrier.
+SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
+
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
+
+SSD_LOCAL_DISK = 'ssd'
+HDD_LOCAL_DISK = 'hdd'
+
+LOCAL_DISK_TYPES = {SSD_LOCAL_DISK, HDD_LOCAL_DISK}

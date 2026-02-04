@@ -204,8 +204,9 @@ def _parse_args(args: Optional[str] = None):
 
 
 def _extract_marked_tests(
-        file_path: str, args: str
-) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]]]]:
+    file_path: str, args: str
+) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]], List[str],
+                     List[bool]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -218,6 +219,10 @@ def _extract_marked_tests(
     and run for hours. This makes it hard to visualize the test results and
     rerun failures. Additionally, the parallelism would be controlled by pytest
     instead of the buildkite job queue.
+
+    Returns:
+        Dict mapping function_name to tuple of:
+        (clouds, queues, params, extra_args, no_auto_retry_flags)
     """
     # Args are already in the format pytest expects (cloud names like --lambda)
     cmd = f'pytest {file_path} --collect-only {args}'
@@ -265,6 +270,7 @@ def _extract_marked_tests(
         run_on_cloud_kube_backend = ('resource_heavy' in marks and
                                      'kubernetes' in default_clouds_to_run)
         benchmark_test = 'benchmark' in marks
+        no_auto_retry = 'no_auto_retry' in marks
 
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
@@ -308,20 +314,19 @@ def _extract_marked_tests(
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
-        ])
+        ], [no_auto_retry for _ in range(len(final_clouds_to_include))])
 
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str,
-                       args: str,
-                       auto_retry: bool = False) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str, args: str) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     generated_steps_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param, extra_args in zip(*clouds_queues_param):
+        for cloud, queue, param, extra_args, no_auto_retry in zip(
+                *clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
@@ -334,6 +339,7 @@ def _generate_pipeline(test_file: str,
                 continue
             if 'PYTHON_VERSION' in os.environ:
                 command = f'PYTHONPATH="$PWD:$PYTHONPATH" {command}'
+
             step = {
                 'label': label,
                 'command': command,
@@ -344,7 +350,15 @@ def _generate_pipeline(test_file: str,
                     'queue': queue
                 }
             }
-            if auto_retry:
+            if no_auto_retry:
+                # Disable automatic retries but allow manual retries.
+                step['retry'] = {
+                    'automatic': False,
+                    'manual': {
+                        'allowed': True
+                    }
+                }
+            else:
                 step['retry'] = {
                     # Automatically retry 2 times on any failure by default.
                     'automatic': True
@@ -397,7 +411,7 @@ def _convert_release(test_files: List[str], args: str, trigger_command: str):
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+        pipeline = _generate_pipeline(test_file, args)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
@@ -468,11 +482,10 @@ def _convert_quick_tests_core(test_files: List[str], args: str,
                         branch != 'master'):
                     continue
                 pipeline = _generate_pipeline(test_file,
-                                              args + f' --base-branch {branch}',
-                                              auto_retry=True)
+                                              args + f' --base-branch {branch}')
                 output_file_pipelines.append(pipeline)
         else:
-            pipeline = _generate_pipeline(test_file, args, auto_retry=True)
+            pipeline = _generate_pipeline(test_file, args)
             output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,

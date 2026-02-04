@@ -260,6 +260,28 @@ auth:
     # @schema type: [boolean, null]
     enabled: null
 
+  # Proxy authentication configuration.
+  # Use this when deploying behind an external authentication proxy
+  # (e.g., AWS ALB with Cognito, Azure Front Door, custom ingress auth).
+  # When enabled, the API server trusts the identity header from the proxy.
+  # This is mutually exclusive with auth.oauth and ingress.oauth2-proxy.
+  # @schema type: [object, null]
+  externalProxy:
+    # Enable proxy authentication.
+    # @schema type: [boolean]
+    enabled: false
+    # Header name containing the user identity.
+    # @schema type: [string]
+    headerName: 'X-Auth-Request-Email'
+    # Header format: 'plaintext' or 'jwt'.
+    # Use 'jwt' for headers that contain JWT tokens.
+    # Use 'plaintext' for headers that contain plain identity strings.
+    # @schema type: [string]
+    headerFormat: 'plaintext'
+    # JWT claim to extract identity from (only used when headerFormat is 'jwt').
+    # @schema type: [string]
+    jwtIdentityClaim: 'sub'
+
 storage:
   # Enable/disable persistent storage
   # With this enabled, SkyPilot will use a PV to persist the internal data like states, logs, lock files, catalog, etc.

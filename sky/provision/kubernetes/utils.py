@@ -45,7 +45,9 @@ from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
 if typing.TYPE_CHECKING:
+    from dateutil import parser as dateutil_parser
     import jinja2
+    from kubernetes.client import models as kubernetes_models
     import yaml
 
     from sky import backends
@@ -53,6 +55,8 @@ if typing.TYPE_CHECKING:
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     yaml = adaptors_common.LazyImport('yaml')
+    dateutil_parser = adaptors_common.LazyImport('dateutil.parser')
+    kubernetes_models = adaptors_common.LazyImport('kubernetes.client.models')
 
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
@@ -691,14 +695,14 @@ class GFDLabelFormatter(GPULabelFormatter):
         """Searches against a canonical list of NVIDIA GPUs and pattern
         matches the canonical GPU name against the GFD label.
         """
-        canonical_gpu_names = [
-            'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
-            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L40', 'L4'
-        ]
-        for canonical_name in canonical_gpu_names:
-            # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
+        for canonical_name in kubernetes_constants.CANONICAL_GPU_NAMES:
+            # A100-80GB accelerator is A100-SXM-80GB or A100-PCIE-80GB
             if canonical_name == 'A100-80GB' and re.search(
                     r'A100.*-80GB', value):
+                return canonical_name
+            # H100-80GB accelerator is H100-SXM-80GB or H100-PCIE-80GB
+            if canonical_name == 'H100-80GB' and re.search(
+                    r'H100.*-80GB', value):
                 return canonical_name
             # Use word boundary matching to prevent substring matches
             elif re.search(rf'\b{re.escape(canonical_name)}\b', value):
@@ -709,10 +713,47 @@ class GFDLabelFormatter(GPULabelFormatter):
         # 2. remove 'GEFORCE-' (e.g., 'NVIDIA-GEFORCE-RTX-3070' -> 'RTX-3070')
         # 3. remove 'RTX-' (e.g. 'RTX-6000' -> 'RTX6000')
         # Same logic, but uppercased, as the Skypilot labeler job found in
-        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml
+        # sky/utils/kubernetes/k8s_gpu_labeler_setup.yaml.j2
         return value.upper().replace('NVIDIA-',
                                      '').replace('GEFORCE-',
                                                  '').replace('RTX-', 'RTX')
+
+
+def _accelerator_name_matches(requested_acc: str,
+                              viable_names: List[str]) -> bool:
+    """Check if requested accelerator matches any viable name.
+
+    For backward compatibility with GPU name changes (e.g., when canonical names
+    like 'H200' are added to replace fallback names like 'H200-SXM-80GB'), this
+    function also matches if one name is a prefix of the other separated by '-'.
+
+    This handles cases where:
+    - Clusters were launched with fallback names (e.g., 'H200-SXM-80GB') but
+      after upgrading, the same label now maps to canonical name (e.g., 'H200').
+    - Users specify canonical names but the cluster uses fallback names.
+
+    Args:
+        requested_acc: The accelerator type requested (e.g., from launched_resources).
+        viable_names: List of viable accelerator names from node labels.
+
+    Returns:
+        True if the requested accelerator matches any viable name.
+    """
+    requested_lower = requested_acc.lower()
+    for viable in viable_names:
+        viable_lower = viable.lower()
+        if requested_lower == viable_lower:
+            return True
+        # Check prefix match with '-' separator for backward compatibility.
+        # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
+        shorter, longer = ((requested_lower, viable_lower)
+                           if len(requested_lower) <= len(viable_lower) else
+                           (viable_lower, requested_lower))
+        if longer.startswith(shorter):
+            # Ensure it's a proper prefix (followed by '-' or end of string)
+            if len(longer) == len(shorter) or longer[len(shorter)] == '-':
+                return True
+    return False
 
 
 class KarpenterLabelFormatter(SkyPilotLabelFormatter):
@@ -1098,7 +1139,9 @@ class GKEAutoscaler(Autoscaler):
                 continue
             node_accelerator_count = accelerator['acceleratorCount']
             viable_names = [node_accelerator_type.lower(), raw_value.lower()]
-            if (requested_gpu_type.lower() in viable_names and
+            # Use _accelerator_name_matches for backward compatibility
+            # with GPU name changes (e.g., 'H200' vs 'H200-SXM-80GB').
+            if (_accelerator_name_matches(requested_gpu_type, viable_names) and
                     int(node_accelerator_count) >= requested_gpu_count):
                 return True
         return False
@@ -1801,11 +1844,13 @@ def get_accelerator_label_key_values(
                     continue
                 for label, value in label_list:
                     if label_formatter.match_label_key(label):
-                        # match either canonicalized name or raw name
+                        # Match either canonicalized name or raw name.
+                        # Use _accelerator_name_matches for backward compatibility
+                        # with GPU name changes (e.g., H200-SXM-80GB -> H200).
                         accelerator = (label_formatter.
                                        get_accelerator_from_label_value(value))
                         viable = [value.lower(), accelerator.lower()]
-                        if acc_type.lower() not in viable:
+                        if not _accelerator_name_matches(acc_type, viable):
                             continue
                         if is_tpu_on_gke(acc_type):
                             assert isinstance(label_formatter,
@@ -2036,7 +2081,7 @@ class PodValidator:
 
     @classmethod
     def validate(cls, data):
-        return cls.__validate(data, kubernetes.models.V1Pod)
+        return cls.__validate(data, kubernetes_models.V1Pod)
 
     @classmethod
     def __validate(cls, data, klass):
@@ -2069,7 +2114,7 @@ class PodValidator:
             if klass in cls.NATIVE_TYPES_MAPPING:
                 klass = cls.NATIVE_TYPES_MAPPING[klass]
             else:
-                klass = getattr(kubernetes.models, klass)
+                klass = getattr(kubernetes_models, klass)
 
         if klass in cls.PRIMITIVE_TYPES:
             return cls.__validate_primitive(data, klass)
@@ -2114,7 +2159,7 @@ class PodValidator:
         :return: date.
         """
         try:
-            return kubernetes.dateutil_parser.parse(string).date()
+            return dateutil_parser.parse(string).date()
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as date object') from exc
@@ -2129,7 +2174,7 @@ class PodValidator:
         :return: datetime.
         """
         try:
-            return kubernetes.dateutil_parser.parse(string)
+            return dateutil_parser.parse(string)
         except ValueError as exc:
             raise ValueError(
                 f'Failed to parse `{string}` as datetime object') from exc

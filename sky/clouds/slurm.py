@@ -47,10 +47,6 @@ class Slurm(clouds.Cloud):
             'controllers is not '
             'well tested with '
             'Slurm.',
-        clouds.CloudImplementationFeatures.IMAGE_ID: 'Specifying image ID is '
-                                                     'not supported in Slurm.',
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE: 'Docker image is not '
-                                                         'supported in Slurm.',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -65,7 +61,6 @@ class Slurm(clouds.Cloud):
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
     _SSH_CONFIG_KEY_MAPPING = {
-        'identityfile': 'IdentityFile',
         'user': 'User',
         'hostname': 'HostName',
     }
@@ -366,6 +361,8 @@ class Slurm(clouds.Cloud):
         if acc_type:
             acc_type = slurm_utils.get_gres_gpu_type(cluster, acc_type)
 
+        image_id = resources.extract_docker_image()
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -383,11 +380,12 @@ class Slurm(clouds.Cloud):
             'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
-            'slurm_private_key': ssh_config_dict['identityfile'][0],
+            'slurm_private_key': slurm_utils.get_identity_file(ssh_config_dict),
             'slurm_sshd_host_key_filename':
                 (slurm_utils.SLURM_SSHD_HOST_KEY_FILENAME),
             'slurm_cluster_name_env_var':
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
+            'image_id': image_id,
         }
 
         return deploy_vars
@@ -509,7 +507,7 @@ class Slurm(clouds.Cloud):
                     ssh_config_dict['hostname'],
                     int(ssh_config_dict.get('port', 22)),
                     ssh_config_dict['user'],
-                    ssh_config_dict['identityfile'][0],
+                    slurm_utils.get_identity_file(ssh_config_dict),
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
                     ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
                 info = client.info()

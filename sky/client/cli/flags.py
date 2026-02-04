@@ -52,6 +52,21 @@ COMMON_OPTIONS = [
                  help=('Run the command asynchronously.'))
 ]
 
+GRACEFUL_OPTIONS = [
+    click.option(
+        '--graceful',
+        is_flag=True,
+        default=False,
+        help=('Wait for MOUNT_CACHED uploads to complete before '
+              'stopping/terminating. Will cancel current jobs first.')),
+    click.option('--graceful-timeout',
+                 type=int,
+                 default=None,
+                 help=('Timeout in seconds for `--graceful` flag. When not '
+                       'set, will wait for MOUNT_CACHED uploads until they are '
+                       'finished.')),
+]
+
 TASK_OPTIONS = [
     click.option(
         '--workdir',

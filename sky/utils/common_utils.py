@@ -190,6 +190,36 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 f'{valid_regex}')
 
 
+def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
+    """Errors out on invalid recipe names.
+
+    Recipe names must:
+    - Start with a letter
+    - Contain only letters, numbers, and dashes (no underscores or dots)
+    - End with a letter or number
+    - Be at most constants.RECIPE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the recipe name is invalid.
+    """
+    if recipe_name is None:
+        return
+    if len(recipe_name) > constants.RECIPE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is too long; '
+                f'maximum length is {constants.RECIPE_NAME_MAX_LENGTH} '
+                f'characters, got {len(recipe_name)}')
+    valid_regex = constants.RECIPE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, recipe_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers, and dashes): '
+                f'{valid_regex}')
+
+
 def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
@@ -724,7 +754,7 @@ def remove_file_if_exists(path: Optional[str]):
 
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
-    return 'microsoft' in platform.uname()[3].lower()
+    return 'microsoft' in platform.uname().release.lower()
 
 
 def find_free_port(start_port: int) -> int:

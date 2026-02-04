@@ -1627,6 +1627,9 @@ def get_managed_jobs_with_filters(
     # then fetch all tasks for those jobs
     if page is not None and limit is not None:
         # Get paginated unique job IDs with ordering
+        # Use GROUP BY instead of DISTINCT to allow ORDER BY on different
+        # columns (PostgreSQL requires ORDER BY columns to be in SELECT list
+        # when using DISTINCT).
         job_ids_subquery = build_managed_jobs_with_filters_query(
             fields=None,
             job_ids=job_ids,
@@ -1637,12 +1640,17 @@ def get_managed_jobs_with_filters(
             user_hashes=user_hashes,
             statuses=statuses,
             skip_finished=skip_finished,
-        ).with_only_columns(spot_table.c.spot_job_id).distinct()
+        ).with_only_columns(spot_table.c.spot_job_id).group_by(
+            spot_table.c.spot_job_id)
 
         # Apply sorting to pagination query - this determines which jobs appear
-        # on each page.
+        # on each page. Use MAX aggregate for columns not in GROUP BY to ensure
+        # PostgreSQL compatibility.
         if sort_by and sort_by in sort_field_map:
             sort_column = sort_field_map[sort_by]
+            # Use MAX aggregate for columns that aren't the grouped column
+            if sort_column != spot_table.c.spot_job_id:
+                sort_column = sqlalchemy.func.max(sort_column)
             if sort_order == 'asc':
                 job_ids_subquery = job_ids_subquery.order_by(sort_column.asc())
             else:
@@ -1780,7 +1788,7 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
 
 
 @_init_db
-def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
+def scheduler_set_waiting(job_ids: List[int], dag_yaml_content: str,
                           original_user_yaml_content: str,
                           env_file_content: str,
                           config_file_content: Optional[str],
@@ -1788,18 +1796,19 @@ def scheduler_set_waiting(job_id: int, dag_yaml_content: str,
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(job_info_table.c.spot_job_id == job_id,)).update({
-                job_info_table.c.schedule_state:
-                    ManagedJobScheduleState.WAITING.value,
-                job_info_table.c.dag_yaml_content: dag_yaml_content,
-                job_info_table.c.original_user_yaml_content:
-                    (original_user_yaml_content),
-                job_info_table.c.env_file_content: env_file_content,
-                job_info_table.c.config_file_content: config_file_content,
-                job_info_table.c.priority: priority,
-            })
+            sqlalchemy.and_(job_info_table.c.spot_job_id.in_(job_ids),)).update(
+                {
+                    job_info_table.c.schedule_state:
+                        ManagedJobScheduleState.WAITING.value,
+                    job_info_table.c.dag_yaml_content: dag_yaml_content,
+                    job_info_table.c.original_user_yaml_content:
+                        (original_user_yaml_content),
+                    job_info_table.c.env_file_content: env_file_content,
+                    job_info_table.c.config_file_content: config_file_content,
+                    job_info_table.c.priority: priority,
+                })
         session.commit()
-        assert updated_count <= 1, (job_id, updated_count)
+        assert updated_count == len(job_ids), (job_ids, updated_count)
 
 
 @_init_db
@@ -2055,6 +2064,36 @@ def get_num_alive_jobs(pool: Optional[str] = None) -> int:
                 sqlalchemy.func.count()  # pylint: disable=not-callable
             ).select_from(job_info_table).where(
                 sqlalchemy.and_(*where_conditions))).fetchone()[0]
+
+
+@_init_db
+def get_pending_jobs_count_by_pool(pool: str) -> int:
+    """Get the count of pending jobs in a pool.
+
+    Pending jobs are jobs that are waiting for a worker, i.e., jobs with:
+    - status = PENDING
+
+    Args:
+        pool: The pool name
+
+    Returns:
+        The number of pending jobs in the pool
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        # Join job_info_table with spot_table to get status
+        query = sqlalchemy.select(
+            sqlalchemy.func.count()  # pylint: disable=not-callable
+        ).select_from(
+            job_info_table.join(
+                spot_table, job_info_table.c.spot_job_id ==
+                spot_table.c.spot_job_id)).where(
+                    sqlalchemy.and_(
+                        spot_table.c.status == ManagedJobStatus.PENDING.value,
+                        job_info_table.c.pool == pool,
+                    ))
+        result = session.execute(query).fetchone()
+        return result[0] if result else 0
 
 
 @_init_db

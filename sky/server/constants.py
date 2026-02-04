@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 31  # add is_primary_in_job_group field for job groups
+API_VERSION = 33  # add recipes endpoint
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -72,3 +72,15 @@ STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
 # Valid empty values for pickled fields (base64-encoded pickled None)
 # base64.b64encode(pickle.dumps(None)).decode('utf-8')
 EMPTY_PICKLED_VALUE = 'gAROLg=='
+
+# We do not support setting these in config.yaml because:
+# 1. config.yaml can be updated dynamically, but auth middleware does not
+#    support hot reload yet.
+# 2. If we introduce hot reload for auth middleware, bad config might
+#    invalidate all authenticated sessions and thus cannot be rolled back
+#    by API users.
+# TODO(aylei): we should introduce server.yaml for static server admin config,
+# which is more structured than multiple environment variables and can be less
+# confusing to users.
+OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
+OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'

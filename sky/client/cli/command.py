@@ -28,10 +28,12 @@ import concurrent.futures
 import fnmatch
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import typing
@@ -68,6 +70,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.server import constants as server_constants
+from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -717,6 +720,27 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
     return is_yaml, result
 
 
+def _check_recipe_reference(entrypoint: str) -> Tuple[bool, Optional[str]]:
+    """Check if entrypoint is a recipe reference like 'recipes:my-recipe'.
+
+    Args:
+        entrypoint: The entrypoint string to check.
+
+    Returns:
+        Tuple of (is_recipe, recipe_name). If is_recipe is True, recipe_name
+        contains the name of the recipe to fetch from the Recipe Hub.
+    """
+    # Pattern matches 'recipes:<valid-recipe-name>'
+    # Recipe names must start with a letter, and can contain letters, numbers,
+    # and dashes, and must end with an alphanumeric character.
+    pattern = re.compile(r'^recipes:(' + constants.RECIPE_NAME_VALID_REGEX +
+                         r')$')
+    match = pattern.match(entrypoint)
+    if match:
+        return True, match.group(1)
+    return False, None
+
+
 def _pop_and_ignore_fields_in_override_params(
         params: Dict[str, Any], field_to_ignore: List[str]) -> None:
     """Pops and ignores fields in override params.
@@ -734,6 +758,55 @@ def _pop_and_ignore_fields_in_override_params(
             if field_value is not None:
                 click.secho(f'Override param {field}={field_value} is ignored.',
                             fg='yellow')
+
+
+def _get_recipe_yaml(entrypoint: str) -> Optional[str]:
+    """Checks if entrypoint is a recipe reference and returns the recipe YAML.
+
+    Fetches the recipe content from the API server.
+
+    Args:
+        entrypoint: The entrypoint string to check.
+
+    Returns:
+        The recipe YAML if entrypoint is a recipe reference. Otherwise, None.
+    """
+    is_recipe, recipe_name = _check_recipe_reference(entrypoint)
+    if is_recipe:
+        assert recipe_name is not None  # For mypy
+        click.secho('Recipe to run: ', fg='cyan', nl=False)
+        click.secho(recipe_name)
+        try:
+            # Make API request to fetch recipe from server
+            body = payloads.RecipeGetBody(recipe_name=recipe_name)
+            response = server_common.make_authenticated_request(
+                'POST', '/recipes/get', json=body.model_dump())
+            request_id: server_common.RequestId[Optional[Dict[
+                str, Any]]] = server_common.get_request_id(response)
+            recipe = sdk.get(request_id)
+        except requests_lib.exceptions.ConnectionError as e:
+            raise click.UsageError(
+                f'Failed to connect to API server to fetch recipe '
+                f'{recipe_name!r}: {e}') from e
+        except Exception as e:
+            # Handle errors from the API server (e.g., recipe not found)
+            raise click.UsageError(str(e)) from e
+
+        if recipe is None:
+            raise click.UsageError(f'Recipe not found: {recipe_name}')
+
+        content = recipe.get('content')
+        if content is None:
+            raise click.UsageError(f'Recipe {recipe_name!r} has no content')
+
+        # Write to temp file and treat as YAML
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                         delete=False) as f:
+            f.write(content)
+            return f.name
+    else:
+        logger.debug(f'Not a recipe reference: {entrypoint}')
+    return None
 
 
 def _make_task_or_dag_from_entrypoint_with_overrides(
@@ -774,7 +847,14 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         raise click.UsageError('Cannot specify both --git-url and --workdir')
 
     entrypoint = ' '.join(entrypoint)
+
+    # Check if entrypoint is a recipe reference (recipes:<name>)
+    recipe_yaml = _get_recipe_yaml(entrypoint)
+    if recipe_yaml is not None:
+        entrypoint = recipe_yaml
+
     is_yaml, _ = _check_yaml(entrypoint)
+
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
@@ -2615,13 +2695,15 @@ def cancel(
 @flags.all_option('Stop all existing clusters.')
 @flags.all_users_option('Stop all existing clusters for all users.')
 @flags.yes_option()
-@_add_click_options(flags.COMMON_OPTIONS)
+@_add_click_options(flags.GRACEFUL_OPTIONS + flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
     all: bool,  # pylint: disable=redefined-builtin
     all_users: bool,
     yes: bool,
+    graceful: bool,
+    graceful_timeout: Optional[int],
     async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -2658,6 +2740,8 @@ def stop(
                            all_users=all_users,
                            down=False,
                            no_confirm=yes,
+                           graceful=graceful,
+                           graceful_timeout=graceful_timeout,
                            async_call=async_call)
 
 
@@ -3035,7 +3119,7 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
-@_add_click_options(flags.COMMON_OPTIONS)
+@_add_click_options(flags.GRACEFUL_OPTIONS + flags.COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
@@ -3043,6 +3127,8 @@ def down(
     all_users: bool,
     yes: bool,
     purge: bool,
+    graceful: bool,
+    graceful_timeout: Optional[int],
     async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -3079,6 +3165,8 @@ def down(
                            down=True,
                            no_confirm=yes,
                            purge=purge,
+                           graceful=graceful,
+                           graceful_timeout=graceful_timeout,
                            async_call=async_call)
 
 
@@ -3240,6 +3328,8 @@ def _down_or_stop_clusters(
         down: bool = False,  # pylint: disable=redefined-outer-name
         no_confirm: bool = True,
         purge: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
         idle_minutes_to_autostop: Optional[int] = None,
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
         async_call: bool = False) -> None:
@@ -3257,6 +3347,10 @@ def _down_or_stop_clusters(
         down: If True, tear down the clusters.
         no_confirm: If True, skip the confirmation prompt.
         purge: If True, forcefully remove the clusters from the cluster table.
+        graceful: If True, cancel the user task, but block until MOUNT_CACHE
+            finishes uploads.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
         idle_minutes_to_autostop: The number of minutes to wait before
             automatically stopping the cluster.
         wait_for: Determines the condition for resetting the idleness timer.
@@ -3440,9 +3534,15 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    request_id = sdk.down(name, purge=purge)
+                    request_id = sdk.down(name,
+                                          purge=purge,
+                                          graceful=graceful,
+                                          graceful_timeout=graceful_timeout)
                 else:
-                    request_id = sdk.stop(name, purge=purge)
+                    request_id = sdk.stop(name,
+                                          purge=purge,
+                                          graceful=graceful,
+                                          graceful_timeout=graceful_timeout)
                 request_ids.append(request_id)
                 progress.stop()
                 _async_call_or_wait(
@@ -4775,6 +4875,12 @@ def volumes_apply(
     volume_config_dict: Dict[str, Any] = {}
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
+
+        # Check if the entrypoint is a recipe reference
+        recipe_yaml = _get_recipe_yaml(entrypoint_str)
+        if recipe_yaml is not None:
+            entrypoint_str = recipe_yaml
+
         is_yaml, yaml_config, yaml_file_provided, invalid_reason = (
             _check_yaml_only(entrypoint_str))
         if not is_yaml:
@@ -5585,6 +5691,12 @@ def jobs_pool_apply(
         raise click.UsageError(
             'Cannot specify both --workers and POOL_YAML. Please use one of '
             'them.')
+
+    if pool_yaml is not None and len(pool_yaml) > 0:
+        recipe_yaml = _get_recipe_yaml(pool_yaml[0])
+        if recipe_yaml is not None:
+            click.secho('Recipe to run: ', fg='cyan', nl=False)
+            pool_yaml = (recipe_yaml,)
 
     if pool_yaml is None or len(pool_yaml) == 0:
         if pool is None:

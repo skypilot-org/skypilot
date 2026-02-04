@@ -76,6 +76,9 @@ install_requires = [
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
+    # Required by sqlalchemy.ext.asyncio which is used in
+    # sky/utils/db/db_utils.py
+    'greenlet',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
     'casbin',
@@ -120,7 +123,6 @@ server_dependencies = [
     GRPC,
     PROTOBUF,
     'aiosqlite',
-    'greenlet',
 ]
 
 local_ray = [
@@ -249,6 +251,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
+    'yotta': [],  # No dependencies needed for Yotta
 }
 
 # Calculate which clouds should be included in the [all] installation.

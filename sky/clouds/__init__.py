@@ -35,6 +35,7 @@ from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
 from sky.clouds.vsphere import Vsphere
+from sky.clouds.yotta import Yotta
 
 __all__ = [
     'IBM',
@@ -66,6 +67,7 @@ __all__ = [
     'Nebius',
     'Hyperbolic',
     'Seeweb',
+    'Yotta',
     # Utility functions
     'cloud_in_iterable',
 ]

@@ -12,7 +12,7 @@ USAGE_POLICY_MESSAGE = (
     'Usage logging can be disabled by setting the '
     'environment variable SKYPILOT_DISABLE_USAGE_COLLECTION=1.')
 
-USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
+USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs', 'secrets']
 USAGE_MESSAGE_REDACT_TYPES = {str, dict}
 
 # Env var for the usage run id. This is used by the API server to associate
