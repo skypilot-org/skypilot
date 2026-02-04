@@ -26,23 +26,21 @@ export async function getUsers() {
     // Data from API is: [{ id: 'user_hash', name: 'username' }, ...]
     // Transform to: [{ userId: 'user_hash', username: 'username' }, ...]
     // Filter out the dashboard users
-    return (
-      data
-        .filter(
-          (user) =>
-            !(
-              (user.name === 'dashboard' || user.name === 'local') &&
-              user.user_type === 'local'
-            )
-        )
-        .map((user) => ({
-          userId: user.id,
-          username: user.name,
-          role: user.role,
-          created_at: user.created_at,
-          userType: user.user_type,
-        })) || []
-    );
+    return (data || [])
+      .filter(
+        (user) =>
+          !(
+            ['dashboard', 'local'].includes(user.name) &&
+            user.user_type === 'local'
+          )
+      )
+      .map((user) => ({
+        userId: user.id,
+        username: user.name,
+        role: user.role,
+        created_at: user.created_at,
+        userType: user.user_type,
+      }));
   } catch (error) {
     console.error('Failed to fetch users:', error);
     throw error;
