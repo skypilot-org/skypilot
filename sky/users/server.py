@@ -44,10 +44,10 @@ def get_user_type(user: models.User) -> str:
     """
     if user.is_service_account():
         return models.UserType.SA.value
-    if user.password is not None:
-        return models.UserType.BASIC.value
     if user.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
         return models.UserType.SYSTEM.value
+    if user.password is not None:
+        return models.UserType.BASIC.value
     if user.name and '@' in user.name:
         return models.UserType.SSO.value
     return models.UserType.LOCAL.value
