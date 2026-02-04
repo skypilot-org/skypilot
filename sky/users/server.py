@@ -33,6 +33,26 @@ USER_LOCK_TIMEOUT_SECONDS = 20
 router = fastapi.APIRouter()
 
 
+def get_user_type(user: models.User) -> str:
+    """Get user type for a user.
+
+    Args:
+        user: The user to get the type for.
+
+    Returns:
+        The user type string.
+    """
+    if user.is_service_account():
+        return models.UserType.SA.value
+    if user.password is not None:
+        return models.UserType.BASIC.value
+    if user.id in [common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID]:
+        return models.UserType.SYSTEM.value
+    if user.name and '@' in user.name:
+        return models.UserType.SSO.value
+    return models.UserType.LOCAL.value
+
+
 # All handlers in user handler are sync to get fastAPI run it in a
 # ThreadPoolExecutor to avoid blocking the async event loop.
 # TODO(aylei): make these async once we have the global_user_state async
@@ -58,7 +78,8 @@ def users() -> List[Dict[str, Any]]:
             'id': user.id,
             'name': user.name,
             'created_at': user.created_at,
-            'role': users_to_role.get(user.id, '')
+            'role': users_to_role.get(user.id, ''),
+            'user_type': get_user_type(user)
         })
     return all_users
 

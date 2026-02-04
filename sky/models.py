@@ -2,6 +2,7 @@
 
 import collections
 import dataclasses
+import enum
 import getpass
 import os
 from typing import Any, ClassVar, Dict, List, Optional
@@ -10,6 +11,20 @@ import pydantic
 
 from sky.skylet import constants
 from sky.utils import common_utils
+
+
+class UserType(enum.Enum):
+    """Enum for user types."""
+    # Internal system users (SERVER_ID, SKYPILOT_SYSTEM_USER_ID)
+    SYSTEM = 'system'
+    # Users created via user_create API
+    BASIC = 'basic'
+    # Service accounts created via create_service_account_token
+    SA = 'sa'
+    # Users authenticated via SSO
+    SSO = 'sso'
+    # Default for existing users (local origin)
+    LOCAL = 'local'
 
 
 @dataclasses.dataclass
