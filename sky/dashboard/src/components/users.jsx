@@ -2147,14 +2147,26 @@ function UsersTable({
                       ) : (
                         <>
                           <span className="capitalize">{user.role}</span>
-                          {/* Only show edit role button if admin */}
+                          {/* Only show edit role button if admin and not a system user */}
                           {currentUserRole === 'admin' && (
                             <button
-                              onClick={() =>
-                                handleEditClick(user.userId, user.role)
+                              onClick={
+                                user.userType !== 'system'
+                                  ? () =>
+                                      handleEditClick(user.userId, user.role)
+                                  : undefined
                               }
-                              className="text-blue-600 hover:text-blue-700 p-1"
-                              title="Edit role"
+                              className={
+                                user.userType !== 'system'
+                                  ? 'text-blue-600 hover:text-blue-700 p-1'
+                                  : 'text-gray-300 cursor-not-allowed p-1'
+                              }
+                              title={
+                                user.userType !== 'system'
+                                  ? 'Edit role'
+                                  : 'Cannot edit role for system users'
+                              }
+                              disabled={user.userType === 'system'}
                             >
                               <PenIcon className="h-3 w-3" />
                             </button>
@@ -2234,43 +2246,61 @@ function UsersTable({
                   (basicAuthEnabled || currentUserRole === 'admin') && (
                     <TableCell className="relative">
                       <div className="flex items-center gap-2">
-                        {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
+                        {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
                         {basicAuthEnabled && (
                           <button
                             onClick={
-                              currentUserRole === 'admin' ||
-                              user.userId === currentUserId
+                              user.userType === 'basic' &&
+                              (currentUserRole === 'admin' ||
+                                user.userId === currentUserId)
                                 ? async () => {
                                     onResetPassword(user);
                                   }
                                 : undefined
                             }
                             className={
-                              currentUserRole === 'admin' ||
-                              user.userId === currentUserId
+                              user.userType === 'basic' &&
+                              (currentUserRole === 'admin' ||
+                                user.userId === currentUserId)
                                 ? 'text-blue-600 hover:text-blue-700 p-1'
                                 : 'text-gray-300 cursor-not-allowed p-1'
                             }
                             title={
-                              currentUserRole === 'admin' ||
-                              user.userId === currentUserId
-                                ? 'Reset Password'
-                                : 'You can only reset your own password'
+                              user.userType !== 'basic'
+                                ? 'Password reset only available for basic auth users'
+                                : currentUserRole === 'admin' ||
+                                    user.userId === currentUserId
+                                  ? 'Reset Password'
+                                  : 'You can only reset your own password'
                             }
                             disabled={
-                              currentUserRole !== 'admin' &&
-                              user.userId !== currentUserId
+                              user.userType !== 'basic' ||
+                              (currentUserRole !== 'admin' &&
+                                user.userId !== currentUserId)
                             }
                           >
                             <KeyRoundIcon className="h-4 w-4" />
                           </button>
                         )}
-                        {/* Delete button - only show for admin */}
+                        {/* Delete button - only show for admin, disabled for system users */}
                         {currentUserRole === 'admin' && (
                           <button
-                            onClick={() => onDeleteUser(user)}
-                            className="text-red-600 hover:text-red-700 p-1"
-                            title="Delete User"
+                            onClick={
+                              user.userType !== 'system'
+                                ? () => onDeleteUser(user)
+                                : undefined
+                            }
+                            className={
+                              user.userType !== 'system'
+                                ? 'text-red-600 hover:text-red-700 p-1'
+                                : 'text-gray-300 cursor-not-allowed p-1'
+                            }
+                            title={
+                              user.userType !== 'system'
+                                ? 'Delete User'
+                                : 'Cannot delete system users'
+                            }
+                            disabled={user.userType === 'system'}
                           >
                             <Trash2Icon className="h-4 w-4" />
                           </button>
