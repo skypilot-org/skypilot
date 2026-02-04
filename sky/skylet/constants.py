@@ -96,6 +96,11 @@ SKY_SLURM_PYTHON_CMD = (f'{SKY_SLURM_UNSET_PYTHONPATH} '
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
 SKY_REMOTE_PYTHON_ENV: str = f'{SKY_RUNTIME_DIR}/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
+# Name for the hardlinked Python binary used by SkyPilot runtime processes.
+# This name intentionally does NOT contain "python" so that user commands like
+# `pkill python` will not kill SkyPilot runtime processes (Ray, skylet, etc.).
+# See: https://linear.app/skypilot/issue/SKY-4501
+SKY_PYTHON_BINARY_NAME = 'skypilot-rt'
 # Place the conda root in the runtime directory, as installing to $HOME
 # on an NFS takes too long (1-2m slower).
 SKY_CONDA_ROOT = f'{SKY_RUNTIME_DIR}/miniconda3'
@@ -254,7 +259,12 @@ UV_INSTALLATION_COMMANDS = (
     # TODO(zhwu): consider adding --python-preference only-managed to avoid
     # using the system python, if a user report such issue.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
-    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
+    # Create a hardlink of the Python binary with a name that does not contain
+    # "python", so that `pkill python` from users will not kill SkyPilot
+    # runtime processes (Ray, SkyPilot commands, etc.).
+    f'ln -f $(echo {SKY_REMOTE_PYTHON_ENV})/bin/python '
+    f'$(echo {SKY_REMOTE_PYTHON_ENV})/bin/{SKY_PYTHON_BINARY_NAME};'
+    f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/{SKY_PYTHON_BINARY_NAME}" > {SKY_PYTHON_PATH_FILE};'  # pylint: disable=line-too-long
 )
 
 _sky_version = str(version.parse(sky.__version__))
