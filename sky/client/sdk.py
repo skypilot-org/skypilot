@@ -16,7 +16,8 @@ import logging
 import os
 import subprocess
 import typing
-from typing import Any, Dict, Iterator, List, Literal, Optional, Tuple, TypeVar, Union
+from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
+                    TypeVar, Union)
 from urllib import parse as urlparse
 
 import click

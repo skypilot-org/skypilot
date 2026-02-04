@@ -41,8 +41,7 @@ def test_summary_message_enabled_infra_with_k8s_contexts(monkeypatch):
     # Provide ctx2text for Kubernetes with non-disabled status so it appears in summary.
     cloud2ctx2text = {
         repr(sky_clouds.Kubernetes()): {
-            k8s_context:
-                'enabled. Note: Cluster has 1 nodes with accelerators that are not labeled.'
+            k8s_context: 'enabled. Note: Cluster has 1 nodes with accelerators that are not labeled.'
         }
     }
 
@@ -525,13 +524,10 @@ class TestCheckJsonOutput:
 
         mock_json_result = {
             'clouds': [{
-                'cloud':
-                    'Kubernetes',
-                'enabled':
-                    True,
+                'cloud': 'Kubernetes',
+                'enabled': True,
                 'capabilities': ['compute'],
-                'reason':
-                    None,
+                'reason': None,
                 'contexts': [{
                     'name': 'gke_sky-dev_us-central1-c_skypilot-cluster',
                     'enabled': True,
@@ -572,13 +568,10 @@ class TestCheckJsonOutput:
 
         mock_json_result = {
             'clouds': [{
-                'cloud':
-                    'Slurm',
-                'enabled':
-                    True,
+                'cloud': 'Slurm',
+                'enabled': True,
                 'capabilities': ['compute'],
-                'reason':
-                    None,
+                'reason': None,
                 'clusters': [{
                     'name': 'hpc-main',
                     'enabled': True,
@@ -620,13 +613,10 @@ class TestCheckJsonOutput:
 
         mock_json_result = {
             'clouds': [{
-                'cloud':
-                    'Azure',
-                'enabled':
-                    False,
+                'cloud': 'Azure',
+                'enabled': False,
                 'capabilities': [],
-                'reason':
-                    "Azure CLI not installed. Run 'pip install azure-cli'."
+                'reason': "Azure CLI not installed. Run 'pip install azure-cli'."
             }],
             'enabled_clouds': [],
             'workspace': 'default'
@@ -732,10 +722,6 @@ class TestCheckForJson:
                             if keys == ('allowed_clouds',) else default_value)
         monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
                             lambda *args, **kwargs: {})
-        monkeypatch.setattr('sky.clouds.aws.AWS._check_compute_credentials',
-                            lambda self: (True, None))
-        monkeypatch.setattr('sky.clouds.aws.AWS._check_storage_credentials',
-                            lambda self: (True, None))
         monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
                             lambda *args, **kwargs: [])
         monkeypatch.setattr('sky.global_user_state.set_enabled_clouds',
@@ -743,7 +729,12 @@ class TestCheckForJson:
         monkeypatch.setattr('sky.global_user_state.set_allowed_clouds',
                             lambda *args, **kwargs: None)
 
-        result = sky_check.check_for_json(clouds=('aws',), workspace='default')
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                result = sky_check.check_for_json(clouds=('aws',),
+                                                  workspace='default')
 
         aws_cloud = next((c for c in result['clouds'] if c['cloud'] == 'AWS'),
                          None)
@@ -762,10 +753,6 @@ class TestCheckForJson:
                             if keys == ('allowed_clouds',) else default_value)
         monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
                             lambda *args, **kwargs: {})
-        monkeypatch.setattr('sky.clouds.aws.AWS._check_compute_credentials',
-                            lambda self: (False, 'AWS credentials not found.'))
-        monkeypatch.setattr('sky.clouds.aws.AWS._check_storage_credentials',
-                            lambda self: (False, 'AWS credentials not found.'))
         monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
                             lambda *args, **kwargs: [])
         monkeypatch.setattr('sky.global_user_state.set_enabled_clouds',
@@ -773,7 +760,13 @@ class TestCheckForJson:
         monkeypatch.setattr('sky.global_user_state.set_allowed_clouds',
                             lambda *args, **kwargs: None)
 
-        result = sky_check.check_for_json(clouds=('aws',), workspace='default')
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(False, 'AWS credentials not found.'))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False,
+                                           'AWS credentials not found.'))):
+                result = sky_check.check_for_json(clouds=('aws',),
+                                                  workspace='default')
 
         aws_cloud = next((c for c in result['clouds'] if c['cloud'] == 'AWS'),
                          None)

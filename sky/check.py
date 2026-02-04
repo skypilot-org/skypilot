@@ -3,7 +3,8 @@ import collections
 import os
 import traceback
 from types import ModuleType
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
+                    Union)
 
 import click
 import colorama
