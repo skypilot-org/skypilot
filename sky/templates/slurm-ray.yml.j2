@@ -27,6 +27,9 @@ provider:
 {% if slurm_proxy_jump is not none %}
     proxyjump: {{slurm_proxy_jump | tojson }}
 {% endif %}
+{% if slurm_identities_only is not none %}
+    identities_only: {{slurm_identities_only | tojson }}
+{% endif %}
 
 auth:
   ssh_user: {{user}}

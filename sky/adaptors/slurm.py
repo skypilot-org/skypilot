@@ -91,6 +91,7 @@ class SlurmClient:
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
         is_inside_slurm_cluster: bool = False,
+        identities_only: Optional[bool] = None,
     ):
         """Initialize SlurmClient.
 
@@ -103,6 +104,9 @@ class SlurmClient:
             ssh_proxy_jump: Optional SSH proxy jump destination.
             is_inside_slurm_cluster: If True, uses local execution mode (for
             when running on the Slurm cluster itself). Defaults to False.
+            identities_only: If True, only use the specified identity file
+                and don't try ssh-agent keys (sets IdentitiesOnly=yes).
+                If False or None, allow ssh-agent and default key fallback.
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -122,6 +126,13 @@ class SlurmClient:
             assert ssh_host is not None
             assert ssh_port is not None
             assert ssh_user is not None
+            # Respect user's IdentitiesOnly setting from SSH config.
+            # When identities_only is True, we keep IdentitiesOnly=yes to
+            # prevent SSH from trying all keys in the agent (which causes
+            # "Too many authentication failures" with multiple clusters).
+            # When not set, allow ssh-agent and default key fallback.
+            disable_identities_only = not identities_only if (
+                identities_only is not None) else True
             self._runner = command_runner.SSHCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
@@ -129,8 +140,7 @@ class SlurmClient:
                 ssh_proxy_command=ssh_proxy_command,
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
-                # Allow ssh-agent and default key fallback for Slurm.
-                disable_identities_only=True,
+                disable_identities_only=disable_identities_only,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
