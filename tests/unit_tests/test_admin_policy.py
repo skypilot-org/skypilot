@@ -47,6 +47,13 @@ def task():
     return sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
 
 
+@pytest.fixture
+def add_volumes_policy_cls(add_example_policy_paths):
+    """Fixture to provide AddVolumesPolicy class after path setup."""
+    from example_policy.skypilot_policy import AddVolumesPolicy
+    return AddVolumesPolicy
+
+
 def _load_task(task: sky.Task, config_path: str) -> sky.Task:
     os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
     importlib.reload(skypilot_config)
@@ -594,15 +601,13 @@ def test_add_volumes_policy(add_example_policy_paths, task):
     assert dag.tasks[0].volumes['/mnt/data0'] == 'pvc0'
 
 
-def test_add_volumes_policy_server_side(add_example_policy_paths, task):
+def test_add_volumes_policy_server_side(add_volumes_policy_cls, task):
     """Test AddVolumesPolicy server-side execution.
 
     This test verifies that the AddVolumesPolicy correctly adds volumes
     when executed on the server side (at_client_side=False).
     """
-    from example_policy.skypilot_policy import AddVolumesPolicy
-
-    policy = AddVolumesPolicy()
+    policy = add_volumes_policy_cls()
     user_request = sky.UserRequest(
         task=task,
         request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
@@ -617,16 +622,14 @@ def test_add_volumes_policy_server_side(add_example_policy_paths, task):
 
 
 def test_add_volumes_policy_skips_controller_task_server_side(
-        add_example_policy_paths, task):
+        add_volumes_policy_cls, task):
     """Test that AddVolumesPolicy skips controller tasks on server side.
 
     Controller tasks (managed job/serve controllers) should not have volumes
     added to avoid mounting organization volumes on job controllers.
     """
-    from example_policy.skypilot_policy import AddVolumesPolicy
-
     with mock.patch.object(task, 'is_controller_task', return_value=True):
-        policy = AddVolumesPolicy()
+        policy = add_volumes_policy_cls()
         user_request = sky.UserRequest(
             task=task,
             request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
@@ -640,16 +643,14 @@ def test_add_volumes_policy_skips_controller_task_server_side(
 
 
 def test_add_volumes_policy_with_existing_volumes_server_side(
-        add_example_policy_paths, task):
+        add_volumes_policy_cls, task):
     """Test AddVolumesPolicy behavior when task already has volumes.
 
     The set_volumes method should overwrite existing volumes as designed.
     """
-    from example_policy.skypilot_policy import AddVolumesPolicy
-
     task.set_volumes({'/mnt/existing': 'existing-volume'})
 
-    policy = AddVolumesPolicy()
+    policy = add_volumes_policy_cls()
     user_request = sky.UserRequest(
         task=task,
         request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
@@ -664,16 +665,14 @@ def test_add_volumes_policy_with_existing_volumes_server_side(
     assert len(mutated_request.task.volumes) == 1
 
 
-def test_add_volumes_policy_server_side_vs_client_side(add_example_policy_paths,
+def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
                                                        task):
     """Test consistency between server-side and client-side execution.
 
     The AddVolumesPolicy should produce the same volume configuration
     whether executed on client side or server side.
     """
-    from example_policy.skypilot_policy import AddVolumesPolicy
-
-    policy = AddVolumesPolicy()
+    policy = add_volumes_policy_cls()
 
     client_user_request = sky.UserRequest(
         task=sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml')),
