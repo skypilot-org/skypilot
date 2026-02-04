@@ -2839,7 +2839,7 @@ def api_login(endpoint: Optional[str] = None,
             # expiration time, causing frequent re-authentication.
             # 1 hour matches common OAuth2 access token expiration times and ensures
             # cookies are refreshed from responses before they become invalid.
-            expires = int(time.time()) + 3600  # 1 hour
+            expires = int(time.time()) + (60 * 60)  # 1 hour
             domain = str(parsed_url.hostname)
             domain_initial_dot = domain.startswith('.')
             secure = parsed_url.scheme == 'https'
