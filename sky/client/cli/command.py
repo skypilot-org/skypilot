@@ -7069,6 +7069,7 @@ INT_OR_NONE = IntOrNone()
           f' set to "none" or "all" to show all requests.'))
 @click.option('--cluster',
               '-c',
+              'cluster_name',
               default=None,
               type=str,
               required=False,
