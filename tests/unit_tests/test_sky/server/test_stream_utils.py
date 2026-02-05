@@ -48,20 +48,6 @@ async def _collect(async_gen):
         result.append(item)
     return result
 
-
-@pytest.fixture(autouse=True)
-def mock_dependencies():
-    """Mock out DB-dependent modules so _tail_log_file can run standalone."""
-    with mock.patch(
-            'sky.server.stream_utils.requests_lib') as mock_requests_lib:
-        mock_status = mock.AsyncMock()
-        mock_status.status = 999  # Greater than RUNNING to trigger break
-        mock_requests_lib.get_request_status_async.return_value = mock_status
-        mock_requests_lib.RequestStatus.RUNNING = 100
-        mock_requests_lib.RequestStatus.CANCELLED = 200
-        yield mock_requests_lib
-
-
 @pytest.mark.asyncio
 async def test_tail_log_file_stale_handle_during_read():
     """OSError during chunked read breaks the loop and flushes the buffer."""
