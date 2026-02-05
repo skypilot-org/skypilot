@@ -1043,7 +1043,6 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                 **_get_shell_complete_args(_complete_file_name))
 @click.option('--cluster',
               '-c',
-              'cluster_name',
               default=None,
               type=str,
               **_get_shell_complete_args(_complete_cluster_name),
@@ -1142,7 +1141,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
-    cluster_name: Optional[str],
+    cluster: Optional[str],
     dryrun: bool,
     detach_run: bool,
     backend_name: Optional[str],
@@ -1200,7 +1199,7 @@ def launch(
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
-        cluster_name, operation_str='Launching tasks on it')
+        cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -1265,7 +1264,7 @@ def launch(
     request_id = sdk.launch(
         task,
         dryrun=dryrun,
-        cluster_name=cluster_name,
+        cluster_name=cluster,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
@@ -7069,7 +7068,6 @@ INT_OR_NONE = IntOrNone()
           f' set to "none" or "all" to show all requests.'))
 @click.option('--cluster',
               '-c',
-              'cluster_name',
               default=None,
               type=str,
               required=False,
@@ -7078,8 +7076,7 @@ INT_OR_NONE = IntOrNone()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: Optional[int],
-               cluster_name: Optional[str]):
+               verbose: bool, limit: Optional[int], cluster: Optional[str]):
     """List requests on SkyPilot API server."""
     if not request_id_prefixes:
         request_id_prefixes = None
@@ -7087,7 +7084,7 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
     request_list = sdk.api_status(request_id_prefixes, all_status, limit,
-                                  fields, cluster_name)
+                                  fields, cluster)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
