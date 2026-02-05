@@ -258,14 +258,9 @@ class TestJobsOperations:
         assert 'Cancelling the jobs controller\'s jobs is not allowed.' in str(
             result.output)
 
-    def test_down_jobs_controller_no_job(self, mock_job_table_no_job,
-                                         mock_client_requests,
+    def test_down_jobs_controller_no_job(self, mock_client_requests,
+                                         mock_jobs_no_job_grpc,
                                          mock_services_no_service_grpc):
-        # TODO (kyuds): after migrating to grpc for jobs, prob better to use
-        # a new monkeypatch. This is reusing.
-        # A lot of monkeypatch allows tests to be simulated via a bunch of
-        # side-effects (like this, mock_job_table_no_job) also "patches"
-        # sky serve cluster queries.
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
@@ -274,7 +269,8 @@ class TestJobsOperations:
         assert isinstance(result.exception,
                           SystemExit), (result.exception, result.output)
 
-    def test_down_jobs_controller_one_job(self, mock_services_no_service_grpc):
+    def test_down_jobs_controller_one_job(self, mock_jobs_one_job_grpc,
+                                          mock_services_no_service_grpc):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.down, [common.JOB_CONTROLLER_NAME],
                                    input='n')
