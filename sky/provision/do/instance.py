@@ -229,6 +229,7 @@ def get_cluster_info(
                 external_ip=instance_ip,
                 ssh_port=22,
                 tags={},
+                node_name=instance_meta['name'],
             )
         ]
 

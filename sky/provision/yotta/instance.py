@@ -264,6 +264,7 @@ def get_cluster_info(
                 external_ip=external_ip,
                 ssh_port=port.get('proxyPort'),
                 tags={},
+                node_name=instance_id,
             )
         ]
         if instance_info['podName'].endswith(HEAD_NODE_SUFFIX):
