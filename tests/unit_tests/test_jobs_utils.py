@@ -28,9 +28,9 @@ def test_terminate_cluster_retry_on_value_error(mock_set_internal,
     # Verify sky.down was called 3 times
     assert mock_sky_down.call_count == 3
     mock_sky_down.assert_has_calls([
-        mock.call('test-cluster'),
-        mock.call('test-cluster'),
-        mock.call('test-cluster'),
+        mock.call('test-cluster', graceful=False, graceful_timeout=None),
+        mock.call('test-cluster', graceful=False, graceful_timeout=None),
+        mock.call('test-cluster', graceful=False, graceful_timeout=None),
     ])
 
     # Verify usage.set_internal was called before each sky.down
@@ -49,7 +49,9 @@ def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,
 
     # Verify sky.down was called once
     assert mock_sky_down.call_count == 1
-    mock_sky_down.assert_called_once_with('test-cluster')
+    mock_sky_down.assert_called_once_with('test-cluster',
+                                          graceful=False,
+                                          graceful_timeout=None)
 
     # Verify usage.set_internal was called once
     assert mock_set_internal.call_count == 1

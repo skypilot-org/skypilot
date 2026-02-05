@@ -1208,7 +1208,9 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False,
            all_users: bool = False,
-           pool: Optional[str] = None) -> None:
+           pool: Optional[str] = None,
+           graceful: bool = False,
+           graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -1252,7 +1254,9 @@ def cancel(name: Optional[str] = None,
             current_workspace = skypilot_config.get_active_workspace()
             try:
                 request = managed_jobsv1_pb2.CancelJobsRequest(
-                    current_workspace=current_workspace)
+                    current_workspace=current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
 
                 if all_users or all or job_ids:
                     request.all_users = all_users
@@ -1277,10 +1281,13 @@ def cancel(name: Optional[str] = None,
         if use_legacy:
             if all_users or all or job_ids:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    job_ids, all_users=all_users)
+                    job_ids,
+                    all_users=all_users,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
-                    name)
+                    name, graceful=graceful, graceful_timeout=graceful_timeout)
             else:
                 assert pool is not None, (job_ids, name, pool, all)
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(

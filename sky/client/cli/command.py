@@ -5437,6 +5437,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               type=str,
               help='Pool name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
 @flags.all_users_option('Cancel all managed jobs from all users.')
@@ -5446,6 +5447,8 @@ def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
     job_ids: Tuple[int],
+    graceful: bool,
+    graceful_timeout: Optional[int],
     all: bool,
     yes: bool,
     all_users: bool,
@@ -5500,6 +5503,8 @@ def jobs_cancel(
         managed_jobs.cancel(job_ids=job_ids,
                             name=name,
                             pool=pool,
+                            graceful=graceful,
+                            graceful_timeout=graceful_timeout,
                             all=all,
                             all_users=all_users))
 
