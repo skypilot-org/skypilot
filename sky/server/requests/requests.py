@@ -48,7 +48,7 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
