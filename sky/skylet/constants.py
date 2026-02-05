@@ -677,3 +677,6 @@ SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
 
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
+
+# Maximum number of node name entries to keep per node in the lineage.
+MAX_NODE_NAME_LINEAGE = 10
