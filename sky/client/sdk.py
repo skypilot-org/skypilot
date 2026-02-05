@@ -2287,6 +2287,7 @@ def api_status(
     all_status: bool = False,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    cluster_name: Optional[str] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2297,6 +2298,8 @@ def api_status(
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
         fields: The fields to get. If None, get all fields.
+        cluster_name: Filter requests by cluster name.
+            If None, show all requests.
 
     Returns:
         A list of request payloads.
@@ -2310,6 +2313,7 @@ def api_status(
         all_status=all_status,
         limit=limit,
         fields=fields,
+        cluster_name=cluster_name,
     )
     response = server_common.make_authenticated_request(
         'GET',
