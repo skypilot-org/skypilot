@@ -1142,7 +1142,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
-    cluster: Optional[str],
+    cluster_name: Optional[str],
     dryrun: bool,
     detach_run: bool,
     backend_name: Optional[str],
@@ -1200,7 +1200,7 @@ def launch(
     env = _merge_cli_and_file_vars([env_file], env)
     secret = _merge_cli_and_file_vars([env_file, secret_file], secret)
     controller_utils.check_cluster_name_not_controller(
-        cluster, operation_str='Launching tasks on it')
+        cluster_name, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -1265,7 +1265,7 @@ def launch(
     request_id = sdk.launch(
         task,
         dryrun=dryrun,
-        cluster_name=cluster,
+        cluster_name=cluster_name,
         backend=backend,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         wait_for=autostop_lib.AutostopWaitFor.from_str(wait_for)
