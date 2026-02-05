@@ -90,7 +90,7 @@ Equivalently, you can use the :ref:`CLI argument <sky-launch>` ``--gpus`` in ``s
   sky launch --gpus A100:8
   sky launch --gpus A100-80GB:8
 
-Use ``sky show-gpus`` to see the names of all supported accelerators.
+Use ``sky gpus list`` to see the names of all supported accelerators.
 
 Cross-region failover
 ---------------------

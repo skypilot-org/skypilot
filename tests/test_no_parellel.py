@@ -91,12 +91,12 @@ class TestAllCloudsEnabled:
                                    ['--cloud', 'notarealcloud', '--dryrun'])
         assert isinstance(result.exception, ValueError)
 
-        result = cli_runner.invoke(command.show_gpus, ['--cloud', 'k8s'])
+        result = cli_runner.invoke(command.gpus_list, ['--cloud', 'k8s'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['--cloud', 'kubernetes'])
+        result = cli_runner.invoke(command.gpus_list, ['--cloud', 'kubernetes'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus,
+        result = cli_runner.invoke(command.gpus_list,
                                    ['--cloud', 'notarealcloud'])
         assert isinstance(result.exception, ValueError)

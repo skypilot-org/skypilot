@@ -21,7 +21,7 @@ but `Falcon-7b-sharded` requires only 40GB memory. Thus,
 * If your GPU has 40 GB memory or less (e.g., Nvidia A100): use `ybelkada/falcon-7b-sharded-bf16`.
 * If your GPU has 80 GB memory (e.g., Nvidia A100-80GB): you can also use `tiiuae/falcon-7b` and `tiiuae/falcon-40b`.
 
-Try `sky show-gpus --all` for supported GPUs.
+Try `sky gpus list --all` for supported GPUs.
 
 We can start the finetuning of Falcon model on Open Assistant's [Guanaco](https://huggingface.co/datasets/timdettmers/openassistant-guanaco) data **with a single command**. It will automatically find the available cheapest VM on any cloud.
 

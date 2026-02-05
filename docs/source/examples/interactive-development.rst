@@ -52,7 +52,7 @@ This can be launched as a pod in your Kubernetes cluster or a VM on any cloud.
 
 .. note::
 
-  View the supported GPUs with the :code:`sky show-gpus` command.
+  View the supported GPUs with the :code:`sky gpus list` command.
 
 .. _dev-autostop:
 
