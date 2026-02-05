@@ -122,7 +122,6 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
       Owner: user-unique-name
-    :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
@@ -686,20 +685,6 @@ Example:
       my-tag: my-value
 
 
-.. _config-yaml-aws-vpc-name:
-
-``aws.vpc_name``
-~~~~~~~~~~~~~~~~
-
-VPC to use in each region (optional).
-
-If this is set, SkyPilot will only provision in regions that contain a VPC
-with this name (provisioner automatically looks for such regions).
-Regions without a VPC with this name will not be used to launch nodes.
-
-Default: ``null`` (use the default VPC in each region).
-
-Deprecated: use ``aws.vpc_names`` instead.
 
 .. _config-yaml-aws-vpc-names:
 
