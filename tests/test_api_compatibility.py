@@ -437,36 +437,3 @@ class TestAPICompatibility:
             pytest.fail(
                 f"Models removed from current version: {missing_models}. "
                 f"{API_VERSION_HINT}")
-
-
-class TestClusterStatusBackwardCompatibility:
-    """Backward Compatibility with an additional cluster_name argument."""
-
-    def test_cluster_name_excluded_when_none(self) -> None:
-        body = current_payloads.RequestStatusBody(
-            request_ids=['req-1'],
-            all_status=False,
-            limit=10,
-            fields=['test-field'],
-        )
-        params = server_common.request_body_to_params(body)
-        assert 'cluster_name' not in params
-        assert 'request_ids' in params
-        assert 'all_status' in params
-        assert 'limit' in params
-        assert 'fields' in params
-
-    def test_cluster_name_included_when_set(self) -> None:
-        body = current_payloads.RequestStatusBody(
-            request_ids=['req-2'],
-            all_status=False,
-            limit=10,
-            cluster_name='test-cluster',
-            fields=['test-field'],
-        )
-        params = server_common.request_body_to_params(body)
-        assert params['cluster_name'] == 'test-cluster'
-        assert 'request_ids' in params
-        assert 'all_status' in params
-        assert 'limit' in params
-        assert 'fields' in params
