@@ -49,17 +49,17 @@ class TestGetUserType:
         result = server.get_user_type(user)
         assert result == models.UserType.SSO.value
 
-    def test_local_user_default(self):
-        """Test that users without special attributes return 'local' type."""
+    def test_legacy_user_default(self):
+        """Test that users without special attributes return 'legacy' type."""
         user = models.User(id='user789', name='bob')
         result = server.get_user_type(user)
-        assert result == models.UserType.LOCAL.value
+        assert result == models.UserType.LEGACY.value
 
-    def test_local_user_with_none_password(self):
+    def test_legacy_user_with_none_password(self):
         """Test that users with None password return appropriate type."""
         user = models.User(id='user789', name='bob', password=None)
         result = server.get_user_type(user)
-        assert result == models.UserType.LOCAL.value
+        assert result == models.UserType.LEGACY.value
 
     def test_priority_service_account_over_system(self):
         """Test that service account check takes priority."""
@@ -86,24 +86,24 @@ class TestGetUserType:
         result = server.get_user_type(user)
         assert result == models.UserType.BASIC.value
 
-    def test_priority_sso_over_local(self):
-        """Test that SSO check takes priority over local."""
+    def test_priority_sso_over_legacy(self):
+        """Test that SSO check takes priority over legacy."""
         # User with email but no password should be SSO type
         user = models.User(id='user123', name='alice@company.org')
         result = server.get_user_type(user)
         assert result == models.UserType.SSO.value
 
     def test_user_with_empty_name(self):
-        """Test user with empty name returns local type."""
+        """Test user with empty name returns legacy type."""
         user = models.User(id='user123', name='')
         result = server.get_user_type(user)
-        assert result == models.UserType.LOCAL.value
+        assert result == models.UserType.LEGACY.value
 
     def test_user_with_none_name(self):
-        """Test user with None name returns local type."""
+        """Test user with None name returns legacy type."""
         user = models.User(id='user123', name=None)
         result = server.get_user_type(user)
-        assert result == models.UserType.LOCAL.value
+        assert result == models.UserType.LEGACY.value
 
 
 @pytest.fixture
@@ -155,21 +155,21 @@ class TestUsersEndpoints:
             'name': 'Alice',
             'role': 'admin',
             'created_at': None,
-            'user_type': 'local',
+            'user_type': 'legacy',
         }
         assert result[1] == {
             'id': 'user2',
             'name': 'Bob',
             'role': 'user',
             'created_at': None,
-            'user_type': 'local',
+            'user_type': 'legacy',
         }
         assert result[2] == {
             'id': 'user3',
             'name': 'Charlie',
             'role': '',
             'created_at': None,
-            'user_type': 'local',
+            'user_type': 'legacy',
         }
 
         # Verify function calls
@@ -415,21 +415,21 @@ class TestUsersEndpoints:
             'name': 'Alice',
             'role': 'admin',
             'created_at': None,
-            'user_type': 'local',
+            'user_type': 'legacy',
         }
         assert result[1] == {
             'id': 'user2',
             'name': 'Bob',
             'role': 'user',
             'created_at': None,
-            'user_type': 'local',
+            'user_type': 'legacy',
         }
         assert result[2] == {
             'id': 'user3',
             'name': 'Charlie',
             'role': 'user',
             'created_at': None,
-            'user_type': 'local',
+            'user_type': 'legacy',
         }
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')

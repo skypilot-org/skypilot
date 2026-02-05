@@ -34,7 +34,7 @@ router = fastapi.APIRouter()
 
 
 def get_user_type(user: models.User) -> str:
-    """Get user type for a user.
+    """Get user type for a user for backward compatibility.
 
     Args:
         user: The user to get the type for.
@@ -50,7 +50,7 @@ def get_user_type(user: models.User) -> str:
         return models.UserType.BASIC.value
     if user.name and '@' in user.name:
         return models.UserType.SSO.value
-    return models.UserType.LOCAL.value
+    return models.UserType.LEGACY.value
 
 
 # All handlers in user handler are sync to get fastAPI run it in a
@@ -74,12 +74,13 @@ def users() -> List[Dict[str, Any]]:
         if user.is_service_account():
             continue
 
+        user_type = user.user_type or get_user_type(user)
         all_users.append({
             'id': user.id,
             'name': user.name,
             'created_at': user.created_at,
             'role': users_to_role.get(user.id, ''),
-            'user_type': get_user_type(user)
+            'user_type': user_type,
         })
     return all_users
 
@@ -126,7 +127,10 @@ def user_create(user_create_body: payloads.UserCreateBody) -> None:
             raise fastapi.HTTPException(
                 status_code=400, detail=f'User {username!r} already exists')
         global_user_state.add_or_update_user(
-            models.User(id=user_hash, name=username, password=password_hash))
+            models.User(id=user_hash,
+                        name=username,
+                        password=password_hash,
+                        user_type=models.UserType.BASIC.value))
         permission.permission_service.update_role(user_hash, role)
 
 
@@ -314,9 +318,12 @@ def user_import(user_import_body: payloads.UserImportBody) -> Dict[str, Any]:
 
             with _user_lock(user_hash):
                 global_user_state.add_or_update_user(
-                    models.User(id=user_hash,
-                                name=username,
-                                password=password_hash))
+                    models.User(
+                        id=user_hash,
+                        name=username,
+                        password=password_hash,
+                        user_type=models.UserType.BASIC.value,
+                    ))
                 permission.permission_service.update_role(user_hash, role)
 
             success_count += 1
@@ -481,7 +488,8 @@ def create_service_account_token(
 
         # Create a user entry for the service account
         service_account_user = models.User(id=service_account_user_id,
-                                           name=token_name)
+                                           name=token_name,
+                                           user_type=models.UserType.SA.value)
         is_new_user = global_user_state.add_or_update_user(
             service_account_user, allow_duplicate_name=False)
 
