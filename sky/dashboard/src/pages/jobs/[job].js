@@ -886,7 +886,15 @@ function JobDetailsContent({
   const RECOVERING_STATUSES = ['RECOVERING'];
 
   const isPending = PENDING_STATUSES.includes(jobData.status);
-  const isPreStart = PRE_START_STATUSES.includes(jobData.status);
+  // Check if controller is running: either controller_pid is set, or schedule_state
+  // indicates the controller is alive (not INACTIVE or WAITING)
+  // After PR #5682, a job can be in PENDING state even though the controller is running
+  const isControllerRunning =
+    jobData.schedule_state !== 'INACTIVE' &&
+    jobData.schedule_state !== 'WAITING';
+  // Controller is not started if job is in pre-start status AND controller is not running
+  const isPreStart =
+    PRE_START_STATUSES.includes(jobData.status) && !isControllerRunning;
   const isRecovering = RECOVERING_STATUSES.includes(jobData.status);
 
   // Compute job group status based on primary tasks
@@ -1539,6 +1547,7 @@ JobDetailsContent.propTypes = {
     id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     name: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     status: PropTypes.string,
+    schedule_state: PropTypes.string,
     user: PropTypes.string,
     user_hash: PropTypes.string,
     workspace: PropTypes.string,

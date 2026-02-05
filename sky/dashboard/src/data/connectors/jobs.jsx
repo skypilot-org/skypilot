@@ -289,6 +289,7 @@ export async function getManagedJobs(options = {}) {
         links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
+        schedule_state: job.schedule_state,
         current_cluster_name: job.current_cluster_name,
         cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
