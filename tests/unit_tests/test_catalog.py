@@ -249,3 +249,41 @@ def test_catalog_prices_are_json_serializable():
     response = {'total_cost': cost}
     serialized_dict = orjson.dumps(response)
     assert orjson.loads(serialized_dict) == {'total_cost': 2.5}
+
+
+def test_get_hourly_cost_with_duplicate_catalog_entries():
+    """Test that duplicate catalog entries for the same AZ don't crash.
+
+    This is a regression test for GitHub issue #8638 where stale local
+    catalogs had duplicate p4de.24xlarge rows with conflicting SpotPrice.
+    """
+    from sky.catalog import aws_catalog
+
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'p4de.24xlarge',
+            'SpotPrice': 12.29,
+            'Region': 'us-east-1',
+            'AvailabilityZone': 'us-east-1c',
+        },
+        {
+            'InstanceType': 'p4de.24xlarge',
+            'SpotPrice': np.nan,
+            'Region': 'us-east-1',
+            'AvailabilityZone': 'us-east-1c',
+        },
+    ])
+
+    saved = aws_catalog._user_df
+    try:
+        aws_catalog._user_df = None
+        with mock.patch.object(aws_catalog,
+                               '_fetch_and_apply_az_mapping',
+                               return_value=df):
+            cost = aws_catalog.get_hourly_cost('p4de.24xlarge',
+                                               use_spot=True,
+                                               region='us-east-1',
+                                               zone='us-east-1c')
+        assert cost == 12.29
+    finally:
+        aws_catalog._user_df = saved

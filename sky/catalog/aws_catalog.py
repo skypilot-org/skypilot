@@ -181,6 +181,13 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     return df
 
 
+def _deduplicate_catalog(df: 'pd.DataFrame') -> 'pd.DataFrame':
+    """Drops duplicate rows per AZ, keeping the one with a valid SpotPrice."""
+    df = df.sort_values('SpotPrice', ascending=True, na_position='last')
+    return df.drop_duplicates(
+        subset=['InstanceType', 'Region', 'AvailabilityZone'], keep='first')
+
+
 def _get_df() -> 'pd.DataFrame':
     global _user_df
     with _apply_az_mapping_lock:
@@ -194,6 +201,7 @@ def _get_df() -> 'pd.DataFrame':
                     return _default_df
                 else:
                     raise
+            _user_df = _deduplicate_catalog(_user_df)
     return _user_df
 
 
