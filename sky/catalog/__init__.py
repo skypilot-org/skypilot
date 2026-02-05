@@ -347,7 +347,7 @@ def get_tpus() -> List[str]:
     # TODO(wei-lin): refactor below hard-coded list.
     # There are many TPU configurations available, we show the some smallest
     # ones for each generation, and people should find larger ones with
-    # sky show-gpus tpu.
+    # sky gpus list tpu.
     return [
         'tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
         'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8', 'tpu-v5p-8',

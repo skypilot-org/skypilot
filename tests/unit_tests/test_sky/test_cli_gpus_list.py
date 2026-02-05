@@ -1,7 +1,8 @@
-"""Tests for show_gpus CLI command.
+"""Tests for gpus list CLI command (and deprecated show_gpus).
 
-This module contains tests for the show_gpus function in
-sky.client.cli.command module.
+This module contains tests for the gpus_list/show_gpus functions in
+sky.client.cli.command module. The show_gpus command is deprecated
+in favor of `sky gpus list`.
 """
 from unittest import mock
 
@@ -17,8 +18,8 @@ from sky.client.cli import command
 from sky.utils import registry
 
 
-class TestShowGpus:
-    """Test suite for the show_gpus function."""
+class TestGpusList:
+    """Test suite for the gpus_list function."""
 
     @pytest.fixture(autouse=True)
     def setup_mocks(self):
@@ -51,7 +52,7 @@ class TestShowGpus:
     # Basic functionality tests
     # ==========================================================================
 
-    def test_show_gpus_no_accelerator_no_cloud(self):
+    def test_gpus_list_no_accelerator_no_cloud(self):
         """Test show_gpus with no accelerator string and no cloud filter."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
@@ -60,12 +61,12 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerator_counts',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus, [])
+            result = self.runner.invoke(command.gpus_list, [])
 
         assert result.exit_code == 0
         assert 'V100' in result.output
 
-    def test_show_gpus_with_specific_accelerator(self):
+    def test_gpus_list_with_specific_accelerator(self):
         """Test show_gpus with a specific accelerator string."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
@@ -74,12 +75,12 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerators',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus, ['V100'])
+            result = self.runner.invoke(command.gpus_list, ['V100'])
 
         assert result.exit_code == 0
         assert 'not found' in result.output
 
-    def test_show_gpus_with_accelerator_and_quantity(self):
+    def test_gpus_list_with_accelerator_and_quantity(self):
         """Test show_gpus with accelerator string including quantity."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
@@ -88,7 +89,7 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerators',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus, ['V100:4'])
+            result = self.runner.invoke(command.gpus_list, ['V100:4'])
 
         assert result.exit_code == 0
         assert 'not found' in result.output
@@ -97,62 +98,62 @@ class TestShowGpus:
     # Input validation tests
     # ==========================================================================
 
-    def test_show_gpus_invalid_accelerator_format(self):
+    def test_gpus_list_invalid_accelerator_format(self):
         """Test show_gpus with invalid accelerator format (too many colons)."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['V100:4:extra'])
+        result = self.runner.invoke(command.gpus_list, ['V100:4:extra'])
 
         assert result.exit_code != 0
         assert 'Invalid accelerator string' in result.output
 
-    def test_show_gpus_invalid_quantity(self):
+    def test_gpus_list_invalid_quantity(self):
         """Test show_gpus with invalid quantity (non-integer)."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['V100:abc'])
+        result = self.runner.invoke(command.gpus_list, ['V100:abc'])
 
         assert result.exit_code != 0
         assert 'Invalid accelerator quantity' in result.output
 
-    def test_show_gpus_negative_quantity(self):
+    def test_gpus_list_negative_quantity(self):
         """Test show_gpus with negative quantity."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['V100:-1'])
+        result = self.runner.invoke(command.gpus_list, ['V100:-1'])
 
         assert result.exit_code != 0
         assert 'Invalid accelerator quantity' in result.output
 
-    def test_show_gpus_zero_quantity(self):
+    def test_gpus_list_zero_quantity(self):
         """Test show_gpus with zero quantity."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['V100:0'])
+        result = self.runner.invoke(command.gpus_list, ['V100:0'])
 
         assert result.exit_code != 0
         assert 'Invalid accelerator quantity' in result.output
 
-    def test_show_gpus_float_quantity(self):
+    def test_gpus_list_float_quantity(self):
         """Test show_gpus with float quantity."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['V100:4.0'])
+        result = self.runner.invoke(command.gpus_list, ['V100:4.0'])
 
         assert result.exit_code != 0
         assert 'Invalid accelerator quantity' in result.output
 
-    def test_show_gpus_empty_accelerator_string(self):
+    def test_gpus_list_empty_accelerator_string(self):
         """Test show_gpus with empty accelerator string after colon."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['V100:'])
+        result = self.runner.invoke(command.gpus_list, ['V100:'])
 
         assert result.exit_code != 0
         assert 'Invalid accelerator quantity' in result.output
@@ -161,42 +162,42 @@ class TestShowGpus:
     # Flag validation tests
     # ==========================================================================
 
-    def test_show_gpus_region_without_cloud(self):
+    def test_gpus_list_region_without_cloud(self):
         """Test that --region flag without --cloud raises error."""
         self.cloud_registry_mock.return_value = None
 
-        result = self.runner.invoke(command.show_gpus,
+        result = self.runner.invoke(command.gpus_list,
                                     ['--region', 'us-west-2'])
 
         assert result.exit_code != 0
         assert 'The --region flag is only valid when the --cloud flag is set' in result.output
 
-    def test_show_gpus_all_regions_without_accelerator(self):
+    def test_gpus_list_all_regions_without_accelerator(self):
         """Test that --all-regions flag without accelerator raises error."""
         self.cloud_registry_mock.return_value = None
 
-        result = self.runner.invoke(command.show_gpus, ['--all-regions'])
+        result = self.runner.invoke(command.gpus_list, ['--all-regions'])
 
         assert result.exit_code != 0
         assert 'The --all-regions flag is only valid when an accelerator is specified' in result.output
 
-    def test_show_gpus_all_regions_with_region(self):
+    def test_gpus_list_all_regions_with_region(self):
         """Test that --all-regions and --region cannot be used together."""
         mock_aws = clouds.AWS()
         self.cloud_registry_mock.return_value = mock_aws
 
-        result = self.runner.invoke(command.show_gpus, [
+        result = self.runner.invoke(command.gpus_list, [
             'V100', '--cloud', 'aws', '--region', 'us-west-2', '--all-regions'
         ])
 
         assert result.exit_code != 0
         assert '--all-regions and --region flags cannot be used simultaneously' in result.output
 
-    def test_show_gpus_all_with_accelerator(self):
+    def test_gpus_list_all_with_accelerator(self):
         """Test that --all flag cannot be used with accelerator name."""
         self.cloud_registry_mock.return_value = None
 
-        result = self.runner.invoke(command.show_gpus, ['V100', '--all'])
+        result = self.runner.invoke(command.gpus_list, ['V100', '--all'])
 
         assert result.exit_code != 0
         assert '--all is only allowed without a GPU name' in result.output
@@ -205,7 +206,7 @@ class TestShowGpus:
     # Cloud filter tests
     # ==========================================================================
 
-    def test_show_gpus_with_cloud_filter(self):
+    def test_gpus_list_with_cloud_filter(self):
         """Test show_gpus with cloud filter."""
         mock_aws = clouds.AWS()
         self.cloud_registry_mock.return_value = mock_aws
@@ -215,13 +216,13 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerator_counts',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus, ['--cloud', 'aws'])
+            result = self.runner.invoke(command.gpus_list, ['--cloud', 'aws'])
 
         assert result.exit_code == 0
         self.cloud_registry_mock.assert_called_once_with('aws')
         assert 'V100' in result.output
 
-    def test_show_gpus_with_region_filter(self):
+    def test_gpus_list_with_region_filter(self):
         """Test show_gpus with region filter."""
         mock_aws = clouds.AWS()
         self.cloud_registry_mock.return_value = mock_aws
@@ -232,12 +233,12 @@ class TestShowGpus:
                                'list_accelerator_counts',
                                return_value=mock.MagicMock()):
             result = self.runner.invoke(
-                command.show_gpus, ['--cloud', 'aws', '--region', 'us-west-2'])
+                command.gpus_list, ['--cloud', 'aws', '--region', 'us-west-2'])
 
         assert result.exit_code == 0
         assert 'V100' in result.output
 
-    def test_show_gpus_with_infra_option(self):
+    def test_gpus_list_with_infra_option(self):
         """Test show_gpus with --infra option."""
         mock_aws = clouds.AWS()
         self.cloud_registry_mock.return_value = mock_aws
@@ -247,13 +248,13 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerator_counts',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus,
+            result = self.runner.invoke(command.gpus_list,
                                         ['--infra', 'aws/us-west-2'])
 
         assert result.exit_code == 0
         assert 'V100' in result.output
 
-    def test_show_gpus_wildcard_cloud_converted_to_none(self):
+    def test_gpus_list_wildcard_cloud_converted_to_none(self):
         """Test that wildcard cloud '*' is converted to None internally."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
@@ -262,7 +263,7 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerator_counts',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus, ['--infra', 'aws'])
+            result = self.runner.invoke(command.gpus_list, ['--infra', 'aws'])
 
         assert result.exit_code == 0
 
@@ -270,7 +271,7 @@ class TestShowGpus:
     # --all flag tests
     # ==========================================================================
 
-    def test_show_gpus_with_all_flag(self):
+    def test_gpus_list_with_all_flag(self):
         """Test show_gpus with --all flag to show all accelerators."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
@@ -283,7 +284,7 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerator_counts',
                                return_value=mock.MagicMock()):
-            result = self.runner.invoke(command.show_gpus, ['--all'])
+            result = self.runner.invoke(command.gpus_list, ['--all'])
 
         assert result.exit_code == 0
         assert 'V100' in result.output
@@ -292,7 +293,7 @@ class TestShowGpus:
     # --all-regions flag tests
     # ==========================================================================
 
-    def test_show_gpus_all_regions_flag_with_accelerator(self):
+    def test_gpus_list_all_regions_flag_with_accelerator(self):
         """Test show_gpus with --all-regions flag and specific accelerator."""
         mock_aws = clouds.AWS()
         self.cloud_registry_mock.return_value = mock_aws
@@ -303,7 +304,7 @@ class TestShowGpus:
                                'list_accelerators',
                                return_value=mock.MagicMock()) as mock_list:
             result = self.runner.invoke(
-                command.show_gpus, ['V100', '--cloud', 'aws', '--all-regions'])
+                command.gpus_list, ['V100', '--cloud', 'aws', '--all-regions'])
 
         assert result.exit_code == 0
         call_args = mock_list.call_args
@@ -313,36 +314,36 @@ class TestShowGpus:
     # Disabled cloud tests
     # ==========================================================================
 
-    def test_show_gpus_k8s_disabled_shows_message(self):
+    def test_gpus_list_k8s_disabled_shows_message(self):
         """Test that disabled Kubernetes shows appropriate message."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
         self.sdk_get_mock.return_value = []
         self.stream_and_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus,
+        result = self.runner.invoke(command.gpus_list,
                                     ['--cloud', 'kubernetes'])
 
         assert 'Kubernetes is not enabled' in result.output
 
-    def test_show_gpus_slurm_disabled_shows_message(self):
+    def test_gpus_list_slurm_disabled_shows_message(self):
         """Test that disabled Slurm shows appropriate message."""
         mock_slurm = clouds.Slurm()
         self.cloud_registry_mock.return_value = mock_slurm
         self.sdk_get_mock.return_value = []
         self.stream_and_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus, ['--cloud', 'slurm'])
+        result = self.runner.invoke(command.gpus_list, ['--cloud', 'slurm'])
 
         assert 'Slurm is not enabled' in result.output
 
-    def test_show_gpus_ssh_disabled_shows_message(self):
+    def test_gpus_list_ssh_disabled_shows_message(self):
         """Test that disabled SSH shows appropriate message when requested."""
         mock_ssh = clouds.SSH()
         self.cloud_registry_mock.return_value = mock_ssh
         self.sdk_get_mock.return_value = []
 
-        result = self.runner.invoke(command.show_gpus,
+        result = self.runner.invoke(command.gpus_list,
                                     ['A100', '--cloud', 'ssh'])
 
         assert 'SSH Node Pools are not enabled' in result.output or result.exit_code != 0
@@ -351,7 +352,7 @@ class TestShowGpus:
     # Case sensitivity tests
     # ==========================================================================
 
-    def test_show_gpus_case_insensitive_accelerator(self):
+    def test_gpus_list_case_insensitive_accelerator(self):
         """Test that accelerator names are handled case-insensitively."""
         self.cloud_registry_mock.return_value = None
         self.sdk_get_mock.return_value = []
@@ -360,7 +361,7 @@ class TestShowGpus:
         with mock.patch.object(sdk,
                                'list_accelerators',
                                return_value=mock.MagicMock()) as mock_list:
-            result = self.runner.invoke(command.show_gpus, ['v100'])
+            result = self.runner.invoke(command.gpus_list, ['v100'])
 
         assert result.exit_code == 0
         call_args = mock_list.call_args
@@ -370,7 +371,7 @@ class TestShowGpus:
     # Kubernetes tests
     # ==========================================================================
 
-    def test_show_gpus_kubernetes_basic_functionality(self):
+    def test_gpus_list_kubernetes_basic_functionality(self):
         """Test Kubernetes GPU listing with basic table structure validation."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -408,7 +409,7 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
@@ -430,7 +431,7 @@ class TestShowGpus:
         assert '2 of 4 free' in result.output  # GPU utilization
         assert 'Healthy' in result.output
 
-    def test_show_gpus_kubernetes_with_specific_gpu_and_quantity(self):
+    def test_gpus_list_kubernetes_with_specific_gpu_and_quantity(self):
         """Test Kubernetes with specific GPU and quantity filter."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -453,13 +454,13 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['A100:8', '--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
         assert 'A100' in result.output
 
-    def test_show_gpus_kubernetes_multiple_contexts(self):
+    def test_gpus_list_kubernetes_multiple_contexts(self):
         """Test Kubernetes with multiple contexts showing aggregated table with proper structure."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -487,7 +488,7 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
@@ -504,7 +505,7 @@ class TestShowGpus:
         # Validate table sections are present
         assert 'Kubernetes' in result.output
 
-    def test_show_gpus_kubernetes_node_status_variations(self):
+    def test_gpus_list_kubernetes_node_status_variations(self):
         """Test Kubernetes with various node statuses: Healthy, NotReady, Cordoned, Tainted."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -608,7 +609,7 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
@@ -637,7 +638,7 @@ class TestShowGpus:
         assert 'NotReady' in combined_line[0]
         assert 'Cordoned' in combined_line[0]
 
-    def test_show_gpus_kubernetes_edge_cases(self):
+    def test_gpus_list_kubernetes_edge_cases(self):
         """Test Kubernetes with edge cases: no accelerator type, zero accelerators, missing CPU/memory info."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -686,7 +687,7 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
@@ -702,7 +703,7 @@ class TestShowGpus:
         # Should show '-' for accelerator type
         assert '-' in no_accel_line[0]
 
-    def test_show_gpus_kubernetes_with_hint(self):
+    def test_gpus_list_kubernetes_with_hint(self):
         """Test Kubernetes node info with hint message."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -736,14 +737,14 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
         # Verify hint message appears in output
         assert 'resource constraints' in result.output
 
-    def test_show_gpus_kubernetes_labeled_zero_gpu_hint(self):
+    def test_gpus_list_kubernetes_labeled_zero_gpu_hint(self):
         """Test Kubernetes hint for nodes with GPU labels but 0 GPU resources."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -784,7 +785,7 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0
@@ -793,7 +794,7 @@ class TestShowGpus:
         assert 'check the node labels and configuration' in result.output
         assert 'Affected 1 node(s): context1/node1' in result.output
 
-    def test_show_gpus_kubernetes_labeled_zero_gpu_hint_multiple_nodes(self):
+    def test_gpus_list_kubernetes_labeled_zero_gpu_hint_multiple_nodes(self):
         """Test Kubernetes hint for nodes with GPU labels but 0 GPU resources."""
         mock_k8s = clouds.Kubernetes()
         self.cloud_registry_mock.return_value = mock_k8s
@@ -832,7 +833,7 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
+                result = self.runner.invoke(command.gpus_list,
                                             ['--cloud', 'kubernetes'])
 
         assert result.exit_code == 0

@@ -175,7 +175,7 @@ Run :code:`sky check` to verify that SkyPilot can see your GPUs.
     # Should show `Kubernetes: Enabled` and should not print any warnings about GPU support.
 
     # List the available GPUs in your cluster
-    $ sky show-gpus --infra k8s
+    $ sky gpus list --infra k8s
 
 Step B4 - Try launching a dummy GPU task
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -184,7 +184,7 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 
 .. code-block:: bash
 
-    # Replace the GPU type from the sky show-gpus output in the task launch command
+    # Replace the GPU type from the sky gpus list output in the task launch command
     $ sky launch -y -c mygpucluster --infra k8s --gpu <gpu-type>:1 -- "nvidia-smi"
 
     # Task should run and print the nvidia-smi output to the console

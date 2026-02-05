@@ -476,7 +476,7 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
                 continue
             gpu_info = _gpu_info_from_name(gpu_name)
             if gpu_info is None:
-                # Prevent `show-gpus` from not showing GPUs without GPU info.
+                # Prevent `gpus list` from not showing GPUs without GPU info.
                 gpu_info = gpu_name
             new_gpus.append({
                 'AcceleratorName': gpu_name,
