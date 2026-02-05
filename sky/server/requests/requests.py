@@ -1180,8 +1180,7 @@ async def _cleanup_legacy_directory_if_empty():
         return
     try:
         # Check if directory is empty (no .log or .lock files)
-        remaining_files = list(legacy_path.glob('*'))
-        if not remaining_files:
+        if not any(legacy_path.iterdir()):
             logger.info(f'Removing empty legacy log directory: {legacy_path}')
             legacy_path.rmdir()
     except Exception as e:  # pylint: disable=broad-except
