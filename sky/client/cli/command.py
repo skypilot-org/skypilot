@@ -3700,6 +3700,11 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
+@click.option(
+    '--nodes',
+    is_flag=True,
+    default=False,
+    help='Show per-node accelerator availability for Kubernetes and Slurm.')
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
@@ -3708,7 +3713,8 @@ def show_gpus(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        nodes: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -3737,6 +3743,9 @@ def show_gpus(
     If ``--cloud slurm`` is specified, it will show the maximum quantities of
     the GPU available on a single node and the real-time availability of the
     GPU across all nodes in the Slurm cluster.
+
+    For Kubernetes and Slurm, use ``--nodes`` to show per-node accelerator
+    availability.
 
     Definitions of certain fields:
 
@@ -4285,7 +4294,7 @@ def show_gpus(
                 yield from _format_kubernetes_realtime_gpu(total_table,
                                                            k8s_realtime_infos,
                                                            all_nodes_info,
-                                                           show_node_info=True,
+                                                           show_node_info=nodes,
                                                            is_ssh=is_ssh)
 
                 # Check for nodes with GPU labels but 0 GPU resources
@@ -4454,7 +4463,7 @@ def show_gpus(
 
                     yield from _format_slurm_realtime_gpu(total_table,
                                                           slurm_realtime_infos,
-                                                          show_node_info=True)
+                                                          show_node_info=nodes)
 
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
