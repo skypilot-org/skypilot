@@ -1668,6 +1668,8 @@ def get_cluster_info(
     cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
+        # Get the k8s node name the pod is running on (for dashboard display)
+        k8s_node_name = getattr(pod.spec, 'node_name', None)
         pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,
@@ -1678,6 +1680,7 @@ def get_cluster_info(
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
                 internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
+                node_name=k8s_node_name,
             )
         ]
         if _is_head(pod):

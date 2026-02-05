@@ -745,6 +745,7 @@ def get_cluster_info(
                     'job_id': job_id,
                     'node': node,
                 },
+                node_name=slurm_utils.instance_id(job_id, node),
             )
         ] for node, node_ip in zip(nodes, node_ips)
     }
