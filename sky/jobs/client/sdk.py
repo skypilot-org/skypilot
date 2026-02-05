@@ -86,6 +86,9 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+    if name is not None:
+        dag.name = name
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
