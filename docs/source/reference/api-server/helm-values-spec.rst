@@ -2552,19 +2552,6 @@ By default, Grafana is configured to work with the ingress controller and auth p
         enabled: true
       dashboards:
         enabled: true
-    dashboardProviders:
-      dashboardproviders.yaml:
-        apiVersion: 1
-        providers:
-        - name: 'default'
-          orgId: 1
-          folder: ''
-          type: file
-          disableDeletion: false
-          allowUiUpdates: false
-          updateIntervalSeconds: 30
-          options:
-            path: /var/lib/grafana/dashboards/default
 
 .. _helm-values-grafana-enabled:
 

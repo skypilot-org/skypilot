@@ -749,17 +749,3 @@ grafana:
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true
-  # Add dashboard provider configuration to load dashboards from default directory
-  dashboardProviders:
-    dashboardproviders.yaml:
-      apiVersion: 1
-      providers:
-      - name: 'default'
-        orgId: 1
-        folder: ''
-        type: file
-        disableDeletion: false
-        allowUiUpdates: false
-        updateIntervalSeconds: 30
-        options:
-          path: /var/lib/grafana/dashboards/default
