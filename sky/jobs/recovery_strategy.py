@@ -747,12 +747,17 @@ class FailoverStrategyExecutor(StrategyExecutor):
             if launched_resources is not None:
                 cloud = str(launched_resources.cloud
                            ) if launched_resources.cloud else None
+                # Get node_names from cached_cluster_info for dashboard display
+                node_names = None
+                if handle.cached_cluster_info is not None:
+                    node_names = handle.cached_cluster_info.get_node_names_str()
                 await asyncio.to_thread(
                     state.set_job_infra,
                     self.job_id,
                     cloud=cloud,
                     region=launched_resources.region,
                     zone=launched_resources.zone,
+                    node_names=node_names,
                 )
         else:
             self._launched_resources = None

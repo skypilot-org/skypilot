@@ -948,6 +948,48 @@ export function ClusterTable({
       ),
     },
     {
+      id: 'node',
+      order: 4.5,
+      header: {
+        label: 'Node',
+        sortKey: 'node_names',
+        className: 'sortable whitespace-nowrap',
+      },
+      renderHeader: () => (
+        <TableHead
+          className="sortable whitespace-nowrap"
+          onClick={() => requestSort('node_names')}
+        >
+          Node{getSortDirection('node_names')}
+        </TableHead>
+      ),
+      renderCell: (item) => {
+        const nodes = item.node_names ? item.node_names.split(',') : [];
+        if (nodes.length === 0) {
+          return <TableCell>-</TableCell>;
+        }
+        const hasMultipleNodes = nodes.length > 1;
+        const tooltipText = nodes.join('\n');
+        return (
+          <TableCell>
+            <NonCapitalizedTooltip
+              content={tooltipText}
+              className="text-sm text-muted-foreground"
+            >
+              <span>
+                {nodes[0]}
+                {hasMultipleNodes && (
+                  <span className="border-b border-dotted border-gray-400 cursor-help ml-1">
+                    (+{nodes.length - 1} more)
+                  </span>
+                )}
+              </span>
+            </NonCapitalizedTooltip>
+          </TableCell>
+        );
+      },
+    },
+    {
       id: 'resources',
       order: 5,
       header: {
