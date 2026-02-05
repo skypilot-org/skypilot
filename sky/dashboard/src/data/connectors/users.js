@@ -31,7 +31,7 @@ export async function getUsers() {
         (user) =>
           !(
             ['dashboard', 'local'].includes(user.name) &&
-            user.user_type === 'local'
+            user.user_type === 'legacy'
           )
       )
       .map((user) => ({
