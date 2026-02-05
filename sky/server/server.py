@@ -250,7 +250,16 @@ def _extract_user_from_header(
 
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    return models.User(id=user_hash, name=user_name)
+    ingress_basic_auth_enabled = os.environ.get(
+        constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED, 'false').lower()
+    if ingress_basic_auth_enabled == 'true':
+        return models.User(id=user_hash,
+                           name=user_name,
+                           user_type=models.UserType.LEGACY.value)
+    else:
+        return models.User(id=user_hash,
+                           name=user_name,
+                           user_type=models.UserType.SSO.value)
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:

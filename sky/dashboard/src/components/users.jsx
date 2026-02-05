@@ -2070,6 +2070,14 @@ function UsersTable({
                   Role{getSortDirection('role')}
                 </TableHead>
               )}
+              {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                <TableHead
+                  onClick={() => requestSort('userType')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Type{getSortDirection('userType')}
+                </TableHead>
+              )}
               <TableHead
                 onClick={() => requestSort('created_at')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -2180,6 +2188,13 @@ function UsersTable({
                           </>
                         )}
                       </div>
+                    </TableCell>
+                  )}
+                  {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                    <TableCell className="truncate" title={user.userType}>
+                      <span className="capitalize">
+                        {user.userType === 'sso' ? 'SSO' : user.userType}
+                      </span>
                     </TableCell>
                   )}
                   <TableCell className="truncate">

@@ -190,5 +190,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if email_header:
             user_hash = hashlib.md5(email_header.encode()).hexdigest(
             )[:common_utils.USER_HASH_LENGTH]
-            return models.User(id=user_hash, name=email_header)
+            return models.User(id=user_hash,
+                               name=email_header,
+                               user_type=models.UserType.SSO.value)
         return None

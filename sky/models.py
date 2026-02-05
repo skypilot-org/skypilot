@@ -17,14 +17,14 @@ class UserType(enum.Enum):
     """Enum for user types."""
     # Internal system users (SERVER_ID, SKYPILOT_SYSTEM_USER_ID)
     SYSTEM = 'system'
-    # Users created via user_create API
+    # Users authenticated by basic auth on the API server that have a password
     BASIC = 'basic'
-    # Service accounts created via create_service_account_token
+    # Service accounts
     SA = 'sa'
     # Users authenticated via SSO
     SSO = 'sso'
-    # Default for existing users (local origin)
-    LOCAL = 'local'
+    # Users authenticated by basic auth on the ingress that have no password
+    LEGACY = 'legacy'
 
 
 @dataclasses.dataclass
@@ -36,20 +36,24 @@ class User:
     name: Optional[str] = None
     password: Optional[str] = None
     created_at: Optional[int] = None
+    user_type: Optional[str] = None
 
     def __init__(
-            self,
-            id: str,  # pylint: disable=redefined-builtin
-            name: Optional[str] = None,
-            password: Optional[str] = None,
-            created_at: Optional[int] = None):
+        self,
+        id: str,  # pylint: disable=redefined-builtin
+        name: Optional[str] = None,
+        password: Optional[str] = None,
+        created_at: Optional[int] = None,
+        user_type: Optional[str] = None,
+    ):
         self.id = id.strip().lower()
         self.name = name
         self.password = password
         self.created_at = created_at
+        self.user_type = user_type
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': self.id, 'name': self.name}
+        return {'id': self.id, 'name': self.name, 'user_type': self.user_type}
 
     @classmethod
     def get_current_user(cls) -> 'User':
