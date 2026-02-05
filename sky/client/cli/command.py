@@ -1043,6 +1043,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
                 **_get_shell_complete_args(_complete_file_name))
 @click.option('--cluster',
               '-c',
+              'cluster_name',
               default=None,
               type=str,
               **_get_shell_complete_args(_complete_cluster_name),
