@@ -925,6 +925,28 @@ def controller_log_file_for_job(job_id: int,
         os.makedirs(log_dir, exist_ok=True)
     return os.path.join(log_dir, f'{job_id}.log')
 
+def _get_job_pending_reason(job_id: int) -> Optional[str]:
+    """Get the pending reason for a job based on schedule_state.
+
+    Returns:
+        - "In backoff, waiting for resources" if ALIVE_BACKOFF
+        - "Waiting for resources" if WAITING/ALIVE_WAITING
+        - "Submitting to scheduler" if INACTIVE
+        - None otherwise
+    """
+    schedule_state = managed_job_state.get_job_schedule_state(job_id)
+
+    if (
+    schedule_state == managed_job_state.ManagedJobScheduleState.ALIVE_BACKOFF
+    ):
+        return 'In backoff, waiting for resources'
+    elif schedule_state in (managed_job_state.ManagedJobScheduleState.WAITING,
+                    managed_job_state.ManagedJobScheduleState.ALIVE_WAITING):
+        return 'Waiting for resources'
+    elif schedule_state == managed_job_state.ManagedJobScheduleState.INACTIVE:
+        return 'Submitting to scheduler'
+    return None
+
 
 def stream_logs_by_id(
         job_id: int,
@@ -967,7 +989,7 @@ def stream_logs_by_id(
         # task_filter is a str, match by task name
         return task_name == task_filter
 
-    pending_reason = managed_job_state.get_job_pending_reason(job_id)
+    pending_reason = _get_job_pending_reason(job_id)
     status_str = f' ({pending_reason})' if pending_reason else ''
     msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str,
                                              job_id=job_id)
@@ -1132,8 +1154,7 @@ def stream_logs_by_id(
                 if (managed_job_status is not None and managed_job_status !=
                         managed_job_state.ManagedJobStatus.RUNNING):
                     # Get specific pending reason instead of just showing status
-                    pending_reason = managed_job_state.get_job_pending_reason(
-                        job_id)
+                    pending_reason = _get_job_pending_reason(job_id)
                     if pending_reason:
                         status_str = f' ({pending_reason})'
                     else:
