@@ -1235,7 +1235,7 @@ def update_cluster_handle(cluster_name: str,
         ci = cluster_handle.cached_cluster_info
         if ci is not None:
             node_names = ci.get_node_names_str()
-    
+
     update_dict = {cluster_table.c.handle: handle}
     if node_names is not None:
         update_dict[cluster_table.c.node_names] = node_names
