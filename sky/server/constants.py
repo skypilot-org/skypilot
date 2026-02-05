@@ -37,8 +37,17 @@ MIN_AVAIL_MEM_GB = 2
 MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE = 4
 # Default encoder/decoder handler name.
 DEFAULT_HANDLER_NAME = 'default'
+
+_API_SERVER_DIRECTORY = '~/.sky/api_server'
+# The log for SkyPilot API server.
+
+API_SERVER_LOGS = f'{_API_SERVER_DIRECTORY}/server.log'
+REQUEST_LOGS_PATH_PREFIX = f'{_API_SERVER_DIRECTORY}/request_logs'
+REQUEST_DEBUG_LOGS_PATH_PREFIX = f'{_API_SERVER_DIRECTORY}/request_debug'
+# The lock for creating the SkyPilot API server.
+API_SERVER_CREATION_LOCK_PATH = f'{_API_SERVER_DIRECTORY}/.creation.lock'
 # The path to the API request database.
-API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
+API_SERVER_REQUEST_DB_PATH = f'{_API_SERVER_DIRECTORY}/requests.db'
 
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.

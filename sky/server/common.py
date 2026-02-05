@@ -625,8 +625,9 @@ def _start_api_server(deploy: bool = False,
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
 
-    with rich_utils.client_status('Starting SkyPilot API server, '
-                                  f'view logs at {constants.API_SERVER_LOGS}'):
+    with rich_utils.client_status(
+            'Starting SkyPilot API server, '
+            f'view logs at {server_constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
@@ -674,7 +675,7 @@ def _start_api_server(deploy: bool = False,
                 os.environ[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
             os.execvp(args[0], args)
 
-        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        log_path = os.path.expanduser(server_constants.API_SERVER_LOGS)
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
         # For spawn mode, copy the environ to avoid polluting the SDK process.
@@ -709,7 +710,7 @@ def _start_api_server(deploy: bool = False,
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'SkyPilot API server process exited unexpectedly.\n'
-                        f'View logs at: {constants.API_SERVER_LOGS}')
+                        f'View logs at: {server_constants.API_SERVER_LOGS}')
             try:
                 # Clear the cache to ensure fresh checks during startup
                 get_api_server_status.cache_clear()  # type: ignore
@@ -723,7 +724,7 @@ def _start_api_server(deploy: bool = False,
                             'Failed to start SkyPilot API server at '
                             f'{get_server_url(host)}'
                             '\nView logs at: '
-                            f'{constants.API_SERVER_LOGS}') from e
+                            f'{server_constants.API_SERVER_LOGS}') from e
                 time.sleep(0.5)
             else:
                 break
@@ -871,7 +872,8 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
         # Lock to prevent multiple processes from starting the server at the
         # same time, causing issues with database initialization.
         with filelock.FileLock(
-                os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+                os.path.expanduser(
+                    server_constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
             get_api_server_status.cache_clear()  # type: ignore[attr-defined]

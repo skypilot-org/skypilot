@@ -9,6 +9,7 @@ import threading
 
 import colorama
 
+from sky.server import constants as server_constants
 from sky.skylet import constants
 from sky.utils import context
 from sky.utils import env_options
@@ -19,9 +20,6 @@ _FORMAT = ('%(levelname).1s %(asctime)s.%(msecs)03d PID=%(process)d '
            '%(filename)s:%(lineno)d] %(message)s')
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
-
-_DEBUG_LOG_DIR = os.path.expanduser(
-    os.path.join(constants.SKY_LOGS_DIRECTORY, 'request_debug'))
 
 DEBUG = logging.DEBUG
 INFO = logging.INFO
@@ -274,8 +272,10 @@ def add_debug_log_handler(request_id: str):
         yield
         return
 
-    os.makedirs(_DEBUG_LOG_DIR, exist_ok=True)
-    log_path = os.path.join(_DEBUG_LOG_DIR, f'{request_id}.log')
+    debug_log_dir = os.path.expanduser(
+        server_constants.REQUEST_DEBUG_LOGS_PATH_PREFIX)
+    os.makedirs(debug_log_dir, exist_ok=True)
+    log_path = os.path.join(debug_log_dir, f'{request_id}.log')
     try:
         debug_log_handler = logging.FileHandler(log_path)
         debug_log_handler.setFormatter(FORMATTER)

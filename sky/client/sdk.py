@@ -2410,7 +2410,7 @@ def api_start(
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server and dashboard: '
                 f'{api_server_url}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
-                f'View API server logs at: {constants.API_SERVER_LOGS}')
+                f'View API server logs at: {server_constants.API_SERVER_LOGS}')
 
 
 @usage_lib.entrypoint
@@ -2434,7 +2434,7 @@ def api_stop() -> None:
     # Acquire the api server creation lock to prevent multiple processes from
     # stopping and starting the API server at the same time.
     with filelock.FileLock(
-            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+            os.path.expanduser(server_constants.API_SERVER_CREATION_LOCK_PATH)):
         try:
             records = scheduler.get_controller_process_records()
             if records is not None:
@@ -2485,10 +2485,10 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
             tail_args.extend(['-n', '+1'])
         else:
             tail_args.extend(['-n', f'{tail}'])
-        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        log_path = os.path.expanduser(server_constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
-        stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
+        stream_and_get(log_path=server_constants.API_SERVER_LOGS, tail=tail)
 
 
 def _save_config_updates(endpoint: Optional[str] = None,

@@ -438,10 +438,6 @@ FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
-# The log for SkyPilot API server.
-API_SERVER_LOGS = '~/.sky/api_server/server.log'
-# The lock for creating the SkyPilot API server.
-API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
 
 # The name for the environment variable that stores the URL of the SkyPilot
 # API server.

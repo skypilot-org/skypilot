@@ -1969,9 +1969,9 @@ async def stream(
         del request_task
     else:
         assert log_path is not None, (request_id, log_path)
-        if log_path == constants.API_SERVER_LOGS:
+        if log_path == server_constants.API_SERVER_LOGS:
             resolved_log_path = pathlib.Path(
-                constants.API_SERVER_LOGS).expanduser()
+                server_constants.API_SERVER_LOGS).expanduser()
             if not resolved_log_path.exists():
                 raise fastapi.HTTPException(
                     status_code=404,
