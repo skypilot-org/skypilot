@@ -388,6 +388,16 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             df['NeuronInfo'] = df['NeuronInfo'].apply(map_neuroninfo)
             df['GpuInfo'] = df['GpuInfo'].fillna(df['NeuronInfo'])
         df = df[USEFUL_COLUMNS]
+
+        # Remove duplicate entries for the same (InstanceType, AvailabilityZone)
+        # The AWS API sometimes returns duplicate entries with inconsistent
+        # GpuInfo (e.g., p4de.24xlarge with "A100" vs "A100-80GB"). We handle
+        # this by keeping the entry with a valid SpotPrice (not NaN) when
+        # available, as the duplicate with NaN SpotPrice is likely stale data.
+        # See: https://github.com/skypilot-org/skypilot/issues/8638
+        df = df.sort_values('SpotPrice', na_position='last')
+        df = df.drop_duplicates(subset=['InstanceType', 'AvailabilityZone'],
+                                keep='first')
     except Exception as e:  # pylint: disable=broad-except
         print(traceback.format_exc())
         print(f'{region} failed with {e}', file=sys.stderr)

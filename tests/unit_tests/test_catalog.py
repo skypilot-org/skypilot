@@ -249,3 +249,68 @@ def test_catalog_prices_are_json_serializable():
     response = {'total_cost': cost}
     serialized_dict = orjson.dumps(response)
     assert orjson.loads(serialized_dict) == {'total_cost': 2.5}
+
+
+def test_get_hourly_cost_no_duplicate_assertion_error():
+    """Test that duplicate entries for same (InstanceType, Zone) are handled.
+
+    Regression test for GitHub issue #8638 where duplicate catalog entries
+    for p4de.24xlarge caused an AssertionError. The catalog should handle
+    duplicates gracefully by keeping the entry with valid SpotPrice.
+    """
+    # Simulate the duplicate entry scenario from the bug report:
+    # Two entries for the same instance type and zone with different GPU info
+    # and one missing SpotPrice (NaN).
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'p4de.24xlarge',
+            'AcceleratorName': 'A100-80GB',
+            'AcceleratorCount': 8,
+            'vCPUs': 96,
+            'MemoryGiB': 1152,
+            'GpuInfo': {
+                'Gpus': [{
+                    'Name': 'A100-80GB'
+                }]
+            },
+            'Price': 40.97,
+            'SpotPrice': 8.4267,
+            'Region': 'us-east-1',
+            'AvailabilityZone': 'us-east-1c',
+        },
+        {
+            'InstanceType': 'p4de.24xlarge',
+            'AcceleratorName': 'A100-80GB',
+            'AcceleratorCount': 8,
+            'vCPUs': 96,
+            'MemoryGiB': 1152,
+            'GpuInfo': {
+                'Gpus': [{
+                    'Name': 'A100'
+                }]
+            },  # Incorrect GPU name
+            'Price': 40.97,
+            'SpotPrice': np.nan,  # Missing SpotPrice
+            'Region': 'us-east-1',
+            'AvailabilityZone': 'us-east-1c',
+        },
+    ])
+
+    # This should not raise an AssertionError even with duplicates.
+    # The function filters by instance type and zone, and should handle
+    # the case where there might be duplicates in the source data.
+    cost = catalog_common.get_hourly_cost_impl(df,
+                                               'p4de.24xlarge',
+                                               use_spot=False,
+                                               region='us-east-1',
+                                               zone='us-east-1c')
+    assert cost == 40.97
+
+    # For spot pricing, since we have duplicates, this tests that
+    # the catalog handles this gracefully (returns the valid price).
+    spot_cost = catalog_common.get_hourly_cost_impl(df,
+                                                    'p4de.24xlarge',
+                                                    use_spot=True,
+                                                    region='us-east-1',
+                                                    zone='us-east-1c')
+    assert spot_cost == 8.4267
