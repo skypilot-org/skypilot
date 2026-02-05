@@ -7066,6 +7066,12 @@ INT_OR_NONE = IntOrNone()
     required=False,
     help=(f'Number of requests to show, default is {_NUM_REQUESTS_TO_SHOW},'
           f' set to "none" or "all" to show all requests.'))
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              required=False,
+              help=('Filter request by cluster name.'))
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
