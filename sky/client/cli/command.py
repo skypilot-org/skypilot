@@ -7076,7 +7076,8 @@ INT_OR_NONE = IntOrNone()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: Optional[int]):
+               verbose: bool, limit: Optional[int],
+               cluster_name: Optional[str]):
     """List requests on SkyPilot API server."""
     if not request_id_prefixes:
         request_id_prefixes = None
@@ -7084,7 +7085,7 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
     request_list = sdk.api_status(request_id_prefixes, all_status, limit,
-                                  fields)
+                                  fields, cluster_name)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
