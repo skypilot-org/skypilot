@@ -21,7 +21,9 @@ from sky.serve import autoscalers
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import context_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -44,13 +46,12 @@ class SkyServeController:
     """
 
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
-                 service_task_yaml: str, host: str, port: int) -> None:
+                 version: int, host: str, port: int) -> None:
         self._service_name = service_name
         self._replica_manager: replica_managers.ReplicaManager = (
-            replica_managers.SkyPilotReplicaManager(
-                service_name=service_name,
-                spec=service_spec,
-                service_task_yaml_path=service_task_yaml))
+            replica_managers.SkyPilotReplicaManager(service_name=service_name,
+                                                    spec=service_spec,
+                                                    version=version))
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._host = host
@@ -172,7 +173,11 @@ class SkyServeController:
                 # See sky/serve/core.py::update
                 latest_task_yaml = serve_utils.generate_task_yaml_file_name(
                     self._service_name, version)
-                service = serve.SkyServiceSpec.from_yaml(latest_task_yaml)
+                with open(latest_task_yaml, 'r', encoding='utf-8') as f:
+                    yaml_content = f.read()
+                service = serve.SkyServiceSpec.from_yaml_str(yaml_content)
+                serve_state.add_or_update_version(self._service_name, version,
+                                                  service, yaml_content)
                 logger.info(
                     f'Update to new version version {version}: {service}')
 
@@ -283,9 +288,10 @@ class SkyServeController:
 # TODO(tian): Probably we should support service that will stop the VM in
 # specific time period.
 def run_controller(service_name: str, service_spec: serve.SkyServiceSpec,
-                   service_task_yaml: str, controller_host: str,
-                   controller_port: int):
-    controller = SkyServeController(service_name, service_spec,
-                                    service_task_yaml, controller_host,
-                                    controller_port)
+                   version: int, controller_host: str, controller_port: int):
+    os.environ[constants.OVERRIDE_CONSOLIDATION_MODE] = 'true'
+    # Hijack sys.stdout/stderr to be context aware.
+    context_utils.hijack_sys_attrs()
+    controller = SkyServeController(service_name, service_spec, version,
+                                    controller_host, controller_port)
     controller.run()

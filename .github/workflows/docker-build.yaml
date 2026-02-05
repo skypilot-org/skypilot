@@ -248,11 +248,21 @@ jobs:
       - name: Create multi-platform manifest
         run: |
           # Create multi-platform manifest from temporary tags
+          VERSION="${{ needs.prepare.outputs.version }}"
+          
+          # Determine if this is a pre-release version (contains rc, alpha, beta, or dev)
+          if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]]; then
+            echo "Pre-release version detected ($VERSION), skipping :latest tag"
+            TAGS="-t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
+          else
+            echo "Stable release version detected ($VERSION), updating :latest tag"
+            TAGS="-t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
+          fi
+          
           docker buildx imagetools create \
-            -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest \
-            -t ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }} \
-            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-amd64 \
-            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}-linux-arm64
+            $TAGS \
+            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION-linux-amd64 \
+            ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION-linux-arm64
 
       - name: Clean up temporary tags
         if: always()
@@ -274,9 +284,18 @@ jobs:
 
       - name: Summary of final tags
         run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
           echo "✅ Multi-platform tags created:"
-          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
-          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ needs.prepare.outputs.version }}"
+          echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:$VERSION"
+          
+          # Check if latest tag was updated
+          if [[ "$VERSION" =~ (rc|alpha|beta|dev) ]]; then
+            echo ""
+            echo "ℹ️  Pre-release version - :latest tag not updated"
+          else
+            echo "   - ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest"
+          fi
+          
           echo ""
           echo "🚀 Built with native runners for maximum performance!"
           echo "🧹 Temporary tags cleaned up automatically!"

@@ -205,7 +205,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set kubernetesCredentials.useKubeconfig=true \
@@ -213,16 +213,44 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. tip::
 
-            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
-            You can use the ``exec_kubeconfig_converter.py`` script to do this.
+            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin``, Nebius Managed Kubernetes, OCI, etc.), you will need to generate a kubeconfig with static authentication instead.
+            You can use the ``generate_kubeconfig.sh`` script to do this.
 
             .. code-block:: bash
 
-                python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
+                # Download the script
+                curl -O https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/sky/utils/kubernetes/generate_kubeconfig.sh && chmod +x generate_kubeconfig.sh
 
-            Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
+                # Generate the kubeconfig
+                export KUBECONFIG=$HOME/.kube/config # or the path to your kubeconfig file
+                ./generate_kubeconfig.sh
 
-            The specific cloud's credential for the exec-based authentication also needs to be configured. For example, to enable exec-based authentication for GKE, you also need to setup GCP credentials (see the GCP tab above).
+            Then create the Kubernetes secret with the generated kubeconfig file ``./kubeconfig``.
+
+
+        .. dropdown:: Update Kubernetes credentials
+
+           After Kubernetes credentials are enabled, you can update the kubeconfig file in ``kube-credentials`` by:
+
+           1. Replace the existing secret in place:
+
+              .. code-block:: bash
+
+                  kubectl delete secret kube-credentials
+                  kubectl create secret generic kube-credentials \
+                    --namespace $NAMESPACE \
+                    --from-file=config=$HOME/.kube/config
+
+           2. Then it will take tens of seconds to take effect on the API server. You can verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  # If `SSH Node Pools` is not enabled
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.kube/config
+                  # If `SSH Node Pools` is enabled
+                  #kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /var/skypilot/kubeconfig/config
 
         To use multiple Kubernetes clusters, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config. An example config file that allows using the hosting Kubernetes cluster and two additional Kubernetes clusters is shown below:
 
@@ -241,9 +269,12 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: AWS
         :sync: aws-creds-tab
 
-        Make sure you have the access key id and secret access key.
+        We use static credentials to authenticate with AWS. Once you have the credentials, create a Kubernetes secret to store it.
+        We support two different options for AWS credentials.
 
-        Create a Kubernetes secret with your AWS credentials:
+        **Option 1: Single profile (default)**
+
+        Use this if you only need a single set of AWS credentials. Create a Kubernetes secret with your AWS access key and secret key:
 
         .. code-block:: bash
 
@@ -254,30 +285,130 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Replace ``YOUR_ACCESS_KEY_ID`` and ``YOUR_SECRET_ACCESS_KEY`` with your actual AWS credentials.
 
-        Enable AWS credentials by setting ``awsCredentials.enabled=true`` and ``awsCredentials.awsSecretName=aws-credentials`` in the Helm values file.
+        Enable it by setting ``awsCredentials.enabled=true`` in the Helm values file.
 
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                 --namespace $NAMESPACE \
                 --reuse-values \
                 --set awsCredentials.enabled=true
+
+        .. dropdown:: Update AWS credentials (single profile)
+
+           After AWS credentials are enabled, update the access or secret key in ``aws-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic aws-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
+                    --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set awsCredentials.awsSecretName=aws-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret aws-credentials
+                  kubectl create secret generic aws-credentials \
+                    --namespace $NAMESPACE \
+                    --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
+                    --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.aws/credentials
+
+        **Option 2: Multiple profiles (for multiple workspaces)**
+
+        Use this if you need different AWS profiles for different workspaces. Create a Kubernetes secret from your AWS credentials file:
+
+        .. code-block:: bash
+
+            kubectl create secret generic aws-credentials \
+              --namespace $NAMESPACE \
+              --from-file=credentials=$HOME/.aws/credentials
+
+        Enable it by setting ``awsCredentials.enabled=true`` and ``awsCredentials.useCredentialsFile=true`` in the Helm values file.
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                --namespace $NAMESPACE \
+                --reuse-values \
+                --set awsCredentials.enabled=true \
+                --set awsCredentials.useCredentialsFile=true
+
+        .. dropdown:: Update AWS credentials (multiple profiles)
+
+           After AWS credentials are enabled, you can update the credentials file in ``aws-credentials`` by:
+
+           1. Replace the existing secret in place:
+
+              .. code-block:: bash
+
+                  kubectl delete secret aws-credentials
+                  kubectl create secret generic aws-credentials \
+                    --namespace $NAMESPACE \
+                    --from-file=credentials=$HOME/.aws/credentials
+
+           2. Then it will take tens of seconds to take effect on the API server. You can verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.aws/credentials
 
         .. dropdown:: Use existing AWS credentials
 
             You can also set the following values to use a secret that already contains your AWS credentials:
 
-            .. code-block::bash
+            .. code-block:: bash
 
                 # TODO: replace with your secret name and keys in the secret
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set awsCredentials.enabled=true \
                     --set awsCredentials.awsSecretName=your_secret_name \
                     --set awsCredentials.accessKeyIdKeyName=aws_access_key_id \
                     --set awsCredentials.secretAccessKeyKeyName=aws_secret_access_key
+
+            Or if using credentials file:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set awsCredentials.enabled=true \
+                    --set awsCredentials.useCredentialsFile=true \
+                    --set awsCredentials.awsSecretName=your_secret_name
 
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -297,7 +428,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set gcpCredentials.enabled=true \
@@ -310,11 +441,55 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set gcpCredentials.enabled=true \
                     --set gcpCredentials.gcpSecretName=your_secret_name
+
+        .. dropdown:: Update GCP credentials
+
+           After GCP credentials are enabled, you can update the credentials file in ``gcp-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic gcp-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY_NEW.json
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set gcpCredentials.gcpSecretName=gcp-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret gcp-credentials
+                  kubectl create secret generic gcp-credentials \
+                    --namespace $NAMESPACE \
+                    --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- ls -lart /root/.config/gcloud
 
     .. tab-item:: RunPod
         :sync: runpod-creds-tab
@@ -338,11 +513,55 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set runpodCredentials.enabled=true \
                     --set runpodCredentials.runpodSecretName=your_secret_name
+
+        .. dropdown:: Update RunPod credentials
+
+           After RunPod credentials are enabled, you can update the API key in ``runpod-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic runpod-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY_NEW
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set runpodCredentials.runpodSecretName=runpod-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret runpod-credentials
+                  kubectl create secret generic runpod-credentials \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.runpod/config.toml
 
     .. tab-item:: Lambda
         :sync: lambda-creds-tab
@@ -362,7 +581,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set lambdaCredentials.enabled=true
@@ -374,11 +593,55 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set lambdaCredentials.enabled=true \
                     --set lambdaCredentials.lambdaSecretName=your_secret_name
+
+        .. dropdown:: Update Lambda credentials
+
+           After Lambda credentials are enabled, you can update the API key in ``lambda-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic lambda-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY_NEW
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set lambdaCredentials.lambdaSecretName=lambda-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret lambda-credentials
+                  kubectl create secret generic lambda-credentials \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.lambda_cloud/lambda_keys
 
     .. tab-item:: Nebius
         :sync: nebius-creds-tab
@@ -425,7 +688,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set nebiusCredentials.enabled=true \
@@ -438,11 +701,32 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set nebiusCredentials.enabled=true \
                     --set nebiusCredentials.nebiusSecretName=your_secret_name
+
+        .. dropdown:: Update Nebius credentials
+
+           After Nebius credentials are enabled, you can update the credentials file in ``nebius-credentials`` by:
+
+           1. Replace the existing secret in place:
+
+              .. code-block:: bash
+
+                  kubectl delete secret nebius-credentials
+                  kubectl create secret generic nebius-credentials \
+                    --namespace $NAMESPACE \
+                    --from-file=credentials=$HOME/.nebius/credentials.json
+
+           2. Then it will take tens of seconds to take effect on the API server. You can verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.nebius/credentials.json
 
     .. tab-item:: Vast
         :sync: vast-creds-tab
@@ -462,7 +746,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             # --reuse-values keeps the Helm chart values set in the previous step
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set vastCredentials.enabled=true
@@ -474,12 +758,55 @@ Following tabs describe how to configure credentials for different clouds on the
             .. code-block:: bash
 
                 # TODO: replace with your secret name
-                helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
                     --namespace $NAMESPACE \
                     --reuse-values \
                     --set vastCredentials.enabled=true \
                     --set vastCredentials.vastSecretName=your_secret_name
 
+        .. dropdown:: Update Vast credentials
+
+           After Vast credentials are enabled, you can update the API key in ``vast-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic vast-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY_NEW
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set vastCredentials.vastSecretName=vast-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret vast-credentials
+                  kubectl create secret generic vast-credentials \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.config/vastai/vast_api_key
 
     .. tab-item:: SSH Node Pools
         :sync: ssh-node-pools-tab
@@ -495,6 +822,17 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --reuse-values \
               --set-file apiService.sshNodePools=/your/path/to/ssh_node_pools.yaml
+
+        .. note::
+
+           Updating the value of ``apiService.sshNodePools`` will not restart the API server but it will take tens of seconds to take effect on the API server.
+           You can verify the config updates on the API server by running the following command:
+
+           .. code-block:: bash
+
+            # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+            API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+            kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.sky/ssh_node_pools.yaml
 
         If your ``ssh_node_pools.yaml`` requires SSH keys, create a secret that contains the keys and set the :ref:`apiService.sshKeySecret <helm-values-apiService-sshKeySecret>` to the secret name:
 
@@ -515,6 +853,28 @@ Following tabs describe how to configure credentials for different clouds on the
               --reuse-values \
               --set apiService.sshKeySecret=$SECRET_NAME
 
+        .. dropdown:: Update SSH key credentials
+
+           After SSH key credentials are enabled, you can update the credentials file in ``$SECRET_NAME`` by:
+
+           1. Replace the existing secret in place:
+
+              .. code-block:: bash
+
+                  kubectl delete secret $SECRET_NAME
+                  kubectl create secret generic $SECRET_NAME \
+                    --namespace $NAMESPACE \
+                    --from-file=id_rsa=/path/to/id_rsa \
+                    --from-file=other_id_rsa=/path/to/other_id_rsa
+
+           2. Then it will take tens of seconds to take effect on the API server. You can verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- ls -lart /root/.ssh/
+
         After the API server is deployed, use the ``sky ssh up`` command to set up the SSH Node Pools. Refer to :ref:`existing-machines` for more details.
 
         .. note::
@@ -534,17 +894,224 @@ Following tabs describe how to configure credentials for different clouds on the
               --namespace $NAMESPACE \
               --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
               --from-file=accountid=$HOME/.cloudflare/accountid
-        
+
         When installing or upgrading the Helm chart, enable Cloudflare R2 credentials by setting :ref:`r2Credentials.enabled <helm-values-r2credentials-enabled>` and :ref:`r2Credentials.r2SecretName <helm-values-r2credentials-r2secretname>`:
-        
+
         .. code-block:: bash
-        
+
             # --reuse-values keeps the Helm chart values set in the previous step
             helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --namespace $NAMESPACE \
               --reuse-values \
               --set r2Credentials.enabled=true \
               --set r2Credentials.r2SecretName=r2-credentials
+
+        .. dropdown:: Update Cloudflare R2 credentials
+
+           After Cloudflare R2 credentials are enabled, you can update the credentials file in ``r2-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic r2-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
+                    --from-file=accountid=$HOME/.cloudflare/accountid
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set r2Credentials.r2SecretName=r2-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret r2-credentials
+                  kubectl create secret generic r2-credentials \
+                    --namespace $NAMESPACE \
+                    --from-file=r2.credentials=$HOME/.cloudflare/r2.credentials
+                    --from-file=accountid=$HOME/.cloudflare/accountid
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.cloudflare/r2.credentials
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.cloudflare/accountid
+
+    .. tab-item:: CoreWeave
+        :sync: coreweave-creds-tab
+
+        SkyPilot API server uses the same credentials as the :ref:`CoreWeave CAIOS installation <coreweave-caios-installation>` to authenticate with CoreWeave Object Storage.
+
+        Once you have the credentials configured locally, you can store them in a Kubernetes secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic coreweave-credentials \
+              --namespace $NAMESPACE \
+              --from-file=cw.config=$HOME/.coreweave/cw.config \
+              --from-file=cw.credentials=$HOME/.coreweave/cw.credentials
+
+        When installing or upgrading the Helm chart, enable CoreWeave CAIOS credentials by setting ``coreweaveCredentials.enabled=true``:
+
+        .. code-block:: bash
+
+            # --reuse-values keeps the Helm chart values set in the previous step
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set coreweaveCredentials.enabled=true
+
+        .. dropdown:: Use existing CoreWeave CAIOS credentials
+
+            You can also set the following values to use a secret that already contains your CoreWeave CAIOS credentials:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set coreweaveCredentials.enabled=true \
+                    --set coreweaveCredentials.coreweaveSecretName=your_secret_name
+
+        .. dropdown:: Update CoreWeave CAIOS credentials
+
+           After CoreWeave CAIOS credentials are enabled, you can update the credentials file in ``coreweave-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic coreweave-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-file=cw.config=$HOME/.coreweave/cw.config \
+                    --from-file=cw.credentials=$HOME/.coreweave/cw.credentials
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set coreweaveCredentials.coreweaveSecretName=coreweave-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret coreweave-credentials
+                  kubectl create secret generic coreweave-credentials \
+                    --namespace $NAMESPACE \
+                    --from-file=cw.config=$HOME/.coreweave/cw.config \
+                    --from-file=cw.credentials=$HOME/.coreweave/cw.credentials
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.coreweave/cw.config
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.coreweave/cw.credentials
+
+    .. tab-item:: DigitalOcean
+        :sync: digitalocean-creds-tab
+
+        SkyPilot API server use **API key** to authenticate with DigitalOcean. To configure DigitalOcean access,
+        follow the `instructions <https://docs.digitalocean.com/reference/api/create-personal-access-token/#creating-a-token>`_
+        provided by DigitalOcean.
+
+        Once the key is generated, create a Kubernetes secret to store it:
+
+        .. code-block:: bash
+
+            kubectl create secret generic digitalocean-credentials \
+              --namespace $NAMESPACE \
+              --from-literal api_key=YOUR_API_KEY
+
+        When installing or upgrading the Helm chart, enable DigitalOcean credentials by
+        setting ``digitaloceanCredentials.enabled=true``
+
+        .. dropdown:: Use existing DigitalOcean credentials
+
+            You can also set the following values to use a secret that already contains your DigitalOcean API key:
+
+            .. code-block:: bash
+
+                # TODO: replace with your secret name
+                # if secret name is not provided, secret name defaults to `digitalocean-credentials`
+                helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set digitaloceanCredentials.enabled=true \
+                    --set digitaloceanCredentials.digitaloceanSecretName=your_secret_name
+
+        .. dropdown:: Update DigitalOcean credentials
+
+           After DigitalOcean credentials are enabled, you can update the API key in ``digitalocean-credentials`` using either approach:
+
+           1. Create a new secret with a new name:
+
+              .. code-block:: bash
+
+                  kubectl create secret generic digitalocean-credentials-new \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY_NEW
+
+              Then point Helm to the new secret name:
+
+              .. code-block:: bash
+
+                  helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set digitaloceanCredentials.digitaloceanSecretName=digitalocean-credentials-new
+
+           2. Replace the existing secret in place, then restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl delete secret digitalocean-credentials
+                  kubectl create secret generic digitalocean-credentials \
+                    --namespace $NAMESPACE \
+                    --from-literal api_key=YOUR_API_KEY
+
+              Restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+              Verify the updated credentials in the API server pod:
+
+              .. code-block:: bash
+
+                  # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
+                  API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.config/doctl/config.yaml
 
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
@@ -586,7 +1153,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
     .. code-block:: bash
 
         # --reuse-values keeps the Helm chart values set in the previous step
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
         --set apiService.dbConnectionString=postgresql://<username>:<password>@<host>:<port>/<database>
@@ -594,7 +1161,7 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
     **Option 2: Set the DB connection URI via Kubernetes secret**
 
     (available on nightly version 20250626 and later)
-    
+
     Create a Kubernetes secret that contains the DB connection URI:
 
     .. code-block:: bash
@@ -602,13 +1169,13 @@ If a persistent DB is not specified, the API server uses a Kubernetes persistent
         kubectl create secret generic skypilot-db-connection-uri \
           --namespace $NAMESPACE \
           --from-literal connection_string=postgresql://<username>:<password>@<host>:<port>/<database>
-    
+
 
     When installing or upgrading the Helm chart, set the ``dbConnectionUri`` to the secret name:
 
     .. code-block:: bash
 
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
           --namespace $NAMESPACE \
           --reuse-values \
           --set apiService.dbConnectionSecretName=skypilot-db-connection-uri
@@ -663,7 +1230,7 @@ To modify your SkyPilot config, use the SkyPilot dashboard: ``http://<api-server
 
         # Install the API server with the config file
         # --reuse-values keeps the Helm chart values set in the previous step
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
         --namespace $NAMESPACE \
         --reuse-values \
         --set-file apiService.config=config.yaml
@@ -731,6 +1298,30 @@ For detailed setup instructions (including how to set up external Prometheus and
 * :ref:`GPU Metrics Setup <api-server-gpu-metrics-setup>`
 
 
+Optional: Set up server-side debug logging
+------------------------------------------
+
+Client-side debug logging can be turned on for individual requests by setting the
+``SKYPILOT_DEBUG`` environment variable to ``1`` when submitting a request, e.g.
+
+.. code-block:: bash
+
+    SKYPILOT_DEBUG=1 sky status
+
+To enable debug logging for all requests on server side, set
+``SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING`` to ``true`` in the Helm values:
+
+.. code-block:: bash
+
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --reuse-values \
+      --set-string 'apiService.extraEnvs[0].name=SKYPILOT_SERVER_ENABLE_REQUEST_DEBUG_LOGGING' \
+      --set-string 'apiService.extraEnvs[0].value=true'
+
+
+Debug level logs for each request are saved to ``~/.sky/logs/request_debug/<request_id>.log`` on the API server.
+Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server
 -----------------------
@@ -797,7 +1388,7 @@ Apply the configuration using:
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel -f values.yaml
 
 
 Additional setup for EKS
@@ -841,7 +1432,7 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel -f values.yaml
 
 .. _minimum-permissions-in-helm:
 
@@ -868,47 +1459,24 @@ In helm deployment, a set of default permissions are granted to the API server t
 
      .. code-block:: bash
 
-        helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+        helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
           --set rbac.manageRbacPolicies=false
 
 * If your use case does not require object storage mounting, you can disable the permissions to manage SkyPilot system components by setting ``rbac.manageSystemComponents=false``:
 
   .. code-block:: bash
 
-      helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+      helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
         --set rbac.manageSystemComponents=false
 
 If you want to use an existing service account and permissions that meet the :ref:`minimum permissions required for SkyPilot<k8s-permissions>` instead of the one managed by Helm, you can disable the creation of RBAC policies and specify the service account name to use:
 
 .. code-block:: bash
 
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel --reuse-values \
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set rbac.create=false \
       --set rbac.serviceAccountName=my-existing-service-account
 
-
-.. _sky-migrate-legacy-service:
-
-.. dropdown:: Migrate from legacy NodePort service
-
-
-    If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
-
-    - Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
-
-    Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
-
-    - Disable the legacy NodePort service:
-
-    Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
-
-    .. note::
-
-        Make sure there is no clients using the NodePort service before disabling it.
-
-    .. note::
-
-        Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-helm-multiple-deploy:
 

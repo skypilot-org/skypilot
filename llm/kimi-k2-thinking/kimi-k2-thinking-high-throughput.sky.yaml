@@ -1,0 +1,41 @@
+# Serve Kimi-K2-Thinking with SkyPilot and vLLM (High Throughput Mode).
+# Uses Decode Context Parallel (DCP) for 43% faster token generation and 26% higher throughput.
+#
+# Usage:
+#   sky launch kimi-k2-thinking-high-throughput.sky.yaml -c kimi-k2-thinking-ht
+#   sky serve up kimi-k2-thinking-high-throughput.sky.yaml -n kimi-k2-thinking-ht
+envs:
+  MODEL_NAME: moonshotai/Kimi-K2-Thinking
+
+
+resources:
+  image_id: docker:vllm/vllm-openai:nightly-f849ee739cdb3d82fce1660a6fd91806e8ae9bff
+  accelerators: H200:8
+  cpus: 100+
+  memory: 1000+
+  ports: 8081
+
+run: |
+  echo 'Starting vLLM API server for Kimi-K2-Thinking (High Throughput Mode with DCP)...'
+  
+  vllm serve $MODEL_NAME \
+    --port 8081 \
+    --tensor-parallel-size 8 \
+    --decode-context-parallel-size 8 \
+    --enable-auto-tool-choice \
+    --tool-call-parser kimi_k2 \
+    --reasoning-parser kimi_k2 \
+    --trust-remote-code
+
+service:
+  replicas: 1
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: What is 2+2?
+      max_tokens: 10
+

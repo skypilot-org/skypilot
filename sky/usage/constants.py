@@ -1,6 +1,6 @@
 """Constants for usage collection."""
 
-LOG_URL = 'http://usage.skypilot.co:9090/loki/api/v1/push'  # pylint: disable=line-too-long
+LOG_URL = 'https://usage-v2.skypilot.co'
 
 USAGE_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
@@ -12,7 +12,7 @@ USAGE_POLICY_MESSAGE = (
     'Usage logging can be disabled by setting the '
     'environment variable SKYPILOT_DISABLE_USAGE_COLLECTION=1.')
 
-USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
+USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs', 'secrets']
 USAGE_MESSAGE_REDACT_TYPES = {str, dict}
 
 # Env var for the usage run id. This is used by the API server to associate

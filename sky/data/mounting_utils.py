@@ -7,6 +7,7 @@ import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import command_runner
 
@@ -17,6 +18,16 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '2.2.0'
+
+# Some machines do not have fuse/fuse3 installed by default
+# hence rclone will fail on these machines
+FUSE3_INSTALL_CMD = ('(command -v fusermount3 > /dev/null 2>&1 || '
+                     '((which apt-get > /dev/null 2>&1 && '
+                     'sudo apt-get update && sudo apt-get install -y fuse3) || '
+                     '(which yum > /dev/null 2>&1 && '
+                     'sudo yum install -y fuse3) || '
+                     'true)) || true')
+
 # Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize
 # Rclone's mounting utility.
 FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
@@ -54,10 +65,10 @@ def get_rclone_install_cmd() -> str:
         f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
         f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
         f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
-        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' || (which yum > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
         f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
         f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm)))')
     return install_cmd
 
 
@@ -94,6 +105,7 @@ def get_s3_mount_cmd(bucket_name: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         # Have to add --s3-env-auth=true to allow rclone to access private
@@ -128,6 +140,7 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'AWS_PROFILE={nebius_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
@@ -136,6 +149,46 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
                     '-o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
+    return mount_cmd
+
+
+def get_coreweave_mount_cmd(cw_credentials_path: str,
+                            coreweave_profile_name: str,
+                            bucket_name: str,
+                            endpoint_url: str,
+                            mount_path: str,
+                            _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount CoreWeave bucket"""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
+        f'AWS_PROFILE={coreweave_profile_name} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-force-path-style=false '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
+                    f'AWS_PROFILE={coreweave_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--subdomain '
                     f'--endpoint {endpoint_url} '
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
@@ -171,7 +224,10 @@ def get_gcs_mount_cmd(bucket_name: str,
     """Returns a command to mount a GCS bucket using gcsfuse."""
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
-    mount_cmd = ('gcsfuse -o allow_other '
+    log_file = '$(mktemp -t gcsfuse.XXXX.log)'
+    mount_cmd = (f'gcsfuse --log-file {log_file} '
+                 '--debug_fuse_errors '
+                 '-o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -194,9 +250,23 @@ def get_az_mount_install_cmd() -> str:
         # Try to install fuse3 from default repos
         'sudo apt-get update && '
         'FUSE3_INSTALLED=0 && '
+        # Detect which libfuse3 package is available. Debian 13+ (trixie) uses
+        # libfuse3-4 instead of libfuse3-3 due to library soname bump.
+        'LIBFUSE3_PKG=$(apt-cache search --names-only "^libfuse3-[0-9]+$" '
+        '2>/dev/null | head -1 | cut -d" " -f1) && '
+        'LIBFUSE3_PKG="${LIBFUSE3_PKG:-libfuse3-3}" && '
+        # On Kubernetes, if FUSERMOUNT_SHARED_DIR is set, it means
+        # fusermount and fusermount3 is symlinked to fusermount-shim.
+        # If we reinstall fuse3, it may overwrite the symlink, so
+        # just install libfuse3, which is needed by blobfuse2.
+        'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
+        '  PACKAGES="$LIBFUSE3_PKG libfuse3-dev"; '
+        'else '
+        '  PACKAGES="fuse3 $LIBFUSE3_PKG libfuse3-dev"; '
+        'fi && '
         'if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
-        'fuse3 libfuse3-dev; then '
+        '$PACKAGES; then '
         '  FUSE3_INSTALLED=1; '
         '  echo "fuse3 installed from default repos"; '
         'else '
@@ -217,7 +287,7 @@ def get_az_mount_install_cmd() -> str:
         '    if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
         '-o Dpkg::Options::="--force-confold" '
-        'fuse3 libfuse3-3 libfuse3-dev; then '
+        '$PACKAGES; then '
         '      FUSE3_INSTALLED=1; '
         '      echo "fuse3 installed from focal"; '
         '      sudo rm /etc/apt/sources.list.d/focal-fuse3.list; '
@@ -231,6 +301,19 @@ def get_az_mount_install_cmd() -> str:
         # Install blobfuse2 only if fuse3 is available
         'if [ "$FUSE3_INSTALLED" = "1" ]; then '
         '  echo "Installing blobfuse2 with libfuse3 support"; '
+        # Workaround for Debian 13+ where libfuse3 soname changed from 3 to 4.
+        # The blobfuse2 binary still links against libfuse3.so.3, so we create
+        # a symlink if needed.
+        '  LIBFUSE_SO=$(find /usr/lib -name "libfuse3.so.3.*" 2>/dev/null | '
+        'head -1) && '
+        '  if [ -n "$LIBFUSE_SO" ]; then '
+        '    LIBFUSE_DIR=$(dirname "$LIBFUSE_SO") && '
+        '    if [ ! -e "$LIBFUSE_DIR/libfuse3.so.3" ]; then '
+        '      echo "Creating libfuse3.so.3 symlink for compatibility"; '
+        '      sudo ln -s $(basename "$LIBFUSE_SO") '
+        '"$LIBFUSE_DIR/libfuse3.so.3"; '
+        '    fi; '
+        '  fi && '
         '  wget -nc https://github.com/Azure/azure-storage-fuse'
         f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}/'
         f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
@@ -355,6 +438,7 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     # Use rclone for ARM64 architectures since goofys doesn't support them
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
         f'AWS_PROFILE={r2_profile_name} '
@@ -384,7 +468,8 @@ def get_cos_mount_cmd(rclone_config: str,
                       _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # stores bucket profile in rclone config file at the cluster's nodes.
-    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+    configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
+                                f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo "{rclone_config}" >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
@@ -404,7 +489,8 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                          bucket_name: str, mount_path: str) -> str:
     """Returns a command to mount a bucket using rclone with vfs cache."""
     # stores bucket profile in rclone config file at the remote nodes.
-    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+    configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
+                                f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo {shlex.quote(rclone_config)} >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
@@ -418,6 +504,13 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                  f'{hashed_mount_path}.log')
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
+
+    # Check if sequential upload is enabled via config.
+    # Default is False (parallel uploads for better performance).
+    sequential_upload = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'sequential_upload'), False)
+    transfers_flag = '--transfers 1 ' if sequential_upload else ''
+
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
@@ -436,13 +529,11 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        # '--transfers 1' guarantees the files written at the local mount point
-        # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
-        '--transfers 1 --vfs-cache-poll-interval 10s --vfs-write-back 1s '
+        f'{transfers_flag}--vfs-cache-poll-interval 10s --vfs-write-back 1s '
         # Have rclone evict files if the cache size exceeds 10G.
         # This is to prevent cache from growing too large and
         # using up all the disk space. Note that files that opened
@@ -450,6 +541,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         '--vfs-cache-max-size 10G '
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # Use a faster fingerprint algorithm to detect changes in files.
+        # Recommended by rclone documentation for buckets like s3.
+        '--vfs-fast-fingerprint '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
@@ -576,7 +670,55 @@ def get_mounting_script(
             fi
         fi
         echo "Mounting $SOURCE_BUCKET to $MOUNT_PATH with $MOUNT_BINARY..."
+        set +e
         {mount_cmd}
+        MOUNT_EXIT_CODE=$?
+        set -e
+        if [ $MOUNT_EXIT_CODE -ne 0 ]; then
+            echo "Mount failed with exit code $MOUNT_EXIT_CODE."
+            if [ "$MOUNT_BINARY" = "goofys" ]; then
+                echo "Looking for goofys log files..."
+                # Find goofys log files in /tmp (created by mktemp -t goofys.XXXX.log)
+                # Note: if /dev/log exists, goofys logs to syslog instead of a file
+                GOOFYS_LOGS=$(ls -t /tmp/goofys.*.log 2>/dev/null | head -1)
+                if [ -n "$GOOFYS_LOGS" ]; then
+                    echo "=== Goofys log file contents ==="
+                    cat "$GOOFYS_LOGS"
+                    echo "=== End of goofys log file ==="
+                else
+                    echo "No goofys log file found in /tmp"
+                fi
+            elif [ "$MOUNT_BINARY" = "gcsfuse" ]; then
+                echo "Looking for gcsfuse log files..."
+                # Find gcsfuse log files in /tmp (created by mktemp -t gcsfuse.XXXX.log)
+                GCSFUSE_LOGS=$(ls -t /tmp/gcsfuse.*.log 2>/dev/null | head -1)
+                if [ -n "$GCSFUSE_LOGS" ]; then
+                    echo "=== GCSFuse log file contents ==="
+                    cat "$GCSFUSE_LOGS"
+                    echo "=== End of gcsfuse log file ==="
+                else
+                    echo "No gcsfuse log file found in /tmp"
+                fi
+            elif [ "$MOUNT_BINARY" = "rclone" ]; then
+                echo "Looking for rclone log files..."
+                # Find rclone log files in ~/.sky/rclone_log/ (for MOUNT_CACHED mode)
+                RCLONE_LOG_DIR={constants.RCLONE_MOUNT_CACHED_LOG_DIR}
+                if [ -d "$RCLONE_LOG_DIR" ]; then
+                    RCLONE_LOGS=$(ls -t "$RCLONE_LOG_DIR"/*.log 2>/dev/null | head -1)
+                    if [ -n "$RCLONE_LOGS" ]; then
+                        echo "=== Rclone log file contents ==="
+                        tail -50 "$RCLONE_LOGS"
+                        echo "=== End of rclone log file ==="
+                    else
+                        echo "No rclone log file found in $RCLONE_LOG_DIR"
+                    fi
+                else
+                    echo "Rclone log directory $RCLONE_LOG_DIR not found"
+                fi
+            fi
+            # TODO(kevin): Print logs from blobfuse2, etc too for observability.
+            exit $MOUNT_EXIT_CODE
+        fi
         echo "Mounting done."
     """)
 

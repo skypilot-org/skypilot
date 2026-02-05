@@ -4,7 +4,11 @@ from typing import Any, Dict, Union
 
 from sky.skylet import constants as skylet_constants
 
+# Environment variable for JobGroup name, injected into all jobs in a JobGroup
+SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
+
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
+JOBS_CONTROLLER_PROVISION_TEMPLATE = 'jobs-controller-provision.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
 JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
@@ -14,6 +18,12 @@ JOB_CONTROLLER_INDICATOR_FILE = '~/.sky/is_jobs_controller'
 
 CONSOLIDATED_SIGNAL_PATH = os.path.expanduser('~/.sky/signals/')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
+
+# The consolidation mode lock ensures that if multiple API servers are running
+# at the same time (e.g. during a rolling update), recovery can only happen once
+# the previous API server has exited.
+CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
+
 # Resources as a dict for the jobs controller.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
@@ -46,7 +56,9 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # The version of the lib files that jobs/utils use. Whenever there is an API
 # change for the jobs/utils, we need to bump this version and update
 # job.utils.ManagedJobCodeGen to handle the version update.
-MANAGED_JOBS_VERSION = 12
+# WARNING: If you update this due to a codegen change, make sure to make the
+# corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
+MANAGED_JOBS_VERSION = 15  # new fields for job groups
 
 # The command for setting up the jobs dashboard on the controller. It firstly
 # checks if the systemd services are available, and if not (e.g., Kubernetes

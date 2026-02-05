@@ -83,6 +83,14 @@ def download_logs_from_api_server(
             remote_machine_prefix,
             local_machine_prefix) for remote_path in paths_on_api_server
     }
+    # Check if any local log directories already exist before downloading
+    for local_path in remote2local_path_dict.values():
+        expanded_path = os.path.expanduser(local_path)
+        if os.path.exists(expanded_path):
+            logger.warning(
+                f'Log directory {local_path} already exists. '
+                f'This may overwrite logs from a previous cluster with the '
+                f'same name and job ID.')
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
     response = server_common.make_authenticated_request(
         'POST',

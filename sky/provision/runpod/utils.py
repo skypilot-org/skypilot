@@ -80,7 +80,11 @@ def _construct_docker_login_template_name(cluster_name: str) -> str:
 
 
 def retry(func):
-    """Decorator to retry a function."""
+    """Decorator to retry a function.
+
+    Only retries on transient errors. Does not retry on authorization errors
+    (Unauthorized, Forbidden) as these are not recoverable.
+    """
 
     def wrapper(*args, **kwargs):
         """Wrapper for retrying a function."""
@@ -89,6 +93,14 @@ def retry(func):
             try:
                 return func(*args, **kwargs)
             except runpod.runpod.error.QueryError as e:
+                error_msg = str(e).lower()
+                # Don't retry on authorization errors - these won't recover
+                auth_keywords = ['unauthorized', 'forbidden', '401', '403']
+                if any(keyword in error_msg for keyword in auth_keywords):
+                    logger.error(f'RunPod authorization error (not retrying): '
+                                 f'{common_utils.format_exception(e)}')
+                    raise
+                cnt += 1
                 if cnt >= 3:
                     raise
                 logger.warning('Retrying for exception: '

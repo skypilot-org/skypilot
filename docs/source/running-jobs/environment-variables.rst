@@ -186,6 +186,12 @@ Environment variables for ``setup``
 
          1.2.3.4
          3.4.5.6
+   * - ``SKYPILOT_SETUP_NUM_GPUS_PER_NODE``
+     - Number of GPUs per node in the cluster.
+
+       Note that GPUs may not be available at this stage. Do not assume
+       GPUs are available during setup.
+     - 1
 
    * - ``SKYPILOT_NUM_NODES``
      - Number of nodes in the cluster. Same value as ``$(echo "$SKYPILOT_NODE_IPS" | wc -l)``.
@@ -208,6 +214,9 @@ Environment variables for ``setup``
          )['cloud']
 
      - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
+   * - ``SKYPILOT_USER``
+     - The username of the user who launched the job.
+     - alice
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1
@@ -264,6 +273,9 @@ Environment variables for ``run``
            os.environ['SKYPILOT_CLUSTER_INFO']
          )['cloud']
      - {"cluster_name": "my-cluster-name", "cloud": "GCP", "region": "us-central1", "zone": "us-central1-a"}
+   * - ``SKYPILOT_USER``
+     - The username of the user who launched the job.
+     - alice
    * - ``SKYPILOT_SERVE_REPLICA_ID``
      - The ID of a replica within the service (starting from 1). Available only for a :ref:`service <sky-serve>`'s replica task.
      - 1

@@ -182,12 +182,16 @@ TPU_V4_HOST_DF = pd.read_csv(
 SERIES_TO_DESCRIPTION = {
     'a2': 'A2 Instance',
     'a3': 'A3 Instance',
-    # TODO(zhwu): GCP does not have A4 instance in SKUs API yet. We keep it here
-    # for completeness.
+    # NOTE: GCP does not provide separate CPU/RAM pricing for A4 instances.
+    # The B200 GPU pricing includes the full VM cost. See special handling in
+    # get_vm_price() which sets A4 VM price to 0.
     'a4': 'A4 Instance',
     'c2': 'Compute optimized',
     'c2d': 'C2D AMD Instance',
     'c3': 'C3 Instance',
+    'c3d': 'C3D Instance',
+    'c4': 'C4 Instance',
+    'c4d': 'C4D Instance',
     'e2': 'E2 Instance',
     'f1': 'Micro Instance with burstable CPU',
     'g1': 'Small Instance with 1 VCPU',
@@ -375,8 +379,13 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
                 is_cpu = True
             elif resource_group == 'RAM':
                 is_memory = True
+            elif resource_group == 'LocalSSD':
+                # Ignore local SSD pricing for now, as we do not include disk
+                # pricing for instances for now.
+                # TODO(zhwu): Handle local SSD pricing.
+                pass
             else:
-                assert resource_group == 'N1Standard'
+                assert resource_group == 'N1Standard', (resource_group, sku)
                 if 'Core' in description:
                     is_cpu = True
                 elif 'Ram' in description:
@@ -392,6 +401,15 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         # Special case for F1 and G1 instances.
         # Memory is not charged for these instances.
         if series in ['f1', 'g1']:
+            memory_price = 0.0
+
+        # Special case for A4 instances.
+        # GCP does not provide separate CPU/RAM pricing for A4 instances in the
+        # SKUs API. The GPU pricing (B200) includes the full VM cost.
+        # We set the VM price to 0 so the entry is not dropped, and the GPU
+        # pricing will provide the total cost.
+        if series == 'a4':
+            cpu_price = 0.0
             memory_price = 0.0
 
         # TODO(tian): (2024/11/10) Some SKUs are missing in the SKUs API. We
@@ -525,7 +543,24 @@ def get_gpu_df(skus: List[Dict[str, Any]],
             row_gpu_name = row['AcceleratorName']
             if row['Region'] not in sku['serviceRegions']:
                 continue
-            if sku['category']['usageType'] != ondemand_or_spot:
+
+            # Check usageType matches, with special handling for B200 spot.
+            # GCP has a bug where some B200 spot SKUs have usageType='OnDemand'
+            # but the description contains 'Spot Preemptible'.
+            usage_type = sku['category']['usageType']
+            description = sku['description']
+            is_spot_description = 'spot preemptible' in description.lower()
+
+            if usage_type != ondemand_or_spot:
+                # For B200 spot pricing, also accept SKUs where description
+                # says "Spot Preemptible" even if usageType is wrong.
+                if not (spot and row_gpu_name == 'B200' and
+                        is_spot_description):
+                    continue
+
+            # For B200 on-demand, skip SKUs that are actually spot (description
+            # says "Spot Preemptible" but usageType is incorrectly 'OnDemand').
+            if not spot and row_gpu_name == 'B200' and is_spot_description:
                 continue
 
             gpu_names = [f'{row_gpu_name} GPU']

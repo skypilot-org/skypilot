@@ -1,0 +1,82 @@
+# Example JobGroup YAML for RL training workload
+# This demonstrates heterogeneous parallel workloads with hostname-based networking
+
+name: rl-experiment
+
+# Execution mode: all jobs start in parallel
+execution: parallel
+
+---
+# GPU nodes for training
+name: trainer
+
+resources:
+  accelerators: H100:8
+  # image_id: docker:my-docker-repo/trainer:0.1.0
+
+num_nodes: 2
+
+run: |
+  echo "Starting trainer on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Master addr: trainer-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Replay buffer: replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379"
+  # torchrun --nnodes=2 --nproc_per_node=8 \
+  #   --master_addr=trainer-0.${SKYPILOT_JOBGROUP_NAME} \
+  #   train.py \
+  #   --replay-buffer-addr replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379
+  sleep 60
+  echo "Trainer completed"
+
+---
+# GPU nodes for data preprocessing
+name: data-processor
+
+resources:
+  accelerators: V100:4
+
+num_nodes: 2
+
+run: |
+  echo "Starting data-processor on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Output to: replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379"
+  # python preprocess.py \
+  #   --output-addr replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379
+  sleep 45
+  echo "Data processor completed"
+
+---
+# High-RAM CPU nodes for replay buffer
+name: replay-buffer
+
+resources:
+  cpus: 8+
+  memory: 64+
+
+run: |
+  echo "Starting replay-buffer on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Listening on port 6379"
+  # python replay_buffer.py --port 6379
+  sleep 90
+  echo "Replay buffer completed"
+
+---
+# High-CPU nodes for RL environment workers
+name: env-worker
+
+resources:
+  cpus: 32+
+  memory: 16+
+
+num_nodes: 2
+
+run: |
+  echo "Starting env-worker on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Trainer addr: trainer-0.${SKYPILOT_JOBGROUP_NAME}:8080"
+  # python env_worker.py --port 5000 \
+  #   --trainer-addr trainer-0.${SKYPILOT_JOBGROUP_NAME}:8080
+  sleep 60
+  echo "Env worker completed"

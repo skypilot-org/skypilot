@@ -56,10 +56,10 @@ def decode_status(
     clusters = return_value
     response = []
     for cluster in clusters:
-        cluster['handle'] = decode_and_unpickle(cluster['handle'])
+        # handle may not always be present in the response.
+        if 'handle' in cluster and cluster['handle'] is not None:
+            cluster['handle'] = decode_and_unpickle(cluster['handle'])
         cluster['status'] = status_lib.ClusterStatus(cluster['status'])
-        cluster['storage_mounts_metadata'] = decode_and_unpickle(
-            cluster['storage_mounts_metadata'])
         if 'is_managed' not in cluster:
             cluster['is_managed'] = False
         response.append(responses.StatusResponse.model_validate(cluster))
@@ -130,10 +130,10 @@ def decode_jobs_queue_v2(
     """
     # Case 1: dict shape {jobs, total, total_no_filter, status_counts}
     if isinstance(return_value, dict):
-        jobs = return_value.get('jobs', [])
-        total = return_value.get('total', len(jobs))
-        total_no_filter = return_value.get('total_no_filter', total)
-        status_counts = return_value.get('status_counts', {})
+        jobs: List[Dict[str, Any]] = return_value.get('jobs', [])
+        total: int = return_value.get('total', len(jobs))
+        total_no_filter: int = return_value.get('total_no_filter', total)
+        status_counts: Dict[str, int] = return_value.get('status_counts', {})
         for job in jobs:
             job['status'] = managed_jobs.ManagedJobStatus(job['status'])
         jobs = [responses.ManagedJobRecord(**job) for job in jobs]

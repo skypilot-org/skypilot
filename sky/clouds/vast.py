@@ -2,10 +2,11 @@
 
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import skypilot_config
 from sky.adaptors import common
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -55,7 +56,9 @@ class Vast(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -74,10 +77,15 @@ class Vast(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         assert zone is None, 'Vast does not support zones.'
         del accelerators, zone  # unused
         regions = catalog.get_region_zones_for_instance_type(
@@ -139,20 +147,24 @@ class Vast(clouds.Cloud):
         return 0.0
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+    def get_default_instance_type(
+            cls,
+            cpus: Optional[str] = None,
+            memory: Optional[str] = None,
+            disk_tier: Optional[resources_utils.DiskTier] = None,
+            region: Optional[str] = None,
+            zone: Optional[str] = None,
+            datacenter_only: bool = False) -> Optional[str]:
         """Returns the default instance type for Vast."""
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 region=region,
-                                                 zone=zone,
-                                                 clouds='vast')
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import vast_catalog
+        return vast_catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            region=region,
+            zone=zone,
+            datacenter_only=datacenter_only)
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -173,7 +185,7 @@ class Vast(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del zones, dryrun, cluster_name, num_nodes  # unused
 
         resources = resources.assert_launchable()
@@ -189,17 +201,36 @@ class Vast(clouds.Cloud):
         else:
             image_id = resources.image_id[resources.region]
 
+        secure_only = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('datacenter_only',),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides,
+        )
+        create_instance_kwargs = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('create_instance_kwargs',),
+            default_value={},
+            override_configs=resources.cluster_config_overrides,
+        )
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'secure_only': secure_only,
+            'create_instance_kwargs': create_instance_kwargs or {},
         }
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import vast_catalog
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)
@@ -217,6 +248,12 @@ class Vast(clouds.Cloud):
                 resource_list.append(r)
             return resource_list
 
+        # Resolve datacenter_only config first (used for all instance filtering)
+        datacenter_only = skypilot_config.get_nested(
+            ('vast', 'datacenter_only'),
+            False,
+            override_configs=resources.cluster_config_overrides)
+
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
@@ -226,7 +263,8 @@ class Vast(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                datacenter_only=datacenter_only)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.
@@ -238,7 +276,7 @@ class Vast(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list,
-         fuzzy_candidate_list) = catalog.get_instance_type_for_accelerator(
+         fuzzy_candidate_list) = vast_catalog.get_instance_type_for_accelerator(
              acc,
              acc_count,
              use_spot=resources.use_spot,
@@ -246,7 +284,7 @@ class Vast(clouds.Cloud):
              region=resources.region,
              zone=resources.zone,
              memory=resources.memory,
-             clouds='vast')
+             datacenter_only=datacenter_only)
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
                                                      None)
@@ -271,7 +309,7 @@ class Vast(clouds.Cloud):
                 '        $ pip install vastai\n'
                 '        $ mkdir -p ~/.config/vastai\n'
                 f'        $ echo [key] > {_CREDENTIAL_PATH}\n'
-                '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
+                '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#vast'  # pylint: disable=line-too-long
             )
 
         return True, None

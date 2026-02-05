@@ -35,15 +35,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'Examples' },
-        { selector: '.toctree-l1 > a', text: 'Workspaces: Isolating Teams' },
         { selector: '.toctree-l1 > a', text: 'External Logging Storage' },
-        { selector: '.toctree-l1 > a', text: 'Authentication and RBAC' },
         { selector: '.toctree-l1 > a', text: 'Volumes' },
         { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
         { selector: '.toctree-l1 > a', text: 'High Availability Controller' },
         { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
         { selector: '.toctree-l3 > a', text: 'Advanced: High Availability Controller' },
+        { selector: '.toctree-l1 > a', text: 'Using a Pool of Workers' },
+        { selector: '.toctree-l1 > a', text: 'Job Groups' },
+        { selector: '.toctree-l1 > a', text: 'Using Slurm' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

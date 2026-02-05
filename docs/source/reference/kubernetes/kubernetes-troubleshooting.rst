@@ -5,7 +5,7 @@ Kubernetes Troubleshooting
 
 If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide will help you debug common issues.
 
-If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
+If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <https://github.com/skypilot-org/skypilot>`_.
 
 .. _kubernetes-troubleshooting-basic:
 
@@ -36,7 +36,7 @@ Step A1 - Can you create pods and services?
 
 As a sanity check, we will now try creating a simple pod running a HTTP server and a service to verify that your cluster and it's networking is functional.
 
-We will use the SkyPilot default image :code:`us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
+We will use the SkyPilot default image :code:`us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
 
 .. code-block:: bash
 

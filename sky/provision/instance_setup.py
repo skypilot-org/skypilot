@@ -39,11 +39,13 @@ _RAY_PRLIMIT = (
     'which prlimit && for id in $(pgrep -f raylet/raylet); '
     'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
 
-_DUMP_RAY_PORTS = (
-    f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
-    f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
-    f'open(os.path.expanduser("{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
-    'encoding="utf-8"))\';')
+DUMP_RAY_PORTS = (f'{constants.SKY_PYTHON_CMD} -c \'import json, os; '
+                  f'runtime_dir = os.path.expanduser(os.environ.get('
+                  f'"{constants.SKY_RUNTIME_DIR_ENV_VAR_KEY}", "~")); '
+                  f'json.dump({constants.SKY_REMOTE_RAY_PORT_DICT_STR}, '
+                  f'open(os.path.join(runtime_dir, '
+                  f'"{constants.SKY_REMOTE_RAY_PORT_FILE}"), "w", '
+                  'encoding="utf-8"))\';')
 
 _RAY_PORT_COMMAND = (
     f'RAY_PORT=$({constants.SKY_PYTHON_CMD} -c '
@@ -230,7 +232,7 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
     @_auto_retry()
     def _setup_node(runner: command_runner.CommandRunner, log_path: str):
         for cmd in setup_commands:
-            returncode, stdout, stderr = runner.run(
+            returncode, stdout, stderr = runner.run_setup(
                 cmd,
                 stream_logs=False,
                 log_path=log_path,
@@ -248,11 +250,12 @@ def setup_runtime_on_cluster(cluster_name: str, setup_commands: List[str],
                             'Retrying setup in 10 seconds.')
                 time.sleep(10)
                 retry_cnt += 1
-                returncode, stdout, stderr = runner.run(cmd,
-                                                        stream_logs=False,
-                                                        log_path=log_path,
-                                                        require_outputs=True,
-                                                        source_bashrc=True)
+                returncode, stdout, stderr = runner.run_setup(
+                    cmd,
+                    stream_logs=False,
+                    log_path=log_path,
+                    require_outputs=True,
+                    source_bashrc=True)
                 if not returncode:
                     break
 
@@ -326,7 +329,7 @@ def ray_head_start_command(custom_resource: Optional[str],
         # the warning when the worker count is >12x CPUs.
         'RAY_worker_maximum_startup_concurrency=$(( 3 * $(nproc --all) )) '
         f'{constants.SKY_RAY_CMD} start --head {ray_options} || exit 1;' +
-        _RAY_PRLIMIT + _DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
+        _RAY_PRLIMIT + DUMP_RAY_PORTS + RAY_HEAD_WAIT_INITIALIZED_COMMAND)
     return cmd
 
 
@@ -559,18 +562,17 @@ def _internal_file_mounts(file_mounts: Dict,
             mkdir_command = f'mkdir -p {os.path.dirname(dst)}'
         else:
             mkdir_command = f'mkdir -p {dst}'
-
-        rc, stdout, stderr = runner.run(mkdir_command,
-                                        log_path=log_path,
-                                        stream_logs=False,
-                                        require_outputs=True)
+        rc, stdout, stderr = runner.run_setup(mkdir_command,
+                                              log_path=log_path,
+                                              stream_logs=False,
+                                              require_outputs=True)
         subprocess_utils.handle_returncode(
             rc,
             mkdir_command, ('Failed to run command before rsync '
                             f'{src} -> {dst}.'),
             stderr=stdout + stderr)
 
-        runner.rsync(
+        runner.rsync_setup(
             source=src,
             target=dst,
             up=True,

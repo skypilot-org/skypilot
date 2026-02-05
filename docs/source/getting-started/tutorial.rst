@@ -149,6 +149,48 @@ as logs and checkpoints using familiar tools.
 Scale up the training with multiple nodes
 -----------------------------------------
 
-<YAML snippets (partial would be fine if it is easier to read) for how to go multi-node for the example above>
+To scale training across multiple nodes, add ``num_nodes`` to your task YAML:
+
+.. code-block:: yaml
+  :emphasize-lines: 5
+
+  resources:
+      cpus: 4+
+      accelerators: L4:4
+
+  # Use 2 nodes with 4 GPUs each (8 GPUs total)
+  num_nodes: 2
+
+And update the run command to use torchrun's multi-node flags:
+
+.. code-block:: yaml
+
+  run: |
+      cd examples
+      source .venv/bin/activate
+      cd mingpt
+      export LOGLEVEL=INFO
+
+      MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+      echo "Starting distributed training, head node: $MASTER_ADDR"
+
+      torchrun \
+      --nnodes=$SKYPILOT_NUM_NODES \
+      --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+      --master_addr=$MASTER_ADDR \
+      --master_port=8008 \
+      --node_rank=${SKYPILOT_NODE_RANK} \
+      main.py
+
+.. tip::
+
+  SkyPilot automatically sets these environment variables for distributed training:
+
+  - ``SKYPILOT_NUM_NODES``: Total number of nodes
+  - ``SKYPILOT_NUM_GPUS_PER_NODE``: Number of GPUs per node
+  - ``SKYPILOT_NODE_RANK``: Rank of the current node (0, 1, 2, ...)
+  - ``SKYPILOT_NODE_IPS``: List of IP addresses of all nodes
+
+  See :ref:`env-vars` for more.
 
 More details in: `Distributed Training with PyTorch <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_.

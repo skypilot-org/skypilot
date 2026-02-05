@@ -100,9 +100,11 @@ class TestResourceChecker:
 
         # Verify both checks were called
         mock_get_clusters.assert_called_once()
-        mock_queue.assert_called_once_with(refresh=False,
-                                           skip_finished=True,
-                                           all_users=True)
+        mock_queue.assert_called_once_with(
+            refresh=False,
+            skip_finished=True,
+            all_users=True,
+            fields=['job_id', 'user_hash', 'workspace'])
 
     @mock.patch('sky.utils.resource_checker.global_user_state.get_clusters')
     @mock.patch('sky.jobs.server.core.queue_v2')

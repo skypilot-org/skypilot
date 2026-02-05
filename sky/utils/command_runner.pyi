@@ -6,7 +6,7 @@ determine the return type based on the value of require_outputs.
 """
 import enum
 import typing
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from typing_extensions import Literal
 
@@ -20,6 +20,7 @@ RSYNC_FILTER_GITIGNORE: str
 RSYNC_FILTER_SKYIGNORE: str
 RSYNC_EXCLUDE_OPTION: str
 ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD: str
+DEFAULT_SSH_CONTROL_NAME: str
 
 
 def ssh_options_list(
@@ -27,10 +28,14 @@ def ssh_options_list(
     ssh_control_name: Optional[str],
     *,
     ssh_proxy_command: Optional[str] = ...,
+    ssh_proxy_jump: Optional[str] = ...,
     docker_ssh_proxy_command: Optional[str] = ...,
-    timeout: int = ...,
+    connect_timeout: Optional[int] = ...,
     port: int = ...,
     disable_control_master: Optional[bool] = ...,
+    escape_percent_expand: bool = ...,
+    ssh_log_file: Optional[str] = ...,
+    disable_identities_only: bool = ...,
 ) -> List[str]:
     ...
 
@@ -63,6 +68,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -78,6 +84,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -93,17 +100,87 @@ class CommandRunner:
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
-    def rsync(self,
-              source: str,
-              target: str,
-              *,
-              up: bool,
-              log_path: str = ...,
-              stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+    def get_remote_home_dir(self) -> str:
+        ...
+
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        max_retry: int = ...,
+    ) -> None:
+        ...
+
+    @typing.overload
+    def run_driver(self,
+                   cmd: Union[str, List[str]],
+                   *,
+                   require_outputs: Literal[False] = ...,
+                   **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_driver(self, cmd: Union[str, List[str]], *,
+                   require_outputs: Literal[True],
+                   **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_driver(self,
+                   cmd: Union[str, List[str]],
+                   *,
+                   require_outputs: bool = ...,
+                   **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    @typing.overload
+    def run_setup(self,
+                  cmd: Union[str, List[str]],
+                  *,
+                  require_outputs: Literal[False] = ...,
+                  **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_setup(self, cmd: Union[str, List[str]], *,
+                  require_outputs: Literal[True],
+                  **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_setup(self,
+                  cmd: Union[str, List[str]],
+                  *,
+                  require_outputs: bool = ...,
+                  **kwargs) -> Union[Tuple[int, str, str], int]:
+        ...
+
+    def rsync_driver(self,
+                     source: str,
+                     target: str,
+                     *,
+                     up: bool,
+                     log_path: str = ...,
+                     stream_logs: bool = ...,
+                     max_retry: int = ...) -> None:
+        ...
+
+    def rsync_setup(self,
+                    source: str,
+                    target: str,
+                    *,
+                    up: bool,
+                    log_path: str = ...,
+                    stream_logs: bool = ...,
+                    max_retry: int = ...) -> None:
         ...
 
     def port_forward_command(
@@ -130,22 +207,27 @@ class SSHCommandRunner(CommandRunner):
     ip: str
     port: int
     ssh_user: str
-    ssh_private_key: str
+    ssh_private_key: Optional[str]
     ssh_control_name: Optional[str]
     docker_user: str
     disable_control_master: Optional[bool]
     port_forward_execute_remote_command: Optional[bool]
+    enable_interactive_auth: bool
+    disable_identities_only: bool
 
     def __init__(
         self,
         node: Tuple[str, int],
         ssh_user: str,
-        ssh_private_key: str,
+        ssh_private_key: Optional[str],
         ssh_control_name: Optional[str] = ...,
         ssh_proxy_command: Optional[str] = ...,
+        ssh_proxy_jump: Optional[str] = ...,
         docker_user: Optional[str] = ...,
         disable_control_master: Optional[bool] = ...,
         port_forward_execute_remote_command: Optional[bool] = ...,
+        enable_interactive_auth: bool = ...,
+        disable_identities_only: bool = ...,
     ) -> None:
         ...
 
@@ -163,6 +245,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -180,6 +263,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -197,6 +281,7 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
@@ -209,14 +294,17 @@ class SSHCommandRunner(CommandRunner):
     ) -> List[str]:
         ...
 
-    def rsync(self,
-              source: str,
-              target: str,
-              *,
-              up: bool,
-              log_path: str = ...,
-              stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        max_retry: int = ...,
+        get_remote_home_dir: Callable[[], str] = ...,
+    ) -> None:
         ...
 
     def port_forward_command(
@@ -233,6 +321,7 @@ class KubernetesCommandRunner(CommandRunner):
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
         deployment: Optional[str] = ...,
+        container: Optional[str] = ...,
         **kwargs,
     ) -> None:
         ...
@@ -251,6 +340,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -268,6 +358,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -285,17 +376,20 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...
 
-    def rsync(self,
-              source: str,
-              target: str,
-              *,
-              up: bool,
-              log_path: str = ...,
-              stream_logs: bool = ...,
-              max_retry: int = ...) -> None:
+    def rsync(
+        self,
+        source: str,
+        target: str,
+        *,
+        up: bool,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        max_retry: int = ...,
+    ) -> None:
         ...
 
     def port_forward_command(
@@ -303,6 +397,30 @@ class KubernetesCommandRunner(CommandRunner):
             port_forward: List[Tuple[int, int]],
             connect_timeout: int = 1,
             ssh_mode: SshMode = SshMode.INTERACTIVE) -> List[str]:
+        ...
+
+
+class SlurmCommandRunner(SSHCommandRunner):
+    """Runner for Slurm commands."""
+    sky_dir: str
+    skypilot_runtime_dir: str
+    job_id: str
+    slurm_node: str
+    container_args: Optional[str]
+
+    def __init__(
+        self,
+        node: Tuple[str, int],
+        ssh_user: str,
+        ssh_private_key: Optional[str],
+        *,
+        sky_dir: str,
+        skypilot_runtime_dir: str,
+        job_id: str,
+        slurm_node: str,
+        container_args: Optional[str] = ...,
+        **kwargs,
+    ) -> None:
         ...
 
 
@@ -325,6 +443,7 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> int:
         ...
 
@@ -342,6 +461,7 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Tuple[int, str, str]:
         ...
 
@@ -359,5 +479,6 @@ class LocalProcessCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = ...,
             source_bashrc: bool = ...,
             skip_lines: int = ...,
+            run_in_background: bool = ...,
             **kwargs) -> Union[Tuple[int, str, str], int]:
         ...

@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import getpass
 import os
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 import pydantic
 
@@ -36,12 +36,6 @@ class User:
     def to_dict(self) -> Dict[str, Any]:
         return {'id': self.id, 'name': self.name}
 
-    def to_env_vars(self) -> Dict[str, Any]:
-        return {
-            constants.USER_ID_ENV_VAR: self.id,
-            constants.USER_ENV_VAR: self.name,
-        }
-
     @classmethod
     def get_current_user(cls) -> 'User':
         """Returns the current user."""
@@ -68,6 +62,22 @@ class KubernetesNodeInfo:
     free: Dict[str, int]
     # IP address of the node (external IP preferred, fallback to internal IP)
     ip_address: Optional[str] = None
+    # CPU count (total CPUs available on the node)
+    cpu_count: Optional[float] = None
+    # Memory in GB (total memory available on the node)
+    memory_gb: Optional[float] = None
+    # Free CPU count (free CPUs available on the node after pod allocations)
+    cpu_free: Optional[float] = None
+    # Free memory in GB (free memory available on the node after pod
+    # allocations)
+    memory_free_gb: Optional[float] = None
+    # Whether the node is ready (all conditions are satisfied)
+    is_ready: bool = True
+    # Whether the node is cordoned (spec.unschedulable is true)
+    is_cordoned: bool = False
+    # List of taints on the node, each taint is a dict with 'key', 'value',
+    # 'effect'
+    taints: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclasses.dataclass

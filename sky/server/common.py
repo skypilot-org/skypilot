@@ -17,11 +17,14 @@ import time
 import typing
 from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
+from urllib.request import Request
 import uuid
 
 import cachetools
+import click
 import colorama
 import filelock
+from packaging import version as version_lib
 from passlib import context as passlib_context
 from typing_extensions import ParamSpec
 
@@ -102,6 +105,7 @@ ApiVersion = Optional[str]
 logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
+_upgrade_hint_shown = False
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -126,6 +130,83 @@ class ApiServerInfo:
     user: Optional[Dict[str, Any]] = None
     basic_auth_enabled: bool = False
     error: Optional[str] = None
+    latest_version: Optional[str] = None
+
+
+def check_and_print_upgrade_hint(api_server_info: ApiServerInfo,
+                                 endpoint: str) -> None:
+    """Check for newer SkyPilot version and print upgrade hint if available.
+
+    This function checks the API server info for latest_version and prints
+    an upgrade hint if a newer version is available. It only shows the hint
+    once per CLI session.
+
+    Args:
+        api_server_info: The API server info containing version information.
+        endpoint: The endpoint URL of the API server.
+    """
+    global _upgrade_hint_shown
+
+    # Skip if we've already shown the hint
+    if _upgrade_hint_shown:
+        return
+
+    # Skip if no latest version info
+    if not api_server_info.latest_version:
+        return
+
+    latest_version = api_server_info.latest_version
+    current_version = api_server_info.version or 'unknown'
+
+    # Skip if current version is unknown (can't compare)
+    if current_version == 'unknown':
+        return
+
+    # Compare versions - only show hint if latest is actually newer
+    try:
+        if version_lib.parse(latest_version) <= version_lib.parse(
+                current_version):
+            return
+    except version_lib.InvalidVersion as e:
+        logger.debug(f'Failed to parse version string(s): {e}')
+        return
+
+    # Check if API server is local or remote
+    is_local = is_api_server_local(endpoint)
+
+    _upgrade_hint_shown = True
+
+    # Build the hint message
+    hint_lines = [
+        f'{colorama.Fore.YELLOW}'
+        f'💡 A new version of SkyPilot is available: {latest_version} '
+        f'(you have {current_version})'
+        f'{colorama.Style.RESET_ALL}',
+    ]
+
+    # Add server-specific instructions
+    if is_local:
+        # Server only returns stable releases, so always
+        # use stable upgrade command
+        upgrade_command = 'pip install --upgrade skypilot'
+
+        hint_lines.extend([
+            f'{ux_utils.INDENT_SYMBOL}Upgrade with: '
+            f'{colorama.Fore.CYAN}{upgrade_command}'
+            f'{colorama.Style.RESET_ALL}',
+            f'{ux_utils.INDENT_LAST_SYMBOL}'
+            'After upgrading, restart the API server: '
+            f'{colorama.Fore.CYAN}sky api stop && sky api start'
+            f'{colorama.Style.RESET_ALL}',
+        ])
+    else:
+        hint_lines.append(
+            f'{ux_utils.INDENT_LAST_SYMBOL}Note: This is a remote API server. '
+            f'Please upgrade SkyPilot on the server side via your deployment '
+            f'method.'
+            f'{colorama.Style.RESET_ALL}')
+
+    click.echo('\n'.join(hint_lines), err=True)
 
 
 def get_api_cookie_jar_path() -> pathlib.Path:
@@ -145,6 +226,22 @@ def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
         file_cookie_jar.load()
         cookie_jar.update(file_cookie_jar)
     return cookie_jar
+
+
+def get_cookie_header_for_url(url: str) -> Dict[str, str]:
+    """Extract Cookie header value from a cookie jar for a specific URL"""
+    cookies = get_api_cookie_jar()
+    if not cookies:
+        return {}
+
+    # Use urllib Request to do URL-aware cookie filtering
+    request = Request(url)
+    cookies.add_cookie_header(request)
+    cookie_header = request.get_header('Cookie')
+
+    if cookie_header is None:
+        return {}
+    return {'Cookie': cookie_header}
 
 
 def set_api_cookie_jar(cookie_jar: CookieJar,
@@ -422,13 +519,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
             commit = result.get('commit')
             user = result.get('user')
             basic_auth_enabled = result.get('basic_auth_enabled')
+            latest_version = result.get('latest_version')
             server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                         api_version=api_version,
                                         version=version,
                                         version_on_disk=version_on_disk,
                                         commit=commit,
                                         user=user,
-                                        basic_auth_enabled=basic_auth_enabled)
+                                        basic_auth_enabled=basic_auth_enabled,
+                                        latest_version=latest_version)
             if api_version is None or version is None or commit is None:
                 logger.warning(f'API server response missing '
                                f'version info. {server_url} may '
@@ -494,8 +593,6 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
-        request_id = response.headers.get('X-Request-ID')
-    if request_id is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 'Failed to get request ID from SkyPilot API server at '
@@ -539,19 +636,27 @@ def _start_api_server(deploy: bool = False,
                                'is not a local URL')
 
         # Check available memory before starting the server.
-        avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-        # pylint: disable=import-outside-toplevel
-        import sky.jobs.utils as job_utils
-        max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
-                      if job_utils.is_consolidation_mode(on_api_restart=True)
-                      else server_constants.MIN_AVAIL_MEM_GB)
-        if avail_mem_size_gb <= max_memory:
-            logger.warning(
-                f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
-                f'has {avail_mem_size_gb:.1f}GB memory available. '
-                f'At least {max_memory}GB is recommended to support higher '
-                'load with better performance.'
-                f'{colorama.Style.RESET_ALL}')
+        # Skip this warning if postgres is used, as:
+        #   1) that's almost certainly a remote API server;
+        #   2) the actual consolidation mode config is stashed in the database,
+        #      and the value of `job_utils.is_consolidation_mode` will not be
+        #      the actual value in the db, but only None as in this case, the
+        #      whole YAML config is really just `db: <URI>`.
+        if skypilot_config.get_nested(('db',), None) is None:
+            avail_mem_size_gb: float = common_utils.get_mem_size_gb()
+            # pylint: disable=import-outside-toplevel
+            import sky.jobs.utils as job_utils
+            max_memory = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE
+                          if job_utils.is_consolidation_mode(
+                              on_api_restart=True) else
+                          server_constants.MIN_AVAIL_MEM_GB)
+            if avail_mem_size_gb <= max_memory:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}Your SkyPilot API server machine '
+                    f'only has {avail_mem_size_gb:.1f}GB memory available. '
+                    f'At least {max_memory}GB is recommended to support higher '
+                    'load with better performance.'
+                    f'{colorama.Style.RESET_ALL}')
 
         args = [sys.executable, *API_SERVER_CMD.split()]
         if deploy:
@@ -560,8 +665,6 @@ def _start_api_server(deploy: bool = False,
             args += [f'--host={host}']
         if metrics_port is not None:
             args += [f'--metrics-port={metrics_port}']
-        # Use this argument to disable the internal signal file check.
-        args += ['--start-with-python']
 
         if foreground:
             # Replaces the current process with the API server
@@ -884,7 +987,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
     yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
-    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
+    dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
     return dag
 
 

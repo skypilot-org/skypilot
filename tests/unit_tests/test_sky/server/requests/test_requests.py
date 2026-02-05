@@ -1,7 +1,9 @@
 """Unit tests for sky.server.requests.requests module."""
 import asyncio
+import logging
 import pathlib
 import time
+from typing import List, Optional
 import unittest.mock as mock
 
 import filelock
@@ -38,7 +40,8 @@ def isolated_database(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_set_request_failed(isolated_database):
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_set_request_failed(isolated_database, test_async):
     request = requests.Request(request_id='test-request-1',
                                name='test-request',
                                entrypoint=dummy,
@@ -52,10 +55,16 @@ async def test_set_request_failed(isolated_database):
     try:
         raise ValueError('Boom!')
     except ValueError as e:
-        requests.set_request_failed('test-request-1', e)
+        if test_async:
+            await requests.set_request_failed_async('test-request-1', e)
+        else:
+            requests.set_request_failed('test-request-1', e)
 
     # Get the updated request
-    updated_request = requests.get_request('test-request-1')
+    if test_async:
+        updated_request = await requests.get_request_async('test-request-1')
+    else:
+        updated_request = requests.get_request('test-request-1')
 
     # Verify the request was updated correctly
     assert updated_request is not None
@@ -74,6 +83,47 @@ def test_set_request_failed_nonexistent_request(isolated_database):
     with pytest.raises(AssertionError):
         requests.set_request_failed('nonexistent-request',
                                     ValueError('Test error'))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_set_request_succeeded(isolated_database, test_async):
+    request = requests.Request(request_id='test-request-1',
+                               name='test-request',
+                               entrypoint=dummy,
+                               request_body=payloads.RequestBody(),
+                               status=RequestStatus.RUNNING,
+                               created_at=0.0,
+                               finished_at=0.0,
+                               user_id='test-user')
+
+    await requests.create_if_not_exists_async(request)
+    result = {'key': 'value', 'number': 42}
+    if test_async:
+        await requests.set_request_succeeded_async('test-request-1', result)
+    else:
+        requests.set_request_succeeded('test-request-1', result)
+
+    # Get the updated request
+    if test_async:
+        updated_request = await requests.get_request_async('test-request-1')
+    else:
+        updated_request = requests.get_request('test-request-1')
+
+    # Verify the request was updated correctly
+    assert updated_request is not None
+    assert updated_request.status == RequestStatus.SUCCEEDED
+    assert updated_request.finished_at > 0.0
+
+    # Verify the return value was set correctly
+    returned_value = updated_request.get_return_value()
+    assert returned_value == result
+
+
+def test_set_request_succeeded_nonexistent_request(isolated_database):
+    # Try to set a non-existent request as succeeded
+    with pytest.raises(AssertionError):
+        requests.set_request_succeeded('nonexistent-request', {'result': 'ok'})
 
 
 @pytest.mark.asyncio
@@ -121,6 +171,7 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Mock log file unlinking
     with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             await requests.clean_finished_requests_with_retention(
                 retention_seconds)
 
@@ -194,6 +245,7 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     # Test with limit=10 - should process in batches of 10
     with mock.patch.object(pathlib.Path, 'unlink') as mock_unlink:
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             # Track how get_request_tasks_async is called to verify batching
             original_get_request_tasks_async = requests.get_request_tasks_async
             call_counts = []
@@ -258,6 +310,7 @@ async def test_clean_finished_requests_with_retention_limit_larger_than_total(
     # Test with limit=100 (much larger than the 5 requests)
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             # Track calls to verify single batch processing
             original_get_request_tasks_async = requests.get_request_tasks_async
             call_counts = []
@@ -312,6 +365,7 @@ async def test_clean_finished_requests_with_retention_batch_size_one(
     # Test with limit=1 (process one at a time)
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             # Track calls to verify single-request processing
             original_get_request_tasks_async = requests.get_request_tasks_async
             call_counts = []
@@ -365,6 +419,7 @@ async def test_clean_finished_requests_with_retention_no_old_requests(
     await requests.create_if_not_exists_async(recent_request)
 
     with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+        mock_logger.getEffectiveLevel.return_value = logging.INFO
         await requests.clean_finished_requests_with_retention(retention_seconds)
 
     # Verify request was NOT deleted
@@ -417,6 +472,7 @@ async def test_clean_finished_requests_with_retention_all_statuses(
 
     with mock.patch.object(pathlib.Path, 'unlink'):
         with mock.patch('sky.server.requests.requests.logger') as mock_logger:
+            mock_logger.getEffectiveLevel.return_value = logging.INFO
             await requests.clean_finished_requests_with_retention(
                 retention_seconds)
 
@@ -1475,7 +1531,9 @@ def test_update_request_row_fields_maintains_order():
 async def test_cancel_get_request_async():
     import gc
 
-    async def mock_get_request_async_no_lock(id: str):
+    async def mock_get_request_async_no_lock(id: str,
+                                             fields: Optional[List[str]] = None
+                                            ):
         await asyncio.sleep(1)
         return None
 
@@ -1497,8 +1555,9 @@ async def test_cancel_get_request_async():
             # for more details.
             gc.collect()
         try:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception:
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            # Expected when tasks are cancelled
             pass
         # Since get_request_async is shielded, task.cancel() will neither cancel or
         # wait the get_request_async coroutine. So we have to wait for a enough time
@@ -1541,3 +1600,118 @@ async def test_get_latest_request_id_async(isolated_database):
     await requests.create_if_not_exists_async(request)
     request_id = await requests.get_latest_request_id_async()
     assert request_id == 'test-request-id-2'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('test_async', [True, False])
+async def test_get_requests_with_prefix(isolated_database, test_async):
+    """Test get_requests_with_prefix."""
+    current_time = time.time()
+
+    # Create multiple matching requests
+    matching_requests = []
+    for i in range(3):
+        request = requests.Request(request_id=f'batch-request-{i:03d}',
+                                   name=f'test-request-{i}',
+                                   entrypoint=dummy,
+                                   request_body=payloads.RequestBody(),
+                                   status=RequestStatus.PENDING if i %
+                                   2 == 0 else RequestStatus.RUNNING,
+                                   created_at=current_time + i,
+                                   user_id=f'test-user-{i}',
+                                   cluster_name=f'cluster-{i}')
+        matching_requests.append(request)
+        await requests.create_if_not_exists_async(request)
+
+    # Create another request
+    non_matching_request = requests.Request(request_id='other-request-1',
+                                            name='other-request',
+                                            entrypoint=dummy,
+                                            request_body=payloads.RequestBody(),
+                                            status=RequestStatus.SUCCEEDED,
+                                            created_at=current_time + 100,
+                                            user_id='other-user')
+    await requests.create_if_not_exists_async(non_matching_request)
+
+    # Test with non-matching prefix
+    if test_async:
+        result = await requests.get_requests_async_with_prefix(
+            'nonexistent-prefix')
+    else:
+        result = requests.get_requests_with_prefix('nonexistent-prefix')
+    assert result is None
+
+    # Test with prefix that matches exactly one request
+    if test_async:
+        result = await requests.get_requests_async_with_prefix(
+            'batch-request-000')
+    else:
+        result = requests.get_requests_with_prefix('batch-request-000')
+    assert result is not None
+    assert len(result) == 1
+    assert result[0].request_id == 'batch-request-000'
+    assert result[0].name == 'test-request-0'
+    assert result[0].user_id == 'test-user-0'
+    assert result[0].cluster_name == 'cluster-0'
+    assert result[0].status == RequestStatus.PENDING
+
+    # Test with prefix that matches multiple requests
+    if test_async:
+        result = await requests.get_requests_async_with_prefix('batch-request')
+    else:
+        result = requests.get_requests_with_prefix('batch-request')
+    assert result is not None
+    assert len(result) == 3
+
+    # Verify all returned requests match the prefix
+    returned_ids = [req.request_id for req in result]
+    expected_ids = [
+        'batch-request-000', 'batch-request-001', 'batch-request-002'
+    ]
+    assert set(returned_ids) == set(expected_ids)
+
+    # Verify request details
+    for req in result:
+        assert req.request_id.startswith('batch-request')
+        assert req.name.startswith('test-request')
+        assert req.user_id.startswith('test-user')
+
+    # Test with empty prefix (should match all requests)
+    if test_async:
+        result = await requests.get_requests_async_with_prefix('')
+    else:
+        result = requests.get_requests_with_prefix('')
+    assert result is not None
+    assert len(result) == 4
+    returned_ids = [req.request_id for req in result]
+    expected_ids = [
+        'batch-request-000', 'batch-request-001', 'batch-request-002',
+        'other-request-1'
+    ]
+    assert set(returned_ids) == set(expected_ids)
+
+    # Test with specific fields - only request_id and name
+    if test_async:
+        result = await requests.get_requests_async_with_prefix(
+            'batch-request', fields=['request_id', 'name'])
+    else:
+        result = requests.get_requests_with_prefix(
+            'batch-request', fields=['request_id', 'name'])
+    assert result is not None
+    assert len(result) == 3
+
+    # Verify that only the requested fields are meaningful
+    for req in result:
+        assert req.request_id in [
+            'batch-request-000', 'batch-request-001', 'batch-request-002'
+        ]
+        if req.request_id == 'batch-request-000':
+            assert req.name == 'test-request-0'
+        elif req.request_id == 'batch-request-001':
+            assert req.name == 'test-request-1'
+        else:
+            assert req.name == 'test-request-2'
+        assert req.pid is None
+        assert req.finished_at is None
+        assert req.should_retry is False
+        assert req.status_msg is None

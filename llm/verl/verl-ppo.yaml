@@ -31,9 +31,9 @@ file_mounts:
 
 secrets:
   HF_TOKEN: null
-  WANDB_API_KEY: null 
+  WANDB_API_KEY: null
 
-setup: |  
+setup: |
   rm -f ~/.pip/pip.conf
   rm -f ~/.config/pip/pip.conf
 
@@ -58,6 +58,10 @@ setup: |
   uv pip install "ray[train]" "click<8.2.0"
   uv pip install tqdm
 
+  # Pin uvloop to 0.21.0 to work around asyncio event loop bug
+  # See: https://github.com/volcengine/verl/issues/3806
+  uv pip install "uvloop==0.21.0"
+
   echo "Downloading Math dataset..."
   mkdir -p ~/data/math
   python3 "$(pwd)/examples/data_preprocess/math_dataset.py" --local_dir ~/data/math
@@ -80,16 +84,17 @@ run: |
   export VLLM_USE_V1=1
 
   source .venv/bin/activate
-  
+
   python3 -c "import wandb; wandb.login(relogin=True, key='$WANDB_API_KEY')"
 
-  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
-    echo "Starting Ray head node..."
-    ps aux | grep ray | grep 6379 &> /dev/null ||  ray start --head --disable-usage-stats \
-          --port=6379 \
-          --dashboard-host=0.0.0.0 \
-          --dashboard-port=8265
+  # This script is only available on skypilot-nightly>=1.0.0.dev20251114
+  # If you are using an older version, you can copy and paste the script from:
+  # https://github.com/skypilot-org/skypilot/blob/master/sky_templates/ray/start_cluster
+  export RAY_DASHBOARD_HOST=0.0.0.0
+  ~/sky_templates/ray/start_cluster
 
+  # Head node: wait for workers and run training
+  if [ "$SKYPILOT_NODE_RANK" == "0" ]; then
     # Wait for all worker nodes to join
     retry_count=0
     max_retries=30

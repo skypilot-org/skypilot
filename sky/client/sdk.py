@@ -30,16 +30,21 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
+from sky.client import interactive_utils
 from sky.client import oauth as oauth_lib
 from sky.jobs import scheduler
+from sky.jobs import utils as managed_job_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
+from sky.ssh_node_pools import utils as ssh_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import annotations
@@ -55,13 +60,13 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
-from sky.utils.kubernetes import ssh_utils
 
 if typing.TYPE_CHECKING:
     import base64
     import binascii
     import io
     import pathlib
+    import secrets
     import time
     import webbrowser
 
@@ -79,6 +84,8 @@ else:
     base64 = adaptors_common.LazyImport('base64')
     binascii = adaptors_common.LazyImport('binascii')
     pathlib = adaptors_common.LazyImport('pathlib')
+    requests = adaptors_common.LazyImport('requests')
+    secrets = adaptors_common.LazyImport('secrets')
     time = adaptors_common.LazyImport('time')
     # only used in dashboard() and api_login()
     webbrowser = adaptors_common.LazyImport('webbrowser')
@@ -155,9 +162,16 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
         retry_context = rest.get_retry_context()
     try:
         line_count = 0
+
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 line_count += 1
+
+                line = interactive_utils.handle_interactive_auth(line)
+                if line is None:
+                    # Line was consumed by interactive auth handler
+                    continue
+
                 if retry_context is None:
                     print(line, flush=True, end='', file=output_stream)
                 elif line_count > retry_context.line_processed:
@@ -364,7 +378,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
@@ -378,6 +392,16 @@ def workspaces() -> server_common.RequestId[Dict[str, Any]]:
     """Gets the workspaces."""
     response = server_common.make_authenticated_request('GET', '/workspaces')
     return server_common.get_request_id(response)
+
+
+def _raise_exception_object_on_client(e: BaseException) -> None:
+    """Raise the exception object on the client."""
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stacktrace = getattr(e, 'stacktrace', str(e))
+        logger.error('=== Traceback on SkyPilot API Server ===\n'
+                     f'{stacktrace}')
+    with ux_utils.print_exception_no_traceback():
+        raise e
 
 
 @usage_lib.entrypoint
@@ -414,15 +438,14 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
     response = server_common.make_authenticated_request(
         'POST', '/validate', json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.deserialize_exception(
-                response.json().get('detail'))
+        _raise_exception_object_on_client(
+            exceptions.deserialize_exception(response.json().get('detail')))
 
 
 @usage_lib.entrypoint
@@ -603,7 +626,10 @@ def launch(
         down=down,
         dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            request_options=request_options,
+            at_client_side=True) as dag:
         return _launch(
             dag,
             cluster_name,
@@ -661,7 +687,7 @@ def _launch(
         clusters = get(status_request_id)
         cluster_user_hash = common_utils.get_user_hash()
         cluster_user_hash_str = ''
-        current_user = common_utils.get_current_user_name()
+        current_user = common_utils.get_local_user_name()
         cluster_user_name = current_user
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
@@ -710,7 +736,7 @@ def _launch(
 
     dag = client_common.upload_mounts_to_api_server(dag)
 
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.LaunchBody(
         task=dag_str,
@@ -801,7 +827,7 @@ def exec(  # pylint: disable=redefined-builtin
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
-    dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+    dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
         cluster_name=cluster_name,
@@ -998,6 +1024,44 @@ def tail_provision_logs(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs (autostop_hook.log) for a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Returns:
+        Exit code 0 on streaming success; non-zero on failure.
+
+    Request Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+    """
+    body = payloads.AutostopLogsBody(cluster_name=cluster_name,
+                                     follow=follow,
+                                     tail=tail)
+
+    response = server_common.make_authenticated_request(
+        'POST', '/autostop_logs', json=json.loads(body.model_dump_json()))
+    request_id: server_common.RequestId[int] = server_common.get_request_id(
+        response)
+    return stream_and_get(request_id)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@annotations.client_api
 def download_logs(cluster_name: str,
                   job_ids: Optional[List[str]]) -> Dict[str, str]:
     """Downloads the logs of jobs.
@@ -1131,8 +1195,12 @@ def start(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def down(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+def down(
+    cluster_name: str,
+    purge: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+) -> server_common.RequestId[None]:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -1147,6 +1215,10 @@ def down(cluster_name: str,
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Returns:
         The request ID of the down request.
@@ -1162,9 +1234,15 @@ def down(cluster_name: str,
             jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/down', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1174,8 +1252,12 @@ def down(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stop(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+def stop(
+    cluster_name: str,
+    purge: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+) -> server_common.RequestId[None]:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -1208,9 +1290,15 @@ def stop(cluster_name: str,
             cluster, or a TPU VM Pod cluster, or the managed jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/stop', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1221,10 +1309,12 @@ def stop(cluster_name: str,
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[autostop_lib.AutostopWaitFor] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Schedules an autostop/autodown for a cluster.
 
@@ -1265,6 +1355,13 @@ def autostop(
             3. "none" - Wait for nothing; autostop right after ``idle_minutes``.
         down: if true, use autodown (tear down the cluster; non-restartable),
             rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+            The script runs before the cluster is stopped or torn down. If the
+            hook fails, autostop will still proceed but a warning will be
+            logged.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+            DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+            be terminated if it exceeds this timeout.
 
     Returns:
         The request ID of the autostop request.
@@ -1273,6 +1370,7 @@ def autostop(
         None
 
     Request Raises:
+        ValueError: if arguments are invalid.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -1282,10 +1380,19 @@ def autostop(
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
             user identity.
     """
+    if hook_timeout is not None and hook is None:
+        raise ValueError('hook_timeout can only be set if hook is set.')
+
     remote_api_version = versions.get_remote_api_version()
     if wait_for is not None and (remote_api_version is None or
                                  remote_api_version < 13):
         logger.warning('wait_for is not supported in your API server. '
+                       'Please upgrade to a newer API server to use it.')
+
+    # Hook support requires API version 28 or higher
+    if hook is not None and (remote_api_version is None or
+                             remote_api_version < 28):
+        logger.warning('Autostop hook is not supported in your API server. '
                        'Please upgrade to a newer API server to use it.')
 
     body = payloads.AutostopBody(
@@ -1293,6 +1400,8 @@ def autostop(
         idle_minutes=idle_minutes,
         wait_for=wait_for,
         down=down,
+        hook=hook,
+        hook_timeout=hook_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/autostop', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1698,12 +1807,6 @@ def storage_delete(name: str) -> server_common.RequestId[None]:
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = None,
-             password: Optional[str] = None,
              name: Optional[str] = None,
              port_start: Optional[int] = None) -> server_common.RequestId[None]:
     """Launches a Kubernetes cluster on local machines.
@@ -1719,15 +1822,7 @@ def local_up(gpus: bool,
             raise ValueError('`sky local up` is only supported when '
                              'running SkyPilot locally.')
 
-    body = payloads.LocalUpBody(gpus=gpus,
-                                ips=ips,
-                                ssh_user=ssh_user,
-                                ssh_key=ssh_key,
-                                cleanup=cleanup,
-                                context_name=context_name,
-                                password=password,
-                                name=name,
-                                port_start=port_start)
+    body = payloads.LocalUpBody(gpus=gpus, name=name, port_start=port_start)
     response = server_common.make_authenticated_request(
         'POST', '/local_up', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1940,7 +2035,8 @@ def status_kubernetes() -> server_common.RequestId[
     Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
           List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
           List[responses.ManagedJobRecord], Optional[str]]]:
-    """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
+    """[Experimental] Gets all SkyPilot clusters and jobs
+    in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
     The caller must parse the controllers to identify which clusters are run
@@ -2012,12 +2108,7 @@ def get(request_id: server_common.RequestId[T]) -> T:
     error = request_task.get_error()
     if error is not None:
         error_obj = error['object']
-        if env_options.Options.SHOW_DEBUG_INFO.get():
-            stacktrace = getattr(error_obj, 'stacktrace', str(error_obj))
-            logger.error('=== Traceback on SkyPilot API Server ===\n'
-                         f'{stacktrace}')
-        with ux_utils.print_exception_no_traceback():
-            raise error_obj
+        _raise_exception_object_on_client(error_obj)
     if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.RequestCancelled(
@@ -2099,16 +2190,16 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True)
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     stream_request_id: Optional[server_common.RequestId[
         T]] = server_common.get_stream_request_id(response)
     if request_id is not None and stream_request_id is not None:
         assert request_id == stream_request_id
     if request_id is None:
         request_id = stream_request_id
-    if response.status_code in [404, 400]:
-        detail = response.json().get('detail')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClientError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         # TODO(syang): handle the case where the requestID is not provided
         # see https://github.com/skypilot-org/skypilot/issues/6549
@@ -2259,7 +2350,9 @@ def api_info() -> responses.APIHealthResponse:
     """
     response = server_common.make_authenticated_request('GET', '/api/health')
     response.raise_for_status()
-    return responses.APIHealthResponse(**response.json())
+    api_health_response = responses.APIHealthResponse(**response.json())
+
+    return api_health_response
 
 
 @usage_lib.entrypoint
@@ -2343,15 +2436,17 @@ def api_stop() -> None:
     with filelock.FileLock(
             os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
         try:
-            with open(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH),
-                      'r',
-                      encoding='utf-8') as f:
-                pids = f.read().split('\n')[:-1]
-                for pid in pids:
-                    if subprocess_utils.is_process_alive(int(pid.strip())):
-                        subprocess_utils.kill_children_processes(
-                            parent_pids=[int(pid.strip())], force=True)
-            os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
+            records = scheduler.get_controller_process_records()
+            if records is not None:
+                for record in records:
+                    try:
+                        if managed_job_utils.controller_process_alive(
+                                record, quiet=False):
+                            subprocess_utils.kill_children_processes(
+                                parent_pids=[record.pid], force=True)
+                    except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                        continue
+                os.remove(os.path.expanduser(scheduler.JOB_CONTROLLER_PID_PATH))
         except FileNotFoundError:
             # its fine we will create it
             pass
@@ -2471,6 +2566,117 @@ def _check_endpoint_in_env_var(is_login: bool) -> None:
                                'clear the environment variable.')
 
 
+def _try_polling_auth(endpoint: str) -> Optional[str]:
+    """Try the polling-based authentication flow."""
+    try:
+        # Generate code verifier (random secret) and challenge (hash)
+        code_verifier = common_utils.base64_url_encode(secrets.token_bytes(32))
+        code_challenge = common_utils.compute_code_challenge(code_verifier)
+
+        # Open browser to authorization page
+        auth_url = f'{endpoint}/auth/authorize?code_challenge={code_challenge}'
+        if not webbrowser.open(auth_url):
+            logger.debug('Failed to open browser.')
+            return None
+
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {auth_url}'
+                   f'{colorama.Style.RESET_ALL}\n'
+                   f'Please click "Authorize" to complete login.\n'
+                   f'{colorama.Style.DIM}Press ctrl+c to fall back to legacy '
+                   f'auth method.{colorama.Style.RESET_ALL}')
+
+        # Poll for token
+        start_time = time.time()
+        while time.time(
+        ) - start_time < server_constants.AUTH_SESSION_TIMEOUT_SECONDS:
+            time.sleep(1)
+            resp = requests.get(f'{endpoint}/api/v1/auth/token',
+                                params={'code_verifier': code_verifier},
+                                timeout=10)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if 'token' in data:
+                    return data['token']
+            elif resp.status_code != 404:
+                # 404 means user hasn't clicked Authorize yet, keep polling
+                logger.debug(f'Poll failed: {resp.status_code}')
+                return None
+
+        click.echo(f'{colorama.Fore.YELLOW}Authentication timed out.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+
+    except KeyboardInterrupt:
+        click.echo(f'\n{colorama.Style.DIM}Interrupted.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Polling auth failed: {e}')
+        return None
+
+
+def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
+    """Try the localhost callback authentication flow (legacy)."""
+    server: Optional[oauth_lib.HTTPServer] = None
+    try:
+        callback_port = common_utils.find_free_port(8000)
+        token_container: Dict[str, Optional[str]] = {'token': None}
+        server = oauth_lib.start_local_auth_server(callback_port,
+                                                   token_container, endpoint)
+
+        token_url = f'{endpoint}/token?local_port={callback_port}'
+        if not webbrowser.open(token_url):
+            return None
+
+        click.echo(f'{colorama.Fore.GREEN}Browser opened at {token_url}'
+                   f'{colorama.Style.RESET_ALL}\n'
+                   f'{colorama.Style.DIM}Press ctrl+c to enter token manually.'
+                   f'{colorama.Style.RESET_ALL}')
+
+        start_time = time.time()
+        while (token_container['token'] is None and time.time() - start_time <
+               server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
+            time.sleep(1)
+
+        if token_container['token'] is None:
+            click.echo(f'{colorama.Fore.YELLOW}Authentication timed out.'
+                       f'{colorama.Style.RESET_ALL}')
+            return None
+        return token_container['token']
+
+    except KeyboardInterrupt:
+        click.echo(f'\n{colorama.Style.DIM}Interrupted.'
+                   f'{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Localhost callback failed: {e}')
+        return None
+    finally:
+        if server is not None:
+            try:
+                server.server_close()
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+
+def _try_manual_token_entry(endpoint: str) -> Optional[str]:
+    """Fall back to manual token entry."""
+    try:
+        token_url = f'{endpoint}/token'
+        click.echo(
+            f'Visit this URL to get the token:\n\n'
+            f'{colorama.Style.BRIGHT}{token_url}{colorama.Style.RESET_ALL}\n')
+        return click.prompt('Paste the token') or None
+    except (KeyboardInterrupt, click.Abort):
+        click.echo(
+            f'\n{colorama.Style.DIM}Cancelled.{colorama.Style.RESET_ALL}')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Manual token entry failed: {e}')
+        return None
+
+
 @usage_lib.entrypoint
 @annotations.client_api
 def api_login(endpoint: Optional[str] = None,
@@ -2573,59 +2779,26 @@ def api_login(endpoint: Optional[str] = None,
     if server_status == server_common.ApiServerStatus.NEEDS_AUTH or relogin:
         # We detected an auth proxy, so go through the auth proxy cookie flow.
         token: Optional[str] = None
-        server: Optional[oauth_lib.HTTPServer] = None
-        try:
-            callback_port = common_utils.find_free_port(8000)
 
-            token_container: Dict[str, Optional[str]] = {'token': None}
-            logger.debug('Starting local authentication server...')
-            server = oauth_lib.start_local_auth_server(callback_port,
-                                                       token_container,
-                                                       endpoint)
+        # Try methods in order:
+        # 1. New polling-based flow - only on servers >= API v30
+        # 2. Old localhost callback flow
+        # 3. Manual token entry
+        remote_api_version = versions.get_remote_api_version()
+        if remote_api_version is not None and remote_api_version >= 30:
+            token = _try_polling_auth(endpoint)
 
-            token_url = (f'{endpoint}/token?local_port={callback_port}')
-            if webbrowser.open(token_url):
-                click.echo(f'{colorama.Fore.GREEN}A web browser has been '
-                           f'opened at {token_url}. Please continue the login '
-                           f'in the web browser.{colorama.Style.RESET_ALL}\n'
-                           f'{colorama.Style.DIM}To manually copy the token, '
-                           f'press ctrl+c.{colorama.Style.RESET_ALL}')
-            else:
-                raise ValueError('Failed to open browser.')
+        if token is None:
+            # Polling auth not available or failed, try localhost callback
+            token = _try_localhost_callback_auth(endpoint)
 
-            start_time = time.time()
+        if token is None:
+            # All automatic methods failed, fall back to manual entry
+            token = _try_manual_token_entry(endpoint)
 
-            while (token_container['token'] is None and
-                   time.time() - start_time < oauth_lib.AUTH_TIMEOUT):
-                time.sleep(1)
-
-            if token_container['token'] is None:
-                click.echo(f'{colorama.Fore.YELLOW}Authentication timed out '
-                           f'after {oauth_lib.AUTH_TIMEOUT} seconds.')
-            else:
-                token = token_container['token']
-
-        except (Exception, KeyboardInterrupt) as e:  # pylint: disable=broad-except
-            logger.debug(f'Automatic authentication failed: {e}, '
-                         'falling back to manual token entry.')
-            if isinstance(e, KeyboardInterrupt):
-                click.echo(f'\n{colorama.Style.DIM}Interrupted. Press ctrl+c '
-                           f'again to exit.{colorama.Style.RESET_ALL}')
-            # Fall back to manual token entry
-            token_url = f'{endpoint}/token'
-            click.echo('Authentication is needed. Please visit this URL '
-                       f'to set up the token:{colorama.Style.BRIGHT}\n\n'
-                       f'{token_url}\n{colorama.Style.RESET_ALL}')
-            token = click.prompt('Paste the token')
-        finally:
-            if server is not None:
-                try:
-                    server.server_close()
-                except Exception:  # pylint: disable=broad-except
-                    pass
-            if not token:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Authentication failed.')
+        if not token:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Authentication failed.')
 
         # Parse the token.
         # b64decode will ignore invalid characters, but does some length and
@@ -2634,7 +2807,6 @@ def api_login(endpoint: Optional[str] = None,
             data = base64.b64decode(token)
         except binascii.Error as e:
             raise ValueError(f'Malformed token: {token}') from e
-        logger.debug(f'Token data: {data!r}')
         try:
             json_data = json.loads(data)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -2746,3 +2918,69 @@ def api_logout() -> None:
     _clear_api_server_config()
     logger.info(f'{colorama.Fore.GREEN}Logged out of SkyPilot API server.'
                 f'{colorama.Style.RESET_ALL}')
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
+@annotations.client_api
+def realtime_slurm_gpu_availability(
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None,
+        slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
+    """Gets the real-time Slurm GPU availability.
+
+    Args:
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
+
+    Returns:
+        The request ID of the Slurm GPU availability request.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    # TODO(kevin): remove this in v0.13.0
+    if (slurm_cluster_name is not None and remote_api_version is not None and
+            remote_api_version < 27):
+        logger.warning(
+            'The Slurm cluster filter is not supported in your API server; '
+            'the server will ignore it and show all Slurm clusters. '
+            'Please upgrade the API server to enable it.')
+
+    body = payloads.SlurmGpuAvailabilityRequestBody(
+        slurm_cluster_name=slurm_cluster_name,
+        name_filter=name_filter,
+        quantity_filter=quantity_filter,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/slurm_gpu_availability',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
+@annotations.client_api
+def slurm_node_info(
+        slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
+    """Gets the resource information for all nodes in the Slurm cluster.
+
+    Returns:
+        The request ID of the Slurm node info request.
+
+    Request Returns:
+        List[Dict[str, Any]]: A list of dictionaries, each containing info
+            for a single Slurm node (node_name, partition, node_state,
+            gpu_type, total_gpus, free_gpus, vcpu_count, memory_gb).
+    """
+    body = payloads.SlurmNodeInfoRequestBody(
+        slurm_cluster_name=slurm_cluster_name)
+    response = server_common.make_authenticated_request(
+        'GET',
+        '/slurm_node_info',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)

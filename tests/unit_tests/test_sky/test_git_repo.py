@@ -186,7 +186,8 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         # Verify task envs and secrets were updated
         assert task.envs[
             git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert task.secrets[git.GIT_TOKEN_ENV_VAR] == 'test_token'
+        assert task_lib.get_plaintext_secrets(
+            task.secrets)[git.GIT_TOKEN_ENV_VAR] == 'test_token'
         assert task.envs[git.GIT_BRANCH_ENV_VAR] == 'main'
         assert git.GIT_SSH_KEY_ENV_VAR not in task.secrets
 
@@ -225,7 +226,8 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         # Verify task envs and secrets were updated
         assert task.envs[
             git.GIT_URL_ENV_VAR] == 'ssh://git@github.com/test/repo.git'
-        assert task.secrets[git.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
+        assert task_lib.get_plaintext_secrets(
+            task.secrets)[git.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
         assert task.envs[git.GIT_BRANCH_ENV_VAR] == 'main'
         assert git.GIT_TOKEN_ENV_VAR not in task.secrets
 
@@ -443,8 +445,10 @@ class TestUpdateTaskWorkdirAndSecretsFromWorkdir:
         # Verify both auth types were set
         assert task.envs[
             git.GIT_URL_ENV_VAR] == 'https://github.com/test/repo.git'
-        assert task.secrets[git.GIT_TOKEN_ENV_VAR] == 'test_token'
-        assert task.secrets[git.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
+        assert task_lib.get_plaintext_secrets(
+            task.secrets)[git.GIT_TOKEN_ENV_VAR] == 'test_token'
+        assert task_lib.get_plaintext_secrets(
+            task.secrets)[git.GIT_SSH_KEY_ENV_VAR] == 'ssh_key_content'
         assert task.envs[git.GIT_BRANCH_ENV_VAR] == 'main'
 
 

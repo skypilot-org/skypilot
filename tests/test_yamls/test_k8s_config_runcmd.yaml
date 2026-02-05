@@ -1,0 +1,3 @@
+kubernetes:
+  post_provision_runcmd:
+    - echo "hello world!"

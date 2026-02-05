@@ -26,7 +26,7 @@ jobs:
 
     - name: Install helm unittest plugin
       run: |
-        helm plugin install https://github.com/helm-unittest/helm-unittest.git
+        helm plugin install https://github.com/helm-unittest/helm-unittest.git --version 6f82a998e0b5461762ca959f87f5dd344af5e4eb
 
     - name: Update chart dependencies
       run: |

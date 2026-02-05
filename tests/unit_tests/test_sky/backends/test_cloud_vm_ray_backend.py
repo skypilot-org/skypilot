@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from sky import resources
 from sky import task
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
@@ -437,6 +438,15 @@ class TestCloudVmRayBackendGetGrpcChannel:
                 i] == f'localhost:{self.INITIAL_TUNNEL_PORT + 1}', f"Process {i} failed: {results[i]}"
 
         assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
+
+    def test_setup_num_gpus(self, monkeypatch):
+        """Test setup num GPUs."""
+        test_task = task.Task(resources=resources.Resources(
+            accelerators={'A100': 8}))
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert backend._get_num_gpus(test_task) == 8
 
 
 class TestIsMessageTooLong:

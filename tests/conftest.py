@@ -1,9 +1,11 @@
 import fcntl
 import os
+import pathlib
 import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from typing import List, Optional, Tuple
@@ -45,6 +47,15 @@ from common_test_fixtures import skyignore_dir
 
 from sky.server import common as server_common
 
+
+@pytest.fixture(autouse=True)
+def _clear_request_level_cache():
+    """Keep request-scoped caches from leaking between tests."""
+    annotations.clear_request_level_cache()
+    yield
+    annotations.clear_request_level_cache()
+
+
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
@@ -66,7 +77,7 @@ all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace',
     'primeintellect', 'runpod', 'vast', 'nebius', 'hyperbolic', 'seeweb',
-    'shadeform'
+    'shadeform', 'coreweave', 'slurm'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -95,7 +106,9 @@ cloud_to_pytest_keyword = {
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
     'shadeform': 'shadeform',
-    'seeweb': 'seeweb'
+    'seeweb': 'seeweb',
+    'coreweave': 'coreweave',
+    'slurm': 'slurm',
 }
 
 
@@ -214,6 +227,20 @@ def pytest_addoption(parser):
         help='Path to the env file to override the default env file',
     )
     parser.addoption(
+        '--plugin-yaml',
+        type=str,
+        default=None,
+        help=('Plugin YAML file (configured in Buildkite pipeline; '
+              'has no effect when running locally)'),
+    )
+    parser.addoption(
+        '--submodule-base-branch',
+        type=str,
+        default=None,
+        help=('Base branch for submodule tests (configured in Buildkite '
+              'pipeline; has no effect when running locally)'),
+    )
+    parser.addoption(
         '--backend-test-cluster',
         type=str,
         default=None,
@@ -240,6 +267,9 @@ def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
     config.addinivalue_line('markers',
                             'local: mark test to run only on local API server')
+    config.addinivalue_line(
+        'markers', 'no_auto_retry: mark test to disable automatic retries '
+        'in Buildkite CI (manual retries still allowed)')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -259,13 +289,22 @@ def pytest_configure(config):
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
+    # Disable parallelism for smoke tests only to save memory in Buildkite.
+    # Check if any of the test paths are under smoke_tests/
+    if hasattr(config, 'args') and config.args:
+        is_smoke_test = any('smoke_tests' in str(arg) for arg in config.args)
+        if is_smoke_test and smoke_tests_utils.is_in_buildkite_env():
+            # Override xdist settings to disable parallelism
+            config.option.numprocesses = 0
+            config.option.dist = 'no'
+
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
 
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            if cloud == 'cloudflare':
+            if cloud in ['cloudflare', 'coreweave']:
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
@@ -329,6 +368,8 @@ def pytest_collection_modifyitems(config, items):
                 # Need to check both conditions as the first default cloud is
                 # added to cloud_to_run when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
+                    continue
+                if config.getoption('--coreweave') and cloud == 'coreweave':
                     continue
                 item.add_marker(skip_marks[cloud])
 
@@ -499,8 +540,9 @@ def setup_policy_server(request, tmp_path_factory):
         return
 
     # get the temp directory shared by all workers
-    root_tmp_dir = tmp_path_factory.getbasetemp().parent
+    root_tmp_dir = tmp_path_factory.getbasetemp().parent / 'policy_server'
 
+    pathlib.Path(root_tmp_dir).mkdir(parents=True, exist_ok=True)
     fn = root_tmp_dir / 'policy_server.txt'
     policy_server_url = ''
     # Reference count and pid for cleanup
@@ -520,24 +562,52 @@ def setup_policy_server(request, tmp_path_factory):
 
     def wait_server(port: int, timeout: int = 60):
         start_time = time.time()
+        success_count = 0
         while time.time() - start_time < timeout:
             try:
                 socket.create_connection(('127.0.0.1', port), timeout=1).close()
-                return True
+                success_count += 1
+                if success_count > 5:
+                    return True
             except (socket.error, OSError):
-                time.sleep(0.5)
+                pass
+            time.sleep(0.5)
         raise RuntimeError(f"Policy server not available after {timeout}s")
 
     try:
         policy_server_url: Optional[str] = None
         with filelock.FileLock(str(fn) + ".lock"):
+            launch_server = True
             if fn.is_file():
                 ref_count(1)
                 policy_server_url = fn.read_text().strip()
-            else:
+                print(
+                    f'Using existing policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
+                port = int(policy_server_url.split(':')[2])
+                # Healthz check the running server
+                try:
+                    wait_server(port)
+                    # The server is running, reuse it
+                    launch_server = False
+                except RuntimeError:
+                    # There is a broken state from previous crashed test, recover it
+                    print(
+                        f'Policy server {policy_server_url} is not running, launching new server',
+                        file=sys.stderr,
+                        flush=True)
+                    pathlib.Path(counter_file).unlink(missing_ok=True)
+                    launch_server = True
+
+            if launch_server:
                 # Launch the policy server
                 port = common_utils.find_free_port(start_port=10000)
                 policy_server_url = f'http://127.0.0.1:{port}'
+                print(
+                    f'Launching policy server {policy_server_url}, file: {fn}',
+                    file=sys.stderr,
+                    flush=True)
                 server_process = subprocess.Popen([
                     'python', 'tests/admin_policy/no_op_server.py', '--host',
                     '0.0.0.0', '--port',
@@ -556,11 +626,12 @@ def setup_policy_server(request, tmp_path_factory):
     finally:
         with filelock.FileLock(str(fn) + ".lock"):
             count = ref_count(-1)
-            if count == 0:
+            if count <= 0:
                 # All workers are done, run post cleanup.
                 pid = pid_file.read_text().strip()
                 if pid:
                     os.kill(int(pid), signal.SIGKILL)
+                pathlib.Path(fn).unlink(missing_ok=True)
 
 
 @pytest.fixture(scope='session', autouse=True)

@@ -282,94 +282,109 @@ def launch(cluster_name_on_cloud: str,
 
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     logger.debug(f'Creating instance {instance_name} in project {project_id}.')
-    nebius.sync_call(
-        service.create(nebius.compute().CreateInstanceRequest(
-            metadata=nebius.nebius_common().ResourceMetadata(
-                parent_id=project_id,
-                name=instance_name,
-            ),
-            spec=nebius.compute().InstanceSpec(
-                gpu_cluster=nebius.compute().InstanceGpuClusterSpec(
-                    id=cluster_id,) if cluster_id is not None else None,
-                boot_disk=nebius.compute().AttachedDiskSpec(
-                    attach_mode=nebius.compute(
-                    ).AttachedDiskSpec.AttachMode.READ_WRITE,
-                    existing_disk=nebius.compute().ExistingDisk(id=disk_id)),
-                cloud_init_user_data=user_data,
-                resources=nebius.compute().ResourcesSpec(platform=platform,
-                                                         preset=preset),
-                filesystems=filesystems_spec if filesystems_spec else None,
-                network_interfaces=[
-                    nebius.compute().NetworkInterfaceSpec(
-                        subnet_id=sub_net.items[0].metadata.id,
-                        ip_address=nebius.compute().IPAddress(),
-                        name='network-interface-0',
-                        public_ip_address=nebius.compute().PublicIPAddress(
-                            static=use_static_ip_address)
-                        if associate_public_ip_address else None,
-                    )
-                ],
-                recovery_policy=nebius.compute().InstanceRecoveryPolicy.FAIL
-                if use_spot else None,
-                preemptible=nebius.compute().PreemptibleSpec(
-                    priority=1,
-                    on_preemption=nebius.compute().PreemptibleSpec.
-                    PreemptionPolicy.STOP) if use_spot else None,
-            ))))
-    instance_id = ''
-    retry_count = 0
-    while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_READY:
-        service = nebius.compute().InstanceServiceClient(nebius.sdk())
-        instance = nebius.sync_call(
-            service.get_by_name(nebius.nebius_common().GetByNameRequest(
-                parent_id=project_id,
-                name=instance_name,
-            )))
-        instance_id = instance.metadata.id
-        if instance.status.state.name == 'STARTING':
-            break
+    try:
+        nebius.sync_call(
+            service.create(nebius.compute().CreateInstanceRequest(
+                metadata=nebius.nebius_common().ResourceMetadata(
+                    parent_id=project_id,
+                    name=instance_name,
+                ),
+                spec=nebius.compute().InstanceSpec(
+                    gpu_cluster=nebius.compute().InstanceGpuClusterSpec(
+                        id=cluster_id,) if cluster_id is not None else None,
+                    boot_disk=nebius.compute().AttachedDiskSpec(
+                        attach_mode=nebius.compute(
+                        ).AttachedDiskSpec.AttachMode.READ_WRITE,
+                        existing_disk=nebius.compute().ExistingDisk(
+                            id=disk_id)),
+                    cloud_init_user_data=user_data,
+                    resources=nebius.compute().ResourcesSpec(platform=platform,
+                                                             preset=preset),
+                    filesystems=filesystems_spec if filesystems_spec else None,
+                    network_interfaces=[
+                        nebius.compute().NetworkInterfaceSpec(
+                            subnet_id=sub_net.items[0].metadata.id,
+                            ip_address=nebius.compute().IPAddress(),
+                            name='network-interface-0',
+                            public_ip_address=nebius.compute().PublicIPAddress(
+                                static=use_static_ip_address)
+                            if associate_public_ip_address else None,
+                        )
+                    ],
+                    recovery_policy=nebius.compute().InstanceRecoveryPolicy.FAIL
+                    if use_spot else None,
+                    preemptible=nebius.compute().PreemptibleSpec(
+                        priority=1,
+                        on_preemption=nebius.compute().PreemptibleSpec.
+                        PreemptionPolicy.STOP) if use_spot else None,
+                ))))
+        instance_id = ''
+        retry_count = 0
+        while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_READY:
+            service = nebius.compute().InstanceServiceClient(nebius.sdk())
+            instance = nebius.sync_call(
+                service.get_by_name(nebius.nebius_common().GetByNameRequest(
+                    parent_id=project_id,
+                    name=instance_name,
+                )))
+            instance_id = instance.metadata.id
+            if instance.status.state.name == 'STARTING':
+                break
 
-        # All Instances initially have state=STOPPED and reconciling=True,
-        # so we need to wait until reconciling is False.
-        if instance.status.state.name == 'STOPPED' and \
-                not instance.status.reconciling:
-            next_token = ''
-            total_operations = 0
-            while True:
-                operations_response = nebius.sync_call(
-                    service.list_operations_by_parent(
-                        nebius.compute().ListOperationsByParentRequest(
-                            parent_id=project_id,
-                            page_size=100,
-                            page_token=next_token,
-                        )))
-                total_operations += len(operations_response.operations)
-                for operation in operations_response.operations:
-                    # Find the most recent operation for the instance.
-                    if operation.resource_id == instance_id:
-                        error_msg = operation.description
-                        if operation.status:
-                            error_msg += f' {operation.status.message}'
-                        raise RuntimeError(error_msg)
-                # If we've fetched too many operations, or there are no more
-                # operations to fetch, just raise a generic error.
-                if total_operations > _MAX_OPERATIONS_TO_FETCH or \
-                        not operations_response.next_page_token:
-                    raise RuntimeError(
-                        f'Instance {instance_name} failed to start.')
-                next_token = operations_response.next_page_token
-        time.sleep(POLL_INTERVAL)
-        logger.debug(f'Waiting for instance {instance_name} to start running. '
-                     f'State: {instance.status.state.name}, '
-                     f'Reconciling: {instance.status.reconciling}')
-        retry_count += 1
+            # All Instances initially have state=STOPPED and reconciling=True,
+            # so we need to wait until reconciling is False.
+            if instance.status.state.name == 'STOPPED' and \
+                    not instance.status.reconciling:
+                next_token = ''
+                total_operations = 0
+                while True:
+                    operations_response = nebius.sync_call(
+                        service.list_operations_by_parent(
+                            nebius.compute().ListOperationsByParentRequest(
+                                parent_id=project_id,
+                                page_size=100,
+                                page_token=next_token,
+                            )))
+                    total_operations += len(operations_response.operations)
+                    for operation in operations_response.operations:
+                        # Find the most recent operation for the instance.
+                        if operation.resource_id == instance_id:
+                            error_msg = operation.description
+                            if operation.status:
+                                error_msg += f' {operation.status.message}'
+                            raise RuntimeError(error_msg)
+                    # If we've fetched too many operations, or there are no more
+                    # operations to fetch, just raise a generic error.
+                    if total_operations > _MAX_OPERATIONS_TO_FETCH or \
+                            not operations_response.next_page_token:
+                        raise RuntimeError(
+                            f'Instance {instance_name} failed to start.')
+                    next_token = operations_response.next_page_token
+            time.sleep(POLL_INTERVAL)
+            logger.debug(
+                f'Waiting for instance {instance_name} to start running. '
+                f'State: {instance.status.state.name}, '
+                f'Reconciling: {instance.status.reconciling}')
+            retry_count += 1
 
-    if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_READY:
-        raise TimeoutError(
-            f'Exceeded maximum retries '
-            f'({nebius.MAX_RETRIES_TO_INSTANCE_READY * POLL_INTERVAL}'
-            f' seconds) while waiting for instance {instance_name}'
-            f' to be ready.')
+        if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_READY:
+            raise TimeoutError(
+                f'Exceeded maximum retries '
+                f'({nebius.MAX_RETRIES_TO_INSTANCE_READY * POLL_INTERVAL}'
+                f' seconds) while waiting for instance {instance_name}'
+                f' to be ready.')
+    except nebius.request_error() as e:
+        # Handle ResourceExhausted quota limit error. In this case, we need to
+        # clean up the disk as VM creation failed and we can't proceed.
+        # It cannot be handled by the caller (provisioner)'s teardown logic,
+        # as we cannot retrieve the disk id, after the instance creation
+        # fails
+        logger.warning(f'Failed to launch instance {instance_name}: {e}')
+        service = nebius.compute().DiskServiceClient(nebius.sdk())
+        nebius.sync_call(
+            service.delete(nebius.compute().DeleteDiskRequest(id=disk_id)))
+        logger.debug(f'Disk {disk_id} deleted.')
+        raise e
     return instance_id
 
 

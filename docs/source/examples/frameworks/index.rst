@@ -8,6 +8,7 @@ Frameworks
    DVC <dvc>
    GCP DWS <https://docs.skypilot.co/en/latest/reservations/reservations.html#gcp-dynamic-workload-scheduler-dws>
    Jupyter <jupyter>
+   marimo <marimo>
    MLFlow <https://nebius.com/blog/posts/orchestrating-llm-fine-tuning-k8s-skypilot-mlflow>
    MPI <mpi>
    Spyder IDE <spyder>

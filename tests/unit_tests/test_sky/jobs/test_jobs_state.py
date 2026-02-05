@@ -66,8 +66,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           resources_str='{}',
                           metadata='{}')
         # Set priority and schedule state
-        state.scheduler_set_waiting(job_id1, '/tmp/dag1.yaml',
-                                    '/tmp/user1.yaml', '/tmp/env1', 100)
+        state.scheduler_set_waiting([job_id1], '/tmp/dag1.yaml',
+                                    '/tmp/user1.yaml', '/tmp/env1', None, 100)
 
         # Job 2: STARTING state (launched but not yet running)
         job_id2 = state.set_job_info_without_job_id(name='test-job-b',
@@ -81,8 +81,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           task_name='task0',
                           resources_str='{}',
                           metadata='{}')
-        state.scheduler_set_waiting(job_id2, '/tmp/dag2.yaml',
-                                    '/tmp/user2.yaml', '/tmp/env2', 200)
+        state.scheduler_set_waiting([job_id2], '/tmp/dag2.yaml',
+                                    '/tmp/user2.yaml', '/tmp/env2', None, 200)
         await state.set_starting_async(job_id2, 0, 'run_123', time.time(), '{}',
                                        {}, mock_callback)
 
@@ -98,8 +98,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           task_name='task0',
                           resources_str='{}',
                           metadata='{}')
-        state.scheduler_set_waiting(job_id3, '/tmp/dag3.yaml',
-                                    '/tmp/user3.yaml', '/tmp/env3', 50)
+        state.scheduler_set_waiting([job_id3], '/tmp/dag3.yaml',
+                                    '/tmp/user3.yaml', '/tmp/env3', None, 50)
         await state.set_starting_async(job_id3, 0, 'run_456', time.time(), '{}',
                                        {}, mock_callback)
         await state.set_started_async(job_id3, 0, time.time(), mock_callback)
@@ -116,8 +116,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           task_name='task0',
                           resources_str='{}',
                           metadata='{}')
-        state.scheduler_set_waiting(job_id4, '/tmp/dag4.yaml',
-                                    '/tmp/user4.yaml', '/tmp/env4', 75)
+        state.scheduler_set_waiting([job_id4], '/tmp/dag4.yaml',
+                                    '/tmp/user4.yaml', '/tmp/env4', None, 75)
         await state.set_starting_async(job_id4, 0, 'run_789', time.time(), '{}',
                                        {}, mock_callback)
         await state.set_started_async(job_id4, 0, time.time(), mock_callback)
@@ -136,8 +136,8 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
                           task_name='task0',
                           resources_str='{}',
                           metadata='{}')
-        state.scheduler_set_waiting(job_id5, '/tmp/dag5.yaml',
-                                    '/tmp/user5.yaml', '/tmp/env5', 150)
+        state.scheduler_set_waiting([job_id5], '/tmp/dag5.yaml',
+                                    '/tmp/user5.yaml', '/tmp/env5', None, 150)
         await state.set_starting_async(job_id5, 0, 'run_abc', time.time(), '{}',
                                        {}, mock_callback)
         await state.set_started_async(job_id5, 0, time.time(), mock_callback)
@@ -286,8 +286,8 @@ class TestGetManagedJobsHighestPriority:
                                                    pool_hash=None,
                                                    user_hash='user1')
         state.set_pending(job_id, 0, 'task0', '{}', '{}')
-        state.scheduler_set_waiting(job_id, '/tmp/dag.yaml', '/tmp/user.yaml',
-                                    '/tmp/env', 300)
+        state.scheduler_set_waiting([job_id], '/tmp/dag.yaml', '/tmp/user.yaml',
+                                    '/tmp/env', None, 300)
         state.scheduler_set_done(job_id)
 
         priority = state.get_managed_jobs_highest_priority()
@@ -308,8 +308,9 @@ class TestGetManagedJobsHighestPriority:
                                                         pool_hash=None,
                                                         user_hash='user1')
             state.set_pending(job_id1, 0, 'task0', '{}', '{}')
-            state.scheduler_set_waiting(job_id1, '/tmp/dag1.yaml',
-                                        '/tmp/user1.yaml', '/tmp/env1', 100)
+            state.scheduler_set_waiting([job_id1], '/tmp/dag1.yaml',
+                                        '/tmp/user1.yaml', '/tmp/env1', None,
+                                        100)
 
             # Job in LAUNCHING state with priority 250
             job_id2 = state.set_job_info_without_job_id(name='job2',
@@ -319,8 +320,9 @@ class TestGetManagedJobsHighestPriority:
                                                         pool_hash=None,
                                                         user_hash='user1')
             state.set_pending(job_id2, 0, 'task0', '{}', '{}')
-            state.scheduler_set_waiting(job_id2, '/tmp/dag2.yaml',
-                                        '/tmp/user2.yaml', '/tmp/env2', 250)
+            state.scheduler_set_waiting([job_id2], '/tmp/dag2.yaml',
+                                        '/tmp/user2.yaml', '/tmp/env2', None,
+                                        250)
             await state.scheduler_set_launching_async(job_id2)
 
             # Job in DONE state with priority 500 (should be ignored)
@@ -331,8 +333,9 @@ class TestGetManagedJobsHighestPriority:
                                                         pool_hash=None,
                                                         user_hash='user1')
             state.set_pending(job_id3, 0, 'task0', '{}', '{}')
-            state.scheduler_set_waiting(job_id3, '/tmp/dag3.yaml',
-                                        '/tmp/user3.yaml', '/tmp/env3', 500)
+            state.scheduler_set_waiting([job_id3], '/tmp/dag3.yaml',
+                                        '/tmp/user3.yaml', '/tmp/env3', None,
+                                        500)
             state.scheduler_set_done(job_id3)
 
         asyncio.get_event_loop().run_until_complete(setup_jobs())

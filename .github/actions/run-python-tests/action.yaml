@@ -1,0 +1,73 @@
+name: "Run Python Tests"
+description: "Setup and run Python tests"
+
+inputs:
+  python-version:
+    description: "Python version to use"
+    required: true
+  test-path:
+    description: "Path to the test file or directory"
+    required: true
+  test-name:
+    description: "Name of the test"
+    required: true
+  buildkite-analytics-token:
+    description: "Buildkite analytics token"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+        python-version: ${{ inputs.python-version }}
+    - name: Install dependencies
+      shell: bash
+      run: |
+        uv venv --seed ~/test-env
+        source ~/test-env/bin/activate
+        uv pip install --prerelease=allow "azure-cli>=2.65.0"
+        # Use -e to include examples and tests folder in the path for unit
+        # tests to access them.
+        uv pip install -e ".[all]"
+        uv pip install pytest pytest-xdist pytest-env>=0.6 pytest-asyncio memory-profiler==0.61.0 buildkite-test-collector
+    - name: Set branch name and commit message
+      id: set_env
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" == "pull_request" ]; then
+          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          {
+            echo "message<<EOF"
+            echo "${{ github.event.pull_request.title }}"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+        else
+          echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          # For push events after merge, head_commit.message contains the merge commit message
+          # which includes the PR title. For merge_group events, use merge_group.head_commit.message
+          {
+            echo "message<<EOF"
+            if [ "${{ github.event_name }}" == "merge_group" ]; then
+              echo "${{ github.event.merge_group.head_commit.message }}"
+            else
+              echo "${{ github.event.head_commit.message }}"
+            fi
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+        fi
+    - name: Run tests with pytest
+      shell: bash
+      env:
+        TEST_PATH: ${{ inputs.test-path }}
+        TEST_NAME: ${{ inputs.test-name }}
+        BUILDKITE_ANALYTICS_TOKEN: ${{ inputs.buildkite-analytics-token }}
+      run: |
+        source ~/test-env/bin/activate
+        if [[ "$TEST_NAME" == "No Parallel Tests" || "$TEST_NAME" == "Event Loop Lag Tests" ]]; then
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 0 --dist no $TEST_PATH"
+        else
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 eval "pytest -n 4 --dist worksteal $TEST_PATH"
+        fi

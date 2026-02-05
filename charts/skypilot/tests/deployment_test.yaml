@@ -52,6 +52,73 @@ tests:
             name: KUBECONFIG
             value: /root/.kube/config:/var/skypilot/kubeconfig/config
 
+  # Tests for global image configuration
+  - it: should apply global image pull secrets to the API deployment
+    set:
+      global.imagePullSecrets[0].name: global-pull-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.imagePullSecrets
+          content:
+            name: global-pull-secret
+
+  - it: should prefix API images with the global registry value
+    set:
+      global.imageRegistry: registry.example.com/custom
+      apiService.image: berkeleyskypilot/skypilot-nightly:latest
+      apiService.logs.retention.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
+
+
+  - it: should replace original image registries when global registry override is set
+    set:
+      global.imageRegistry: registry.example.com/custom
+      apiService.image: gcr.io/skypilot-dev/sky:dev
+      apiService.logs.retention.enabled: true
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: registry.example.com/custom/skypilot-dev/sky:dev
+      - equal:
+          path: spec.template.spec.containers[1].image
+          value: registry.example.com/custom/skypilot-dev/sky:dev
+
+  - it: should inject global extra envs into api containers and init containers
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+      - contains:
+          path: spec.template.spec.initContainers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+
+  - it: should prefix gcp credentials init container image with the global registry override
+    set:
+      global.imageRegistry: registry.example.com/custom
+      gcpCredentials.enabled: true
+      gcpCredentials.image: google/cloud-sdk:slim
+      gcpCredentials.projectId: test-project
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-gcp-credentials
+            image: registry.example.com/custom/google/cloud-sdk:slim
+
   # Test cases for upgradeStrategy configuration
   - it: should use Recreate strategy by default
     asserts:
@@ -81,6 +148,25 @@ tests:
             valueFrom:
               fieldRef:
                 fieldPath: metadata.uid
+      # Verify sky-ephemeral is NOT added when storage.enabled=false (backward compatibility)
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Verify state-volume uses emptyDir (not PVC)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: state-volume
+            emptyDir: {}
+      # Verify ~/.sky is mounted from state-volume with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
 
   - it: should use RollingUpdate strategy when configured with external database via connection string
     set:
@@ -112,14 +198,181 @@ tests:
       - failedTemplate:
           errorMessage: "External database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString when using RollingUpdate strategy"
 
-  - it: should fail RollingUpdate strategy with local storage enabled
+  - it: should fail RollingUpdate strategy with local storage enabled using ReadWriteOnce
     set:
       apiService.upgradeStrategy: RollingUpdate
       apiService.dbConnectionSecretName: test-db-secret
       storage.enabled: true
     asserts:
       - failedTemplate:
-          errorMessage: "Local storage is not supported when using RollingUpdate strategy. Use recreate upgrade strategy or set storage.enabled to false."
+          errorMessage: "Local storage with ReadWriteOnce access mode is not supported when using RollingUpdate strategy. Either use Recreate upgrade strategy, set storage.enabled to false, or use ReadWriteMany access mode with a compatible storage class (e.g., NFS-backed storage like Google Filestore)."
+
+  - it: should allow RollingUpdate strategy with local storage enabled using ReadWriteMany
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+      - equal:
+          path: spec.strategy.rollingUpdate.maxSurge
+          value: 1
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+
+  - it: should use emptyDir for ~/.sky when RollingUpdate with storage enabled to avoid SQLite on NFS
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      # Should have sky-ephemeral emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Should mount sky-ephemeral at ~/.sky
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: sky-ephemeral
+            mountPath: /root/.sky
+      # Should NOT mount state-volume at ~/.sky with subPath .sky
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+
+  - it: should persist api_server/clients directory when RollingUpdate with storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+    asserts:
+      # Should mount api_server/clients from PVC
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/api_server/clients
+            subPath: api_server/clients
+
+  - it: should use state-volume for ~/.sky when Recreate with storage enabled
+    set:
+      apiService.upgradeStrategy: Recreate
+      storage.enabled: true
+    asserts:
+      # Should NOT have sky-ephemeral volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: sky-ephemeral
+            emptyDir: {}
+      # Should mount state-volume at ~/.sky with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+      # Should NOT have separate clients mount
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky/api_server/clients
+            subPath: api_server/clients
+
+  - it: should use sky-ephemeral for logrotate sidecar when RollingUpdate with storage enabled
+    set:
+      apiService.upgradeStrategy: RollingUpdate
+      apiService.dbConnectionSecretName: test-db-secret
+      storage.enabled: true
+      storage.accessMode: ReadWriteMany
+      apiService.logs.retention.enabled: true
+    asserts:
+      # Logrotate sidecar should mount sky-ephemeral at ~/.sky
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: sky-ephemeral
+            mountPath: /root/.sky
+
+  - it: should use state-volume for logrotate sidecar when Recreate with storage enabled
+    set:
+      apiService.upgradeStrategy: Recreate
+      storage.enabled: true
+      apiService.logs.retention.enabled: true
+    asserts:
+      # Logrotate sidecar should mount state-volume at ~/.sky with subPath
+      - contains:
+          path: spec.template.spec.containers[1].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/.sky
+            subPath: .sky
+
+  - it: should mount managed job log directories when storage is enabled
+    set:
+      storage.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/jobs_controller
+            subPath: sky_logs/jobs_controller
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/managed_jobs
+            subPath: sky_logs/managed_jobs
+
+  - it: should not mount managed job log directories when storage is disabled
+    set:
+      storage.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/jobs_controller
+            subPath: sky_logs/jobs_controller
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: state-volume
+            mountPath: /root/sky_logs/managed_jobs
+            subPath: sky_logs/managed_jobs
+
+  - it: should honor fullnameOverride for deployment names and labels
+    set:
+      fullnameOverride: custom-fullname
+    asserts:
+      - equal:
+          path: metadata.name
+          value: custom-fullname-api-server
+      - equal:
+          path: spec.selector.matchLabels.app
+          value: custom-fullname-api
+      - equal:
+          path: spec.template.metadata.labels.app
+          value: custom-fullname-api
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_RELEASE_NAME
+            value: custom-fullname
 
   # Test cases for dbConnectionSecretName configuration
   - it: should set database connection environment variable from secret
@@ -291,3 +544,319 @@ tests:
           pattern: "setup-r2-credentials"
       - notMatchRegexRaw:
           pattern: "R2_CREDENTIALS"
+
+  - it: should mount aws credentials from access key and secret key
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+    asserts:
+      # Should have emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+            emptyDir: {}
+      # Should mount the directory
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: aws-config
+            mountPath: /root/.aws
+            readOnly: true
+      # Should have init container
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: create-aws-credentials
+
+  - it: should mount aws credentials from credentials file
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: true
+    asserts:
+      # Should have secret volume (not emptyDir)
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-credentials-file
+            secret:
+              secretName: aws-credentials
+      # Should NOT have emptyDir volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+            emptyDir: {}
+      # Should mount the file with subPath
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: aws-credentials-file
+            mountPath: /root/.aws/credentials
+            subPath: credentials
+            readOnly: true
+      # Should NOT have init container
+      - notMatchRegexRaw:
+          pattern: "create-aws-credentials"
+
+  - it: should not mount aws credentials when disabled
+    set:
+      awsCredentials.enabled: false
+    asserts:
+      # Should NOT have aws-config volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+      # Should NOT have aws-credentials-file volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-credentials-file
+      # Should NOT have volumeMount
+      - notMatchRegexRaw:
+          pattern: "mountPath: /root/.aws"
+      # Should NOT have init container
+      - notMatchRegexRaw:
+          pattern: "create-aws-credentials"
+
+  - it: should use custom secret name with access key and secret key
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: false
+      awsCredentials.awsSecretName: my-custom-secret
+      awsCredentials.accessKeyIdKeyName: my_key_id
+      awsCredentials.secretAccessKeyKeyName: my_secret_key
+    asserts:
+      # Init container should reference custom secret and keys
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            env:
+              - name: AWS_ACCESS_KEY_ID
+                valueFrom:
+                  secretKeyRef:
+                    name: my-custom-secret
+                    key: my_key_id
+              - name: AWS_SECRET_ACCESS_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: my-custom-secret
+                    key: my_secret_key
+
+  - it: should use custom secret name with credentials file
+    set:
+      awsCredentials.enabled: true
+      awsCredentials.useCredentialsFile: true
+      awsCredentials.awsSecretName: my-aws-profiles
+    asserts:
+      # Volume should reference custom secret
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-credentials-file
+            secret:
+              secretName: my-aws-profiles
+
+  - it: should default to accessKeyIdKeyName and secretAccessKeyKeyName when useCredentialsFile is unset
+    set:
+      awsCredentials.enabled: true
+    asserts:
+      # Should have init container
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: create-aws-credentials
+      # Should have emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: aws-config
+            emptyDir: {}
+
+  # Test cases for coreweaveCredentials configuration
+  - it: should mount coreweave credentials correctly when coreweaveCredentials is enabled
+    set:
+      coreweaveCredentials.enabled: true
+      coreweaveCredentials.coreweaveSecretName: my-coreweave-secret
+    asserts:
+      # Should have coreweave-credentials secret volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-credentials
+            secret:
+              secretName: my-coreweave-secret
+      # Should have coreweave-config emptyDir volume
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-config
+            emptyDir: {}
+      # Should mount coreweave-config in container
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: coreweave-config
+            mountPath: /root/.coreweave
+            readOnly: true
+
+      # Should have init container
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-coreweave-credentials
+      # Init container should have correct volume mounts
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            volumeMounts:
+              - name: coreweave-credentials
+                mountPath: /root/.coreweave_credentials
+              - name: coreweave-config
+                mountPath: /root/.coreweave
+
+  - it: should inject global extra envs into coreweave init container
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      coreweaveCredentials.enabled: true
+      coreweaveCredentials.coreweaveSecretName: my-coreweave-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-coreweave-credentials
+            env:
+              - name: GLOBAL_ENV
+                value: global
+
+  - it: should not mount coreweave credentials when coreweaveCredentials is disabled
+    set:
+      coreweaveCredentials.enabled: false
+    asserts:
+      # Should NOT have coreweave-credentials volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-credentials
+      # Should NOT have coreweave-config volume
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: coreweave-config
+            emptyDir: {}
+      # Should NOT have volumeMount
+      - notMatchRegexRaw:
+          pattern: "mountPath: /root/.coreweave"
+      # Should NOT have init container
+      - notMatchRegexRaw:
+          pattern: "setup-coreweave-credentials"
+
+  - it: should prefix coreweave credentials init container image with the global registry override
+    set:
+      global.imageRegistry: registry.example.com/custom
+      coreweaveCredentials.enabled: true
+      coreweaveCredentials.coreweaveSecretName: my-coreweave-secret
+      apiService.image: berkeleyskypilot/skypilot-nightly:latest
+    asserts:
+      - contains:
+          path: spec.template.spec.initContainers
+          any: true
+          content:
+            name: setup-coreweave-credentials
+            image: registry.example.com/custom/berkeleyskypilot/skypilot-nightly:latest
+
+  # Test cases for SKYPILOT_INITIAL_BASIC_AUTH environment variable
+  - it: should set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthSecret
+    set:
+      apiService.enableUserManagement: true
+      apiService.initialBasicAuthSecret: my-auth-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: my-auth-secret
+                key: auth
+
+  - it: should set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled with initialBasicAuthCredentials
+    set:
+      apiService.enableUserManagement: true
+      apiService.initialBasicAuthCredentials: "user:password"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-initial-basic-auth
+                key: auth
+
+  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when basic auth enabled but no initial credentials
+    set:
+      apiService.enableUserManagement: true
+      # Neither initialBasicAuthSecret nor initialBasicAuthCredentials set
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when basic auth disabled
+    set:
+      apiService.enableUserManagement: false
+      apiService.initialBasicAuthSecret: my-auth-secret
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  - it: should not set SKYPILOT_INITIAL_BASIC_AUTH when oauth2-proxy is enabled
+    set:
+      ingress.oauth2-proxy.enabled: true
+      apiService.enableUserManagement: true
+      apiService.initialBasicAuthSecret: my-auth-secret
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INITIAL_BASIC_AUTH
+
+  # Test cases for SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE environment variable
+  - it: should set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is true
+    set:
+      auth.disableBasicAuthMiddleware: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+            value: "true"
+
+  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE when auth.disableBasicAuthMiddleware is false
+    set:
+      auth.disableBasicAuthMiddleware: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+
+  - it: should not set SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE

@@ -4,6 +4,8 @@ import asyncio
 import contextlib
 import contextvars
 import functools
+import html
+import re
 import time
 import typing
 from typing import Any, Callable, cast, Optional, TypeVar
@@ -32,7 +34,15 @@ else:
 
 F = TypeVar('F', bound=Callable[..., Any])
 
-_RETRY_CONTEXT = contextvars.ContextVar('retry_context', default=None)
+
+class RetryContext:
+
+    def __init__(self):
+        self.line_processed = 0
+
+
+_RETRY_CONTEXT: contextvars.ContextVar[Optional[RetryContext]] = (
+    contextvars.ContextVar('retry_context', default=None))
 
 _session = requests.Session()
 # Tune connection pool size, otherwise the default max is just 10.
@@ -57,11 +67,8 @@ _transient_errors = [
     urllib3.exceptions.HTTPError,
 ]
 
-
-class RetryContext:
-
-    def __init__(self):
-        self.line_processed = 0
+_HTML_TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>',
+                            re.IGNORECASE | re.DOTALL)
 
 
 @contextlib.contextmanager
@@ -249,11 +256,42 @@ def handle_server_unavailable(response: 'requests.Response') -> None:
         if 'detail' in response_data:
             error_msg = response_data['detail']
     except Exception:  # pylint: disable=broad-except
-        if response.text:
-            error_msg = response.text
+        error_msg = handle_response_text(response)
 
     with ux_utils.print_exception_no_traceback():
         raise exceptions.ServerTemporarilyUnavailableError(error_msg)
+
+
+def handle_response_text(response: 'requests.Response') -> str:
+    """Handle the plaintext response to get the error message
+
+    There is a special handling for html content which might be returned
+    by the reverse proxy to make the error message more user-friendly.
+    """
+    error_msg = ''
+    if isinstance(response, str):
+        text, headers = response, {}
+    else:
+        text = getattr(response, 'text', '')
+        headers = getattr(response, 'headers', {}) or {}
+    if not isinstance(text, str):
+        text = str(text) if text is not None else ''
+    if not text:
+        return ''
+    content_type = headers.get('Content-Type', '')
+    is_html = isinstance(content_type, str) and 'html' in (content_type.lower())
+    if not is_html:
+        stripped = text.lstrip()
+        is_html = stripped.startswith('<') and '<title' in stripped.lower()
+    if is_html:
+        match = _HTML_TITLE_RE.search(text)
+        if match:
+            title = html.unescape(match.group(1)).strip()
+            if title:
+                error_msg = title
+    if not error_msg:
+        error_msg = text
+    return error_msg
 
 
 async def handle_server_unavailable_async(

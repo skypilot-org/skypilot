@@ -1,16 +1,39 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
 import {
-  ENDPOINT,
   CLUSTER_NOT_UP_ERROR,
   CLUSTER_DOES_NOT_EXIST,
   NOT_SUPPORTED_ERROR,
 } from '@/data/connectors/constants';
 import dashboardCache from '@/lib/cache';
+import jobsCacheManager from '@/lib/jobs-cache-manager';
 import { apiClient } from './client';
+import { applyEnhancements } from '@/plugins/dataEnhancement';
+
+// ============ Pagination Plugin Integration ============
+
+/**
+ * Check if the jobs pagination plugin is available.
+ * The plugin sets window.__skyJobsPaginationFetch when loaded.
+ * With requires_early_init=True, the plugin is guaranteed to be
+ * loaded before any API calls complete.
+ */
+function isJobsPaginationPluginAvailable() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.__skyJobsPaginationFetch === 'function'
+  );
+}
+
+/**
+ * Get the jobs pagination plugin fetch function
+ */
+function getJobsPaginationFetch() {
+  return typeof window !== 'undefined' ? window.__skyJobsPaginationFetch : null;
+}
 
 // Configuration
-const DEFAULT_TAIL_LINES = 10000;
+const DEFAULT_TAIL_LINES = 5000;
 const DEFAULT_FIELDS = [
   'job_id',
   '_job_id',
@@ -32,7 +55,55 @@ const DEFAULT_FIELDS = [
   'pool_hash',
   'details',
   'failure_reason',
+  'user_yaml',
+  'entrypoint',
+  'is_job_group',
+  'execution',
+  'is_primary_in_job_group',
+  'links',
 ];
+
+/**
+ * Compute the job group status based on primary tasks.
+ * For job groups with primary/auxiliary tasks, the job status is determined
+ * only by the primary tasks. If all primary tasks succeed, the job is
+ * considered successful even if auxiliary tasks were cancelled.
+ *
+ * Uses is_primary_in_job_group per task:
+ * - null: Non-job-group task (counts for status)
+ * - true: Primary task in job group (counts for status)
+ * - false: Auxiliary task in job group (does not count for status)
+ *
+ * @param {Array} tasks - Array of task objects with status and is_primary_in_job_group fields
+ * @returns {string} - The computed job group status
+ */
+export function computeJobGroupStatus(tasks) {
+  if (!tasks || tasks.length === 0) {
+    return null;
+  }
+
+  // Filter to only primary tasks for status determination.
+  // is_primary_in_job_group: true/false for job groups, null for non-groups.
+  // For non-job-groups (null), all tasks count for status.
+  // For job groups, only tasks with is_primary_in_job_group=true count.
+  const primaryTasks = tasks.filter(
+    (t) =>
+      t.is_primary_in_job_group === null ||
+      t.is_primary_in_job_group === undefined ||
+      t.is_primary_in_job_group === true
+  );
+
+  // Use primary tasks for status; fall back to all tasks if none match
+  const tasksForStatus = primaryTasks.length > 0 ? primaryTasks : tasks;
+
+  // Return the first non-SUCCEEDED status, or SUCCEEDED if all succeeded
+  for (const task of tasksForStatus) {
+    if (task.status !== 'SUCCEEDED') {
+      return task.status;
+    }
+  }
+  return 'SUCCEEDED';
+}
 
 export async function getManagedJobs(options = {}) {
   try {
@@ -73,8 +144,18 @@ export async function getManagedJobs(options = {}) {
     }
 
     const response = await apiClient.post(`/jobs/queue/v2`, body);
+    if (!response.ok) {
+      const msg = `Failed to get managed jobs with status ${response.status}`;
+      throw new Error(msg);
+    }
     const id = response.headers.get('X-Skypilot-Request-ID');
+    // Handle empty request ID
+    if (!id) {
+      const msg = 'No request ID received from server for managed jobs';
+      throw new Error(msg);
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
+    let errorMessage = fetchedData.statusText;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -84,21 +165,26 @@ export async function getManagedJobs(options = {}) {
             // Handle specific error types
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { jobs: [], total: 0, controllerStopped: true };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
             }
           } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
           }
         }
       } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
+        console.error('Error parsing response JSON:', parseError);
+        errorMessage = String(parseError);
       }
-      // For non-CLUSTER_NOT_UP 500 errors, signal cache to skip update
-      return {
-        __skipCache: true,
-        jobs: [],
-        total: 0,
-        controllerStopped: false,
-      };
+    }
+    // Handle all error status codes (4xx, 5xx, etc.)
+    if (!fetchedData.ok) {
+      const msg = `API request to get managed jobs result failed with status ${fetchedData.status}, error: ${errorMessage}`;
+      throw new Error(msg);
     }
     // print out the response for debugging
     const data = await fetchedData.json();
@@ -149,11 +235,14 @@ export async function getManagedJobs(options = {}) {
         cloud = job.cloud || '';
         cluster_resources = job.cluster_resources;
         region = job.region || '';
+        if (region === '-') {
+          region = '';
+        }
 
         if (cloud) {
           infra = cloud;
           if (region) {
-            infra += `/${region}`;
+            infra += ` (${region})`;
           }
         }
 
@@ -197,15 +286,30 @@ export async function getManagedJobs(options = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
+        cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
+        accelerators: job.accelerators, // Include accelerators field
+        labels: job.labels || {}, // Include labels field
+        // JobGroup fields
+        is_job_group: job.is_job_group,
+        execution: job.execution,
+        is_primary_in_job_group: job.is_primary_in_job_group,
       };
     });
 
+    // Apply plugin data enhancements
+    // Pass raw backend data so enhancements can extract fields directly
+    const enhancedJobs = await applyEnhancements(jobData, 'jobs', {
+      dashboardCache,
+      rawData: managedJobs, // Raw backend response for field extraction
+    });
+
     return {
-      jobs: jobData,
+      jobs: enhancedJobs,
       total,
       totalNoFilter,
       controllerStopped: false,
@@ -214,14 +318,7 @@ export async function getManagedJobs(options = {}) {
   } catch (error) {
     console.error('Error fetching managed job data:', error);
     // Signal to the cache to not overwrite previously cached data
-    return {
-      __skipCache: true,
-      jobs: [],
-      total: 0,
-      totalNoFilter: 0,
-      controllerStopped: false,
-      statusCounts: {},
-    };
+    throw error;
   }
 }
 
@@ -300,8 +397,7 @@ export async function getManagedJobsWithClientPagination(options) {
       'Error fetching managed job data with client pagination:',
       error
     );
-    // Signal to the cache to not overwrite previously cached data
-    return { __skipCache: true, jobs: [], controllerStopped: false, total: 0 };
+    throw error;
   }
 }
 
@@ -310,9 +406,17 @@ export async function getPoolStatus() {
     const response = await apiClient.post(`/jobs/pool_status`, {
       pool_names: null, // null means get all pools
     });
+    if (!response.ok) {
+      const msg = `Initial API request to get pool status failed with status ${response.status}`;
+      throw new Error(msg);
+    }
     const id = response.headers.get('X-Skypilot-Request-ID');
+    if (!id) {
+      const msg = 'No request ID received from server for getting pool status';
+      throw new Error(msg);
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-
+    let errorMessage = fetchedData.statusText;
     if (fetchedData.status === 500) {
       try {
         const data = await fetchedData.json();
@@ -321,15 +425,26 @@ export async function getPoolStatus() {
             const error = JSON.parse(data.detail.error);
             if (error.type && error.type === CLUSTER_NOT_UP_ERROR) {
               return { pools: [], controllerStopped: true };
+            } else {
+              errorMessage = error.message || String(data.detail.error);
             }
           } catch (jsonError) {
-            console.error('Failed to parse error JSON:', jsonError);
+            console.error(
+              'Error parsing JSON from data.detail.error:',
+              jsonError
+            );
+            errorMessage = String(data.detail.error);
           }
         }
       } catch (dataError) {
-        console.error('Failed to parse response JSON:', dataError);
+        console.error('Error parsing response JSON:', dataError);
+        errorMessage = String(dataError);
       }
-      throw new Error('Server error');
+    }
+
+    if (!fetchedData.ok) {
+      const msg = `API request to get pool status result failed with status ${fetchedData.status}, error: ${errorMessage}`;
+      throw new Error(msg);
     }
 
     // Parse the pools data from the response
@@ -394,6 +509,7 @@ export async function getPoolStatus() {
 }
 
 // Hook for individual job details that reuses the main jobs cache
+// Returns all tasks for a given job_id (supports multi-task jobs)
 export function useSingleManagedJob(jobId, refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
@@ -407,19 +523,19 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
       try {
         setLoadingJobData(true);
 
-        // Always get all jobs data (cache handles freshness automatically)
+        // Fetch the specific job by ID with all fields for complete data
         const allJobsData = await dashboardCache.get(getManagedJobs, [
           { allUsers: true, allFields: true, jobIDs: [jobId] },
         ]);
 
-        // Filter for the specific job client-side
-        const job = allJobsData?.jobs?.find(
-          (j) => String(j.id) === String(jobId)
-        );
+        // Filter for ALL tasks matching this job_id (supports multi-task jobs)
+        const matchingJobs =
+          allJobsData?.jobs?.filter((j) => String(j.id) === String(jobId)) ||
+          [];
 
-        if (job) {
+        if (matchingJobs.length > 0) {
           setJobData({
-            jobs: [job],
+            jobs: matchingJobs,
             controllerStopped: allJobsData.controllerStopped || false,
           });
         } else {
@@ -445,6 +561,7 @@ export function useSingleManagedJob(jobId, refreshTrigger = 0) {
 
 export async function streamManagedJobLogs({
   jobId,
+  task = null,
   controller = false,
   signal,
   onNewLog,
@@ -476,8 +593,6 @@ export async function streamManagedJobLogs({
   };
 
   const timeoutPromise = createTimeoutPromise();
-  const baseUrl = window.location.origin;
-  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
 
   // Create the fetch promise
   const fetchPromise = (async () => {
@@ -487,17 +602,15 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
         tail: DEFAULT_TAIL_LINES,
+        task: task,
       };
 
-      const response = await fetch(`${fullEndpoint}/jobs/logs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-        // Only use the signal if it's provided
-        ...(signal ? { signal } : {}),
-      });
+      const response = await apiClient.fetchImmediate(
+        '/jobs/logs',
+        requestBody,
+        'POST',
+        { signal }
+      );
 
       // Stream the logs
       const reader = response.body.getReader();
@@ -574,7 +687,12 @@ export async function handleJobAction(action, jobId, cluster) {
       logStarter = 'Restarting';
       logMiddle = 'restarted';
       apiPath = 'jobs/queue/v2';
-      requestBody = { all_users: true, refresh: true };
+      requestBody = {
+        all_users: true,
+        refresh: true,
+        skip_finished: true,
+        fields: ['status'],
+      };
       jobId = 'controller';
       break;
     default:
@@ -584,22 +702,36 @@ export async function handleJobAction(action, jobId, cluster) {
   // Show initial notification
   showToast(`${logStarter} job ${jobId}...`, 'info');
 
-  const baseUrl = window.location.origin;
-  const fullEndpoint = `${baseUrl}${ENDPOINT}`;
-
   try {
     try {
-      const response = await fetch(`${fullEndpoint}/${apiPath}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      const response = await apiClient.fetchImmediate(
+        `/${apiPath}`,
+        requestBody
+      );
+      if (!response.ok) {
+        console.error(
+          `Initial API request ${apiPath} failed with status ${response.status}`
+        );
+        showToast(
+          `${logStarter} job ${jobId} failed with status ${response.status}.`,
+          'error'
+        );
+        return;
+      }
 
       const id = response.headers.get('X-Skypilot-Request-ID');
-      const finalResponse = await fetch(
-        `${fullEndpoint}/api/get?request_id=${id}`
+      if (!id) {
+        console.error(`No request ID received from server for ${apiPath}`);
+        showToast(
+          `${logStarter} job ${jobId} failed with no request ID.`,
+          'error'
+        );
+        return;
+      }
+      const finalResponse = await apiClient.fetchImmediate(
+        `/api/get?request_id=${id}`,
+        undefined,
+        'GET'
       );
 
       // Check the status code of the final response
@@ -702,12 +834,8 @@ export async function downloadManagedJobLogs({
     }
 
     // Step 2: request the zip and trigger browser download
-    const baseUrl = window.location.origin;
-    const fullUrl = `${baseUrl}${ENDPOINT}/download`;
-    const resp = await fetch(`${fullUrl}?relative=items`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ folder_paths: folderPaths }),
+    const resp = await apiClient.fetchImmediate('/download?relative=items', {
+      folder_paths: folderPaths,
     });
     if (!resp.ok) {
       const text = await resp.text();

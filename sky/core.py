@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
+import shlex
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import colorama
 
@@ -20,11 +21,13 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.backends import task_codegen
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.schemas.api import responses
+from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -84,8 +87,18 @@ def optimize(
     # but we do not apply the admin policy there. We should apply the admin
     # policy in the optimizer, but that will require some refactoring.
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, request_options=request_options) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.OPTIMIZE,
+            request_options=request_options) as dag:
         dag.resolve_and_validate_volumes()
+        # Use job group optimizer for job groups to properly handle
+        # co-location constraints and show the combined optimizer table
+        if dag.is_job_group():
+            return optimizer.Optimizer.optimize_job_group(
+                dag=dag,
+                minimize=minimize,
+                blocked_resources=blocked_resources,
+                quiet=quiet)
         return optimizer.Optimizer.optimize(dag=dag,
                                             minimize=minimize,
                                             blocked_resources=blocked_resources,
@@ -99,6 +112,7 @@ def status(
     all_users: bool = False,
     include_credentials: bool = False,
     summary_response: bool = False,
+    include_handle: bool = True,
 ) -> List[responses.StatusResponse]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets cluster statuses.
@@ -179,7 +193,8 @@ def status(
         cluster_names=cluster_names,
         all_users=all_users,
         include_credentials=include_credentials,
-        summary_response=summary_response)
+        summary_response=summary_response,
+        include_handle=include_handle)
 
     status_responses = []
     for cluster in clusters:
@@ -272,6 +287,74 @@ all_clusters, unmanaged_clusters, all_jobs, context
     ]
     all_jobs = [responses.ManagedJobRecord(**job) for job in all_jobs]
     return all_clusters, unmanaged_clusters, all_jobs, context
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: Literal[False] = ...,
+    limit: Optional[int] = ...,
+) -> List[str]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: Literal[True] = ...,
+    limit: Optional[int] = ...,
+) -> List[Dict[str, Union[str, int]]]:
+    ...
+
+
+@typing.overload
+def get_cluster_events(
+    cluster_name: Optional[str] = ...,
+    cluster_hash: Optional[str] = ...,
+    event_type: str = ...,
+    include_timestamps: bool = ...,
+    limit: Optional[int] = ...,
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    ...
+
+
+def get_cluster_events(
+    cluster_name: Optional[str] = None,
+    cluster_hash: Optional[str] = None,
+    event_type: str = 'STATUS_CHANGE',
+    include_timestamps: bool = False,
+    limit: Optional[int] = None
+) -> Union[List[str], List[Dict[str, Union[str, int]]]]:
+    """Get events for a cluster.
+
+    Args:
+        cluster_name: Name of the cluster. Cannot be specified if cluster_hash
+            is specified.
+        cluster_hash: Hash of the cluster. Cannot be specified if cluster_name
+            is specified.
+        event_type: Type of events to retrieve ('STATUS_CHANGE' or 'DEBUG').
+        include_timestamps: If True, returns list of dicts with 'reason' and
+            'transitioned_at' fields. If False, returns list of reason strings.
+        limit: If specified, returns at most this many events (most recent).
+            If None, returns all events.
+
+    Returns:
+        If include_timestamps is False: List of event reason strings.
+        If include_timestamps is True: List of dicts with 'reason' and
+            'transitioned_at' (unix timestamp) fields.
+        Events are ordered from oldest to newest.
+    """
+    event_type_enum = global_user_state.ClusterEventType(event_type)
+    return global_user_state.get_cluster_events(
+        cluster_name=cluster_name,
+        cluster_hash=cluster_hash,
+        event_type=event_type_enum,
+        include_timestamps=include_timestamps,
+        limit=limit)
 
 
 def endpoints(cluster: str,
@@ -389,56 +472,54 @@ def cost_report(
         cluster_reports = subprocess_utils.run_in_parallel(
             _process_cluster_report, cluster_reports)
 
-    def _update_record_with_resources(record: Dict[str, Any]) -> None:
-        """Add resource fields for dashboard compatibility."""
-        if record is None:
-            return
-        resources = record.get('resources')
-        if resources is None:
-            return
-        if not dashboard_summary_response:
-            fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
-        else:
-            fields = ['cloud']
-        for field in fields:
-            try:
-                record[field] = str(getattr(resources, field))
-            except Exception as e:  # pylint: disable=broad-except
-                # Ok to skip the fields as this is just for display
-                # purposes.
-                logger.debug(f'Failed to get resources.{field} for cluster '
-                             f'{record["name"]}: {str(e)}')
-                record[field] = None
-
-        # Add resources_str and resources_str_full for dashboard
-        # compatibility
-        num_nodes = record.get('num_nodes', 1)
-        try:
-            resource_str_simple = resources_utils.format_resource(resources,
-                                                                  simplify=True)
-            record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
-            if not abbreviate_response:
-                resource_str_full = resources_utils.format_resource(
-                    resources, simplify=False)
-                record[
-                    'resources_str_full'] = f'{num_nodes}x{resource_str_full}'
-        except Exception as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to get resources_str for cluster '
-                         f'{record["name"]}: {str(e)}')
-            for field in fields:
-                record[field] = None
-            record['resources_str'] = '-'
-            if not abbreviate_response:
-                record['resources_str_full'] = '-'
-
     for report in cluster_reports:
-        _update_record_with_resources(report)
+        _update_record_with_resources(report, dashboard_summary_response)
         if dashboard_summary_response:
             report.pop('usage_intervals')
             report.pop('user_hash')
             report.pop('resources')
 
     return cluster_reports
+
+
+def _update_record_with_resources(
+        record: Dict[str, Any],
+        dashboard_summary_response: bool = False) -> None:
+    """Add resource fields for dashboard compatibility."""
+    if record is None:
+        return
+    resources = record.get('resources')
+    if resources is None:
+        return
+    if not dashboard_summary_response:
+        fields = ['cloud', 'region', 'cpus', 'memory', 'accelerators']
+    else:
+        fields = ['cloud']
+    for field in fields:
+        try:
+            record[field] = str(getattr(resources, field))
+        except Exception as e:  # pylint: disable=broad-except
+            # Ok to skip the fields as this is just for display
+            # purposes.
+            logger.debug(f'Failed to get resources.{field} for cluster '
+                         f'{record["name"]}: {str(e)}')
+            record[field] = None
+
+    # Add resources_str and resources_str_full for dashboard
+    # compatibility
+    num_nodes = record.get('num_nodes', 1)
+    try:
+        resource_str_simple, resource_str_full = (
+            resources_utils.format_resource(resources, simplified_only=False))
+        record['resources_str'] = f'{num_nodes}x{resource_str_simple}'
+        record['resources_str_full'] = f'{num_nodes}x{resource_str_full}'
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to get resources_str for cluster '
+                     f'{record["name"]}: {str(e)}')
+        for field in fields:
+            record[field] = None
+        record['resources_str'] = '-'
+        record['resources_str_full'] = '-'
 
 
 def _start(
@@ -469,6 +550,8 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         if down or idle_minutes_to_autostop:
@@ -497,6 +580,35 @@ def _start(
                 controller_autostop_config.enabled):
             idle_minutes_to_autostop = controller_autostop_config.idle_minutes
             down = controller_autostop_config.down
+            wait_for = controller_autostop_config.wait_for
+            hook = controller_autostop_config.hook
+            hook_timeout = controller_autostop_config.hook_timeout
+    else:
+        # For non-controller clusters, restore autostop configuration from
+        # database if not explicitly provided.
+        if idle_minutes_to_autostop is None:
+            cluster_record = global_user_state.get_cluster_from_name(
+                cluster_name, include_user_info=False, summary_response=True)
+            if cluster_record is not None:
+                stored_autostop = cluster_record.get('autostop', -1)
+                stored_to_down = cluster_record.get('to_down', False)
+                # Restore autostop if it was previously set (autostop > 0)
+                if stored_autostop > 0:
+                    logger.warning(f'Restoring cluster {cluster_name!r} with '
+                                   f'autostop set to {stored_autostop} minutes'
+                                   f'. To turn off autostop, run: '
+                                   f'`sky autostop {cluster_name} --cancel`')
+                    idle_minutes_to_autostop = stored_autostop
+                    # Only restore 'down' if it was explicitly set and we're
+                    # restoring autostop
+                    if stored_to_down:
+                        down = stored_to_down
+                elif stored_autostop == 0:
+                    logger.warning(
+                        f'Autostop was previously set to 0 minutes '
+                        f'for cluster {cluster_name!r} so it will '
+                        'not be restored. To turn on autostop, run: '
+                        f'`sky autostop {cluster_name} -i <minutes>`')
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
@@ -516,7 +628,15 @@ def _start(
                              all_file_mounts=None,
                              storage_mounts=storage_mounts)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop, wait_for, down)
+        # For controller clusters, hook comes from controller_autostop_config.
+        # For regular clusters, hook is None so it will be inherited from the
+        # existing config on the remote cluster.
+        backend.set_autostop(handle,
+                             idle_minutes_to_autostop,
+                             wait_for,
+                             down,
+                             hook=hook,
+                             hook_timeout=hook_timeout)
     return handle
 
 
@@ -598,8 +718,84 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
     return message
 
 
+def _graceful_job_cancel(handle: backends.ResourceHandle,
+                         backend: backends.Backend,
+                         cluster_name: str,
+                         timeout: Optional[int] = None,
+                         terminate: bool = True) -> None:
+    """Stop jobs and flush rclone uploads on all nodes in parallel."""
+    op = 'shutdown' if terminate else 'stop'
+    if (not isinstance(handle, backends.CloudVmRayResourceHandle) or
+            not isinstance(backend, backends.CloudVmRayBackend)):
+        logger.warning(f'Graceful {op} only available for '
+                       'CloudVmRayBackend. Skipping...')
+        return
+
+    # Kill all running jobs on the cluster
+    logger.info(f'Graceful {op} enabled. Terminating user jobs on '
+                f'{cluster_name}...')
+    try:
+        backend.cancel_jobs(handle, jobs=None, cancel_all=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to cancel jobs: {e}')
+
+    # Flush rclone uploads on all nodes in parallel
+    logger.info('Flushing MOUNT_CACHED uploads on all nodes of '
+                f'{cluster_name!r}...')
+
+    # Get the flush script
+    flush_script = task_codegen.TaskCodeGen.get_rclone_flush_script()
+
+    # Wrap with timeout if specified
+    if timeout:
+        flush_script = f'timeout {timeout} bash -c {shlex.quote(flush_script)}'
+
+    runners = handle.get_command_runners()
+    node_args = [(i, runner) for i, runner in enumerate(runners)]
+    errors = []
+    logger.debug(f'Waiting for uploads on {len(runners)} node(s)...')
+
+    def run_flush_on_node(args):
+        """Run flush script on a single node."""
+        node_id, runner = args
+        try:
+            returncode, stdout, stderr = runner.run(
+                flush_script,
+                stream_logs=False,
+                require_outputs=True,
+            )
+            return (node_id, returncode, stdout, stderr)
+        except Exception as e:  # pylint: disable=broad-except
+            return (node_id, -1, '', str(e))
+
+    parallel_results = subprocess_utils.run_in_parallel(
+        run_flush_on_node,
+        node_args,
+        num_threads=len(runners),
+    )
+
+    for node_id, returncode, _, stderr in parallel_results:
+        if returncode == 0:
+            logger.debug(f'Node {node_id}: uploads flushed successfully')
+        elif returncode == 124:  # timeout exit code
+            logger.warning(f'Node {node_id}: flush timed out after {timeout}s')
+            errors.append(f'Node {node_id}: timeout')
+        else:
+            logger.warning(
+                f'Node {node_id}: flush failed (rc={returncode}): {stderr}')
+            errors.append(f'Node {node_id}: {stderr}')
+
+    if errors:
+        logger.warning(f'Some nodes had flush errors: {errors}')
+    else:
+        logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
+
+
 @usage_lib.entrypoint
-def down(cluster_name: str, purge: bool = False) -> None:
+def down(cluster_name: str,
+         purge: bool = False,
+         graceful: bool = False,
+         graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tears down a cluster.
 
@@ -615,6 +811,10 @@ def down(cluster_name: str, purge: bool = False) -> None:
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
@@ -627,14 +827,24 @@ def down(cluster_name: str, purge: bool = False) -> None:
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    if graceful:
+        _graceful_job_cancel(handle,
+                             backend,
+                             cluster_name,
+                             graceful_timeout,
+                             terminate=True)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
     backend.teardown(handle, terminate=True, purge=purge)
 
 
 @usage_lib.entrypoint
-def stop(cluster_name: str, purge: bool = False) -> None:
+def stop(cluster_name: str,
+         purge: bool = False,
+         graceful: bool = False,
+         graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stops a cluster.
 
@@ -653,6 +863,10 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             certain manual troubleshooting scenarios; with it set, it is the
             user's responsibility to ensure there are no leaked instances and
             related resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
@@ -694,17 +908,26 @@ def stop(cluster_name: str, purge: bool = False) -> None:
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {cluster_name}') from e
 
+    if graceful:
+        _graceful_job_cancel(handle,
+                             backend,
+                             cluster_name,
+                             graceful_timeout,
+                             terminate=False)
+
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)
 
 
 @usage_lib.entrypoint
 def autostop(
-        cluster_name: str,
-        idle_minutes: int,
-        wait_for: Optional[autostop_lib.AutostopWaitFor] = autostop_lib.
-    DEFAULT_AUTOSTOP_WAIT_FOR,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes: int,
+    wait_for: Optional[
+        autostop_lib.AutostopWaitFor] = autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    hook: Optional[str] = None,
+    hook_timeout: Optional[int] = None,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedules an autostop/autodown for a cluster.
@@ -738,6 +961,12 @@ def autostop(
           to a negative number cancels any autostop/autodown setting.
         down: if true, use autodown (tear down the cluster; non-restartable),
           rather than autostop (restartable).
+        hook: optional script to execute on the remote cluster before autostop.
+          The script runs before the cluster is stopped or torn down. If the
+          hook fails, autostop will still proceed but a warning will be logged.
+        hook_timeout: timeout in seconds for hook execution. If None, uses
+          DEFAULT_AUTOSTOP_HOOK_TIMEOUT_SECONDS (3600 = 1 hour). The hook will
+          be terminated if it exceeds this timeout.
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
@@ -793,7 +1022,12 @@ def autostop(
                 f'see reason above.') from e
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes, wait_for, down)
+    backend.set_autostop(handle,
+                         idle_minutes,
+                         wait_for,
+                         down,
+                         hook=hook,
+                         hook_timeout=hook_timeout)
 
 
 # ==================
@@ -1036,6 +1270,43 @@ def tail_logs(cluster_name: str,
 
 
 @usage_lib.entrypoint
+def tail_autostop_logs(cluster_name: str,
+                       follow: bool = True,
+                       tail: int = 0) -> int:
+    """Tails the autostop hook logs of a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        follow: whether to follow the logs.
+        tail: number of lines to display from the end of the log file.
+
+    Raises:
+        ValueError: if arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
+
+    Returns:
+        Return code 0 on success, non-zero on failure.
+    """
+    # Check the status of the cluster.
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='tailing autostop logs',
+    )
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    returnval = backend.tail_autostop_logs(handle, follow=follow, tail=tail)
+    return returnval
+
+
+@usage_lib.entrypoint
 def download_logs(
         cluster_name: str,
         job_ids: Optional[List[str]],
@@ -1184,6 +1455,7 @@ def enabled_clouds(workspace: Optional[str] = None,
             return [cloud.canonical_name() for cloud in cached_clouds]
         enabled_ssh_infras = []
         enabled_k8s_infras = []
+        enabled_slurm_infras = []
         enabled_cloud_infras = []
         for cloud in cached_clouds:
             cloud_infra = cloud.expand_infras()
@@ -1191,10 +1463,16 @@ def enabled_clouds(workspace: Optional[str] = None,
                 enabled_ssh_infras.extend(cloud_infra)
             elif isinstance(cloud, clouds.Kubernetes):
                 enabled_k8s_infras.extend(cloud_infra)
+            elif isinstance(cloud, clouds.Slurm):
+                enabled_slurm_infras.extend(cloud_infra)
             else:
                 enabled_cloud_infras.extend(cloud_infra)
+        # We do not sort slurm infras alphabetically because the
+        # default partition should appear first.
+        # Ordering of slurm infras is enforced in Slurm implementation.
         all_infras = sorted(enabled_ssh_infras) + sorted(
-            enabled_k8s_infras) + sorted(enabled_cloud_infras)
+            enabled_k8s_infras) + enabled_slurm_infras + sorted(
+                enabled_cloud_infras)
         return all_infras
 
 
@@ -1205,7 +1483,14 @@ def realtime_kubernetes_gpu_availability(
     quantity_filter: Optional[int] = None,
     is_ssh: Optional[bool] = None
 ) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    """Gets the real-time Kubernetes GPU availability.
 
+    Returns:
+        A list of tuples, where each tuple contains:
+        - context (str): The Kubernetes context.
+        - availability_list (List[models.RealtimeGpuAvailability]): A list
+            of RealtimeGpuAvailability objects for that context.
+    """
     if context is None:
         # Include contexts from both Kubernetes and SSH clouds
         kubernetes_contexts = clouds.Kubernetes.existing_allowed_contexts()
@@ -1231,11 +1516,13 @@ def realtime_kubernetes_gpu_availability(
             region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be the same.')
+
+        all_keys = set(counts.keys()) | set(capacity.keys()) | set(
+            available.keys())
+        counts = {key: counts.get(key, []) for key in all_keys}
+        capacity = {key: capacity.get(key, 0) for key in all_keys}
+        available = {key: available.get(key, 0) for key in all_keys}
+
         realtime_gpu_availability_list: List[
             models.RealtimeGpuAvailability] = []
 
@@ -1287,89 +1574,133 @@ def realtime_kubernetes_gpu_availability(
     return availability_lists
 
 
+def realtime_slurm_gpu_availability(
+        slurm_cluster_name: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+        **kwargs) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    """Gets Slurm real-time GPU availability grouped by partition.
+
+    This function calls the Slurm backend to fetch GPU info.
+
+    Args:
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+        env_vars: Environment variables (may be needed for backend).
+        kwargs: Additional keyword arguments.
+
+    Returns:
+        A list of tuples, where each tuple contains:
+        - partition_name (str): The name of the Slurm partition.
+        - availability_list (List[models.RealtimeGpuAvailability]): A list
+            of RealtimeGpuAvailability objects for that partition.
+        Example structure:
+        [
+            ('gpu_partition_1', [
+                RealtimeGpuAvailability(gpu='V100', counts=[4, 8],
+                                        capacity=16, available=10),
+                RealtimeGpuAvailability(gpu='A100', counts=[8],
+                                        capacity=8, available=0),
+            ]),
+            ('gpu_partition_2', [
+                RealtimeGpuAvailability(gpu='V100', counts=[4],
+                                        capacity=4, available=4),
+            ])
+        ]
+
+    Raises:
+        ValueError: If Slurm is not configured or no matching GPUs are found.
+        exceptions.NotSupportedError: If Slurm is not enabled or configured.
+    """
+    del env_vars, kwargs  # Currently unused
+
+    if slurm_cluster_name is None:
+        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
+    else:
+        slurm_cluster_names = [slurm_cluster_name]
+
+    # Optional: Check if Slurm is enabled first
+    # enabled = global_user_state.get_enabled_clouds(
+    #     capability=sky_cloud.CloudCapability.COMPUTE)
+    # if not clouds.Slurm() in enabled:
+    #    raise exceptions.NotSupportedError(
+    #       "Slurm is not enabled. Run 'sky check' to enable it.")
+
+    def realtime_slurm_gpu_availability_single(
+            slurm_cluster_name: str) -> List[models.RealtimeGpuAvailability]:
+        try:
+            # This function now returns aggregated data per GPU type:
+            # Tuple[Dict[str, List[InstanceTypeInfo]], Dict[str, int],
+            # Dict[str, int]]
+            # (qtys_map, total_capacity, total_available)
+            accelerator_counts, total_capacity, total_available = (
+                catalog.list_accelerator_realtime(
+                    gpus_only=True,  # Ensure we only query for GPUs
+                    name_filter=name_filter,
+                    # Pass None for region_filter here; filtering happens
+                    # inside if needed, but we want all partitions returned
+                    # for grouping.
+                    region_filter=slurm_cluster_name,
+                    quantity_filter=quantity_filter,
+                    clouds='slurm',
+                    case_sensitive=False,
+                ))
+        except exceptions.NotSupportedError as e:
+            logger.error(f'Failed to query Slurm GPU availability: {e}')
+            raise
+        except ValueError as e:
+            # Re-raise ValueError if no GPUs are found matching the filters
+            logger.error(f'Error querying Slurm GPU availability: {e}')
+            raise
+        except Exception as e:
+            logger.error(
+                'Error querying Slurm GPU availability: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            raise ValueError(
+                f'Error querying Slurm GPU availability: {e}') from e
+
+        # --- Format the output ---
+        realtime_gpu_availability_list: List[
+            models.RealtimeGpuAvailability] = []
+        for gpu_type, _ in sorted(accelerator_counts.items()):
+            realtime_gpu_availability_list.append(
+                models.RealtimeGpuAvailability(
+                    gpu_type,
+                    accelerator_counts.pop(gpu_type),
+                    total_capacity[gpu_type],
+                    total_available[gpu_type],
+                ))
+        return realtime_gpu_availability_list
+
+    parallel_queried = subprocess_utils.run_in_parallel(
+        realtime_slurm_gpu_availability_single, slurm_cluster_names)
+    availability_lists: List[Tuple[str,
+                                   List[models.RealtimeGpuAvailability]]] = []
+    for slurm_cluster_name, queried in zip(slurm_cluster_names,
+                                           parallel_queried):
+        if len(queried) == 0:
+            logger.debug(f'No gpus found in Slurm cluster {slurm_cluster_name}')
+            continue
+        availability_lists.append((slurm_cluster_name, queried))
+    return availability_lists
+
+
 # =================
 # = Local Cluster =
 # =================
 @usage_lib.entrypoint
 def local_up(gpus: bool,
-             ips: Optional[List[str]],
-             ssh_user: Optional[str],
-             ssh_key: Optional[str],
-             cleanup: bool,
-             context_name: Optional[str] = None,
-             password: Optional[str] = None,
              name: Optional[str] = None,
              port_start: Optional[int] = None) -> None:
-    """Creates a local or remote cluster."""
-
-    def _validate_args(ips, ssh_user, ssh_key, cleanup):
-        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
-        # all must be specified
-        if bool(ips) or bool(ssh_user) or bool(ssh_key):
-            if not (ips and ssh_user and ssh_key):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'All ips, ssh_user, and ssh_key must be specified '
-                        'together.')
-
-        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
-        # are all provided
-        if cleanup and not (ips and ssh_user and ssh_key):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'cleanup can only be used with ips, ssh_user and ssh_key.')
-
-    _validate_args(ips, ssh_user, ssh_key, cleanup)
-
-    # If remote deployment arguments are specified, run remote up script
-    if ips:
-        assert ssh_user is not None and ssh_key is not None
-        kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name,
-                                                      password)
-    else:
-        # Run local deployment (kind) if no remote args are specified
-        kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
+    """Creates a local cluster."""
+    kubernetes_deploy_utils.deploy_local_cluster(name, port_start, gpus)
 
 
 def local_down(name: Optional[str] = None) -> None:
     """Tears down the Kubernetes cluster started by local_up."""
     kubernetes_deploy_utils.teardown_local_cluster(name)
-
-
-@usage_lib.entrypoint
-def ssh_up(infra: Optional[str] = None, cleanup: bool = False) -> None:
-    """Deploys or tears down a Kubernetes cluster on SSH targets.
-
-    Args:
-        infra: Name of the cluster configuration in ssh_node_pools.yaml.
-            If None, the first cluster in the file is used.
-        cleanup: If True, clean up the cluster instead of deploying.
-    """
-    kubernetes_deploy_utils.deploy_ssh_cluster(
-        cleanup=cleanup,
-        infra=infra,
-    )
-
-
-@usage_lib.entrypoint
-def ssh_status(context_name: str) -> Tuple[bool, str]:
-    """Check the status of an SSH Node Pool context.
-
-    Args:
-        context_name: The SSH context name (e.g., 'ssh-my-cluster')
-
-    Returns:
-        Tuple[bool, str]: (is_ready, reason)
-            - is_ready: True if the SSH Node Pool is ready, False otherwise
-            - reason: Explanation of the status
-    """
-    try:
-        is_ready, reason = clouds.SSH.check_single_context(context_name)
-        return is_ready, reason
-    except Exception as e:  # pylint: disable=broad-except
-        return False, ('Failed to check SSH context: '
-                       f'{common_utils.format_exception(e)}')
 
 
 def get_all_contexts() -> List[str]:

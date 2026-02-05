@@ -1,4 +1,5 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
+import asyncio
 import contextlib
 import functools
 import os
@@ -14,7 +15,6 @@ import prometheus_client as prom
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import context_utils
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -142,6 +142,34 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'sky_apiserver_request_rss_incr_bytes',
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
+
+SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
+    'sky_apiserver_websocket_ssh_latency_seconds',
+    ('Time taken for ssh message to go from client to API server and back'
+     'to the client. This does not include: latency to reach the pod, '
+     'overhead from sending through the k8s port-forward tunnel, or '
+     'ssh server lag on the destination pod.'),
+    ['pid'],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
+)
+
+SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
+    'sky_apiserver_long_executors',
+    'Total number of long-running request executors in the API server',
+)
+
+SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
+    'sky_apiserver_short_executors',
+    'Total number of short-running request executors in the API server',
+)
 
 
 @contextlib.contextmanager
@@ -328,7 +356,7 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     try:
         # Start port forward
-        port_forward_process, local_port = await context_utils.to_thread(
+        port_forward_process, local_port = await asyncio.to_thread(
             start_svc_port_forward, context, namespace, service, service_port)
 
         # Build endpoint URL
@@ -353,8 +381,7 @@ async def send_metrics_request_with_port_forward(
     finally:
         # Always clean up port forward
         if port_forward_process:
-            await context_utils.to_thread(stop_svc_port_forward,
-                                          port_forward_process)
+            await asyncio.to_thread(stop_svc_port_forward, port_forward_process)
 
 
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:

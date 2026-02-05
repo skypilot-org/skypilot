@@ -15,37 +15,27 @@ import starlette.middleware.base
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.jobs import utils as managed_job_utils
-from sky.server.auth import authn
+from sky.server import constants as server_constants
+from sky.server import middleware_utils
 from sky.server.auth import loopback
 from sky.users import permission
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# We do not support setting these in config.yaml because:
-# 1. config.yaml can be updated dynamically, but auth middleware does not
-#    support hot reload yet.
-# 2. If we introduce hot reload for auth middleware, bad config might
-#    invalidate all authenticated sessions and thus cannot be rolled back
-#    by API users.
-# TODO(aylei): we should introduce server.yaml for static server admin config,
-# which is more structured than multiple environment variables and can be less
-# confusing to users.
-OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
-OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 
-
+@middleware_utils.websocket_aware
 class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle authentication by delegating to OAuth2 Proxy."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.enabled: bool = (os.getenv(OAUTH2_PROXY_ENABLED_ENV_VAR,
-                                        'false') == 'true')
+        self.enabled: bool = (os.getenv(
+            server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, 'false') == 'true')
         self.proxy_base: str = ''
         if self.enabled:
-            proxy_base = os.getenv(OAUTH2_PROXY_BASE_URL_ENV_VAR)
+            proxy_base = os.getenv(
+                server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR)
             if not proxy_base:
                 raise ValueError('OAuth2 Proxy is enabled but base_url is not '
                                  'set')
@@ -110,8 +100,7 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # Already authenticated
             return await call_next(request)
 
-        if managed_job_utils.is_consolidation_mode(
-        ) and loopback.is_loopback_request(request):
+        if loopback.is_loopback_request(request):
             return await call_next(request)
 
         async with aiohttp.ClientSession() as session:
@@ -126,13 +115,10 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def _authenticate(self, request: fastapi.Request, call_next,
                             session: aiohttp.ClientSession):
-        forwarded_headers = dict(request.headers)
+        forwarded_headers = {}
         auth_url = f'{self.proxy_base}/oauth2/auth'
         forwarded_headers['X-Forwarded-Uri'] = str(request.url).rstrip('/')
-        # Remove content-length and content-type headers and drop request body
-        # to reduce the auth overhead.
-        forwarded_headers.pop('content-length', None)
-        forwarded_headers.pop('content-type', None)
+        forwarded_headers['Host'] = request.url.hostname
         logger.debug(f'authenticate request: {auth_url}, '
                      f'headers: {forwarded_headers}')
 
@@ -162,8 +148,6 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     permission.permission_service.add_user_if_not_exists(
                         auth_user.id)
                 request.state.auth_user = auth_user
-                await authn.override_user_info_in_request_body(
-                    request, auth_user)
                 return await call_next(request)
             elif auth_response.status == http.HTTPStatus.UNAUTHORIZED:
                 # For /api/health, we should allow unauthenticated requests to
@@ -171,6 +155,13 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                 # TODO(aylei): remove this to an aggregated login middleware
                 # in favor of the unified authentication.
                 if request.url.path.startswith('/api/health'):
+                    request.state.anonymous_user = True
+                    return await call_next(request)
+
+                # Allow unauthenticated access to the polling auth endpoint.
+                # This endpoint is used by the CLI to poll for auth tokens
+                # during the login flow before authentication is complete.
+                if request.url.path == '/api/v1/auth/token':
                     request.state.anonymous_user = True
                     return await call_next(request)
 

@@ -1,0 +1,39 @@
+# Serve Kimi-K2-Thinking with SkyPilot and vLLM (Low Latency Mode).
+# This model supports deep thinking & tool orchestration with reasoning capabilities.
+#
+# Usage:
+#   sky launch kimi-k2-thinking.sky.yaml -c kimi-k2-thinking
+#   sky serve up kimi-k2-thinking.sky.yaml -n kimi-k2-thinking
+envs:
+  MODEL_NAME: moonshotai/Kimi-K2-Thinking
+
+resources:
+  image_id: docker:vllm/vllm-openai:nightly-f849ee739cdb3d82fce1660a6fd91806e8ae9bff
+  accelerators: H200:8
+  cpus: 100+
+  memory: 1000+
+  ports: 8081
+
+run: |
+  echo 'Starting vLLM API server for Kimi-K2-Thinking (Low Latency Mode)...'
+  
+  vllm serve $MODEL_NAME \
+    --port 8081 \
+    --tensor-parallel-size 8 \
+    --enable-auto-tool-choice \
+    --tool-call-parser kimi_k2 \
+    --reasoning-parser kimi_k2 \
+    --trust-remote-code
+
+service:
+  replicas: 1
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: What is 2+2?
+      max_tokens: 10
+

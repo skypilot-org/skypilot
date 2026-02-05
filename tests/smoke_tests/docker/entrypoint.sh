@@ -94,10 +94,10 @@ if [ ! -d "/skypilot" ]; then
 fi
 
 cd /skypilot
-uv pip uninstall skypilot
-uv pip install --prerelease=allow "azure-cli>=2.65.0"
-uv pip install -r requirements-dev.txt
-uv pip install -e ".[all]"
+uv pip uninstall --system skypilot
+uv pip install --system --prerelease=allow "azure-cli>=2.65.0"
+uv pip install --system -r requirements-dev.txt
+uv pip install --system -e ".[all]"
 sky api start
 sky check
 sky api stop

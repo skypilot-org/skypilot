@@ -28,6 +28,21 @@ class ClusterStatus(enum.Enum):
     STOPPED = 'STOPPED'
     """The cluster is stopped."""
 
+    AUTOSTOPPING = 'AUTOSTOPPING'
+    """The cluster is in the process of autostopping.
+
+    This state indicates that the autostop process has been triggered and
+    the cluster is executing pre-stop hooks and preparing to stop or tear down.
+    Check the 'to_down' field to determine if it's a stop or teardown operation.
+    """
+
+    PENDING = 'PENDING'
+    """The cluster is pending scheduling.
+
+    NOTE: This state is for display only and should not be used in state
+    machine logic without necessary considerations.
+    """
+
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
@@ -37,6 +52,8 @@ _STATUS_TO_COLOR = {
     ClusterStatus.INIT: colorama.Fore.BLUE,
     ClusterStatus.UP: colorama.Fore.GREEN,
     ClusterStatus.STOPPED: colorama.Fore.YELLOW,
+    ClusterStatus.AUTOSTOPPING: colorama.Fore.MAGENTA,
+    ClusterStatus.PENDING: colorama.Fore.CYAN,
 }
 
 
@@ -64,3 +81,6 @@ class VolumeStatus(enum.Enum):
 
     # Volume is being used
     IN_USE = 'IN_USE'
+
+    # Volume is not ready (e.g., PVC is pending, may eventually become ready)
+    NOT_READY = 'NOT_READY'

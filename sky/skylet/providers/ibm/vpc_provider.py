@@ -10,6 +10,7 @@ import textwrap
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict
 
 import requests
 
@@ -173,7 +174,7 @@ class IBMVPCProvider:
                 "a subnet"
             )
 
-        subnet_prototype = {}
+        subnet_prototype: Dict[str, Any] = {}
         subnet_prototype["zone"] = {"name": zone_name}
         subnet_prototype["ip_version"] = "ipv4"
         subnet_prototype["name"] = subnet_name
@@ -186,7 +187,7 @@ class IBMVPCProvider:
 
     def create_public_gateway(self, vpc_id, zone_name, subnet_data):
 
-        gateway_prototype = {}
+        gateway_prototype: Dict[str, Any] = {}
         gateway_prototype["vpc"] = {"id": vpc_id}
         gateway_prototype["zone"] = {"name": zone_name}
         gateway_prototype["name"] = f"{subnet_data['name']}-gw"
@@ -345,7 +346,7 @@ class IBMVPCProvider:
                     return True
                 tries -= 1
                 time.sleep(sleep_interval)
-            logger.error("Failed to delete instance within the alloted time\n")
+            logger.error("Failed to delete instance within the allotted time\n")
             return False
 
         for subnet_id in self.get_vpc_subnets(vpc_data, region, field="id"):
@@ -522,7 +523,7 @@ class ClusterCleaner:
             if e.code == 404:
                 print(("VPC doesn't exist."))
                 return None
-            else: raise 
+            else: raise
 
     def delete_subnets(vpc_data):
         def _poll_subnet_exists(subnet_id):
@@ -560,12 +561,12 @@ class ClusterCleaner:
                     deleting_resource = False
                 except ibm_cloud_sdk_core.ApiException as e:
                     if e.code == 404:
-                        print("gateway doesn't exist.") 
+                        print("gateway doesn't exist.")
                         deleting_resource = False
                     if e.code == 409:
                         print("gateway still in use.")
-                        # will retry until cloud functions timeout. 
-                        time.sleep(5) 
+                        # will retry until cloud functions timeout.
+                        time.sleep(5)
 
     def delete_vms(vpc_id):
         def _poll_vpc_contains_vms(vpc_id):
@@ -586,7 +587,7 @@ class ClusterCleaner:
             )
 
         def _del_instance(vm_data):
-            # first delete ips created by node_provider 
+            # first delete ips created by node_provider
             nic_id = vm_data["network_interfaces"][0]["id"]
             res = ibm_vpc_client.list_instance_network_interface_floating_ips(
                 vm_data["id"], nic_id
@@ -598,7 +599,7 @@ class ClusterCleaner:
                     ibm_vpc_client.delete_floating_ip(ip["id"])
             print(f"Deleting VM: {vm_data['id']}")
             ibm_vpc_client.delete_instance(id=vm_data["id"])
-            
+
         res = ibm_vpc_client.list_instances(vpc_id=vpc_id).get_result()
         num_instances = res["total_count"]
 
@@ -619,12 +620,12 @@ class ClusterCleaner:
                 deleting_resource = False
             except ibm_cloud_sdk_core.ApiException as e:
                 if e.code == 404:
-                    print("VPC doesn't exist.") 
+                    print("VPC doesn't exist.")
                     deleting_resource = False
                 if e.code == 409:
                     print("VPC still in use.")
-                    # will retry until cloud functions timeout. 
-                    time.sleep(5) 
+                    # will retry until cloud functions timeout.
+                    time.sleep(5)
 
     def delete_vpc(vpc_id):
         vpc_data = get_vpc_data(vpc_id)

@@ -43,12 +43,17 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
                 request.wait_for)
+            hook = request.hook if request.HasField('hook') else None
+            hook_timeout = (request.hook_timeout
+                            if request.HasField('hook_timeout') else None)
             autostop_lib.set_autostop(
                 idle_minutes=request.idle_minutes,
                 backend=request.backend,
                 wait_for=wait_for if wait_for is not None else
                 autostop_lib.DEFAULT_AUTOSTOP_WAIT_FOR,
-                down=request.down)
+                down=request.down,
+                hook=hook,
+                hook_timeout=hook_timeout)
             return autostopv1_pb2.SetAutostopResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
@@ -197,43 +202,51 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     f.write(request.codegen)
                 os.chmod(script_path, 0o755)
 
-            cd = f'cd {constants.SKY_REMOTE_WORKDIR}'
             job_submit_cmd = (
                 # JOB_CMD_IDENTIFIER is used for identifying the process
                 # retrieved with pid is the same driver process.
                 f'{job_lib.JOB_CMD_IDENTIFIER.format(job_id)} && '
-                f'{cd} && {constants.SKY_PYTHON_CMD} -u {script_path}'
+                f'{constants.SKY_PYTHON_CMD} -u {script_path}'
                 # Do not use &>, which is not POSIX and may not work.
                 # Note that the order of ">filename 2>&1" matters.
                 f' > {remote_log_path} 2>&1')
             job_lib.scheduler.queue(job_id, job_submit_cmd)
-
-            if request.HasField('managed_job'):
-                managed_job = request.managed_job
-                pool = managed_job.pool if managed_job.HasField(
-                    'pool') else None
-                pool_hash = None
-                if pool is not None:
-                    pool_hash = serve_state.get_service_hash(pool)
-                # Add the managed job to job queue database.
-                user_id = managed_job.user_id if managed_job.HasField(
-                    'user_id') else None
-                managed_job_state.set_job_info(job_id, managed_job.name,
-                                               managed_job.workspace,
-                                               managed_job.entrypoint, pool,
-                                               pool_hash, user_id)
-                # Set the managed job to PENDING state to make sure that
-                # this managed job appears in the `sky jobs queue`, even
-                # if it needs to wait to be submitted.
-                # We cannot set the managed job to PENDING state in the
-                # job template (jobs-controller.yaml.j2), as it may need
-                # to wait for the run commands to be scheduled on the job
-                # controller in high-load cases.
-                for task in managed_job.tasks:
-                    managed_job_state.set_pending(job_id, task.task_id,
-                                                  task.name, task.resources_str,
-                                                  task.metadata_json)
             return jobsv1_pb2.QueueJobResponse()
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
+    def SetJobInfoWithoutJobId(  # type: ignore[return]
+        self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
+        try:
+            pool = request.pool if request.HasField('pool') else None
+            pool_hash = request.pool_hash if request.HasField(
+                'pool_hash') else None
+            user_hash = request.user_hash if request.HasField(
+                'user_hash') else None
+            job_ids = []
+            execution = request.execution
+            for i in range(request.num_jobs):
+                is_primary_in_job_group = request.is_primary_in_job_groups[i]
+                job_id = managed_job_state.set_job_info_without_job_id(
+                    name=request.name,
+                    workspace=request.workspace,
+                    entrypoint=request.entrypoint,
+                    pool=pool,
+                    pool_hash=pool_hash,
+                    user_hash=user_hash,
+                    execution=execution)
+                job_ids.append(job_id)
+                # Set pending state for all tasks
+                for task_id, task_name, metadata_json in zip(
+                        request.task_ids, request.task_names,
+                        request.metadata_jsons):
+                    managed_job_state.set_pending(job_id, task_id, task_name,
+                                                  request.resources_str,
+                                                  metadata_json,
+                                                  is_primary_in_job_group)
+            return jobsv1_pb2.SetJobInfoWithoutJobIdResponse(job_ids=job_ids)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
@@ -387,6 +400,21 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
+    def GetJobExitCodes(  # type: ignore[return]
+            self, request: jobsv1_pb2.GetJobExitCodesRequest,
+            context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetJobExitCodesResponse:
+        try:
+            job_id = request.job_id if request.HasField(
+                'job_id') else job_lib.get_latest_job_id()
+            exit_codes: Optional[List[int]] = None
+            if job_id:
+                exit_codes_list = job_lib.get_exit_codes(job_id)
+                exit_codes = exit_codes_list if exit_codes_list else []
+            return jobsv1_pb2.GetJobExitCodesResponse(exit_codes=exit_codes)
+        except Exception as e:  # pylint: disable=broad-except
+            context.abort(grpc.StatusCode.INTERNAL, str(e))
+
 
 class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                             ):
@@ -407,7 +435,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         context: grpc.ServicerContext
     ) -> managed_jobsv1_pb2.GetJobTableResponse:
         try:
-            accessible_workspaces = list(request.accessible_workspaces)
+            accessible_workspaces = (
+                list(request.accessible_workspaces.workspaces)
+                if request.HasField('accessible_workspaces') else None)
             job_ids = (list(request.job_ids.ids)
                        if request.HasField('job_ids') else None)
             user_hashes: Optional[List[Optional[str]]] = None
@@ -419,6 +449,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     user_hashes.append(None)
             statuses = (list(request.statuses.statuses)
                         if request.HasField('statuses') else None)
+            fields = (list(request.fields.fields)
+                      if request.HasField('fields') else None)
             job_queue = managed_job_utils.get_managed_job_queue(
                 skip_finished=request.skip_finished,
                 accessible_workspaces=accessible_workspaces,
@@ -432,7 +464,9 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 page=request.page if request.HasField('page') else None,
                 limit=request.limit if request.HasField('limit') else None,
                 user_hashes=user_hashes,
-                statuses=statuses)
+                statuses=statuses,
+                fields=fields,
+            )
             jobs = job_queue['jobs']
             total = job_queue['total']
             total_no_filter = job_queue['total_no_filter']
@@ -440,7 +474,20 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
 
             jobs_info = []
             for job in jobs:
+                converted_metadata = None
+                metadata = job.get('metadata')
+                if metadata:
+                    converted_metadata = {
+                        k: v for k, v in metadata.items() if v is not None
+                    }
+                schedule_state = job.get('schedule_state')
+                if schedule_state is not None:
+                    schedule_state = managed_job_state.ManagedJobScheduleState(
+                        schedule_state).to_protobuf()
                 job_info = managed_jobsv1_pb2.ManagedJobInfo(
+                    # The `spot.job_id`, which can be used to identify
+                    # different tasks for the same job
+                    _job_id=job.get('_job_id'),
                     job_id=job.get('job_id'),
                     task_id=job.get('task_id'),
                     job_name=job.get('job_name'),
@@ -449,8 +496,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     workspace=job.get('workspace'),
                     status=managed_job_state.ManagedJobStatus(
                         job.get('status')).to_protobuf(),
-                    schedule_state=managed_job_state.ManagedJobScheduleState(
-                        job.get('schedule_state')).to_protobuf(),
+                    schedule_state=schedule_state,
                     resources=job.get('resources'),
                     cluster_resources=job.get('cluster_resources'),
                     cluster_resources_full=job.get('cluster_resources_full'),
@@ -468,13 +514,16 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     end_at=job.get('end_at'),
                     user_yaml=job.get('user_yaml'),
                     entrypoint=job.get('entrypoint'),
-                    metadata={
-                        k: v
-                        for k, v in job.get('metadata', {}).items()
-                        if v is not None
-                    },
+                    metadata=converted_metadata,
                     pool=job.get('pool'),
-                    pool_hash=job.get('pool_hash'))
+                    pool_hash=job.get('pool_hash'),
+                    links=job.get('links'),
+                    # Primary/auxiliary task support (None for non-job-groups)
+                    is_primary_in_job_group=job.get('is_primary_in_job_group'),
+                    # Fields populated from cluster handle
+                    zone=job.get('zone'),
+                    labels=job.get('labels'),
+                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
@@ -483,6 +532,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                 total_no_filter=total_no_filter,
                 status_counts=status_counts)
         except Exception as e:  # pylint: disable=broad-except
+            logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
     def GetAllJobIdsByName(  # type: ignore[return]

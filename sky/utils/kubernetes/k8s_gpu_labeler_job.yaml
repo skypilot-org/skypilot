@@ -13,10 +13,11 @@ spec:
       serviceAccountName: gpu-labeler-sa
       containers:
       - name: gpu-labeler
-        image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:latest # Using this image also serves as a way to "pre-pull" the image onto nodes
+        image: us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:latest # Using this image also serves as a way to "pre-pull" the image onto nodes
         command: ["/bin/bash", "-i", "-c"]
         args:
           - |
+            source ~/skypilot-runtime/bin/activate
             python /label_gpus.py
         env:
         - name: MY_NODE_NAME

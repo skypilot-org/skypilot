@@ -1,3 +1,20 @@
+# Global configuration for all components in the chart.
+global:
+  # Override the default imageRegistry for all images in the chart.
+  # @schema type: [string, null]
+  imageRegistry: null
+  # Specify imagePullSecrets for all components in the chart.
+  # @schema type: [array, null]; item: object
+  imagePullSecrets: null
+  # Specify extra environment variables to set on all components in the chart.
+  # @schema type: [array, null]; item: object
+  extraEnvs: null
+
+# Override the base name of the resources created by this chart.
+# @schema type: [string, null]
+fullnameOverride: null
+
+
 apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
@@ -19,6 +36,9 @@ apiService:
   # - Recreate: delete the old pod first and create a new one (has downtime).
   # - RollingUpdate: [EXPERIMENTAL] create a new pod first, wait for it to be ready, then delete the old one (zero downtime).
   # Default to Recreate. When set to RollingUpdate, an external database must be configured via .apiService.dbConnectionSecretName or .apiService.dbConnectionString.
+  # For persistent storage with RollingUpdate, use storage.accessMode=ReadWriteMany with an RWX-capable storage class.
+  # If storage.enabled=false with RollingUpdate, file mounts and logs will be lost on pod restart; consider configuring
+  # 'jobs.bucket' in the SkyPilot config to persist file mounts to cloud storage.
   upgradeStrategy: Recreate
   # Deprecated: use other auth methods instead.
   # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
@@ -150,8 +170,33 @@ apiService:
   # @schema type: [array, null]; item: object
   extraVolumeMounts: null
 
+  # Additional containers to run alongside the API server. Example:
+  # sidecarContainers:
+  #   - name: my-sidecar
+  #     image: busybox
+  #     args: ["sleep", "3600"]
+  # @schema type: [array, null]; item: object
+  sidecarContainers: null
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
+
+  # Configure how to manage API server logs
+  logs:
+    retention:
+      # Whether to enable log retention
+      enabled: true
+      # The size of the log file to retain
+      size: 10M
+
+  # Image pull policy for the API server pod
+  # @schema type: [string, null]
+  imagePullPolicy: Always
+
+  # Add scheduling constraints to the API server pod
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
 
 # Authentication configuration for the API server
 # Refer to https://docs.skypilot.co/en/latest/reference/auth.html for more details.
@@ -215,14 +260,53 @@ auth:
     # @schema type: [boolean, null]
     enabled: null
 
+  # Proxy authentication configuration.
+  # Use this when deploying behind an external authentication proxy
+  # (e.g., AWS ALB with Cognito, Azure Front Door, custom ingress auth).
+  # When enabled, the API server trusts the identity header from the proxy.
+  # This is mutually exclusive with auth.oauth and ingress.oauth2-proxy.
+  # @schema type: [object, null]
+  externalProxy:
+    # Enable proxy authentication.
+    # @schema type: [boolean]
+    enabled: false
+    # Header name containing the user identity.
+    # @schema type: [string]
+    headerName: 'X-Auth-Request-Email'
+    # Header format: 'plaintext' or 'jwt'.
+    # Use 'jwt' for headers that contain JWT tokens.
+    # Use 'plaintext' for headers that contain plain identity strings.
+    # @schema type: [string]
+    headerFormat: 'plaintext'
+    # JWT claim to extract identity from (only used when headerFormat is 'jwt').
+    # @schema type: [string]
+    jwtIdentityClaim: 'sub'
+
 storage:
   # Enable/disable persistent storage
   # With this enabled, SkyPilot will use a PV to persist the internal data like states, logs, lock files, catalog, etc.
+  # Persisted data includes:
+  # - Managed job logs (accessible via `sky jobs logs <job_id>` and `sky jobs logs --controller <job_id>`)
+  # - File mounts uploaded during managed job submission
+  # - API server state and configuration
+  # Note: Transient cluster logs (sky-*) and api_server logs are NOT persisted to minimize storage usage.
   # Refer to https://docs.skypilot.co/en/latest/reference/architecture/state.html for more details.
+  #
+  # IMPORTANT: When using RollingUpdate upgrade strategy:
+  # - ReadWriteOnce (RWO): NOT supported - the PVC cannot be mounted by both old and new pods during rolling update.
+  # - ReadWriteMany (RWX): Supported - requires an RWX-capable storage class (e.g., NFS-backed storage like Google Filestore,
+  #   AWS EFS, Azure Files, or an NFS provisioner). Both pods can mount the same PVC during the rolling update.
+  # - storage.enabled=false: Supported - but file mounts and logs will be lost on pod restart. Consider configuring
+  #   'jobs.bucket' in the SkyPilot config to use cloud storage for file mounts.
   enabled: true
   # Storage class name - leave empty to use cluster default
+  # For RWX storage with RollingUpdate, use a storage class that supports ReadWriteMany access mode:
+  # - GKE: Create a Filestore-backed storage class (https://cloud.google.com/filestore/docs/accessing-fileshares)
+  # - EKS: Use EFS CSI driver (https://docs.aws.amazon.com/eks/latest/userguide/efs-csi.html)
+  # - AKS: Use Azure Files (https://docs.microsoft.com/azure/aks/azure-files-dynamic-pv)
   storageClassName: ""
   # Access modes - ReadWriteOnce or ReadWriteMany depending on what is supported by the storage class
+  # When using RollingUpdate upgrade strategy, ReadWriteMany is required for persistent storage.
   accessMode: ReadWriteOnce
   # Storage size
   size: 10Gi
@@ -237,6 +321,9 @@ storage:
 
 
 ingress:
+  # Whether to use a unified ingress resource for the API server and other services like Grafana.
+  # @schema type: [boolean]
+  unified: false
   enabled: true
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   # Example:
@@ -263,28 +350,6 @@ ingress:
   # Custom annotations for the ingress
   # @schema type: [object, null]
   annotations: null
-
-  # Whether enable an additional NodePort service for the ingress controller
-  # Default to null for backward compatibility:
-  # - For existing deployments, error out and ask users to set ingress.nodePortEnabled explicitly
-  # - For new deployments, disable the NodePort service, equivalent to ingress.nodePortEnabled=false
-  # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
-  # - Ask users to set ingress.nodePortEnabled explicitly
-  # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
-  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and switch to ingress-nginx.controller.service.type
-  # if you are upgrading from 0.8.0 nightly.
-  # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
-  # TODO(aylei): remove these fields in v0.10.0
-  # @schema hidden: true
-  nodePortEnabled: null
-  # Specific nodePort to use for the ingress controller
-  # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
-  # Deprecated: use ingress-nginx.controller.service.nodePorts.http instead
-  # @schema type: [number, null]
-  httpNodePort: 30050 # Set to null to automatically assign a random port
-  # Deprecated: use ingress-nginx.controller.service.nodePorts.https instead
-  # @schema type: [number, null]
-  httpsNodePort: 30051 # Set to null to automatically assign a random port
 
   # TODO(aylei): deprecate skypilot managed proxy auth to reduce our maintenance burden, replace with examples instead.
   # OAuth2 Proxy configuration for authentication
@@ -327,6 +392,10 @@ ingress:
     cookie-refresh: null  # refresh tokens after this duration (Access token lifespan minus 1 min)
     # @schema type: [string, number, null]
     cookie-expire: null  # cookie expiration time (should match refresh token lifespan)
+
+  # TLS settings to enable https ingress
+  tls:
+    enabled: false
 
 ingress-nginx:
   enabled: true
@@ -447,10 +516,16 @@ awsCredentials:
   enabled: false
   # Name of the secret containing the aws credentials. Only used if enabled is true.
   awsSecretName: aws-credentials
+
+  # Set to true to mount a complete AWS credentials file with multiple profiles.
+  # This is required for using different AWS profiles with different workspaces.
+  useCredentialsFile: false
+
   # Key name used to set AWS_ACCESS_KEY_ID.
   accessKeyIdKeyName: aws_access_key_id
   # Key name used to set AWS_SECRET_ACCESS_KEY.
   secretAccessKeyKeyName: aws_secret_access_key
+
 
 gcpCredentials:
   enabled: false
@@ -459,12 +534,21 @@ gcpCredentials:
   projectId: null
   # Name of the secret containing the gcp credentials. Only used if enabled is true.
   gcpSecretName: gcp-credentials
+  # Docker image to use for initializing the GCP credentials.
+  # @schema type: [string, null]
+  image: google/cloud-sdk:latest
 
 # Populate RunPod credentials from the secret with key `api_key`
 runpodCredentials:
   enabled: false
   # Name of the secret containing the RunPod credentials. Only used if enabled is true.
   runpodSecretName: runpod-credentials
+
+# Populate Digital Ocean credentials from the secret with key `api_key`
+digitaloceanCredentials:
+  enabled: false
+  # Name of the secret containing the Digital Ocean credentials. Only used if enabled is true.
+  digitaloceanSecretName: digitalocean-credentials
 
 # Populate Lambda credentials from the secret with key `api_key`
 lambdaCredentials:
@@ -491,6 +575,11 @@ r2Credentials:
   # Name of the secret containing the r2 credentials. Only used if enabled is true.
   r2SecretName: r2-credentials
 
+coreweaveCredentials:
+  enabled: false
+  # Name of the secret containing the coreweave credentials. Only used if enabled is true.
+  coreweaveSecretName: coreweave-credentials
+
 # Extra init containers to run before the api container
 # @schema type: [array, null]; item: object
 extraInitContainers: null
@@ -514,6 +603,11 @@ runtimeClassName:
 # Refer to https://github.com/prometheus-community/helm-charts/blob/main/charts/prometheus/values.yaml for available values.
 # @schema skipProperties:true
 prometheus:
+  # By default, the API server will be annotated with well-known annotations (prometheus.io/*) to be discovered by prometheus.
+  # Set this to true will remove the well-known annotations and use a dedicated scrape config instead, which can be helpful when
+  # you do not want the API server to be discovered by other prometheus instances.
+  # @schema type: [boolean, null]
+  useDedicatedScrapeConfig: false
   enabled: false
   # Keep the installation minimal by default. If you want to monitor more resources other than the API server,
   # it is recommended to install and manage prometheus separately.
@@ -521,14 +615,20 @@ prometheus:
   server:
     persistentVolume:
       enabled: true
-      size: 10Gi
+      size: 50Gi
+    retention: "1000d"
+    # The Prometheus documentations recommends setting the retention size to be 80-85% of the persistent volume size.
+    # ref: https://prometheus.io/docs/prometheus/latest/storage/#right-sizing-retention-size
+    # 43GB is roughly 80% of the 50Gi persistent volume size. We use Gi for the PV size and GB for the retention size
+    # because these are the units set by the Prometheus chart schema for each respective field.
+    retentionSize: "43GB"
   # Configure additional scrape configs using extraScrapeConfigs
   extraScrapeConfigs: |
     # Static scrape target for SkyPilot API server GPU metrics
     - job_name: 'skypilot-api-server-gpu-metrics'
       static_configs:
         # Use the API service created by this Helm chart
-        - targets: ['{{ .Release.Name }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
+        - targets: ['{{ include "skypilot.fullname" . }}-api-service.{{ .Release.Namespace }}.svc.cluster.local:9090']
       metrics_path: '/gpu-metrics'
       scrape_interval: 15s
       scrape_timeout: 10s
@@ -539,10 +639,47 @@ prometheus:
         regex: ;(.+)
         target_label: node
         replacement: $1
+    {{ if .Values.useDedicatedScrapeConfig }}
+    - job_name: 'skypilot-api-server-metrics'
+      honor_labels: true
+      kubernetes_sd_configs:
+        - role: pod
+          namespaces:
+            names:
+            - '{{ .Release.Namespace }}'
+      relabel_configs:
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_scrape]
+          action: keep
+          regex: true
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_path]
+          action: replace
+          target_label: __metrics_path__
+          regex: (.+)
+        - source_labels: [__meta_kubernetes_pod_annotation_skypilot_co_port, __meta_kubernetes_pod_ip]
+          action: replace
+          regex: (\d+);((([0-9]+?)(\.|$)){4})
+          replacement: $2:$1
+          target_label: __address__
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(.+)
+        - source_labels: [__meta_kubernetes_namespace]
+          action: replace
+          target_label: namespace
+        - source_labels: [__meta_kubernetes_pod_name]
+          action: replace
+          target_label: pod
+        - source_labels: [__meta_kubernetes_pod_phase]
+          regex: Pending|Succeeded|Failed|Completed
+          action: drop
+        - source_labels: [__meta_kubernetes_pod_node_name]
+          action: replace
+          target_label: node
+    {{ end}}
   kube-state-metrics:
     enabled: true
+    # TODO (kyuds): remove skypilot-cluster label in v0.12.0; deprecated in favor of skypilot-cluster-name.
     metricLabelsAllowlist:
-      - pods=[skypilot-cluster]
+      - pods=[skypilot-cluster,skypilot-cluster-name]
   prometheus-node-exporter:
     enabled: false
   prometheus-pushgateway:
@@ -555,6 +692,11 @@ prometheus:
 # @schema skipProperties:true
 grafana:
   enabled: false
+  # Use Recreate strategy to avoid PVC mount conflicts during upgrades
+  # Since Grafana uses ReadWriteOnce PVC, RollingUpdate would fail when
+  # trying to mount the same PVC on two pods simultaneously
+  deploymentStrategy:
+    type: Recreate
   persistence:
     enabled: true
     size: 10Gi
@@ -573,7 +715,13 @@ grafana:
     enableAuthedIngress: true
     path: "/grafana"
     ingressClassName: nginx
-    hosts: null
+    # @schema type: [array]; item: string
+    # If you set hosts to null, the Grafana Helm chart will use its default value ([chart-example.local]).
+    # To match all hosts, set hosts to an empty array ([]).
+    hosts: []
+    # Custom annotations for the ingress
+    annotations: null
+
   grafana.ini:
     server:
       domain: localhost

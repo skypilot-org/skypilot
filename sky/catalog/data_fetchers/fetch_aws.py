@@ -13,13 +13,14 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 
 from sky import exceptions
 from sky.adaptors import aws
 from sky.adaptors import common as adaptors_common
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -60,14 +61,28 @@ ALL_REGIONS = [
     'ap-northeast-2',
     'ap-southeast-1',
     'ap-southeast-2',
+    'ap-southeast-4',
     'ap-northeast-1',
 ]
 US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 # The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Arch'
+    'InstanceType',
+    'AcceleratorName',
+    'AcceleratorCount',
+    'vCPUs',
+    'MemoryGiB',
+    'GpuInfo',
+    'Price',
+    'SpotPrice',
+    'Region',
+    'AvailabilityZone',
+    'Arch',
+    'LocalDiskType',
+    'NVMeSupported',
+    'LocalDiskSize',
+    'LocalDiskCount',
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -233,7 +248,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
         def get_acc_info(row) -> Tuple[Optional[str], float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
-                                  ('InferenceAcceleratorInfo', 'Accelerators'),
+                                  ('NeuronInfo', 'NeuronDevices'),
                                   ('FpgaInfo', 'Fpgas')]:
                 info = row.get(col)
                 if isinstance(info, dict):
@@ -268,49 +283,72 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 return row['MemoryInfo']['SizeInMiB'] / 1024
             return float(row['Memory'].split(' GiB')[0])
 
+        def get_local_disk_info(row) -> Dict[str, Any]:
+            info: Dict[str, Any] = {}
+            local_disk_supported = row['InstanceStorageSupported']
+            info['LocalDiskType'] = None
+            info['NVMeSupported'] = False
+            info['LocalDiskSize'] = None
+            info['LocalDiskCount'] = None
+
+            if local_disk_supported:
+                raw_info = row['InstanceStorageInfo']
+                info['NVMeSupported'] = raw_info['NvmeSupport'] == 'required'
+                # This is always 1. AWS probably made this as a list
+                # with future changes in consideration.
+                assert len(raw_info['Disks']) == 1, (
+                    f'Instance type {row["InstanceType"]} has '
+                    f'{len(raw_info["Disks"])} disk entries, expected 1.')
+                disk_info = raw_info['Disks'][0]
+                assert disk_info['Type'] in constants.LOCAL_DISK_TYPES, (
+                    f'Instance type {row["InstanceType"]} has unknown '
+                    f'disk type {disk_info["Type"]}.')
+                info['LocalDiskType'] = disk_info['Type']
+                info['LocalDiskSize'] = disk_info['SizeInGB']
+                info['LocalDiskCount'] = disk_info['Count']
+            return info
+
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
-            # AWS p3dn.24xlarge offers a different V100 GPU.
+            # AWS instance type workarounds for incorrect/missing GPU info.
             # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # pylint: disable=line-too-long
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
-            if row['InstanceType'] == 'p4de.24xlarge':
+            elif row['InstanceType'] == 'p4de.24xlarge':
                 acc_name = 'A100-80GB'
                 acc_count = 8
-            if row['InstanceType'].startswith('trn1'):
-                # Trainium instances does not have a field for information of
-                # the accelerators. We need to infer the accelerator info from
-                # the instance type name.
-                # aws ec2 describe-instance-types --region us-east-1
-                # https://aws.amazon.com/ec2/instance-types/trn1/
-                acc_name = 'Trainium'
-                find_num_in_name = re.search(r'(\d+)xlarge',
-                                             row['InstanceType'])
-                assert find_num_in_name is not None, row['InstanceType']
-                num_in_name = find_num_in_name.group(1)
-                acc_count = int(num_in_name) // 2
-            if row['InstanceType'] == 'p5en.48xlarge':
+            elif row['InstanceType'] in ('p5e.48xlarge', 'p5en.48xlarge'):
                 # TODO(andyl): Check if this workaround still needed after
                 # v0.10.0 released. Currently, the acc_name returned by the
                 # AWS API is 'NVIDIA', which is incorrect. See #4652.
+                # Both p5e.48xlarge and p5en.48xlarge have 8x H200 GPUs.
                 acc_name = 'H200'
                 acc_count = 8
-            if (row['InstanceType'].startswith('g6f') or
-                    row['InstanceType'].startswith('gr6f')):
+            elif (row['InstanceType'].startswith('g6f') or
+                  row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
-                # returns Count: 1 under GpuInfo. We need to check the GPU
-                # memory to get the actual fraction of the GPU.
+                # returns Count: 1 or Count: 0 under GpuInfo. We need to
+                # directly check the GPU memory to get the actual fraction of
+                # the GPU. Note that TotalGpuMemoryInMiB seems unreliable here -
+                # sometimes it is unexpectedly 0.
                 # See also Standard_NV{vcpu}ads_A10_v5 support on Azure.
-                fraction = row['GpuInfo']['TotalGpuMemoryInMiB'] / L4_GPU_MEMORY
+                assert len(row['GpuInfo']['Gpus']) == 1
+                assert row['GpuInfo']['Gpus'][0]['Name'] == 'L4'
+                fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
+                    'SizeInMiB'] / L4_GPU_MEMORY
                 acc_count = round(fraction, 3)
-            if row['InstanceType'] == 'p5.4xlarge':
+            elif row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
+            elif row['InstanceType'].startswith('g7e'):
+                # Change name from "RTX PRO Server 6000" to "RTXPRO6000" for consistency
+                acc_name = 'RTXPRO6000'
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,
                 'vCPUs': get_vcpus(row),
                 'MemoryGiB': get_memory_gib(row),
                 'Arch': get_arch(row),
+                **get_local_disk_info(row)
             })
 
         # The AWS API may not have all the instance types in the pricing table,
@@ -336,6 +374,19 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             axis='columns')
         if 'GpuInfo' not in df.columns:
             df['GpuInfo'] = np.nan
+        if 'NeuronInfo' in df.columns:
+            # The AWS Neuron API uses 'NeuronDevices' instead of 'Gpus'
+            # in its dict; for consistency with GPU handling, rename key.
+            def map_neuroninfo(neuroninfo):
+                if isinstance(neuroninfo,
+                              dict) and 'NeuronDevices' in neuroninfo:
+                    # Rename 'NeuronDevices' to 'Gpus'
+                    neuroninfo = neuroninfo.copy()
+                    neuroninfo['Gpus'] = neuroninfo.pop('NeuronDevices')
+                return neuroninfo
+
+            df['NeuronInfo'] = df['NeuronInfo'].apply(map_neuroninfo)
+            df['GpuInfo'] = df['GpuInfo'].fillna(df['NeuronInfo'])
         df = df[USEFUL_COLUMNS]
     except Exception as e:  # pylint: disable=broad-except
         print(traceback.format_exc())
@@ -383,44 +434,70 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 # TODO(tian): find out the driver version.
 #   Neuron driver:
 _GPU_DESC_UBUNTU_DATE = [
-    ('gpu', 'AMI GPU PyTorch 2.1.0', '20.04', '20231103'),
-    ('gpu', 'AMI GPU PyTorch 1.10.0', '18.04', '20221114'),
-    ('k80', 'AMI GPU PyTorch 1.10.0', '20.04', '20211208'),
-    ('k80', 'AMI GPU PyTorch 1.10.0', '18.04', '20211208'),
-    ('neuron', 'Base Neuron AMI', '22.04', '20240923'),
+    ('neuron', '/aws/service/neuron/dlami/multi-framework', '22.04'),
 ]
 
 
-def _fetch_image_id(region: str, description: str, ubuntu_version: str,
-                    creation_date: str) -> Optional[str]:
+def _fetch_image_creation_date(region: str,
+                               image_id: Optional[str]) -> Optional[str]:
+    if image_id is None:
+        return None
     try:
         image = subprocess.check_output(f"""\
-            aws ec2 describe-images --region {region} --owners amazon \\
-                --filters 'Name=name,Values="Deep Learning {description} (Ubuntu {ubuntu_version}) {creation_date}"' \\
-                    'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
+            aws ec2 describe-images --region {region} --image-ids {image_id} \\
+                --query 'Images[0].Name' --output text
             """,
                                         shell=True)
     except subprocess.CalledProcessError as e:
-        print(f'Failed {region}, {description}, {ubuntu_version}, '
-              f'{creation_date}. Trying next date.')
+        print(f'Failed to fetch image creation date for {region}, {image_id}')
         print(f'{type(e)}: {e}')
         image_id = None
+    else:
+        assert image is not None
+        image_name = image.decode('utf-8').strip()
+        match = re.search(r'(\d+)$', image_name)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _fetch_image_id_from_ssm_param(
+        region: str,
+        ssm_prefix: str,
+        ubuntu_version: str = '22.04') -> Optional[str]:
+    try:
+        image = subprocess.check_output(f"""\
+            aws ssm get-parameter --region {region} --name "{ssm_prefix}/ubuntu-{ubuntu_version}/latest/image_id" \\
+                --query 'Parameter.Value' --output text
+            """,
+                                        shell=True)
+    except subprocess.CalledProcessError as e:
+        print(
+            f'Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}'
+        )
+        print(f'{type(e)}: {e}')
+        return None
     else:
         assert image is not None
         image_id = image.decode('utf-8').strip()
     return image_id
 
 
-def _get_image_row(region: str, gpu: str, description: str, ubuntu_version: str,
-                   date: str) -> Tuple[str, str, str, str, Optional[str], str]:
-    print(f'Getting image for {region}, {description}, {ubuntu_version}, {gpu}')
-    image_id = _fetch_image_id(region, description, ubuntu_version, date)
-    if image_id is None:
-        # not found
-        print(f'Failed to find image for {region}, {description}, '
-              f'{ubuntu_version}, {gpu}')
+def _get_image_row(
+    region: str,
+    gpu: str,
+    ssm_prefix: str,
+    ubuntu_version: str = '22.04'
+) -> Tuple[str, str, str, str, Optional[str], Optional[str]]:
+    print(f'Getting image for {region}, {ssm_prefix}, {ubuntu_version}, {gpu}')
+    image_id = _fetch_image_id_from_ssm_param(region, ssm_prefix,
+                                              ubuntu_version)
+    if image_id is not None:
+        creation_date = _fetch_image_creation_date(region, image_id)
+    else:
+        creation_date = None
     tag = f'skypilot:{gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
-    return tag, region, 'ubuntu', ubuntu_version, image_id, date
+    return tag, region, 'ubuntu', ubuntu_version, image_id, creation_date
 
 
 def get_all_regions_images_df(regions: Set[str]) -> 'pd.DataFrame':
@@ -535,13 +612,26 @@ if __name__ == '__main__':
     instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
-    # Disable refreshing images.csv as we are using skypilot custom AMIs
+    # Disable refreshing images.csv for skypilot custom AMIs
+    # refresh only the neuron based images
     # See sky/clouds/catalog/images/README.md for more details.
-    # image_df = get_all_regions_images_df(user_regions)
-    # _check_regions_integrity(image_df, 'images')
+    image_df = get_all_regions_images_df(user_regions)
+    _check_regions_integrity(image_df, 'images')
+    # filter out rows where ImageId is None
+    image_df = image_df[image_df['ImageId'].notna()]
 
-    # image_df.to_csv('aws/images.csv', index=False)
-    # print('AWS Images saved to aws/images.csv')
+    # check if aws/images.csv exists
+    if os.path.exists('aws/images.csv'):
+        # load the data from aws/images.csv
+        existing_image_df = pd.read_csv('aws/images.csv')
+        # filter out the neuron based images
+        existing_image_df = existing_image_df[~existing_image_df['Tag'].
+                                              eq('skypilot:neuron-ubuntu-2204')]
+        # concat the new neuron based images with the existing images
+        image_df = pd.concat([existing_image_df, image_df])
+
+    image_df.to_csv('aws/images.csv', index=False)
+    print('AWS Images saved to aws/images.csv')
 
     if args.az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()

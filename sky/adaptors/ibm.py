@@ -28,6 +28,9 @@ requests = common.LazyImport('requests',
                              import_error_message=_IMPORT_ERROR_MESSAGE)
 yaml = common.LazyImport('yaml', import_error_message=_IMPORT_ERROR_MESSAGE)
 
+# Global process lock for thread-safe boto3 operations
+global_process_lock = None
+
 
 def read_credential_file():
     try:
@@ -152,9 +155,9 @@ def _get_global_process_lock():
       already initialized.
     Necessary when process are spawned without a shared lock.
     """
-    global global_process_lock  # pylint: disable=global-variable-undefined
+    global global_process_lock
 
-    if 'global_process_lock' not in globals():
+    if global_process_lock is None:
         global_process_lock = multiprocessing.Lock()
 
     return global_process_lock

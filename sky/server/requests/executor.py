@@ -44,9 +44,11 @@ from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import metrics as metrics_lib
+from sky.server import plugins
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.server.requests import threads
 from sky.server.requests.queues import local_queue
@@ -158,6 +160,8 @@ queue_backend = server_config.QueueBackend.MULTIPROCESSING
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
+    # Load plugins for executor process.
+    plugins.load_plugins(plugins.ExtensionContext())
     # Executor never stops, unless the whole process is killed.
     threading.Thread(target=metrics_lib.process_monitor,
                      args=(f'worker:{proc_group}', threading.Event()),
@@ -229,6 +233,12 @@ class RequestWorker:
             fut = executor.submit_until_success(
                 _request_execution_wrapper, request_id, ignore_return_value,
                 self.num_db_connections_per_worker)
+            # Decrement the free executor count when a request starts
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.dec()
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.dec()
             # Monitor the result of the request execution.
             threading.Thread(target=self.handle_task_result,
                              args=(fut, request_element),
@@ -263,9 +273,23 @@ class RequestWorker:
                 queue.put(request_element)
         except exceptions.ExecutionRetryableError as e:
             time.sleep(e.retry_wait_seconds)
+            # Reset the request status to PENDING so it can be picked up again.
+            # Assume retryable since the error is ExecutionRetryableError.
+            request_id, _, _ = request_element
+            with api_requests.update_request(request_id) as request_task:
+                assert request_task is not None, request_id
+                request_task.status = api_requests.RequestStatus.PENDING
             # Reschedule the request.
             queue = _get_queue(self.schedule_type)
             queue.put(request_element)
+            logger.info(f'Rescheduled request {request_id} for retry')
+        finally:
+            # Increment the free executor count when a request finishes
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.inc()
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.inc()
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
@@ -287,6 +311,16 @@ class RequestWorker:
                 burst_workers=self.burstable_parallelism,
                 initializer=executor_initializer,
                 initargs=(proc_group,))
+            # Initialize the appropriate gauge for the number of free executors
+            total_executors = (self.garanteed_parallelism +
+                               self.burstable_parallelism)
+            if metrics_utils.METRICS_ENABLED:
+                if self.schedule_type == api_requests.ScheduleType.LONG:
+                    metrics_utils.SKY_APISERVER_LONG_EXECUTORS.set(
+                        total_executors)
+                elif self.schedule_type == api_requests.ScheduleType.SHORT:
+                    metrics_utils.SKY_APISERVER_SHORT_EXECUTORS.set(
+                        total_executors)
             while not self._cancel_event.is_set():
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
@@ -395,7 +429,10 @@ def _request_execution_wrapper(request_id: str,
     rss_begin = proc.memory_info().rss
     db_utils.set_max_connections(num_db_connections_per_worker)
     # Handle the SIGTERM signal to abort the request processing gracefully.
-    signal.signal(signal.SIGTERM, _sigterm_handler)
+    # Only set up signal handlers in the main thread, as signal.signal() raises
+    # ValueError if called from a non-main thread (e.g., in tests).
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGTERM, _sigterm_handler)
 
     logger.info(f'Running request {request_id} with pid {pid}')
 
@@ -499,8 +536,8 @@ def _request_execution_wrapper(request_id: str,
         # so that the "Request xxxx failed due to ..." log message will be
         # written to the original stdout and stderr file descriptors.
         _restore_output()
-        logger.info(f'Request {request_id} failed due to '
-                    f'{common_utils.format_exception(e)}')
+        logger.error(f'Request {request_id} failed due to '
+                     f'{common_utils.format_exception(e)}')
         return
     else:
         api_requests.set_request_succeeded(
@@ -688,15 +725,27 @@ async def _execute_request_coroutine(request: api_requests.Request):
 
 async def prepare_request_async(
     request_id: str,
-    request_name: str,
+    request_name: request_names.RequestName,
     request_body: payloads.RequestBody,
     func: Callable[P, Any],
     request_cluster_name: Optional[str] = None,
     schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
     is_skypilot_system: bool = False,
+    auth_user: Optional[models.User] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
-    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+    if auth_user is not None:
+        assert auth_user.name is not None
+        # Use the authenticated user identity as the single source of truth
+        # if present.
+        user_id = auth_user.id
+        # Set user identity for executors.
+        request_body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+    else:
+        # Fallback to legacy environment variable based identity if no
+        # authentication is set.
+        user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
@@ -720,18 +769,19 @@ async def prepare_request_async(
     return request
 
 
-async def schedule_request_async(request_id: str,
-                                 request_name: str,
-                                 request_body: payloads.RequestBody,
-                                 func: Callable[P, Any],
-                                 request_cluster_name: Optional[str] = None,
-                                 ignore_return_value: bool = False,
-                                 schedule_type: api_requests.ScheduleType = (
-                                     api_requests.ScheduleType.LONG),
-                                 is_skypilot_system: bool = False,
-                                 precondition: Optional[
-                                     preconditions.Precondition] = None,
-                                 retryable: bool = False) -> None:
+async def schedule_request_async(
+        request_id: str,
+        request_name: request_names.RequestName,
+        request_body: payloads.RequestBody,
+        func: Callable[P, Any],
+        request_cluster_name: Optional[str] = None,
+        ignore_return_value: bool = False,
+        schedule_type: api_requests.ScheduleType = (
+            api_requests.ScheduleType.LONG),
+        is_skypilot_system: bool = False,
+        precondition: Optional[preconditions.Precondition] = None,
+        retryable: bool = False,
+        auth_user: Optional[models.User] = None) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -752,11 +802,14 @@ async def schedule_request_async(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request_task = await prepare_request_async(request_id, request_name,
-                                               request_body, func,
+    request_task = await prepare_request_async(request_id,
+                                               request_name,
+                                               request_body,
+                                               func,
                                                request_cluster_name,
                                                schedule_type,
-                                               is_skypilot_system)
+                                               is_skypilot_system,
+                                               auth_user=auth_user)
     schedule_prepared_request(request_task, ignore_return_value, precondition,
                               retryable)
 

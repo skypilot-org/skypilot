@@ -7,6 +7,13 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
 
+.. seealso::
+
+   :doc:`pools` for running batch inference workloads across multiple infrastructure.
+
+   :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
+   can communicate with each other.
+
 SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically retry failures, recover from spot instance preemptions, and clean up when done.
 
 To start a managed job, use :code:`sky jobs launch`:
@@ -324,6 +331,34 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
 
 This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
 
+Recovering on specific exit codes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can also specify a list of exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      max_restarts_on_errors: 3
+      # Always recover if the job exits with code 33 or 34.
+      # In a multi-node job, recovery is triggered if any node exits with a code in [33, 34].
+      # Can also use a single integer: recover_on_exit_codes: 33
+      recover_on_exit_codes: [33, 34]
+
+In this configuration:
+
+- If the job exits with code 33 or 34, it will be recovered. Restarts triggered by these specific exit codes do not count towards the `max_restarts_on_errors` limit.
+- For any other non-zero exit code, the job will be recovered up to 3 times (as specified by :code:`max_restarts_on_errors`)
+
+.. note::
+  For multi-node jobs, recovery is triggered if **any** node exits with a code in :code:`recover_on_exit_codes`.
+
+.. warning::
+
+  You should **not** use exit code 137 in :code:`recover_on_exit_codes`. This code is used internally by SkyPilot and including it may interfere with proper recovery behavior.
+
 
 When will my job be recovered?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -335,7 +370,7 @@ Here's how various kinds of failures will be handled by SkyPilot:
    :header-rows: 0
 
    * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
-     - If :code:`max_restarts_on_errors` is set, restart up to that many times. If :code:`max_restarts_on_errors` is not set, or we run out of restarts, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
+     - If the exit code is in :code:`recover_on_exit_codes`, always restart. Otherwise, if :code:`max_restarts_on_errors` is set, restart up to that many times. If neither condition is met, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
    * - Instances are preempted or underlying hardware fails:
      - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
    * - Can't find available resources due to cloud quota or capacity restrictions:
@@ -356,6 +391,10 @@ Scaling to many jobs
 
 You can easily manage dozens, hundreds, or thousands of managed jobs at once. This is a great fit for batch jobs such as **data processing**, **batch inference**, or **hyperparameter sweeps**. To see an example launching many jobs in parallel, see :ref:`many-jobs`.
 
+.. tip::
+
+  For workloads that can reuse the same environment across many jobs, consider using :ref:`Pools <pool>`. Pools provide faster cold-starts by maintaining a set of pre-provisioned workers that can be reused across job submissions.
+
 .. TODO(cooperc): code block or dashboard showcasing UX of many jobs (thousand-scale)
 
 To increase the maximum number of jobs that can run at once, see :ref:`jobs-controller-sizing`.
@@ -371,8 +410,12 @@ A pipeline is a managed job that contains a sequence of tasks running one after 
 This is useful for running a sequence of tasks that depend on each other, e.g., training a model and then running inference on it.
 Different tasks can have different resource requirements to use appropriate per-task resources, which saves costs, while  keeping the burden of managing the tasks off the user.
 
+.. seealso::
+
+  :ref:`job-groups` for running multiple tasks **in parallel** instead of sequentially.
+
 .. note::
-  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky jobs launch`.
+  In other words, a managed job is either a single task, a pipeline (sequential tasks), or a :ref:`job group <job-groups>` (parallel tasks). All managed jobs are submitted by :code:`sky jobs launch`.
 
 To run a pipeline, specify the sequence of tasks in a YAML file. Here is an example:
 
@@ -429,6 +472,13 @@ second task has name :code:`eval`. The tasks are separated by a line with three
 dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 :code:`run` sections. Tasks are executed sequentially. If a task fails, later tasks are skipped.
 
+.. tip::
+
+   To explicitly indicate a pipeline (sequential execution), you can add
+   :code:`execution: serial` to the header. This is optional since pipelines
+   are the default when :code:`execution` is omitted. Use :code:`execution: parallel`
+   for :ref:`job groups <job-groups>` instead.
+
 To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 
 To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky dashboard`.
@@ -452,314 +502,6 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   The :code:`$SKYPILOT_TASK_ID` environment variable is also available in the :code:`run` section of each task. It is unique for each task in the pipeline.
   For example, the :code:`$SKYPILOT_TASK_ID` for the :code:`eval` task above is:
   "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
-
-
-.. _pool:
-
-Using pools (experimental)
---------------------------
-
-.. warning::
-
-  Pools are currently in alpha so some features are not currently supported:
-
-  - Pools does not currently support heterogeneous clusters (e.g., mixed H100 and H200 workers)
-  - Pools does not currently support multiple jobs running concurrently on the same worker
-
-SkyPilot supports spawning a **pool** for launching many jobs that share the same environment — for example, batch inference or large-scale data processing.
-
-The pool consists of multiple individual **workers**, each of which is a SkyPilot cluster instance with identical configuration and setup. All workers in the pool are provisioned with the same environment, ensuring consistency across jobs and reducing launch overhead.
-
-Workers in the pool are **reused** across job submissions, avoiding repeated setup and **saving cold start time**. This is ideal for workloads where many jobs need to run with the same software environment and dependencies.
-
-
-.. tip::
-
-  To get started with pools, use the nightly build of SkyPilot: :code:`pip install -U skypilot-nightly`
-
-Create a pool
-~~~~~~~~~~~~~
-
-Here is a simple example of creating a pool:
-
-.. code-block:: yaml
-  :emphasize-lines: 2-4
-
-  # pool.yaml
-  pool:
-    # Specify the number of workers in the pool.
-    workers: 3
-
-  resources:
-    # Specify the resources for each worker.
-    accelerators: H100
-
-  file_mounts:
-    /my-data:
-      source: s3://my-dataset/
-      mode: MOUNT
-
-  setup: |
-    # Setup commands for all workers
-    echo "Setup complete!"
-
-Notice that the :code:`pool` section is the only difference from a normal SkyPilot YAML.
-To specify the number of workers in the pool, use the :code:`workers` field under :code:`pool`.
-When creating a pool, the :code:`run` section is ignored.
-
-The setup commands **must not be blocking**. If a long-running server is required, it should be launched in the background. The :code:`setsid` command ensures that setup processes are not terminated when the shell exits. An example using vLLM server is shown below:
-
-.. code-block:: yaml
-
-  setup: |
-    # Start a long-running vLLM server in the background
-    setsid bash -c "vllm serve $MODEL_NAME > ./vllm.log 2>&1" > /dev/null 2>&1 &
-
-To create a pool, use :code:`sky jobs pool apply`:
-
-.. code-block:: console
-
-  $ sky jobs pool apply -p gpu-pool pool.yaml
-  YAML to run: pool.yaml
-  Pool spec:
-  Worker policy:  Fixed-size (3 workers)
-
-  Each pool worker will use the following resources (estimated):
-  Considered resources (1 node):
-  -------------------------------------------------------------------------------------------------------
-  INFRA                 INSTANCE                         vCPUs   Mem(GB)   GPUS     COST ($)   CHOSEN
-  -------------------------------------------------------------------------------------------------------
-  Nebius (eu-north1)    gpu-h100-sxm_1gpu-16vcpu-200gb   16      200       H100:1   2.95          ✔
-  Nebius (eu-north1)    gpu-h200-sxm_1gpu-16vcpu-200gb   16      200       H200:1   3.50
-  GCP (us-central1-a)   a3-highgpu-1g                    26      234       H100:1   5.38
-  -------------------------------------------------------------------------------------------------------
-  Applying config to pool 'gpu-pool'. Proceed? [Y/n]:
-  Launching controller for 'gpu-pool'...
-  ...
-  ⚙︎ Job submitted, ID: 1
-
-  Pool name: gpu-pool
-  📋 Useful Commands
-  ├── To submit jobs to the pool: sky jobs launch --pool gpu-pool <yaml_file>
-  ├── To submit multiple jobs:    sky jobs launch --pool gpu-pool --num-jobs 10 <yaml_file>
-  ├── To check the pool status:   sky jobs pool status gpu-pool
-  └── To terminate the pool:      sky jobs pool down gpu-pool
-
-  ✓ Successfully created pool 'gpu-pool'.
-
-The pool will be created in the background. You can submit jobs to this pool immediately. If there aren't any workers ready to run the jobs yet, the jobs will wait in the PENDING state.
-Jobs will start automatically once some worker is provisioned and ready to run.
-
-Submit jobs to a pool
-~~~~~~~~~~~~~~~~~~~~~
-
-To submit jobs to the pool, create a job YAML file:
-
-.. code-block:: yaml
-
-  # job.yaml
-  name: simple-workload
-
-  # Specify the resources requirements for the job.
-  # This should be the same as the resources configuration in the pool YAML.
-  resources:
-    accelerators: {H100:1, H200:1}
-
-  run: |
-    nvidia-smi
-
-This indicates that the job (1) requires the specified :code:`resources` to run, and (2) executes the given :code:`run` command when dispatched to a worker. Then, use :code:`sky jobs launch -p <pool-name>` to submit jobs to the pool:
-
-.. code-block:: console
-
-  $ sky jobs launch -p gpu-pool job.yaml
-  YAML to run: job.yaml
-  Submitting to pool 'gpu-pool' with 1 job.
-  Managed job 'simple-workload' will be launched on (estimated):
-  Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
-  Launching a managed job 'simple-workload'. Proceed? [Y/n]: Y
-  Launching managed job 'simple-workload' (rank: 0) from jobs controller...
-  ...
-  ⚙︎ Job submitted, ID: 2
-  ├── Waiting for task resources on 1 node.
-  └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
-  (simple-workload, pid=4150) Thu Aug 14 18:49:05 2025
-  (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
-  (simple-workload, pid=4150) | NVIDIA-SMI 570.172.08             Driver Version: 570.172.08     CUDA Version: 12.8     |
-  (simple-workload, pid=4150) |-----------------------------------------+------------------------+----------------------+
-  (simple-workload, pid=4150) | GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
-  (simple-workload, pid=4150) | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
-  (simple-workload, pid=4150) |                                         |                        |               MIG M. |
-  (simple-workload, pid=4150) |=========================================+========================+======================|
-  (simple-workload, pid=4150) |   0  NVIDIA H100 80GB HBM3          On  |   00000000:0F:00.0 Off |                    0 |
-  (simple-workload, pid=4150) | N/A   29C    P0             69W /  700W |       0MiB /  81559MiB |      0%      Default |
-  (simple-workload, pid=4150) |                                         |                        |             Disabled |
-  (simple-workload, pid=4150) +-----------------------------------------+------------------------+----------------------+
-  (simple-workload, pid=4150)
-  (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
-  (simple-workload, pid=4150) | Processes:                                                                              |
-  (simple-workload, pid=4150) |  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
-  (simple-workload, pid=4150) |        ID   ID                                                               Usage      |
-  (simple-workload, pid=4150) |=========================================================================================|
-  (simple-workload, pid=4150) |  No running processes found                                                             |
-  (simple-workload, pid=4150) +-----------------------------------------------------------------------------------------+
-  ✓ Job finished (status: SUCCEEDED).
-  ✓ Managed job finished: 2 (status: SUCCEEDED).
-
-The job will be launched on one of the available workers in the pool.
-
-.. note::
-
-  Currently, each worker is **exclusively occupied** by a single managed job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
-
-Submit multiple jobs at once
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Pools support a :code:`--num-jobs` flag to conveniently submit multiple jobs at once.
-Each job will be assigned a unique environment variable :code:`$SKYPILOT_JOB_RANK`, which can be used to determine the job partition.
-Additionally, the :code:`$SKYPILOT_NUM_JOBS` environment variable will be set to the total number of jobs submitted.
-
-For example, if you have 1000 prompts to evaluate, each job can process prompts with sequence numbers
-:code:`$SKYPILOT_JOB_RANK * 100` to :code:`($SKYPILOT_JOB_RANK + 1) * 100`.
-
-Here is a simple example:
-
-.. code-block:: yaml
-
-  # batch-job.yaml
-  name: batch-workload
-
-  resources:
-    accelerators: {H100:1, H200:1}
-
-  run: |
-    echo "Job rank: $SKYPILOT_JOB_RANK out of $SKYPILOT_NUM_JOBS"
-    echo "Processing prompts from $(($SKYPILOT_JOB_RANK * 100)) to $((($SKYPILOT_JOB_RANK + 1) * 100))"
-    # Actual business logic here...
-    echo "Job $SKYPILOT_JOB_RANK finished"
-
-Use the following command to submit them to the pool:
-
-.. code-block:: console
-
-  $ sky jobs launch -p gpu-pool --num-jobs 10 batch-job.yaml
-  YAML to run: batch-job.yaml
-  Submitting to pool 'gpu-pool' with 10 jobs.
-  Managed job 'batch-workload' will be launched on (estimated):
-  Use resources from pool 'gpu-pool': 1x[H200:1, H100:1].
-  Launching 10 managed jobs 'batch-workload'. Proceed? [Y/n]: Y
-  Launching managed job 'batch-workload' (rank: 0) from jobs controller...
-  ...
-  Launching managed job 'batch-workload' (rank: 9) from jobs controller...
-  Jobs submitted with IDs: 3,4,5,6,7,8,9,10,11,12.
-  📋 Useful Commands
-  ├── To stream job logs:                 sky jobs logs <job-id>
-  ├── To stream controller logs:          sky jobs logs --controller <job-id>
-  └── To cancel all jobs on the pool:     sky jobs cancel --pool gpu-pool
-
-Note that the maximum concurrency is limited by the number of workers in the pool.
-To enable more jobs to run simultaneously, increase the number of workers when creating the pool.
-
-There are several things to note when submitting to a pool:
-
-- Any :code:`setup` commands or file mounts in the YAML are ignored.
-- The :code:`resources` requirements are still respected. This should be the same as the ones used in the pool YAML.
-- The :code:`run` command is executed for the job.
-
-Monitor job statuses
-~~~~~~~~~~~~~~~~~~~~~
-
-You can use the job page in the dashboard to monitor the job status.
-
-.. image:: ../images/pool-dashboard.png
-  :width: 100%
-  :align: center
-
-In this example, we submit 10 jobs with IDs from 3 to 12.
-Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.
-
-Since each job requires **the entire worker cluster**, the number of concurrent jobs is limited to the number of workers. Additional jobs will remain in the **PENDING** state until a worker becomes available.
-
-As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
-
-Clicking on the pool name will show detailed information about the pool, including its resource specification, status of each worker node, and any job currently running on it:
-
-.. image:: ../images/pool-details.png
-  :width: 100%
-  :align: center
-
-In this example, one worker is ready in Nebius, and another is currently provisioning.
-The ready worker is running the managed job with ID 10.
-The **Worker Details** section displays the current resource summary of the pool, while the **Jobs** section shows a live snapshot of all jobs associated with this pool, including their statuses and job IDs.
-
-.. tip::
-
-  You can use :code:`sky jobs cancel -p gpu-pool` to cancel all jobs currently running or pending on the pool.
-
-Update a pool
-~~~~~~~~~~~~~
-
-You can update the pool configuration with the following command:
-
-.. code-block:: yaml
-  :emphasize-lines: 3
-
-  # new-pool.yaml
-  pool:
-    workers: 10
-
-  resources:
-    accelerators: {H100:1, H200:1}
-
-  file_mounts:
-    /my-data-2:
-      source: s3://my-dataset-2/
-      mode: MOUNT
-
-  setup: |
-    # Setup commands for all workers
-    echo "Setup complete!"
-
-.. code-block:: console
-
-  $ sky jobs pool apply -p gpu-pool new-pool.yaml
-
-The :code:`sky jobs pool apply` command can be used to update the configuration of an existing pool with the same name.
-In this example, it updates the number of workers in the pool to 10.
-If no such pool exists, it will create a new one; this is equivalent to the behavior demonstrated in the previous example.
-
-Pools will automatically detect changes in the worker configuration. If only the pool configuration (e.g. number of workers) is changed, the pool will be updated in place to reuse the previous workers; otherwise, if the setup, file mounts, workdir, or resources configuration is changed, new worker clusters will be created and the old ones will be terminated gradually.
-
-You can also update the number of workers in a pool without a YAML file by using the :code:`--workers` flag:
-
-.. code-block:: console
-
-  $ sky jobs pool apply -p gpu-pool --workers 10
-
-.. note::
-
-  If there is a :code:`workdir` or :code:`file_mounts` field in the worker configuration, workers will always be recreated when the pool is updated. This is to respect any data changes in them.
-
-Terminate a pool
-~~~~~~~~~~~~~~~~
-
-After usage, the pool can be terminated with :code:`sky jobs pool down`:
-
-.. code-block:: console
-
-  $ sky jobs pool down gpu-pool
-  Terminating pool(s) 'gpu-pool'. Proceed? [Y/n]:
-  Pool 'gpu-pool' is scheduled to be terminated.
-
-The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
-
-.. admonition:: Coming Soon
-
-  Some improved features are under development and will be available soon:
-
-  - **Autoscaling**: Automatically scale down to 0 workers when idle, and scale up when new jobs are submitted.
-  - **Multi-job per worker**: Support for running multiple jobs concurrently on the same worker.
-  - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
 
 
 File uploads for managed jobs
@@ -826,11 +568,14 @@ The jobs controller is a small on-demand CPU VM or pod created by SkyPilot to ma
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
-You can see the controller with :code:`sky status` and refresh its status by using the :code:`-r/--refresh` flag.
+.. note::
+  If you are using a SkyPilot API server, you can run the controller within the same pod as your API server by enabling :ref:`consolidation mode <jobs-consolidation-mode>`.
+
+You can see the controller with :code:`sky status -u` and refresh its status by using the :code:`-r/--refresh` flag.
 
 While the cost of the jobs controller is negligible (~$0.25/hour when running and less than $0.004/hour when stopped),
 you can still tear it down manually with
-:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status`.
+:code:`sky down <job-controller-name>`, where the ``<job-controller-name>`` can be found in the output of :code:`sky status -u`.
 
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
@@ -915,11 +660,11 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
 
-To see your current jobs controller, use :code:`sky status`.
+To see your current jobs controller, use :code:`sky status -u`.
 
 .. code-block:: console
 
-  $ sky status --refresh
+  $ sky status -u --refresh
 
   Clusters
   NAME                          INFRA             RESOURCES                                  STATUS   AUTOSTOP  LAUNCHED
@@ -1019,3 +764,58 @@ For absolute maximum parallelism, the following per-cloud configurations are rec
   Remember to tear down your controller to apply these changes, as described above.
 
 With this configuration, you can launch up to 512 jobs at once. Once the jobs are launched, up to 2000 jobs can be running in parallel.
+
+.. _jobs-consolidation-mode:
+
+Run the controller within the API server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you have deployed a :ref:`remote API server <sky-api-server>`, you can avoid needing to launch a separate VM/pod for the controller. We call this deployment mode "consolidation mode", as the API server and jobs controller are consolidated onto the same pod.
+
+.. warning::
+  Because the jobs controller must stay alive to manage running jobs, it's required to use an external API server to enable consolidation mode.
+
+.. image:: ../images/jobs-consolidation-mode.svg
+  :width: 800
+  :alt: Architecture diagram of SkyPilot remote API server with and without consolidation mode
+  :align: center
+
+Consolidating the API server and the jobs controller has a few advantages:
+
+- 6x faster job submission.
+- Consistent cloud/Kubernetes credentials across the API server and jobs controller.
+- Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
+- No extra VM/pod is needed for the jobs controller, saving cost.
+
+To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
+.. note::
+  You must **restart the API server** after making this change for it to take effect.
+
+  .. code-block:: bash
+
+     # Update NAMESPACE / RELEASE_NAME if you are using custom values.
+     NAMESPACE=skypilot
+     RELEASE_NAME=skypilot
+     # Restart the API server to pick up the config change
+     kubectl -n $NAMESPACE rollout restart deployment $RELEASE_NAME-api-server
+
+  See :ref:`more about the Kubernetes upgrade strategy of the API server <sky-api-server-graceful-upgrade>`.
+
+.. warning::
+
+  When using consolidation mode with a remote  :ref:`SkyPilot API server with RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, any file mounts or workdirs that upload local files/folders of the managed jobs will be lost during a rolling update. To address that, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>`; or, configure a cloud bucket for all local files via :ref:`config-yaml-jobs-bucket` in your :ref:`SkyPilot config <config-yaml>` to persist them.
+
+  .. code-block::
+    
+    jobs:
+      bucket: s3://xxx
+
+The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.

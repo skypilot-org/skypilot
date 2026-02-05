@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 from typing import Optional, Tuple
+from unittest import mock
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -28,7 +29,9 @@ import uvicorn
 
 import sky
 from sky import admin_policy
+from sky import models
 from sky import skypilot_config
+from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -51,6 +54,7 @@ def _load_task_and_apply_policy(
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
         request_options=admin_policy.RequestOptions(
             cluster_name='test',
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -369,6 +373,44 @@ def test_restful_policy_with_request_options(monkeypatch):
             assert config is not None
         finally:
             os.unlink(config_path)
+
+
+def test_restful_policy_with_user(monkeypatch):
+    """Test RESTful admin policy receiving user information."""
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        with PolicyServer() as server:
+            ImageIdInspectorPolicy.received_requests.clear()
+
+            # Create a test task
+            task = create_test_task()
+
+            # Create temporary config and apply policy using existing function
+            with tempfile.NamedTemporaryFile(mode='w',
+                                             suffix='.yaml',
+                                             delete=False) as f:
+                f.write(f'admin_policy: http://127.0.0.1:{server.port}\n')
+                config_path = f.name
+
+            try:
+                dag, config = _load_task_and_apply_policy(
+                    task, config_path, monkeypatch)
+
+                # Verify the policy was called with proper request structure
+                assert len(ImageIdInspectorPolicy.received_requests) == 1
+                request = ImageIdInspectorPolicy.received_requests[0]
+
+                # Check that user information was properly included
+                assert request.user is not None
+                assert request.user.id == '123'
+                assert request.user.name == 'test'
+
+                # Check that we got valid results back
+                assert dag is not None
+                assert len(dag.tasks) == 1
+                assert config is not None
+            finally:
+                os.unlink(config_path)
 
 
 def test_restful_policy_basic_functionality(monkeypatch):

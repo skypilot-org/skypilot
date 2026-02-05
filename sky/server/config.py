@@ -2,12 +2,17 @@
 
 import dataclasses
 import enum
-from typing import Optional
+import functools
+import os
+from typing import Literal, Optional
 
 from sky import sky_logging
 from sky.server import constants as server_constants
 from sky.server import daemons
+from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
+from sky.utils import yaml_utils
 
 # Constants based on profiling the peak memory usage while serving various
 # sky commands. These estimation are highly related to usage patterns
@@ -46,6 +51,11 @@ _MIN_IDLE_SHORT_WORKERS = 1
 # system usage stats.
 _BURSTABLE_WORKERS_FOR_LOCAL = 1024
 
+SERVER_CONFIG_PATH = '~/.sky/.server.yaml'
+
+_DEFAULT_HEADER_NAME = 'X-Auth-Request-Email'
+_DEFAULT_IDENTITY_CLAIM = 'sub'
+
 logger = sky_logging.init_logger(__name__)
 
 
@@ -75,9 +85,11 @@ class ServerConfig:
     queue_backend: QueueBackend
 
 
-def compute_server_config(deploy: bool,
-                          max_db_connections: Optional[int] = None,
-                          quiet: bool = False) -> ServerConfig:
+def compute_server_config(
+        deploy: bool,
+        max_db_connections: Optional[int] = None,
+        quiet: bool = False,
+        reserved_memory_mb: Optional[float] = None) -> ServerConfig:
     """Compute the server config based on environment.
 
     We have different assumptions for the resources in different deployment
@@ -113,6 +125,8 @@ def compute_server_config(deploy: bool,
     cpu_count = common_utils.get_cpu_count()
     logger.debug(f'CPU count: {cpu_count}')
     mem_size_gb = common_utils.get_mem_size_gb()
+    if reserved_memory_mb is not None:
+        mem_size_gb -= (reserved_memory_mb / 1024)
     logger.debug(f'Memory size: {mem_size_gb}GB')
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
@@ -240,3 +254,146 @@ def _max_short_worker_parallism(mem_size_gb: float,
     available_mem = max(0, mem_size_gb - reserved_mem)
     n = max(_get_min_short_workers(), int(available_mem / SHORT_WORKER_MEM_GB))
     return n
+
+
+def _get_server_config_schema() -> dict:
+    """Returns the schema for validating ~/.sky/server.yaml.
+
+    This configuration file is used by the API server to configure
+    authentication and other server-specific settings.
+    """
+    external_proxy_schema = {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'enabled': {
+                'type': 'boolean',
+            },
+            'header_name': {
+                'type': 'string',
+            },
+            'header_format': {
+                'type': 'string',
+                'enum': ['plaintext', 'jwt'],
+            },
+            'jwt_identity_claim': {
+                'type': 'string',
+            },
+        },
+    }
+
+    auth_schema = {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'external_proxy': external_proxy_schema,
+        },
+    }
+
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'auth': auth_schema,
+        },
+    }
+
+
+@dataclasses.dataclass
+class ExternalProxyConfig:
+    """Configuration for external authentication proxy.
+
+    Attributes:
+        enabled: Whether external proxy authentication is enabled.
+        header_name: The HTTP header containing user identity.
+        header_format: The format of the header value ('plaintext' or 'jwt').
+        jwt_identity_claim: The JWT claim containing user identity (only used
+            when header_format is 'jwt').
+    """
+    enabled: bool = False
+    header_name: str = _DEFAULT_HEADER_NAME
+    header_format: Literal['plaintext', 'jwt'] = 'plaintext'
+    jwt_identity_claim: str = _DEFAULT_IDENTITY_CLAIM
+
+
+def load_server_config() -> config_utils.Config:
+    """Load server configuration from ~/.sky/server.yaml.
+
+    Returns:
+        A Config object containing the server configuration.
+    """
+    config_path = os.path.expanduser(SERVER_CONFIG_PATH)
+    if not os.path.exists(config_path):
+        return config_utils.Config()
+
+    config_data = yaml_utils.read_yaml(config_path)
+    if not config_data:
+        return config_utils.Config()
+
+    common_utils.validate_schema(config_data, _get_server_config_schema(),
+                                 config_path)
+    return config_utils.Config.from_dict(config_data)
+
+
+@functools.lru_cache(maxsize=1)
+def load_external_proxy_config() -> ExternalProxyConfig:
+    """Load external proxy configuration.
+
+    Returns:
+        ExternalProxyConfig with the resolved configuration.
+
+    Raises:
+        ValueError: If both JWT header format and legacy header env var are set
+    """
+    server_config = load_server_config()
+
+    enabled = server_config.get_nested(('auth', 'external_proxy', 'enabled'),
+                                       None)
+    if enabled is None:
+        # Backward compatibility: the server may be deployed with a legacy
+        # config (e.g. legacy helm chart) which will not explicitly enable
+        # external proxy auth when needed (e.g. when oauth2-proxy is configured
+        # on the ingress). So:
+        # - If any of the built-in auth schemes is enabled, disable it since
+        # built-in auth is exclusive with auth on the ingress
+        # - Otherwise we enable it since user should have at least one ingress
+        # auth scheme set in this case.
+        enabled = True
+        if (os.getenv(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false') == 'true' or
+            (os.getenv(server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, 'false')
+             == 'true')):
+            enabled = False
+    if not enabled:
+        return ExternalProxyConfig(enabled=False)
+
+    header_format = server_config.get_nested(
+        ('auth', 'external_proxy', 'header_format'), 'plaintext')
+    header_name = server_config.get_nested(
+        ('auth', 'external_proxy', 'header_name'), _DEFAULT_HEADER_NAME)
+    jwt_identity_claim = server_config.get_nested(
+        ('auth', 'external_proxy', 'jwt_identity_claim'),
+        _DEFAULT_IDENTITY_CLAIM)
+
+    # Check for legacy env var
+    legacy_header = os.getenv(constants.ENV_VAR_SERVER_AUTH_USER_HEADER)
+    if legacy_header:
+        if header_format == 'jwt':
+            raise ValueError(
+                'Configuration error: Environment variable '
+                f'{constants.ENV_VAR_SERVER_AUTH_USER_HEADER} is set but '
+                'header_format is "jwt". The legacy header environment '
+                'variable only supports plaintext format. Please either:\n'
+                f'  1. Remove the {constants.ENV_VAR_SERVER_AUTH_USER_HEADER} '
+                'environment variable, OR\n'
+                '  2. Set header_format to "plaintext" in server.yaml')
+        # Legacy env var overrides header_name from config
+        header_name = legacy_header
+        logger.debug(f'Using legacy auth header from env var: {legacy_header}')
+
+    return ExternalProxyConfig(
+        enabled=True,
+        header_name=header_name,
+        header_format=header_format,
+        jwt_identity_claim=jwt_identity_claim,
+    )

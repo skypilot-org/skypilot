@@ -1,12 +1,16 @@
 import os
 import tempfile
 from unittest import mock
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
+from pydantic import SecretStr
 import pytest
 
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import task
+from sky.utils import git
 from sky.utils import registry
 
 
@@ -234,7 +238,7 @@ def test_update_secrets():
     # Test updating with dict
     secrets_dict = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
     task_obj.update_secrets(secrets_dict)
-    assert task_obj.secrets == secrets_dict
+    assert task.get_plaintext_secrets(task_obj.secrets) == secrets_dict
 
     # Test updating with list of tuples
     more_secrets = [('JWT_SECRET', 'jwt-secret'),
@@ -246,11 +250,11 @@ def test_update_secrets():
         'JWT_SECRET': 'jwt-secret',
         'REDIS_PASSWORD': 'redis-pass'
     }
-    assert task_obj.secrets == expected
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected
 
     # Test updating with None (should be no-op)
     task_obj.update_secrets(None)
-    assert task_obj.secrets == expected
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected
 
 
 def test_update_secrets_error_handling():
@@ -284,7 +288,7 @@ def test_secrets_property():
     # Test with initial secrets
     initial_secrets = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
     task_obj = task.Task(run='echo hello', secrets=initial_secrets)
-    assert task_obj.secrets == initial_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == initial_secrets
 
 
 def test_envs_and_secrets_property():
@@ -294,6 +298,7 @@ def test_envs_and_secrets_property():
 
     task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
     combined = task_obj.envs_and_secrets
+    combined = task.get_plaintext_envs_and_secrets(combined)
 
     # Should contain all environment variables
     assert combined['PUBLIC_VAR'] == 'public-value'
@@ -314,6 +319,7 @@ def test_secrets_override_envs_in_combined():
 
     task_obj = task.Task(run='echo hello', envs=envs, secrets=secrets)
     combined = task_obj.envs_and_secrets
+    combined = task.get_plaintext_envs_and_secrets(combined)
 
     # Secret should override env for shared variable name
     assert combined['SHARED_VAR'] == 'secret_value'
@@ -340,7 +346,7 @@ def test_from_yaml_config_with_secrets():
     task_obj = task.Task.from_yaml_config(config)
 
     # Check that secrets are parsed correctly
-    assert task_obj.secrets == {
+    assert task.get_plaintext_secrets(task_obj.secrets) == {
         'API_KEY': 'secret-key-123',
         'DATABASE_PASSWORD': 'secret-password'
     }
@@ -367,10 +373,11 @@ def test_from_yaml_config_secrets_type_conversion():
     task_obj = task.Task.from_yaml_config(config)
 
     # Non-None values should be converted to strings
-    assert task_obj.secrets['NUMERIC_KEY'] == '456'
-    assert task_obj.secrets['BOOL_KEY'] == 'True'
-    assert task_obj.secrets['STRING_KEY'] == 'regular-string'
-    assert task_obj.secrets['EMPTY_KEY'] == ''
+    assert task.get_plaintext_secrets(task_obj.secrets)['NUMERIC_KEY'] == '456'
+    assert task.get_plaintext_secrets(task_obj.secrets)['BOOL_KEY'] == 'True'
+    assert task.get_plaintext_secrets(
+        task_obj.secrets)['STRING_KEY'] == 'regular-string'
+    assert task.get_plaintext_secrets(task_obj.secrets)['EMPTY_KEY'] == ''
 
 
 def test_from_yaml_config_secrets_validation():
@@ -387,7 +394,7 @@ def test_task_initialization_with_secrets():
     secrets = {'API_KEY': 'secret123', 'DB_PASSWORD': 'password456'}
     task_obj = task.Task(run='echo hello', secrets=secrets)
 
-    assert task_obj.secrets == secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == secrets
     assert task_obj.run == 'echo hello'
 
 
@@ -441,7 +448,7 @@ def test_from_yaml_config_null_secrets_with_override():
         'API_KEY': 'overridden-api-key',
         'TOKEN': 'overridden-token'
     }
-    assert task_obj.secrets == expected_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected_secrets
 
     # Environment variables should be preserved
     assert task_obj.envs == {'PUBLIC_VAR': 'public-value'}
@@ -482,7 +489,7 @@ def test_from_yaml_config_partial_null_secrets_override():
         'YAML_SECRET': 'yaml-value',
         'NULL_SECRET': 'cli-override'
     }
-    assert task_obj.secrets == expected_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected_secrets
 
 
 def test_from_yaml_config_override_non_null_secrets():
@@ -501,7 +508,7 @@ def test_from_yaml_config_override_non_null_secrets():
                                           secrets_overrides=secrets_overrides)
 
     expected_secrets = {'EXISTING_SECRET': 'overridden-value'}
-    assert task_obj.secrets == expected_secrets
+    assert task.get_plaintext_secrets(task_obj.secrets) == expected_secrets
 
 
 def test_from_yaml_config_env_and_secrets_overrides_independent():
@@ -525,10 +532,13 @@ def test_from_yaml_config_env_and_secrets_overrides_independent():
                                           secrets_overrides=secrets_overrides)
 
     assert task_obj.envs == {'ENV_VAR': 'env-override'}
-    assert task_obj.secrets == {'SECRET_VAR': 'secret-override'}
+    assert task.get_plaintext_secrets(task_obj.secrets) == {
+        'SECRET_VAR': 'secret-override'
+    }
 
     # Combined should have both
     combined = task_obj.envs_and_secrets
+    combined = task.get_plaintext_envs_and_secrets(combined)
     expected_combined = {
         'ENV_VAR': 'env-override',
         'SECRET_VAR': 'secret-override'
@@ -700,6 +710,7 @@ def make_mock_resource(cloud=None, region=None, zone=None):
             self.cloud = cloud
             self.region = region
             self.zone = zone
+            self.priority = 0
 
         def copy(self, **override):
             # Return a new instance with overridden attributes
@@ -819,6 +830,97 @@ def test_resolve_volumes_override_topology():
             assert r.zone == 'a'
 
 
+def test_resolve_volumes_ephemeral_volume_success():
+    """Test resolving ephemeral volume with 'size' field."""
+    t = task.Task()
+    t._volumes = {'/mnt': {'size': 10}}
+    t.resources = [make_mock_resource()]
+
+    # Mock VolumeMount.resolve_ephemeral_config to return a mock volume mount
+    mock_volume_mount = mock.MagicMock()
+    mock_volume_mount.is_ephemeral = True
+    mock_volume_mount.volume_name = 'ephemeral-vol'
+    mock_volume_mount.path = '/mnt'
+
+    with mock.patch('sky.utils.volume.VolumeMount.resolve_ephemeral_config',
+                    return_value=mock_volume_mount) as mock_resolve:
+        t.resolve_and_validate_volumes()
+        # Verify resolve_ephemeral_config was called with correct parameters
+        mock_resolve.assert_called_once_with('/mnt', {'size': 10})
+        # Verify volume_mounts was populated
+        assert t.volume_mounts is not None
+        assert len(t.volume_mounts) == 1
+        assert t.volume_mounts[0] == mock_volume_mount
+
+
+def test_resolve_volumes_ephemeral_volume_with_multiple_fields():
+    """Test resolving ephemeral volume with 'size' and other fields."""
+    t = task.Task()
+    vol_config = {'size': 20, 'type': 'pd-standard', 'labels': {'env': 'test'}}
+    t._volumes = {'/data': vol_config}
+    t.resources = [make_mock_resource()]
+
+    mock_volume_mount = mock.MagicMock()
+    mock_volume_mount.is_ephemeral = True
+
+    with mock.patch('sky.utils.volume.VolumeMount.resolve_ephemeral_config',
+                    return_value=mock_volume_mount) as mock_resolve:
+        t.resolve_and_validate_volumes()
+        mock_resolve.assert_called_once_with('/data', vol_config)
+
+
+def test_resolve_volumes_dict_with_name_and_size():
+    """Test dict with both 'size' and 'name' prioritizes 'size' (ephemeral)."""
+    t = task.Task()
+    # When both 'size' and 'name' exist, 'size' takes precedence (ephemeral)
+    t._volumes = {'/mnt': {'size': 10, 'name': 'vol1'}}
+    t.resources = [make_mock_resource()]
+
+    mock_volume_mount = mock.MagicMock()
+    mock_volume_mount.is_ephemeral = True
+
+    with mock.patch('sky.utils.volume.VolumeMount.resolve_ephemeral_config',
+                    return_value=mock_volume_mount) as mock_ephemeral, \
+         mock.patch('sky.utils.volume.VolumeMount.resolve') as mock_resolve:
+        t.resolve_and_validate_volumes()
+        # Verify ephemeral config is called (size takes precedence)
+        mock_ephemeral.assert_called_once()
+        # Verify resolve is NOT called
+        mock_resolve.assert_not_called()
+
+
+def test_resolve_volumes_invalid_dict_no_size_no_name():
+    """Test dict without 'size' or 'name' raises ValueError."""
+    t = task.Task()
+    t._volumes = {'/mnt': {'type': 'pd-standard'}}
+    t.resources = [make_mock_resource()]
+
+    with pytest.raises(ValueError,
+                       match='Invalid volume config.*Either "size".*or "name"'):
+        t.resolve_and_validate_volumes()
+
+
+def test_resolve_volumes_invalid_dict_empty():
+    """Test empty dict raises ValueError."""
+    t = task.Task()
+    t._volumes = {'/mnt': {}}
+    t.resources = [make_mock_resource()]
+
+    with pytest.raises(ValueError,
+                       match='Invalid volume config.*Either "size".*or "name"'):
+        t.resolve_and_validate_volumes()
+
+
+def test_resolve_volumes_invalid_type_list():
+    """Test volume config with invalid type (list) raises ValueError."""
+    t = task.Task()
+    t._volumes = {'/mnt': ['vol1', 'vol2']}
+    t.resources = [make_mock_resource()]
+
+    with pytest.raises(ValueError, match='Invalid volume config'):
+        t.resolve_and_validate_volumes()
+
+
 def test_resolve_volumes_with_envs():
 
     config = {
@@ -875,3 +977,265 @@ def test_resolve_volumes_with_envs_dict():
     }
     t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
+
+
+def test_resources_to_config():
+    """Test the functionality of converting resources to
+    its respective yaml config."""
+    t = task.Task()
+    resource1 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a')
+    t.resources = [resource1]
+    # get the resource config
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    t.resources = [resource1, resource1]
+    # two identical resources should be combined into a single resource
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    t.resources = {resource1, resource1}
+    # two identical resources should be combined into a single resource
+    assert t.get_resource_config() == resource1.to_yaml_config()
+
+    resource2 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a',
+                                        memory='10GB')
+    t.resources = [resource1, resource2]
+    # the common config should be factored out
+    common_config = resources_lib.Resources(cloud='aws',
+                                            region='us-west1',
+                                            zone='a').to_yaml_config()
+    returned_config = t.get_resource_config()
+    ordered = returned_config.pop('ordered')
+    assert returned_config == common_config
+    assert len(ordered) == 2
+    # the first resource should be empty, because all fields
+    # are the same as the common config
+    assert ordered[0] == {}
+    # the second resource should have the modified memory
+    assert float(ordered[1]['memory']) == 10.0
+
+
+def test_task_resource_config_modification():
+    """Test the functionality of modifying resource config."""
+    t = task.Task()
+    resource1 = resources_lib.Resources(cloud='aws',
+                                        region='us-west1',
+                                        zone='a')
+    resource2 = resource1.copy(memory='10GB')
+    t.resources = [resource1, resource2]
+
+    # get the resource config
+    resource_config = t.get_resource_config()
+    assert len(resource_config['ordered']) == 2
+
+    # Modify one of the ordered resources, this should modify the resource1
+    resource_config['ordered'][0]['memory'] = '20GB'
+    t.set_resources(resource_config)
+    # check that resource1 is modified
+    assert float(t.resources[0].memory) == 20.0
+    assert float(t.resources[1].memory) == 10.0
+
+    # Modify the autostop config for all resources
+    # by changing the base config.
+    resource_config['autostop'] = {'idle_minutes': 10}
+    t.set_resources(resource_config)
+    assert t.resources[0].autostop_config.idle_minutes == 10
+    assert t.resources[1].autostop_config.idle_minutes == 10
+
+
+def test_secrets_not_plaintext_on_initialization():
+    """Test that secrets initialized in Task are SecretStr objects, not plain strings."""
+    secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DB_PASSWORD': 'secret-password'
+    }
+    task_obj = task.Task(run='echo hello', secrets=secrets)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    for key, value in task_obj.secrets.items():
+        assert isinstance(
+            value,
+            SecretStr), f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value,
+                              str), f'Secret {key} should not be a plain string'
+        # Verify we can get the secret value
+        assert value.get_secret_value() == secrets[key]
+
+
+def test_secrets_not_plaintext_after_update_envs_and_secrets_from_workdir():
+    """Test that update_envs_and_secrets_from_workdir doesn't put plaintext strings in secrets."""
+    # Set up task with git workdir
+    task_obj = task.Task(name='test', run='echo hello')
+    task_obj.workdir = {
+        'url': 'https://github.com/test/repo.git',
+        'ref': 'main'
+    }
+
+    # Mock GitRepo and clone info
+    mock_clone_info = MagicMock()
+    mock_clone_info.url = 'https://github.com/test/repo.git'
+    mock_clone_info.token = 'test_token_12345'
+    mock_clone_info.ssh_key = 'test_ssh_key_content'
+
+    mock_repo_instance = MagicMock()
+    mock_repo_instance.get_repo_clone_info.return_value = mock_clone_info
+    mock_repo_instance.get_ref_type.return_value = git.GitRefType.BRANCH
+
+    with patch.dict(os.environ, {git.GIT_TOKEN_ENV_VAR: 'test_token_12345'}, clear=True), \
+         patch('sky.utils.git.GitRepo', return_value=mock_repo_instance):
+        task_obj.update_envs_and_secrets_from_workdir()
+
+    # Verify secrets are SecretStr instances, not plain strings
+    assert git.GIT_TOKEN_ENV_VAR in task_obj.secrets
+    token_secret = task_obj.secrets[git.GIT_TOKEN_ENV_VAR]
+    assert isinstance(token_secret, SecretStr), \
+        f'Git token secret should be SecretStr, got {type(token_secret)}'
+    assert not isinstance(token_secret, str), \
+        'Git token secret should not be a plain string'
+    assert token_secret.get_secret_value() == 'test_token_12345'
+
+    assert git.GIT_SSH_KEY_ENV_VAR in task_obj.secrets
+    ssh_key_secret = task_obj.secrets[git.GIT_SSH_KEY_ENV_VAR]
+    assert isinstance(ssh_key_secret, SecretStr), \
+        f'SSH key secret should be SecretStr, got {type(ssh_key_secret)}'
+    assert not isinstance(ssh_key_secret, str), \
+        'SSH key secret should not be a plain string'
+    assert ssh_key_secret.get_secret_value() == 'test_ssh_key_content'
+
+
+def test_secrets_not_plaintext_after_update_secrets():
+    """Test that update_secrets doesn't put plaintext strings in secrets."""
+    task_obj = task.Task(run='echo hello')
+
+    # Update secrets with dict
+    secrets_dict = {'API_KEY': 'secret1', 'DB_PASSWORD': 'secret2'}
+    task_obj.update_secrets(secrets_dict)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == secrets_dict[key]
+
+    # Update secrets with list of tuples
+    more_secrets = [('JWT_SECRET', 'jwt-secret'),
+                    ('REDIS_PASSWORD', 'redis-pass')]
+    task_obj.update_secrets(more_secrets)
+
+    # Verify all secrets (including newly added ones) are SecretStr instances
+    all_secrets = {
+        'API_KEY': 'secret1',
+        'DB_PASSWORD': 'secret2',
+        'JWT_SECRET': 'jwt-secret',
+        'REDIS_PASSWORD': 'redis-pass'
+    }
+    assert len(task_obj.secrets.keys()) == len(all_secrets.keys())
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == all_secrets[key]
+
+
+def test_secrets_not_plaintext_from_yaml_config():
+    """Test that from_yaml_config stores secrets as SecretStr objects, not plain strings."""
+    config = {
+        'run': 'echo hello',
+        'envs': {
+            'PUBLIC_VAR': 'public-value',
+            'DEBUG': 'true'
+        },
+        'secrets': {
+            'API_KEY': 'secret-api-key-123',
+            'DATABASE_PASSWORD': 'secret-password-456',
+            'JWT_SECRET': 'jwt-secret-token'
+        }
+    }
+
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    expected_secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DATABASE_PASSWORD': 'secret-password-456',
+        'JWT_SECRET': 'jwt-secret-token'
+    }
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == expected_secrets[key]
+
+
+def test_secrets_not_plaintext_from_yaml_str():
+    """Test that from_yaml_str stores secrets as SecretStr objects, not plain strings."""
+    yaml_str = """
+run: echo hello
+envs:
+  PUBLIC_VAR: public-value
+  DEBUG: "true"
+secrets:
+  API_KEY: secret-api-key-123
+  DATABASE_PASSWORD: secret-password-456
+  JWT_SECRET: jwt-secret-token
+"""
+
+    task_obj = task.Task.from_yaml_str(yaml_str)
+
+    # Verify all secrets are SecretStr instances, not plain strings
+    expected_secrets = {
+        'API_KEY': 'secret-api-key-123',
+        'DATABASE_PASSWORD': 'secret-password-456',
+        'JWT_SECRET': 'jwt-secret-token'
+    }
+    for key, value in task_obj.secrets.items():
+        assert isinstance(value, SecretStr), \
+            f'Secret {key} should be SecretStr, got {type(value)}'
+        assert not isinstance(value, str), \
+            f'Secret {key} should not be a plain string'
+        assert value.get_secret_value() == expected_secrets[key]
+
+
+def test_secrets_not_plaintext_from_yaml():
+    """Test that from_yaml stores secrets as SecretStr objects, not plain strings."""
+    yaml_content = """
+run: echo hello
+envs:
+  PUBLIC_VAR: public-value
+  DEBUG: "true"
+secrets:
+  API_KEY: secret-api-key-123
+  DATABASE_PASSWORD: secret-password-456
+  JWT_SECRET: jwt-secret-token
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml',
+                                     delete=False) as f:
+        f.write(yaml_content)
+        f.flush()
+        yaml_path = f.name
+
+    try:
+        task_obj = task.Task.from_yaml(yaml_path)
+
+        # Verify all secrets are SecretStr instances, not plain strings
+        expected_secrets = {
+            'API_KEY': 'secret-api-key-123',
+            'DATABASE_PASSWORD': 'secret-password-456',
+            'JWT_SECRET': 'jwt-secret-token'
+        }
+        for key, value in task_obj.secrets.items():
+            assert isinstance(value, SecretStr), \
+                f'Secret {key} should be SecretStr, got {type(value)}'
+            assert not isinstance(value, str), \
+                f'Secret {key} should not be a plain string'
+            assert value.get_secret_value() == expected_secrets[key]
+    finally:
+        os.unlink(yaml_path)

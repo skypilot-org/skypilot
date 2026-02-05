@@ -1,7 +1,7 @@
 """Utilities for formatting tables for CLI output."""
 import abc
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import prettytable
 
@@ -92,12 +92,14 @@ def format_job_table(
     jobs: List[responses.ManagedJobRecord],
     show_all: bool,
     show_user: bool,
+    pool_status: Optional[List[Dict[str, Any]]] = None,
     max_jobs: Optional[int] = None,
     status_counts: Optional[Dict[str, int]] = None,
 ):
     jobs = [job.model_dump() for job in jobs]
     return managed_jobs.format_job_table(
         jobs,
+        pool_status=pool_status,
         show_all=show_all,
         show_user=show_user,
         max_jobs=max_jobs,
@@ -202,24 +204,37 @@ class VolumeTable(abc.ABC):
 class PVCVolumeTable(VolumeTable):
     """The PVC volume table."""
 
+    def __init__(self,
+                 volumes: List[responses.VolumeRecord],
+                 show_all: bool = False):
+        # Check if any volume has an error before creating the table
+        self._has_errors = any(row.get('error_message') for row in volumes)
+        super().__init__(volumes, show_all)
+
     def _create_table(self, show_all: bool = False) -> prettytable.PrettyTable:
         """Create the PVC volume table."""
         #  If show_all is False, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL
+        #   (+ MESSAGE if any volume is not ready)
         #  If show_all is True, show the table with the columns:
         #   NAME, TYPE, INFRA, SIZE, USER, WORKSPACE,
-        #   AGE, STATUS, LAST_USE, USED_BY, NAME_ON_CLOUD
-        #   STORAGE_CLASS, ACCESS_MODE
+        #   AGE, STATUS, LAST_USE, USED_BY, IS_EPHEMERAL, NAME_ON_CLOUD
+        #   STORAGE_CLASS, ACCESS_MODE, MESSAGE
 
+        columns = _BASIC_COLUMNS + [
+            'IS_EPHEMERAL',
+        ]
         if show_all:
-            columns = _BASIC_COLUMNS + [
+            columns = columns + [
                 'NAME_ON_CLOUD',
                 'STORAGE_CLASS',
                 'ACCESS_MODE',
+                'MESSAGE',
             ]
-        else:
-            columns = _BASIC_COLUMNS
+        elif self._has_errors:
+            # Show MESSAGE column even without show_all if there are issues
+            columns = columns + ['MESSAGE']
 
         table = log_utils.create_table(columns)
         return table
@@ -230,11 +245,23 @@ class PVCVolumeTable(VolumeTable):
         """Add rows to the PVC volume table."""
         for row in volumes:
             table_row = self._get_row_base_columns(row, show_all)
+            table_row.append(row.get('is_ephemeral', False))
             if show_all:
                 table_row.append(row.get('name_on_cloud', ''))
                 table_row.append(
                     row.get('config', {}).get('storage_class_name', '-'))
                 table_row.append(row.get('config', {}).get('access_mode', ''))
+                # Add error message
+                error_msg = row.get('error_message', '')
+                table_row.append(error_msg if error_msg else '-')
+            elif self._has_errors:
+                # Show error message even without show_all if there are errors
+                error_msg = row.get('error_message', '')
+                # Truncate error message for display
+                if error_msg:
+                    error_msg = common_utils.truncate_long_string(
+                        error_msg, constants.ERROR_MESSAGE_TRUNC_LENGTH)
+                table_row.append(error_msg if error_msg else '-')
 
             self.table.add_row(table_row)
 

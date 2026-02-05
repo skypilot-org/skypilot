@@ -49,7 +49,32 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def _seed_test_jobs(_mock_managed_jobs_db_conn):
+def _mock_global_user_state_db(tmp_path, monkeypatch):
+    """Create a temporary SQLite DB for global_user_state to avoid conflicts.
+
+    GetJobTable calls managed_job_utils.get_managed_job_queue() which in turn
+    calls global_user_state.get_cluster_name_to_handle_map(). This triggers
+    global_user_state database initialization, which can conflict with the
+    managed jobs database fixture causing Alembic migration errors in CI.
+    """
+    from sky import global_user_state
+
+    db_path = tmp_path / 'state_testing.db'
+    engine = create_engine(f'sqlite:///{db_path}')
+    async_engine = create_async_engine(f'sqlite+aiosqlite:///{db_path}',
+                                       connect_args={'timeout': 30})
+
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE', engine)
+    monkeypatch.setattr(global_user_state, '_SQLALCHEMY_ENGINE_ASYNC',
+                        async_engine)
+
+    global_user_state.create_table(engine)
+
+    yield engine
+
+
+@pytest.fixture
+def _seed_test_jobs(_mock_managed_jobs_db_conn, _mock_global_user_state_db):
     """Seed the database with test jobs in various states for comprehensive testing."""
 
     # Mock callback function for async state transitions
@@ -269,7 +294,8 @@ class TestGetJobTable:
     def test_get_job_table_basic(self):
         """Test basic GetJobTable functionality - should return all jobs with minimal request."""
         request = managed_jobsv1_pb2.GetJobTableRequest(
-            accessible_workspaces=['ws1', 'ws2']  # Include both workspaces
+            accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                workspaces=['ws1', 'ws2'])  # Include both workspaces
         )
         context_mock = mock.Mock()
 
@@ -329,10 +355,87 @@ class TestGetJobTable:
         assert 'ws1' in workspaces
         assert 'ws2' in workspaces
 
+    def test_get_job_table_no_accessible_workspaces(self):
+        """Test basic GetJobTable functionality without specified accessible
+         workspaces - should return all jobs."""
+        request = managed_jobsv1_pb2.GetJobTableRequest()
+        context_mock = mock.Mock()
+
+        response = self.service.GetJobTable(request, context_mock)
+        assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
+        context_mock.abort.assert_not_called()
+        assert len(response.jobs) == 4
+        assert response.total == 4
+        assert response.total_no_filter == 4
+
+        # Validate that job IDs match our seeded jobs
+        returned_job_ids = [job.job_id for job in response.jobs]
+        expected_job_ids = [
+            self.job_ids['job_id1'], self.job_ids['job_id2'],
+            self.job_ids['job_id3'], self.job_ids['job_id4']
+        ]
+        assert sorted(returned_job_ids) == sorted(expected_job_ids)
+
+        # Validate exact job info for a specific job
+        # Find the job with job_id1 to make the test deterministic
+        job_id1 = self.job_ids['job_id1']
+        target_job = next(job for job in response.jobs if job.job_id == job_id1)
+
+        # Assert all properties (job_id1 is in PENDING state)
+        assert target_job.job_id == job_id1
+        assert target_job.task_id == 0
+        assert target_job.job_name == 'a'
+        assert target_job.task_name == 'task0'
+        assert target_job.job_duration == 0.0  # Not started yet
+        assert target_job.status == state.ManagedJobStatus.PENDING.to_protobuf()
+        assert target_job.schedule_state == state.ManagedJobScheduleState.INACTIVE.to_protobuf(
+        )
+        assert target_job.resources == '{}'
+        assert target_job.cluster_resources == '-'
+        assert target_job.cluster_resources_full == '-'
+        assert target_job.cloud == '-'
+        assert target_job.region == '-'
+        assert target_job.infra == '-'
+        assert len(target_job.accelerators) == 0
+        assert target_job.recovery_count == 0
+        assert target_job.metadata == {}
+        assert target_job.workspace == 'ws1'
+        assert not target_job.HasField('details')
+        assert not target_job.HasField('failure_reason')
+        assert not target_job.HasField('user_name')
+        assert target_job.user_hash == 'abcd1234'
+        assert not target_job.HasField('submitted_at')
+        assert not target_job.HasField('start_at')
+        assert not target_job.HasField('end_at')
+        assert not target_job.HasField('user_yaml')
+        assert target_job.entrypoint == 'ep1'
+        assert target_job.pool == 'test-pool'
+        assert target_job.pool_hash == 'hash123'
+
+        # Validate that workspaces are correct
+        workspaces = [job.workspace for job in response.jobs]
+        assert 'ws1' in workspaces
+        assert 'ws2' in workspaces
+
+    def test_get_job_table_empty_accessible_workspaces(self):
+        """Test basic GetJobTable functionality with empty accessible
+         workspaces - should return no jobs."""
+        request = managed_jobsv1_pb2.GetJobTableRequest(
+            accessible_workspaces=managed_jobsv1_pb2.Workspaces(workspaces=[]))
+        context_mock = mock.Mock()
+
+        response = self.service.GetJobTable(request, context_mock)
+        assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
+        context_mock.abort.assert_not_called()
+        assert len(response.jobs) == 0
+        assert response.total == 0
+        assert response.total_no_filter == 4
+
     def test_get_job_table_different_states(self):
         """Test that our seeded jobs are in different states as expected."""
         request = managed_jobsv1_pb2.GetJobTableRequest(
-            accessible_workspaces=['ws1', 'ws2'])
+            accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                workspaces=['ws1', 'ws2']))
         context_mock = mock.Mock()
 
         response = self.service.GetJobTable(request, context_mock)
@@ -369,6 +472,79 @@ class TestGetJobTable:
         assert job_data[self.job_ids['job_id2']].end_at == 0.0
         assert job_data[self.job_ids['job_id3']].end_at == 0.0
         assert job_data[self.job_ids['job_id4']].end_at > 0
+
+    def test_get_job_table_with_fields_filter(self):
+        """Test GetJobTable with specific fields filter - other fields should be empty/default."""
+        # Request only specific fields: job_name, workspace, pool
+        request = managed_jobsv1_pb2.GetJobTableRequest(
+            accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                workspaces=['ws1', 'ws2']),
+            fields=managed_jobsv1_pb2.Fields(
+                fields=['job_name', 'workspace', 'pool']))
+        context_mock = mock.Mock()
+
+        response = self.service.GetJobTable(request, context_mock)
+        context_mock.abort.assert_not_called()
+        assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
+        assert len(response.jobs) == 4
+
+        # Validate that requested fields have values
+        for job in response.jobs:
+            # job_id and status are always included (required fields)
+            assert job.job_id > 0
+            # status should be set to a valid value (not None)
+            assert job.status is not None
+            # Requested fields should have values
+            assert job.job_name in ['a', 'b', 'd']
+            assert job.workspace in ['ws1', 'ws2']
+            # pool can be empty for some jobs, but should be set for jobs with pools
+            if job.job_id in [self.job_ids['job_id1'], self.job_ids['job_id4']]:
+                assert job.pool == 'test-pool'
+            else:
+                assert job.pool == ''
+
+            # Non-requested fields should be empty/default
+            # These fields should NOT have meaningful values since they weren't requested
+            assert job.task_id == 0  # default int value
+            assert job.job_duration == 0.0  # default float value
+            assert job.resources == ''
+            assert job.cluster_resources == ''
+            assert job.cluster_resources_full == ''
+            assert job.cloud == ''
+            assert job.region == ''
+            assert job.infra == ''
+            assert job.recovery_count == 0
+            assert len(job.accelerators) == 0
+            assert len(job.metadata) == 0
+            assert not job.HasField('details')
+            assert not job.HasField('failure_reason')
+            assert not job.HasField('user_name')
+            assert not job.HasField('user_hash')
+            assert not job.HasField('submitted_at')
+            assert not job.HasField('start_at')
+            assert not job.HasField('end_at')
+            assert not job.HasField('user_yaml')
+            assert not job.HasField('entrypoint')
+            assert not job.HasField('pool_hash')
+
+    def test_get_job_table_with_empty_fields_filter(self):
+        """Test GetJobTable with empty fields list - should return minimal fields (job_id, status)."""
+        request = managed_jobsv1_pb2.GetJobTableRequest(
+            accessible_workspaces=managed_jobsv1_pb2.Workspaces(
+                workspaces=['ws1', 'ws2']),
+            fields=managed_jobsv1_pb2.Fields(fields=[]))
+        context_mock = mock.Mock()
+
+        response = self.service.GetJobTable(request, context_mock)
+        assert isinstance(response, managed_jobsv1_pb2.GetJobTableResponse)
+        context_mock.abort.assert_not_called()
+        assert len(response.jobs) == 4
+
+        # Even with empty fields, job_id and status are always returned
+        for job in response.jobs:
+            assert job.job_id > 0
+            # status should be set to a valid value (not None)
+            assert job.status is not None
 
 
 class TestCancelJobs:

@@ -1,0 +1,46 @@
+# Pool configuration for batch text classification
+# This creates a pool of workers with openai/gpt-oss-20b pre-downloaded
+# 
+# Usage:
+#   sky jobs pool apply -p text-classify pool.yaml
+
+workdir: .
+
+envs:
+  MODEL_NAME: openai/gpt-oss-20b
+  BUCKET_NAME:  # Set your unique bucket name (must be globally unique)
+
+# Cloud storage bucket for results (optional)
+# If you don't have access to cloud storage buckets:
+#   1. Comment out this entire file_mounts section
+#   2. Update --output-dir in classify.yaml to use local storage (e.g., ~/sky_workdir)
+file_mounts:
+  /results:
+    name: ${BUCKET_NAME}
+    mode: MOUNT
+
+resources:
+  accelerators: H100:1
+  disk_size: 100
+
+setup: |
+  # Set up virtual env
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+  
+  # Install vLLM and dependencies
+  uv pip install vllm==0.11.0 transformers==4.57.1
+  
+  # Install dependencies for the classification script
+  uv pip install datasets==2.18.0 tqdm==4.66.1
+  
+  # Download the model to cache it for all jobs
+  echo "Downloading model ${MODEL_NAME}..."
+  huggingface-cli download ${MODEL_NAME} --local-dir /tmp/model
+  
+  echo "Pool worker setup complete!"
+
+pool:
+  # Number of workers in the pool
+  workers: 2
+

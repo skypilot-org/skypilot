@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import {
   getWorkspaces,
@@ -41,6 +41,7 @@ import {
 } from '@/components/elements/icons';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { RotateCwIcon, PlusIcon, Trash2Icon, EditIcon } from 'lucide-react';
+import { LastUpdatedTimestamp } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { statusGroups } from './jobs';
 import dashboardCache from '@/lib/cache';
@@ -48,97 +49,53 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
-import { CLOUD_CANONICALIZATIONS } from '@/data/connectors/constants';
+import {
+  CLOUD_CANONICALIZATIONS,
+  CLUSTER_NOT_UP_ERROR,
+} from '@/data/connectors/constants';
+import { getClusters } from '@/data/connectors/clusters';
+import { getManagedJobs } from '@/data/connectors/jobs';
 import Link from 'next/link';
 
-// Workspace-aware API functions (cacheable)
+// Workspace-aware API functions - use cached global data and filter by workspace
+// This avoids making separate API calls per workspace
 export async function getWorkspaceClusters(workspaceName) {
   try {
-    const clusters = await apiClient.fetch('/status', {
-      cluster_names: null,
-      all_users: true,
-      include_credentials: false,
-      override_skypilot_config: { active_workspace: workspaceName },
-    });
-
-    const mappedClusters = clusters.map((cluster) => ({
-      status:
-        cluster.status === 'UP'
-          ? 'RUNNING'
-          : cluster.status === 'STOPPED'
-            ? 'STOPPED'
-            : cluster.status === 'INIT'
-              ? 'LAUNCHING'
-              : 'TERMINATED',
-      cluster: cluster.name,
-      user: cluster.user_name,
-      user_hash: cluster.user_hash,
-      cluster_hash: cluster.cluster_hash,
-      cloud: cluster.cloud,
-      region: cluster.region,
-      zone: cluster.zone,
-      launched_at: cluster.launched_at,
-      handle: cluster.handle,
-      last_use: cluster.last_use,
-      autostop: cluster.autostop,
-      to_down: cluster.to_down,
-      metadata: cluster.metadata,
-      resources_str: cluster.resources_str,
-      workspace: cluster.workspace || 'default', // Preserve workspace info
-    }));
+    // Use cached global clusters data and filter by workspace
+    const allClusters = await dashboardCache.get(getClusters);
 
     // Filter clusters to only include those that belong to the requested workspace
-    const filteredClusters = mappedClusters.filter(
+    const filteredClusters = (allClusters || []).filter(
       (cluster) => cluster.workspace === workspaceName
     );
     return filteredClusters;
   } catch (error) {
-    console.error(
-      `Error fetching clusters for workspace ${workspaceName}:`,
-      error
-    );
-    return [];
+    const msg = `Error fetching clusters for workspace ${workspaceName}: ${error}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
 export async function getWorkspaceManagedJobs(workspaceName) {
   try {
-    const response = await apiClient.post('/jobs/queue/v2', {
-      all_users: true,
-      verbose: true,
-      skip_finished: true,
-      workspace_match: workspaceName,
-      fields: ['workspace', 'status'],
-      override_skypilot_config: { active_workspace: workspaceName },
-    });
+    // Use cached global managed jobs data and filter by workspace
+    // This avoids making separate API calls per workspace
+    const allJobsData = await dashboardCache.get(getManagedJobs, [
+      { allUsers: true, skipFinished: true },
+    ]);
 
-    const id = response.headers.get('X-Skypilot-Request-ID');
-    const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    const data = await fetchedData.json();
-    const jobsData = data.return_value
-      ? JSON.parse(data.return_value)
-      : { jobs: [] };
+    const allJobs = allJobsData?.jobs || [];
 
-    // Ensure workspace information is preserved and filter by workspace
-    if (jobsData.jobs) {
-      jobsData.jobs = jobsData.jobs.map((job) => ({
-        ...job,
-        workspace: job.workspace || 'default',
-      }));
-
-      // Filter jobs to only include those that belong to the requested workspace
-      jobsData.jobs = jobsData.jobs.filter(
-        (job) => job.workspace === workspaceName
-      );
-    }
-
-    return jobsData;
-  } catch (error) {
-    console.error(
-      `Error fetching managed jobs for workspace ${workspaceName}:`,
-      error
+    // Filter jobs to only include those that belong to the requested workspace
+    const filteredJobs = allJobs.filter(
+      (job) => job.workspace === workspaceName
     );
-    return { jobs: [] };
+
+    return { jobs: filteredJobs };
+  } catch (error) {
+    const msg = `Error fetching managed jobs for workspace ${workspaceName}: ${error}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
@@ -296,8 +253,13 @@ export function Workspaces() {
     totalClusters: 0,
     managedJobs: 0,
   });
-  const [loading, setLoading] = useState(true);
+  const [clustersLoading, setClustersLoading] = useState(true);
+  const [jobsLoading, setJobsLoading] = useState(true);
   const [rawWorkspacesData, setRawWorkspacesData] = useState(null);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
+
+  // Track if this is the initial load (controls panel-level vs cell-level spinners)
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   // Sorting state
   const [sortConfig, setSortConfig] = useState({
@@ -394,156 +356,211 @@ export function Workspaces() {
     }
   };
 
-  const fetchData = async (showLoading = false) => {
-    if (showLoading) {
-      setLoading(true);
-    }
-    try {
-      // First, get the list of workspaces the user has access to
-      const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
-      setRawWorkspacesData(fetchedWorkspacesConfig);
-      const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+  // Fetch clusters independently and update state progressively
+  const fetchClustersData = useCallback(
+    async (workspaceNames, enabledCloudsMap) => {
+      try {
+        const allClusters = await dashboardCache.get(getClusters);
 
-      // Fetch data for each workspace in parallel using workspace-aware API calls
-      const workspaceDataPromises = configuredWorkspaceNames.map(
-        async (wsName) => {
-          const [enabledClouds, clusters, managedJobs] = await Promise.all([
-            dashboardCache.get(getEnabledClouds, [wsName]),
-            dashboardCache.get(getWorkspaceClusters, [wsName]),
-            dashboardCache.get(getWorkspaceManagedJobs, [wsName]),
-          ]);
+        // Calculate per-workspace cluster stats
+        const workspaceClusterStats = {};
+        let totalRunningClusters = 0;
 
-          return {
-            workspaceName: wsName,
-            enabledClouds,
-            clusters: clusters || [],
-            managedJobs: managedJobs || { jobs: [] },
-          };
-        }
-      );
-
-      const workspaceDataArray = await Promise.all(workspaceDataPromises);
-
-      // Aggregate all clusters and jobs with workspace information
-      const clustersResponse = [];
-      const allJobs = [];
-      const enabledCloudsMap = {};
-
-      workspaceDataArray.forEach(
-        ({ workspaceName, enabledClouds, clusters, managedJobs }) => {
-          // Clusters and jobs already have workspace info from API calls
-          clusters.forEach((cluster) => {
-            clustersResponse.push(cluster);
-          });
-
-          managedJobs.jobs.forEach((job) => {
-            allJobs.push(job);
-          });
-
-          enabledCloudsMap[workspaceName] = enabledClouds;
-        }
-      );
-
-      const managedJobsResponse = { jobs: allJobs };
-
-      // Build cluster to workspace mapping
-      const clusterNameToWorkspace = Object.fromEntries(
-        clustersResponse.map((c) => [c.cluster, c.workspace || 'default'])
-      );
-
-      // Initialize workspace stats
-      const workspaceStatsAggregator = {};
-      configuredWorkspaceNames.forEach((wsName) => {
-        workspaceStatsAggregator[wsName] = {
-          name: wsName,
-          totalClusterCount: 0,
-          runningClusterCount: 0,
-          managedJobsCount: 0,
-          clouds: new Set(),
-        };
-      });
-
-      // Process clusters
-      let totalRunningClusters = 0;
-      clustersResponse.forEach((cluster) => {
-        const wsName = cluster.workspace || 'default';
-
-        if (!workspaceStatsAggregator[wsName]) {
-          workspaceStatsAggregator[wsName] = {
-            name: wsName,
+        workspaceNames.forEach((wsName) => {
+          workspaceClusterStats[wsName] = {
             totalClusterCount: 0,
             runningClusterCount: 0,
-            managedJobsCount: 0,
-            clouds: new Set(),
           };
-        }
+        });
 
-        workspaceStatsAggregator[wsName].totalClusterCount++;
-        if (cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING') {
-          workspaceStatsAggregator[wsName].runningClusterCount++;
-          totalRunningClusters++;
-        }
-        if (cluster.cloud) {
-          workspaceStatsAggregator[wsName].clouds.add(cluster.cloud);
-        }
-      });
+        (allClusters || []).forEach((cluster) => {
+          const wsName = cluster.workspace || 'default';
+          if (!workspaceClusterStats[wsName]) {
+            workspaceClusterStats[wsName] = {
+              totalClusterCount: 0,
+              runningClusterCount: 0,
+            };
+          }
+          workspaceClusterStats[wsName].totalClusterCount++;
+          if (cluster.status === 'RUNNING' || cluster.status === 'LAUNCHING') {
+            workspaceClusterStats[wsName].runningClusterCount++;
+            totalRunningClusters++;
+          }
+        });
 
-      // Process managed jobs
-      const jobs = managedJobsResponse.jobs || [];
+        // Update workspaceDetails with cluster data
+        setWorkspaceDetails((prev) => {
+          return prev.map((ws) => ({
+            ...ws,
+            totalClusterCount:
+              workspaceClusterStats[ws.name]?.totalClusterCount || 0,
+            runningClusterCount:
+              workspaceClusterStats[ws.name]?.runningClusterCount || 0,
+          }));
+        });
+
+        // Update global stats for clusters
+        setGlobalStats((prev) => ({
+          ...prev,
+          runningClusters: totalRunningClusters,
+          totalClusters: (allClusters || []).length,
+        }));
+      } catch (error) {
+        console.error('Error fetching clusters:', error);
+      } finally {
+        setClustersLoading(false);
+      }
+    },
+    []
+  );
+
+  // Fetch jobs independently and update state progressively
+  const fetchJobsData = useCallback(async (workspaceNames) => {
+    try {
+      const allJobsData = await dashboardCache.get(getManagedJobs, [
+        { allUsers: true, skipFinished: true },
+      ]);
+      const jobs = allJobsData?.jobs || [];
+
+      // Calculate per-workspace job stats
+      const workspaceJobStats = {};
       const activeJobStatuses = new Set(statusGroups.active);
       let activeGlobalManagedJobs = 0;
 
+      workspaceNames.forEach((wsName) => {
+        workspaceJobStats[wsName] = { managedJobsCount: 0 };
+      });
+
       jobs.forEach((job) => {
-        // Use the direct workspace field from managed jobs
         const wsName = job.workspace || 'default';
-        if (
-          workspaceStatsAggregator[wsName] &&
-          activeJobStatuses.has(job.status)
-        ) {
-          workspaceStatsAggregator[wsName].managedJobsCount++;
+        if (!workspaceJobStats[wsName]) {
+          workspaceJobStats[wsName] = { managedJobsCount: 0 };
         }
         if (activeJobStatuses.has(job.status)) {
+          workspaceJobStats[wsName].managedJobsCount++;
           activeGlobalManagedJobs++;
         }
       });
 
-      // Finalize workspace details
-      const finalWorkspaceDetails = Object.values(workspaceStatsAggregator)
-        .filter((ws) => configuredWorkspaceNames.includes(ws.name))
-        .map((ws) => {
-          const enabledClouds = Array.isArray(enabledCloudsMap[ws.name])
-            ? enabledCloudsMap[ws.name]
-            : [];
-
-          return {
-            ...ws,
-            clouds: enabledClouds,
-          };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-
-      setWorkspaceDetails(finalWorkspaceDetails);
-      setGlobalStats({
-        runningClusters: totalRunningClusters,
-        totalClusters: clustersResponse.length,
-        managedJobs: activeGlobalManagedJobs,
+      // Update workspaceDetails with job data
+      setWorkspaceDetails((prev) => {
+        return prev.map((ws) => ({
+          ...ws,
+          managedJobsCount: workspaceJobStats[ws.name]?.managedJobsCount || 0,
+        }));
       });
+
+      // Update global stats for jobs
+      setGlobalStats((prev) => ({
+        ...prev,
+        managedJobs: activeGlobalManagedJobs,
+      }));
     } catch (error) {
-      console.error('Error fetching workspace data:', error);
-      setWorkspaceDetails([]);
-      setGlobalStats({ runningClusters: 0, totalClusters: 0, managedJobs: 0 });
+      console.error('Error fetching jobs:', error);
+    } finally {
+      setJobsLoading(false);
     }
-    if (showLoading) {
-      setLoading(false);
-    }
-  };
+  }, []);
+
+  const fetchData = useCallback(
+    async (options = { showLoadingIndicators: true }) => {
+      const { showLoadingIndicators = true } = options;
+
+      if (showLoadingIndicators) {
+        setClustersLoading(true);
+        setJobsLoading(true);
+      }
+
+      try {
+        // First, get the list of workspaces the user has access to
+        const fetchedWorkspacesConfig = await dashboardCache.get(getWorkspaces);
+        setRawWorkspacesData(fetchedWorkspacesConfig);
+        const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
+
+        // Fetch enabledClouds for all workspaces in parallel
+        const enabledCloudsPromises = configuredWorkspaceNames.map(
+          async (wsName) => {
+            try {
+              const enabledClouds = await dashboardCache.get(getEnabledClouds, [
+                wsName,
+              ]);
+              return { wsName, enabledClouds };
+            } catch (error) {
+              console.error(
+                `Error fetching enabled clouds for ${wsName}:`,
+                error
+              );
+              return { wsName, enabledClouds: [] };
+            }
+          }
+        );
+
+        const enabledCloudsResults = await Promise.all(enabledCloudsPromises);
+        const enabledCloudsMap = {};
+        enabledCloudsResults.forEach(({ wsName, enabledClouds }) => {
+          enabledCloudsMap[wsName] = enabledClouds;
+        });
+
+        // Initialize workspace details with zeros - UI will show spinners for counts
+        const initialWorkspaceDetails = configuredWorkspaceNames
+          .map((wsName) => ({
+            name: wsName,
+            totalClusterCount: 0,
+            runningClusterCount: 0,
+            managedJobsCount: 0,
+            clouds: Array.isArray(enabledCloudsMap[wsName])
+              ? enabledCloudsMap[wsName]
+              : [],
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        setWorkspaceDetails(initialWorkspaceDetails);
+
+        // Mark initial loading as complete so the table renders
+        if (isInitialLoad && showLoadingIndicators) {
+          setIsInitialLoad(false);
+        }
+
+        // Launch clusters and jobs fetches in parallel
+        // Each function updates its data immediately when done and sets its loading state to false
+        const clustersPromise = fetchClustersData(
+          configuredWorkspaceNames,
+          enabledCloudsMap
+        );
+        const jobsPromise = fetchJobsData(configuredWorkspaceNames);
+
+        // Wait for both to complete (errors are handled inside each function)
+        await Promise.all([clustersPromise, jobsPromise]);
+      } catch (error) {
+        console.error('Error fetching workspace data:', error);
+        // Don't clear data on error during refresh - keep showing stale data
+        if (isInitialLoad) {
+          setWorkspaceDetails([]);
+          setGlobalStats({
+            runningClusters: 0,
+            totalClusters: 0,
+            managedJobs: 0,
+          });
+        }
+        if (showLoadingIndicators) {
+          setClustersLoading(false);
+          setJobsLoading(false);
+        }
+        if (isInitialLoad && showLoadingIndicators) {
+          setIsInitialLoad(false);
+        }
+      }
+    },
+    [isInitialLoad, fetchClustersData, fetchJobsData]
+  );
 
   useEffect(() => {
     const initializeData = async () => {
       // Trigger cache preloading for workspaces page and background preload other pages
       await cachePreloader.preloadForPage('workspaces');
 
-      fetchData(true); // Show loading on initial load
+      await fetchData({ showLoadingIndicators: true });
+      setLastFetchedTime(new Date());
     };
 
     initializeData();
@@ -551,12 +568,49 @@ export function Workspaces() {
     // Set up refresh interval
     const interval = setInterval(() => {
       if (window.document.visibilityState === 'visible') {
-        fetchData(false); // Don't show loading on background refresh
+        fetchData({ showLoadingIndicators: false });
       }
     }, REFRESH_INTERVALS.REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
+
+  const handleRefresh = useCallback(async () => {
+    // Set loading states immediately for responsive UI
+    setClustersLoading(true);
+    setJobsLoading(true);
+
+    // Invalidate cache to ensure fresh data is fetched
+    dashboardCache.invalidate(getWorkspaces);
+    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+
+    // Invalidate cluster and job caches
+    dashboardCache.invalidate(getClusters);
+    dashboardCache.invalidateFunction(getManagedJobs);
+
+    try {
+      await apiClient.fetch('/check', {}, 'POST');
+      await fetchData({ showLoadingIndicators: false });
+      setLastFetchedTime(new Date());
+    } catch (error) {
+      console.error('Error during sky check refresh:', error);
+    } finally {
+      setClustersLoading(false);
+      setJobsLoading(false);
+    }
+  }, [fetchData]);
+
+  // Intercept Cmd+R / Ctrl+R to trigger in-app refresh instead of browser reload
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'r') {
+        event.preventDefault();
+        handleRefresh();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRefresh]);
 
   // Sorting functionality
   const handleSort = (key) => {
@@ -649,10 +703,10 @@ export function Workspaces() {
 
       // Invalidate cache to ensure fresh data is fetched (same as manual refresh)
       dashboardCache.invalidate(getWorkspaces);
-      dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
-      dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
+      dashboardCache.invalidate(getClusters);
+      dashboardCache.invalidateFunction(getManagedJobs);
 
-      await fetchData(true); // Show loading during refresh
+      await fetchData({ showLoadingIndicators: true });
     } catch (error) {
       console.error('Error deleting workspace:', error);
 
@@ -664,18 +718,6 @@ export function Workspaces() {
       }));
       setTopLevelError(error);
     }
-  };
-
-  const handleRefresh = () => {
-    // Invalidate cache to ensure fresh data is fetched
-    dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
-
-    // Invalidate workspace-specific caches
-    dashboardCache.invalidateFunction(getWorkspaceClusters); // Invalidate all workspace clusters
-    dashboardCache.invalidateFunction(getWorkspaceManagedJobs); // Invalidate all workspace jobs
-
-    fetchData(true); // Show loading on manual refresh
   };
 
   const handleCancelDelete = () => {
@@ -708,7 +750,8 @@ export function Workspaces() {
     wordBreak: 'normal',
   };
 
-  if (loading && workspaceDetails.length === 0) {
+  // Only show full-page loading spinner during initial load
+  if (isInitialLoad && workspaceDetails.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
@@ -780,15 +823,21 @@ export function Workspaces() {
           <span className="text-sky-blue leading-none">Workspaces</span>
         </div>
         <div className="flex items-center">
-          {loading && (
+          {(clustersLoading || jobsLoading) && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-xs">Refreshing...</span>
+              <span className="ml-2 text-gray-500 text-xs">Loading...</span>
             </div>
+          )}
+          {!clustersLoading && !jobsLoading && lastFetchedTime && (
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
           )}
           <button
             onClick={handleRefresh}
-            disabled={loading}
+            disabled={clustersLoading || jobsLoading}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             <RotateCwIcon className="h-4 w-4 mr-1.5" />
@@ -852,7 +901,7 @@ export function Workspaces() {
       </div>
 
       {/* Workspaces Table */}
-      {workspaceDetails.length === 0 && !loading ? (
+      {workspaceDetails.length === 0 && !isInitialLoad ? (
         <div className="text-center py-10">
           <p className="text-lg text-gray-600">No workspaces found.</p>
           <p className="text-sm text-gray-500 mt-2">
@@ -873,9 +922,9 @@ export function Workspaces() {
                   </TableHead>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
-                    onClick={() => handleSort('totalClusterCount')}
+                    onClick={() => handleSort('runningClusterCount')}
                   >
-                    Clusters {getSortDirection('totalClusterCount')}
+                    Running Clusters {getSortDirection('runningClusterCount')}
                   </TableHead>
                   <TableHead
                     className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
@@ -890,7 +939,7 @@ export function Workspaces() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading && sortedWorkspaces.length === 0 ? (
+                {isInitialLoad && sortedWorkspaces.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={5}
@@ -936,8 +985,13 @@ export function Workspaces() {
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
                           >
-                            {workspace.runningClusterCount} running,{' '}
-                            {workspace.totalClusterCount} total
+                            <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-sm">
+                              {clustersLoading ? (
+                                <CircularProgress size={12} />
+                              ) : (
+                                workspace.runningClusterCount
+                              )}
+                            </span>
                           </button>
                         </TableCell>
                         <TableCell>
@@ -950,7 +1004,13 @@ export function Workspaces() {
                             }}
                             className="text-gray-700 hover:text-blue-600 hover:underline"
                           >
-                            {workspace.managedJobsCount}
+                            <span className="inline-flex items-center px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-sm">
+                              {jobsLoading ? (
+                                <CircularProgress size={12} />
+                              ) : (
+                                workspace.managedJobsCount
+                              )}
+                            </span>
                           </button>
                         </TableCell>
                         <TableCell>

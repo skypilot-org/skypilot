@@ -46,6 +46,10 @@ provider:
     # Used to set up the necessary permissions and sidecars.
     fuse_device_required: {{k8s_fuse_device_required}}
 
+    {% if ephemeral_volume_mounts %}
+    ephemeral_volume_specs: {{ephemeral_volume_mounts | tojson}}
+    {% endif %}
+
     # ServiceAccount created by the autoscaler for the head node pod that it
     # runs in. If this field isn't provided, the head pod config below must
     # contain a user-created service account with the proper permissions.
@@ -209,7 +213,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-head-ssh
         spec:
@@ -227,7 +233,9 @@ provider:
         metadata:
             labels:
               parent: skypilot
+              # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
               skypilot-cluster: {{cluster_name_on_cloud}}
+              skypilot-cluster-name: {{cluster_name_on_cloud}}
               skypilot-user: {{ user }}
             # NOTE: If you're running multiple Ray clusters with services
             # on one Kubernetes cluster, they must have unique service
@@ -247,7 +255,9 @@ provider:
         metadata:
           labels:
             parent: skypilot
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
+            skypilot-cluster-name: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
           name: {{cluster_name_on_cloud}}-worker{{ worker_id }}
         spec:
@@ -272,6 +282,7 @@ available_node_types:
         labels:
             parent: skypilot
             # component will be set for the head node pod to be the same as the head node service selector above if a
+            # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
             # Custom tags for the pods
@@ -512,6 +523,14 @@ available_node_types:
                 resourceFieldRef:
                   containerName: ray-node
                   resource: requests.memory
+            # Disable Ray memory monitor to prevent Ray's memory manager
+            # from interfering with kubernetes resource manager.
+            # If ray memory monitor is enabled, the ray memory monitor kills
+            # the running job is the job uses more than 95% of allocated memory,
+            # even if the job is not misbehaving or using its full allocated memory.
+            # This behavior does not give a chance for k8s scheduler to evict the pod.
+            - name: RAY_memory_monitor_refresh_ms
+              value: "0"
             {% for key, value in k8s_env_vars.items() if k8s_env_vars is not none %}
             - name: {{ key }}
               value: {{ value }}
@@ -635,6 +654,15 @@ available_node_types:
               # Set -x to print the commands and their arguments as they are executed.
               # Useful for debugging.
               set -x
+
+              # Execute user-provided post-provision runcmd
+              # before any of the SkyPilot setup commands.
+              {%- if runcmd %}
+              {%- for cmd in runcmd %}
+              {{cmd}}
+              {%- endfor %}
+              {%- endif %}
+
               # Helper function to conditionally use sudo
               # TODO(zhwu): consolidate the two prefix_cmd and sudo replacements
               prefix_cmd() { if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }
@@ -645,13 +673,6 @@ available_node_types:
               # STEP 1: Run apt update, install missing packages, and set up ssh.
               (
                 (
-                # For backwards compatibility, we put a marker file in the pod
-                # to indicate that the apt ssh setup step will write a completion
-                # marker file (/tmp/apt_ssh_setup_complete) to the pod.
-                # TODO: Remove this marker file and its usage in setup_commands
-                # after v0.11.0 release.
-                touch /tmp/apt_ssh_setup_started
-
                 # Helper: run apt-get update with retries
                 apt_update_with_retries() {
                   # do not fail the whole shell; we handle return codes
@@ -896,22 +917,21 @@ available_node_types:
                   echo "Waiting for curl package to be installed..."
                 done
                 {{ conda_installation_commands }}
+                {{ uv_installation_commands }}
                 {{ ray_installation_commands }}
 
                 # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
-                # unset PYTHONPATH in case the user provided docker image set it.
-                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                # unset PYTHONPATH and set CWD to $HOME to avoid user image interfering with SkyPilot runtime.
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 # Wait for `patch` package to be installed before applying ray patches
                 until dpkg -l | grep -q "^ii  patch "; do
                   sleep 0.1
                   echo "Waiting for patch package to be installed..."
                 done
                 # Apply Ray patches for progress bar fix
-                # set UV_SYSTEM_PYTHON to false in case the user provided docker image set it to true.
-                # unset PYTHONPATH in case the user provided docker image set it.
                 # ~/.sky/python_path is seeded by conda_installation_commands
-                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false env -u PYTHONPATH ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
-                  env -u PYTHONPATH $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
+                VIRTUAL_ENV=~/skypilot-runtime UV_SYSTEM_PYTHON=false {{sky_unset_pythonpath_and_set_cwd}} ~/.local/bin/uv pip list | grep "ray " | grep 2.9.3 2>&1 > /dev/null && {
+                  {{sky_unset_pythonpath_and_set_cwd}} $(cat ~/.sky/python_path) -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
                 }
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -1059,7 +1079,7 @@ available_node_types:
                 # Also, skip the jobs that are waiting to be scheduled as those does not have a controller process running.
                 # For SkyServe, this will be None and every service will be recovered. This is because SkyServe
                 # will delete the service from the database after it is terminated so everything in the database is running.
-                ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs = state.get_managed_jobs(); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
+                ALL_IN_PROGRESS_JOBS=$({{sky_python_cmd}} -c "from sky.jobs import state; jobs, _ = state.get_managed_jobs_with_filters(fields=['job_id', 'schedule_state']); print(' '.join({str(job['job_id']) for job in jobs if job['schedule_state'] not in [state.ManagedJobScheduleState.DONE, state.ManagedJobScheduleState.WAITING]}) if jobs else None)")
                 if [ "$ALL_IN_PROGRESS_JOBS" != "None" ]; then
                   read -ra ALL_IN_PROGRESS_JOBS_SEQ <<< "$ALL_IN_PROGRESS_JOBS"
                 fi
@@ -1152,14 +1172,31 @@ available_node_types:
               {% if k8s_network_type == 'coreweave' %}
               rdma/ib: 1
               {% endif %}
-            {% if k8s_resource_key is not none %}
+              {% if k8s_network_type == 'together' and k8s_resource_key is not none %}
+              nvidia.com/rdma_ib: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_efa_count is not none %}
+              vpc.amazonaws.com/efa: {{k8s_efa_count}}
+              {% endif %}
+            {% if k8s_resource_key is not none or k8s_cpu_limit is defined %}
             limits:
-              # Limits need to be defined for GPU/TPU requests
+              {% if k8s_cpu_limit is defined %}
+              # CPU/Memory limits set via set_pod_resource_limits config
+              cpu: {{k8s_cpu_limit}}
+              memory: {{k8s_memory_limit}}G
+              {% endif %}
               {% if k8s_resource_key is not none %}
+              # Limits need to be defined for GPU/TPU/EFA requests
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
               {% if k8s_network_type == 'coreweave' %}
               rdma/ib: 1
+              {% endif %}
+              {% if k8s_network_type == 'together' %}
+              nvidia.com/rdma_ib: {{accelerator_count}}
+              {% endif %}
+              {% if k8s_efa_count is not none %}
+              vpc.amazonaws.com/efa: {{k8s_efa_count}}
               {% endif %}
             {% endif %}
           {% if k8s_ipc_lock_capability %}
@@ -1335,12 +1372,10 @@ setup_commands:
     start_epoch=$(date +%s);
 
     # Wait for SSH setup to complete before proceeding
-    if [ -f /tmp/apt_ssh_setup_started ]; then
-      echo "=== Logs for asynchronous SSH setup ===";
-      ([ -f /tmp/apt_ssh_setup_complete ]|| [ -f /tmp/${STEPS[0]}.failed ]) && cat /tmp/${STEPS[0]}.log ||
-      { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
-      [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
-    fi
+    echo "=== Logs for asynchronous SSH setup ===";
+    ([ -f /tmp/apt_ssh_setup_complete ]|| [ -f /tmp/${STEPS[0]}.failed ]) && cat /tmp/${STEPS[0]}.log ||
+    { tail -f -n +1 /tmp/${STEPS[0]}.log & TAIL_PID=$!; echo "Tail PID: $TAIL_PID"; sleep 0.5; until [ -f /tmp/apt_ssh_setup_complete ] || [ -f /tmp/${STEPS[0]}.failed ]; do sleep 0.5; done; kill $TAIL_PID || true; };
+    [ -f /tmp/${STEPS[0]}.failed ] && { echo "Error: ${STEPS[0]} failed. Exiting."; exit 1; } || true;
 
     echo "=== Logs for asynchronous ray and skypilot installation ===";
     ([ -f /tmp/ray_skypilot_installation_complete ]|| [ -f /tmp/${STEPS[1]}.failed ]) && cat /tmp/${STEPS[1]}.log ||
@@ -1351,6 +1386,7 @@ setup_commands:
     echo "=== Ray and skypilot dependencies installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);
     {{ skypilot_wheel_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     end_epoch=$(date +%s);
     echo "=== Skypilot wheel installation completed in $(($end_epoch - $start_epoch)) secs ===";
     start_epoch=$(date +%s);

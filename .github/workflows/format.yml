@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.8"]
+        python-version: ["3.9"]
     steps:
     - uses: actions/checkout@v3
     - name: Install the latest version of uv
@@ -39,7 +39,8 @@ jobs:
         source ~/test-env/bin/activate
         yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' \
             --exclude 'sky/skylet/providers/ibm/**' \
-            --exclude 'sky/schemas/generated/**'
+            --exclude 'sky/schemas/generated/**' \
+            --exclude 'tests/unit_tests/test_sky/backends/testdata/**'
     - name: Running black
       run: |
         source ~/test-env/bin/activate
@@ -54,4 +55,5 @@ jobs:
         source ~/test-env/bin/activate
         isort --diff --check ./ --sg 'sky/skylet/ray_patches/**' \
             --sg 'sky/skylet/providers/ibm/**' \
-            --sg 'sky/schemas/generated/**'
+            --sg 'sky/schemas/generated/**' \
+            --sg 'tests/unit_tests/test_sky/backends/testdata/**'

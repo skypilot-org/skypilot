@@ -13,9 +13,9 @@ _REGION_CONFIG_CLOUDS = ['nebius', 'oci']
 # maps the field name to the patch merge key.
 # pylint: disable=line-too-long
 # Ref: https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#podspec-v1-core
-# NOTE: field containers and imagePullSecrets are not included deliberately for
-# backward compatibility (we only support one container per pod now).
+# NOTE: field imagePullSecrets are not included deliberately for backward compatibility
 _PATCH_MERGE_KEYS = {
+    'containers': 'name',
     'initContainers': 'name',
     'ephemeralContainers': 'name',
     'volumes': 'name',
@@ -207,9 +207,15 @@ def merge_k8s_configs(
     Updates nested dictionaries instead of replacing them.
     If a list is encountered, it will be appended to the base_config list.
 
-    An exception is when the key is 'containers', in which case the
-    first container in the list will be fetched and merge_dict will be
-    called on it with the first container in the base_config list.
+    For fields with Kubernetes patch merge strategy (containers, volumes, env,
+    etc.), items are merged by their patch merge key (e.g., 'name' for
+    containers). If an item with the same key exists in base_config, it is
+    merged; otherwise, the new item is appended.
+
+    Special handling for 'containers': for backward compatibility, if a
+    container in the override does not have a 'name' field, it is merged
+    into the first container in the base config (legacy behavior). If the
+    container has a 'name' field, patch merge by name is used.
     """
     for key, value in override_config.items():
         (next_allowed_override_keys, next_disallowed_override_keys
@@ -222,12 +228,11 @@ def merge_k8s_configs(
         elif isinstance(value, list) and key in base_config:
             assert isinstance(base_config[key], list), \
                 f'Expected {key} to be a list, found {base_config[key]}'
-            if key in ['containers', 'imagePullSecrets']:
-                # If the key is 'containers' or 'imagePullSecrets, we take the
-                # first and only container/secret in the list and merge it, as
-                # we only support one container per pod.
+            if key == 'imagePullSecrets':
+                # For imagePullSecrets, merge the first item from override
+                # into the first item in base (legacy behavior).
                 assert len(value) == 1, \
-                    f'Expected only one container, found {value}'
+                    f'Expected only one imagePullSecret, found {value}'
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
@@ -238,6 +243,7 @@ def merge_k8s_configs(
                 for override_item in value:
                     override_item_name = override_item.get(patch_merge_key)
                     if override_item_name is not None:
+                        # Item has a name - use patch merge by name
                         existing_base_item = next(
                             (v for v in base_config[key]
                              if v.get(patch_merge_key) == override_item_name),
@@ -246,6 +252,12 @@ def merge_k8s_configs(
                             merge_k8s_configs(existing_base_item, override_item)
                         else:
                             base_config[key].append(override_item)
+                    elif key == 'containers' and base_config[key]:
+                        # Backward compatibility for containers: if no name is
+                        # specified, merge into the first container (index 0)
+                        merge_k8s_configs(base_config[key][0], override_item,
+                                          next_allowed_override_keys,
+                                          next_disallowed_override_keys)
                     else:
                         base_config[key].append(override_item)
             else:
@@ -272,7 +284,7 @@ def get_cloud_config_value_from_dict(
     """
     input_config = Config(dict_config)
     region_key = None
-    if cloud == 'kubernetes':
+    if cloud in ('kubernetes', 'ssh'):
         region_key = 'context_configs'
     elif cloud in _REGION_CONFIG_CLOUDS:
         region_key = 'region_configs'
@@ -283,19 +295,6 @@ def get_cloud_config_value_from_dict(
             keys=(cloud, region_key, region) + keys,
             default_value=None,
             override_configs=override_configs)
-        if not per_context_config and cloud in _REGION_CONFIG_CLOUDS:
-            # TODO (kyuds): Backward compatibility, remove after 0.11.0.
-            per_context_config = input_config.get_nested(
-                keys=(cloud, region) + keys,
-                default_value=None,
-                override_configs=override_configs)
-            if per_context_config is not None:
-                logger.info(
-                    f'{cloud} configuration is using the legacy format. \n'
-                    'This format will be deprecated after 0.11.0, refer to '
-                    '`https://docs.skypilot.co/en/latest/reference/config.html` '  # pylint: disable=line-too-long
-                    'for the new format. Please use `region_configs` to specify region specific configuration.'
-                )
     # if no override found for specified region
     general_config = input_config.get_nested(keys=(cloud,) + keys,
                                              default_value=default_value,

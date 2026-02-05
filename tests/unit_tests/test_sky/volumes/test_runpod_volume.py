@@ -85,7 +85,7 @@ class TestRunPodVolume:
         with pytest.raises(ValueError) as exc_info:
             vol = volume_lib.Volume.from_yaml_config(cfg)
             vol.validate()
-        assert 'RunPod DataCenterId is required to create a network volume' in str(
+        assert 'RunPod DataCenterId is required for network volumes' in str(
             exc_info.value)
 
     def test_min_size_enforced(self, monkeypatch):
@@ -452,12 +452,30 @@ class TestRunPodProvisionVolume:
         assert runpod_prov._list_volumes() == []
 
     def test_try_resolve_volume_id(self, monkeypatch):
-        monkeypatch.setattr(runpod_prov, '_list_volumes', lambda: [{
-            'name': 'n1',
-            'id': 'i1'
-        }])
-        assert runpod_prov._try_resolve_volume_id('n1') == 'i1'
-        assert runpod_prov._try_resolve_volume_id('n2') is None
+        monkeypatch.setattr(
+            runpod_prov, '_list_volumes', lambda: [{
+                'name': 'n1',
+                'id': 'i1',
+                'dataCenterId': 'iad-1'
+            }])
+        assert runpod_prov._try_resolve_volume_id('n1', 'iad-1') == 'i1'
+        assert runpod_prov._try_resolve_volume_id('n2', 'iad-1') is None
+        assert runpod_prov._try_resolve_volume_id('n1', 'nyc-1') is None
+
+    def test_try_resolve_volume_by_name(self, monkeypatch):
+        monkeypatch.setattr(
+            runpod_prov, '_list_volumes', lambda: [{
+                'name': 'n1',
+                'id': 'i1',
+                'size': 100,
+                'dataCenterId': 'iad-1'
+            }])
+        vol = runpod_prov._try_resolve_volume_by_name('n1', 'iad-1')
+        assert vol is not None
+        assert vol['id'] == 'i1'
+        assert vol['size'] == 100
+        assert runpod_prov._try_resolve_volume_by_name('n2', 'iad-1') is None
+        assert runpod_prov._try_resolve_volume_by_name('n1', 'nyc-1') is None
 
     def test_apply_volume_reuse_existing(self, monkeypatch):
 
@@ -466,10 +484,16 @@ class TestRunPodProvisionVolume:
             size = '100'
             zone = 'iad-1'
             id_on_cloud = None
+            zone = 'iad-1'
+            config = {}
 
         cfg = Cfg()
-        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: 'VID')
+        monkeypatch.setattr(
+            runpod_prov, '_try_resolve_volume_by_name',
+            lambda name, data_center_id: {
+                'id': 'VID',
+                'size': 100
+            })
         called = {'post': False}
 
         def _rest(method, path, json=None):
@@ -488,10 +512,11 @@ class TestRunPodProvisionVolume:
             size = '100'
             zone = 'iad-1'
             id_on_cloud = None
+            config = {}
 
         cfg = Cfg()
-        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: None)
+        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_by_name',
+                            lambda name, data_center_id: None)
         created = {}
 
         def _rest(method, path, json=None):
@@ -506,6 +531,111 @@ class TestRunPodProvisionVolume:
         assert created['payload'][2]['dataCenterId'] == 'iad-1'
         assert created['payload'][2]['size'] == 100
 
+    def test_apply_volume_use_existing_not_found(self, monkeypatch):
+
+        class Cfg:
+            name_on_cloud = 'vol'
+            size = '100'
+            zone = 'iad-1'
+            id_on_cloud = None
+            config = {'use_existing': True}
+
+        cfg = Cfg()
+        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_by_name',
+                            lambda name, data_center_id: None)
+        with pytest.raises(ValueError) as exc_info:
+            runpod_prov.apply_volume(cfg)
+        assert 'does not exist while use_existing is True' in str(
+            exc_info.value)
+
+    def test_apply_volume_existing_no_id(self, monkeypatch):
+
+        class Cfg:
+            name_on_cloud = 'vol'
+            size = '100'
+            zone = 'iad-1'
+            id_on_cloud = None
+            config = {}
+
+        cfg = Cfg()
+        # Return a volume dict without 'id' field
+        monkeypatch.setattr(
+            runpod_prov, '_try_resolve_volume_by_name',
+            lambda name, data_center_id: {
+                'name': 'vol',
+                'size': 100
+            })
+        with pytest.raises(RuntimeError) as exc_info:
+            runpod_prov.apply_volume(cfg)
+        assert 'has no id returned' in str(exc_info.value)
+
+    def test_apply_volume_existing_size_mismatch(self, monkeypatch):
+
+        class Cfg:
+            name_on_cloud = 'vol'
+            size = '100'
+            zone = 'iad-1'
+            id_on_cloud = None
+            config = {}
+
+        cfg = Cfg()
+        # Return existing volume with different size
+        monkeypatch.setattr(
+            runpod_prov, '_try_resolve_volume_by_name',
+            lambda name, data_center_id: {
+                'id': 'VID',
+                'size': 200
+            })
+
+        # Capture warning logs
+        import logging
+
+        from sky import sky_logging
+        warnings_logged = []
+        original_warning = logging.Logger.warning
+
+        def capture_warning(self, msg, *args, **kwargs):
+            warnings_logged.append(msg)
+            return original_warning(self, msg, *args, **kwargs)
+
+        monkeypatch.setattr(logging.Logger, 'warning', capture_warning)
+
+        out = runpod_prov.apply_volume(cfg)
+        assert out.id_on_cloud == 'VID'
+        assert out.size == '200'  # Should be overridden with existing volume's size
+        assert any('size' in str(w) and 'overriding' in str(w).lower()
+                   for w in warnings_logged)
+
+    def test_apply_volume_existing_no_size(self, monkeypatch):
+
+        class Cfg:
+            name_on_cloud = 'vol'
+            size = '100'
+            zone = 'iad-1'
+            id_on_cloud = None
+            config = {}
+
+        cfg = Cfg()
+        # Return existing volume without size field
+        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_by_name',
+                            lambda name, data_center_id: {'id': 'VID'})
+
+        # Capture warning logs
+        import logging
+        warnings_logged = []
+        original_warning = logging.Logger.warning
+
+        def capture_warning(self, msg, *args, **kwargs):
+            warnings_logged.append(msg)
+            return original_warning(self, msg, *args, **kwargs)
+
+        monkeypatch.setattr(logging.Logger, 'warning', capture_warning)
+
+        out = runpod_prov.apply_volume(cfg)
+        assert out.id_on_cloud == 'VID'
+        assert out.size == '100'  # Should keep original config size
+        assert any('no size returned' in str(w) for w in warnings_logged)
+
     def test_apply_volume_errors(self, monkeypatch):
 
         class Cfg:
@@ -513,10 +643,11 @@ class TestRunPodProvisionVolume:
             size = None
             zone = 'iad-1'
             id_on_cloud = None
+            config = {}
 
         cfg = Cfg()
-        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: None)
+        monkeypatch.setattr(runpod_prov, '_try_resolve_volume_by_name',
+                            lambda name, data_center_id: None)
         with pytest.raises(RuntimeError) as exc_info:
             runpod_prov.apply_volume(cfg)
         assert 'RunPod network volume size must be specified to create' in str(
@@ -536,7 +667,7 @@ class TestRunPodProvisionVolume:
         cfg.zone = None
         with pytest.raises(RuntimeError) as exc_info:
             runpod_prov.apply_volume(cfg)
-        assert 'RunPod DataCenterId is required to create a network' in str(
+        assert 'RunPod DataCenterId is required for network volumes' in str(
             exc_info.value)
         cfg = Cfg()
         cfg.size = '100'
@@ -565,6 +696,8 @@ class TestRunPodProvisionVolume:
         class Cfg:
             name_on_cloud = 'vol'
             id_on_cloud = 'VID'
+            zone = 'iad-1'
+            config = {}
 
         cfg = Cfg()
         runpod_prov.delete_volume(cfg)
@@ -574,13 +707,13 @@ class TestRunPodProvisionVolume:
         cfg2 = Cfg()
         cfg2.id_on_cloud = None
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: 'VID2')
+                            lambda name, data_center_id: 'VID2')
         runpod_prov.delete_volume(cfg2)
         assert deleted['path'] == ('DELETE', '/networkvolumes/VID2')
         # not found
         deleted['path'] = None
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: None)
+                            lambda name, data_center_id: None)
         runpod_prov.delete_volume(cfg2)
         assert deleted['path'] is None
 
@@ -589,9 +722,11 @@ class TestRunPodProvisionVolume:
         class Cfg:
             id_on_cloud = None
             name_on_cloud = 'vol'
+            zone = 'iad-1'
+            config = {}
 
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: None)
+                            lambda name, data_center_id: None)
         used_pods, used_clusters = runpod_prov.get_volume_usedby(Cfg())
         assert used_pods == [] and used_clusters == []
 
@@ -600,6 +735,8 @@ class TestRunPodProvisionVolume:
         class Cfg:
             id_on_cloud = 'VID'
             name_on_cloud = 'vol'
+            zone = 'iad-1'
+            config = {}
 
         # Mock GraphQL response
         class _API:
@@ -645,6 +782,8 @@ class TestRunPodProvisionVolume:
         class Cfg:
             id_on_cloud = 'VID'
             name_on_cloud = 'vol'
+            zone = 'iad-1'
+            config = {}
 
         # Mock GraphQL response
         class _API:
@@ -682,7 +821,8 @@ class TestRunPodProvisionVolume:
         monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
                             lambda: 'user-hash')
         config = Cfg()
-        used_pods, used_clusters = runpod_prov.get_all_volumes_usedby([config])
+        used_pods, used_clusters, _ = runpod_prov.get_all_volumes_usedby(
+            [config])
         used_pods, used_clusters = runpod_prov.map_all_volumes_usedby(
             used_pods, used_clusters, config)
         assert used_pods == ['cluster-a-user-hash-head']
@@ -694,9 +834,11 @@ class TestRunPodProvisionVolume:
         class Cfg:
             id_on_cloud = None
             name_on_cloud = 'vol'
+            zone = 'iad-1'
+            config = {}
 
         monkeypatch.setattr(runpod_prov, '_try_resolve_volume_id',
-                            lambda name: 'VIDX')
+                            lambda name, data_center_id: 'VIDX')
 
         class _API:
 
@@ -717,6 +859,8 @@ class TestRunPodProvisionVolume:
         class Cfg:
             id_on_cloud = 'VID'
             name_on_cloud = 'vol'
+            zone = 'iad-1'
+            config = {}
 
         class _API:
 
@@ -790,6 +934,8 @@ class TestRunPodProvisionVolume:
         class Cfg:
             id_on_cloud = 'VID'
             name_on_cloud = 'vol'
+            zone = 'iad-1'
+            config = {}
 
         class _API:
 
@@ -816,3 +962,71 @@ class TestRunPodProvisionVolume:
         used_pods, used_clusters = runpod_prov.get_volume_usedby(Cfg())
         assert used_pods == ['c1-head']
         assert used_clusters == []
+
+    def test_get_all_volumes_usedby_exception_handling(self, monkeypatch):
+        """Test that exceptions in get_volume_usedby are caught and handled."""
+
+        class CfgSuccess:
+            id_on_cloud = 'VID1'
+            name_on_cloud = 'vol-success'
+            name = 'vol-success'
+            zone = 'iad-1'
+            config = {}
+
+        class CfgFailure:
+            id_on_cloud = 'VID2'
+            name_on_cloud = 'vol-failure'
+            name = 'vol-failure'
+            zone = 'iad-1'
+            config = {}
+
+        # Mock GraphQL to raise exception for one volume but succeed for another
+        call_count = [0]
+
+        class _API:
+
+            class api:
+
+                class graphql:
+
+                    @staticmethod
+                    def run_graphql_query(query):
+                        call_count[0] += 1
+                        # First call (for vol-success) succeeds
+                        if call_count[0] == 1:
+                            return {
+                                'data': {
+                                    'myself': {
+                                        'pods': [{
+                                            'id': 'p1',
+                                            'name': 'cluster-a-user-hash-head',
+                                            'networkVolumeId': 'VID1'
+                                        }]
+                                    }
+                                }
+                            }
+                        # Second call (for vol-failure) raises exception
+                        raise RuntimeError('GraphQL query failed')
+
+        monkeypatch.setattr('sky.adaptors.runpod.runpod', _API)
+        monkeypatch.setattr('sky.global_user_state.get_clusters', lambda: [{
+            'name': 'cluster-a'
+        }])
+        monkeypatch.setattr('sky.utils.common_utils.get_user_hash',
+                            lambda: 'user-hash')
+
+        configs = [CfgSuccess(), CfgFailure()]
+        used_pods, used_clusters, failed_volume_names = runpod_prov.get_all_volumes_usedby(
+            configs)
+
+        # Successful volume should be in the results
+        assert 'vol-success' in used_pods
+        assert used_pods['vol-success'] == ['cluster-a-user-hash-head']
+        assert 'vol-success' in used_clusters
+        assert used_clusters['vol-success'] == ['cluster-a']
+
+        # Failed volume should not be in results but should be in failed_volume_names
+        assert 'vol-failure' not in used_pods
+        assert 'vol-failure' not in used_clusters
+        assert 'vol-failure' in failed_volume_names
+        assert len(failed_volume_names) == 1

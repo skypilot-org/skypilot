@@ -1,4 +1,4 @@
-"""Columns for cluster pool.
+"""Columns for pool.
 
 Revision ID: 002
 Revises: 001
@@ -21,7 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade():
-    """Add columns for cluster pool."""
+    """Add columns for pool."""
     with op.get_context().autocommit_block():
         db_utils.add_column_to_table_alembic('job_info',
                                              'pool',
@@ -38,5 +38,5 @@ def upgrade():
 
 
 def downgrade():
-    """Remove columns for cluster pool."""
+    """Remove columns for pool."""
     pass

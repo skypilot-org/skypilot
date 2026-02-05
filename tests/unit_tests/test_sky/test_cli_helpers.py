@@ -3,9 +3,10 @@
 This module contains tests for CLI helper functions in sky.client.cli.command.
 """
 import traceback
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from unittest import mock
 
+import click
 import colorama
 import pytest
 
@@ -14,6 +15,7 @@ from sky import jobs as managed_jobs
 from sky.client import sdk as client_sdk
 from sky.client.cli import command
 from sky.client.cli import table_utils
+from sky.client.cli import utils as cli_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.skylet import constants
@@ -67,6 +69,7 @@ def test_handle_jobs_queue_request_success_tuple_response():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Verify the result
@@ -75,6 +78,7 @@ def test_handle_jobs_queue_request_success_tuple_response():
     mock_stream.assert_called_once_with(request_id)
     mock_format.assert_called_once_with(
         managed_jobs_list,
+        pool_status=None,
         show_all=False,
         show_user=False,
         max_jobs=10,
@@ -120,6 +124,7 @@ def test_handle_jobs_queue_request_success_list_response():
                     max_num_jobs_to_show=None,
                     is_called_by_user=True,
                     only_in_progress=False,
+                    queue_result_version=cli_utils.QueueResultVersion.V1,
                 )
 
     # Verify the result - should count unique job IDs
@@ -128,6 +133,89 @@ def test_handle_jobs_queue_request_success_list_response():
     mock_stream.assert_called_once_with(request_id)
     mock_format.assert_called_once_with(
         mock_job_records,
+        pool_status=None,
+        show_all=True,
+        show_user=True,
+        max_jobs=None,
+        status_counts=None,
+    )
+
+
+def test_handle_jobs_queue_request_success_list_response_with_pool_status():
+    """Test _handle_jobs_queue_request with list response (legacy API)."""
+    # Create mock managed job records as dicts
+    mock_jobs = [
+        {
+            'job_id': 1,
+            'job_name': 'test-job-1'
+        },
+        {
+            'job_id': 2,
+            'job_name': 'test-job-2'
+        },
+        {
+            'job_id': 3,
+            'job_name': 'test-job-3'
+        },
+    ]
+
+    # Mock job records using the model
+    mock_job_records = [responses.ManagedJobRecord(**job) for job in mock_jobs]
+
+    # Mock pool status records using the model
+    mock_pool_statuses = [
+        {
+            'replica_info': [
+                {
+                    'replica_id': 1,
+                    'used_by': 3,
+                },
+                {
+                    'replica_id': 2,
+                    'used_by': 2,
+                },
+                {
+                    'replica_id': 3,
+                    'used_by': 1,
+                },
+            ],
+        },
+    ]
+
+    request_id = server_common.RequestId[List[responses.ManagedJobRecord]](
+        'test-request-id')
+
+    pool_status_request_id = server_common.RequestId[List[Dict[str, Any]]](
+        'test-pool-status-request-id')
+
+    with mock.patch.object(client_sdk,
+                           'stream_and_get',
+                           side_effect=[mock_job_records,
+                                        mock_pool_statuses]) as mock_stream:
+        with mock.patch.object(usage_lib.messages.usage, 'set_internal'):
+            with mock.patch.object(
+                    table_utils, 'format_job_table',
+                    return_value='formatted table') as mock_format:
+                num_jobs, msg = command._handle_jobs_queue_request(
+                    request_id=request_id,
+                    show_all=True,
+                    show_user=True,
+                    max_num_jobs_to_show=None,
+                    pool_status_request_id=pool_status_request_id,
+                    is_called_by_user=True,
+                    only_in_progress=False,
+                )
+
+    # Verify the result - should count unique job IDs
+    assert num_jobs == 3
+    assert msg == 'formatted table'
+    mock_stream.assert_has_calls([
+        mock.call(request_id),
+        mock.call(pool_status_request_id),
+    ])
+    mock_format.assert_called_once_with(
+        mock_job_records,
+        pool_status=mock_pool_statuses,
         show_all=True,
         show_user=True,
         max_jobs=None,
@@ -445,6 +533,7 @@ def test_handle_jobs_queue_request_counts_terminal_status_correctly():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Should return the total number of jobs (5) when only_in_progress=False
@@ -505,6 +594,7 @@ def test_handle_jobs_queue_request_only_in_progress_true():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Only RUNNING and PENDING should be counted as in-progress (non-terminal)
@@ -542,6 +632,7 @@ def test_handle_jobs_queue_request_only_in_progress_with_no_status_counts():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Should return 0 when status_counts is None
@@ -592,7 +683,25 @@ def test_handle_jobs_queue_request_only_in_progress_all_terminal():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
+                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Should return 0 since all jobs are terminal
     assert num_jobs == 0
+
+
+def test_natural_order_group_list_commands_hides_aliases_and_hidden():
+    """list_commands should hide duplicate command objects and hidden commands."""
+    group = command._NaturalOrderGroup()
+
+    base_cmd = click.Command('volumes')
+    group.add_command(base_cmd, name='volumes')
+    group.add_command(base_cmd, name='volume')  # alias pointing to same object
+
+    hidden_cmd = click.Command('hidden', hidden=True)
+    group.add_command(hidden_cmd, name='hidden')
+
+    other_cmd = click.Command('other')
+    group.add_command(other_cmd, name='other')
+
+    assert group.list_commands(ctx=None) == ['volumes', 'other']

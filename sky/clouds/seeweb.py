@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import sky_logging
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.provision import seeweb as seeweb_provision
 from sky.utils import registry
@@ -27,6 +28,8 @@ if typing.TYPE_CHECKING:
 
 # ---------- key file path -----------------
 _SEEWEB_KEY_FILE = '~/.seeweb_cloud/seeweb_keys'
+
+logger = sky_logging.init_logger(__name__)
 # (content: ini-like)
 #   api_key = <TOKEN>
 
@@ -57,9 +60,6 @@ class Seeweb(clouds.Cloud):
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
             ('Disk cloning not supported. '
              'Seeweb does not support disk cloning.'),
-        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
-            ('Docker images not supported. '
-             'Seeweb does not support Docker images.'),
         clouds.CloudImplementationFeatures.IMAGE_ID:
             ('Custom image IDs not supported. '
              'Seeweb does not support custom image IDs.'),
@@ -84,7 +84,9 @@ class Seeweb(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
@@ -108,6 +110,7 @@ class Seeweb(clouds.Cloud):
         use_spot: bool,
         region: Optional[str],
         zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
         assert zone is None, 'Seeweb does not support zones.'
         del zone
@@ -196,6 +199,15 @@ class Seeweb(clouds.Cloud):
 
         acc_dict = self.get_accelerators_from_instance_type(
             resources.instance_type)
+        docker_image = resources.extract_docker_image()
+        docker_run_options: List[str] = []
+        if docker_image is not None:
+            if acc_dict:
+                docker_run_options.append('--gpus all')
+            logger.info(
+                'Launching Seeweb cluster with docker image %s. Ensure the '
+                'image is Debian-based and allows passwordless sudo.',
+                docker_image)
 
         # Standard custom_resources string for Ray
         custom_resources = resources_utils.make_ray_custom_resources_str(
@@ -235,6 +247,8 @@ class Seeweb(clouds.Cloud):
             'seeweb_gpu_config': seeweb_gpu_config,
             'image_id': image_id,
         }
+        if docker_run_options:
+            result['docker_run_options'] = docker_run_options
         return result
 
     @classmethod

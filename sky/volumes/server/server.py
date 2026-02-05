@@ -7,6 +7,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.utils import registry
 from sky.utils import volume as volume_utils
@@ -18,19 +19,21 @@ router = fastapi.APIRouter()
 
 
 @router.get('')
-async def volume_list(request: fastapi.Request) -> None:
-    """Gets the volumes."""
-    auth_user = request.state.auth_user
-    auth_user_env_vars_kwargs = {
-        'env_vars': auth_user.to_env_vars()
-    } if auth_user else {}
-    request_body = payloads.RequestBody(**auth_user_env_vars_kwargs)
+async def volume_list(request: fastapi.Request, refresh: bool = False) -> None:
+    """Gets the volumes.
+
+    Args:
+        refresh: If True, refresh volume state from cloud APIs before returning.
+            If False (default), return cached data from the database.
+    """
+    request_body = payloads.VolumeListBody(refresh=refresh)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='volume_list',
+        request_name=request_names.RequestName.VOLUME_LIST,
         request_body=request_body,
         func=core.volume_list,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -40,10 +43,11 @@ async def volume_delete(request: fastapi.Request,
     """Deletes a volume."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='volume_delete',
+        request_name=request_names.RequestName.VOLUME_DELETE,
         request_body=volume_delete_body,
         func=core.volume_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -63,11 +67,12 @@ async def volume_validate(
             'size': volume_validate_body.size,
             'labels': volume_validate_body.labels,
             'config': volume_validate_body.config,
-            'resource_name': volume_validate_body.resource_name,
+            'use_existing': volume_validate_body.use_existing,
         }
         volume = volume_lib.Volume.from_yaml_config(volume_config)
         volume.validate()
     except Exception as e:
+        requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(status_code=400,
                                     detail=exceptions.serialize_exception(e))
 
@@ -79,6 +84,9 @@ async def volume_apply(request: fastapi.Request,
     volume_cloud = volume_apply_body.cloud
     volume_type = volume_apply_body.volume_type
     volume_config = volume_apply_body.config
+    if volume_config is None:
+        volume_config = {}
+    volume_config['use_existing'] = volume_apply_body.use_existing
 
     supported_volume_types = [
         volume_type.value for volume_type in volume_utils.VolumeType
@@ -98,8 +106,6 @@ async def volume_apply(request: fastapi.Request,
         supported_access_modes = [
             access_mode.value for access_mode in volume_utils.VolumeAccessMode
         ]
-        if volume_config is None:
-            volume_config = {}
         access_mode = volume_config.get('access_mode')
         if access_mode is None:
             volume_config['access_mode'] = (
@@ -114,8 +120,9 @@ async def volume_apply(request: fastapi.Request,
                 detail='Runpod network volume is only supported on Runpod')
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='volume_apply',
+        request_name=request_names.RequestName.VOLUME_APPLY,
         request_body=volume_apply_body,
         func=core.volume_apply,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )

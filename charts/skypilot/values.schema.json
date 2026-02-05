@@ -5,6 +5,9 @@
         "apiService": {
             "type": "object",
             "properties": {
+                "affinity": {
+                    "type": "object"
+                },
                 "annotations": {
                     "type": [
                         "object",
@@ -71,6 +74,12 @@
                 "image": {
                     "type": "string"
                 },
+                "imagePullPolicy": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "initialBasicAuthCredentials": {
                     "type": "string"
                 },
@@ -79,6 +88,22 @@
                         "string",
                         "null"
                     ]
+                },
+                "logs": {
+                    "type": "object",
+                    "properties": {
+                        "retention": {
+                            "type": "object",
+                            "properties": {
+                                "enabled": {
+                                    "type": "boolean"
+                                },
+                                "size": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
                 },
                 "metrics": {
                     "type": "object",
@@ -91,6 +116,9 @@
                         }
                     }
                 },
+                "nodeSelector": {
+                    "type": "object"
+                },
                 "preDeployHook": {
                     "type": "string"
                 },
@@ -99,6 +127,15 @@
                 },
                 "resources": {
                     "type": "object"
+                },
+                "sidecarContainers": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
                 },
                 "skipResourceCheck": {
                     "type": "boolean"
@@ -121,6 +158,9 @@
                 "terminationGracePeriodSeconds": {
                     "type": "integer"
                 },
+                "tolerations": {
+                    "type": "array"
+                },
                 "upgradeStrategy": {
                     "type": "string"
                 }
@@ -132,6 +172,26 @@
                 "null"
             ],
             "properties": {
+                "externalProxy": {
+                    "type": [
+                        "object",
+                        "null"
+                    ],
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "headerFormat": {
+                            "type": "string"
+                        },
+                        "headerName": {
+                            "type": "string"
+                        },
+                        "jwtIdentityClaim": {
+                            "type": "string"
+                        }
+                    }
+                },
                 "oauth": {
                     "type": [
                         "object",
@@ -229,6 +289,31 @@
                 },
                 "secretAccessKeyKeyName": {
                     "type": "string"
+                },
+                "useCredentialsFile": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "coreweaveCredentials": {
+            "type": "object",
+            "properties": {
+                "coreweaveSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "digitaloceanCredentials": {
+            "type": "object",
+            "properties": {
+                "digitaloceanSecretName": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
                 }
             }
         },
@@ -241,6 +326,12 @@
                 "type": "object"
             }
         },
+        "fullnameOverride": {
+            "type": [
+                "string",
+                "null"
+            ]
+        },
         "gcpCredentials": {
             "type": "object",
             "properties": {
@@ -250,7 +341,42 @@
                 "gcpSecretName": {
                     "type": "string"
                 },
+                "image": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "projectId": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "global": {
+            "type": "object",
+            "properties": {
+                "extraEnvs": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "imagePullSecrets": {
+                    "type": [
+                        "array",
+                        "null"
+                    ],
+                    "items": {
+                        "type": "object"
+                    }
+                },
+                "imageRegistry": {
                     "type": [
                         "string",
                         "null"
@@ -288,18 +414,6 @@
                 "host": {
                     "type": [
                         "string",
-                        "null"
-                    ]
-                },
-                "httpNodePort": {
-                    "type": [
-                        "number",
-                        "null"
-                    ]
-                },
-                "httpsNodePort": {
-                    "type": [
-                        "number",
                         "null"
                     ]
                 },
@@ -369,6 +483,17 @@
                 },
                 "path": {
                     "type": "string"
+                },
+                "tls": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "unified": {
+                    "type": "boolean"
                 }
             }
         },

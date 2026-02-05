@@ -8,6 +8,8 @@ import pytest
 
 from sky.client.cli import command
 from sky.client.cli import flags
+from sky.task import get_plaintext_envs_and_secrets
+from sky.task import get_plaintext_secrets
 
 
 def test_parse_secret_var_with_equals():
@@ -83,7 +85,7 @@ secrets:
         assert hasattr(result, 'envs')
 
         # Check that secrets were overridden/added
-        task_secrets = result.secrets
+        task_secrets = get_plaintext_secrets(result.secrets)
         assert task_secrets['API_KEY'] == 'overridden_secret'  # Overridden
         assert task_secrets['NEW_SECRET'] == 'new_value'  # Added
         assert task_secrets['DB_PASSWORD'] == 'yaml_password'  # From YAML
@@ -126,7 +128,7 @@ def test_secrets_in_command_line_task():
 
     # Check task was created correctly
     assert result.run == 'python train.py'
-    assert result.secrets == {
+    assert get_plaintext_secrets(result.secrets) == {
         'API_KEY': 'secret123',
         'DB_PASSWORD': 'password456'
     }
@@ -141,7 +143,9 @@ def test_secrets_integration_with_resources():
         entrypoint=('echo hello',), secret=secrets, gpus='V100:1')
 
     # Check that secrets are set
-    assert result.secrets == {'DOCKER_PASSWORD': 'docker_secret'}
+    assert get_plaintext_secrets(result.secrets) == {
+        'DOCKER_PASSWORD': 'docker_secret'
+    }
 
     # Check that resources are set
     assert len(result.resources) > 0
@@ -168,7 +172,7 @@ secrets:
         result = command._make_task_or_dag_from_entrypoint_with_overrides(
             entrypoint=(yaml_file,), secret=secrets)
 
-        task_secrets = result.secrets
+        task_secrets = get_plaintext_secrets(result.secrets)
         assert task_secrets['API_KEY'] == 'cli_value'  # CLI overrides YAML
         assert task_secrets['CLI_ONLY'] == 'cli_secret'  # CLI adds new
         assert task_secrets['YAML_ONLY'] == 'yaml_secret'  # YAML preserved
@@ -205,11 +209,13 @@ secrets:
         assert result.envs['SHARED_VAR'] == 'cli_env_value'
         assert result.envs['ENV_ONLY'] == 'env_val'
 
-        assert result.secrets['SHARED_VAR'] == 'cli_secret_value'
-        assert result.secrets['SECRET_ONLY'] == 'secret_val'
+        assert get_plaintext_secrets(
+            result.secrets)['SHARED_VAR'] == 'cli_secret_value'
+        assert get_plaintext_secrets(
+            result.secrets)['SECRET_ONLY'] == 'secret_val'
 
         # Check combined behavior (secrets should override envs)
-        combined = result.envs_and_secrets
+        combined = get_plaintext_envs_and_secrets(result.envs_and_secrets)
         assert combined['SHARED_VAR'] == 'cli_secret_value'
 
     finally:
@@ -256,7 +262,7 @@ def test_null_secrets_override_with_cli():
             'API_KEY': 'cli-api-key',
             'SECRET_TOKEN': 'cli-token'
         }
-        assert task.secrets == expected_secrets
+        assert get_plaintext_secrets(task.secrets) == expected_secrets
 
         # Environment variables should be preserved
         assert task.envs == {'PUBLIC_VAR': 'public-value'}
@@ -336,7 +342,7 @@ def test_mixed_null_and_non_null_secrets():
             'YAML_SECRET': 'yaml-value',
             'CLI_SECRET': 'cli-override-value'
         }
-        assert task.secrets == expected_secrets
+        assert get_plaintext_secrets(task.secrets) == expected_secrets
 
     finally:
         os.unlink(yaml_file)
@@ -374,7 +380,7 @@ def test_cli_override_non_null_secrets():
             entrypoint=(yaml_file,), secret=cli_secrets)
 
         expected_secrets = {'EXISTING_SECRET': 'overridden-value'}
-        assert task.secrets == expected_secrets
+        assert get_plaintext_secrets(task.secrets) == expected_secrets
 
     finally:
         os.unlink(yaml_file)

@@ -14,8 +14,10 @@ import requests
 
 import sky
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -60,6 +62,7 @@ def _load_task_and_apply_policy(
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
         request_options=sky.admin_policy.RequestOptions(
             cluster_name='test',
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -99,10 +102,28 @@ def test_use_spot_for_all_gpus_policy(add_example_policy_paths, task):
 
 def test_add_labels_policy(add_example_policy_paths, task):
     task = _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
-    with admin_policy_utils.apply_and_use_config_in_current_request(task):
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH):
         assert 'app' in skypilot_config.get_nested(
             ('kubernetes', 'custom_metadata', 'labels'),
             {}), ('label should be set')
+
+
+def test_add_labels_conditional_policy(add_example_policy_paths, task):
+    task = _load_task(task,
+                      os.path.join(POLICY_PATH, 'add_labels_conditional.yaml'))
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH):
+        assert 'app' in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should be set')
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task, request_name=request_names.AdminPolicyRequestName.VALIDATE):
+        assert 'app' not in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should not be set for validate request')
 
 
 def test_reject_all_policy(add_example_policy_paths, task):
@@ -214,7 +235,10 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
             None) == ['kind-skypilot', 'kind-skypilot2'
                      ], 'Kubernetes allowed contexts should be updated'
 
-        with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag,
+                request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+        ):
             assert skypilot_config.get_nested(
                 ('kubernetes', 'allowed_contexts'),
                 None) == ['kind-skypilot', 'kind-skypilot2'
@@ -246,7 +270,7 @@ def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
     dag, _ = _load_task_and_apply_policy(
         task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
 
-    resources = dag.tasks[0].resources
+    resources = list(dag.tasks[0].resources)
 
     assert resources[0].autostop_config is not None
     assert resources[0].autostop_config.enabled is True
@@ -264,9 +288,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.run = None
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the credentials file is mounted
@@ -288,9 +314,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         original_run_cmd = 'echo "hello world"'
         fresh_task.run = original_run_cmd
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the gcloud auth command is prepended
@@ -308,9 +336,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ, env_without_creds, clear=True):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         original_run_cmd = fresh_task.run
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the entire gcloud directory is mounted
@@ -325,9 +355,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.file_mounts = {'/existing/mount': '/local/path'}
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that both existing and new mounts are present
@@ -340,9 +372,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=False)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=False)
         # Should reject the request if it is not applied at client-side
         with pytest.raises(RuntimeError,
                            match='Policy UseLocalGcpCredentialsPolicy was not '
@@ -352,12 +386,15 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mr = policy.apply(user_request)
         mutated_user_request = sky.UserRequest(
             task=mr.task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
             skypilot_config=mr.skypilot_config,
             at_client_side=False)
         # Server accept the request if it is applied at client-side
@@ -368,15 +405,35 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.envs['SKYPILOT_LOCAL_GCP_CREDENTIALS_SET'] = 'v0'
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=False)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=False)
         # Should reject the request due to version mismatch
         with pytest.raises(RuntimeError,
                            match='Policy UseLocalGcpCredentialsPolicy at v0 '
                            'was applied at client-side but the server '
                            'requires v1 to be applied'):
             policy.apply(user_request)
+
+
+def test_user_request_encode_decode(task):
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        user_request = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=False,
+            user=models.User(id='123', name='test'))
+        encoded_request = user_request.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert repr(decoded_request.task) == repr(task)
+        assert decoded_request.skypilot_config == sky.Config()
+        assert decoded_request.at_client_side == False
+        assert decoded_request.user == models.User(id='123', name='test')
+        assert decoded_request.request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
 
 
 def test_restful_policy(add_example_policy_paths, task):

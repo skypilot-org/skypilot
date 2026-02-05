@@ -1,9 +1,10 @@
 """Unit tests for sky.jobs.utils functions."""
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytest
 
+from sky import exceptions
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 
@@ -534,10 +535,10 @@ class TestGetManagedJobQueue:
         def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {'test-cluster': mock_handle}
 
-        def fake_get_readable_resources_repr(handle, simplify=False):
-            if simplify:
-                return '1x V100'
-            return '1x V100 (AWS)'
+        def fake_get_readable_resources_repr(handle, simplified_only=False):
+            if simplified_only:
+                return ('1x V100', None)
+            return ('1x V100', '1x V100 (AWS)')
 
         # Patch functions
         monkeypatch.setattr(jobs_utils.global_user_state,
@@ -660,3 +661,321 @@ class TestGetManagedJobQueue:
 
         # Verify that generate_managed_job_cluster_name was called
         assert generated_cluster_name == 'my_task-42'
+
+
+class TestControllerProcessAlive:
+
+    def test_controller_process_alive_matches_start_time(self, monkeypatch):
+        """Process considered alive when start time matches recorded value."""
+        expected_pid = 1234
+        expected_start = 1700000000.0
+
+        class _FakeProcess:
+
+            def __init__(self, pid):
+                assert pid == expected_pid
+
+            def create_time(self):
+                return expected_start
+
+            def cmdline(self):
+                return ['python', '-m', 'sky.jobs.controller']
+
+            def is_running(self):
+                return True
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
+        record = managed_job_state.ControllerPidRecord(
+            pid=expected_pid, started_at=expected_start)
+        assert jobs_utils.controller_process_alive(record, legacy_job_id=42)
+
+    def test_controller_process_alive_mismatched_start_time(self, monkeypatch):
+        """Process considered dead when start time does not match."""
+        expected_pid = 5678
+        recorded_start = 1700000000.0
+        actual_start = recorded_start + 5.0
+
+        class _FakeProcess:
+
+            def __init__(self, pid):
+                assert pid == expected_pid
+
+            def create_time(self):
+                return actual_start
+
+            def cmdline(self):
+                return ['python', '-m', 'sky.jobs.controller']
+
+            def is_running(self):
+                return True
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _FakeProcess)
+        record = managed_job_state.ControllerPidRecord(
+            pid=expected_pid, started_at=recorded_start)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                False)
+
+    def test_controller_process_alive_fallback_requires_keyword(
+            self, monkeypatch):
+        """Without start time, fallback relies on command keywords."""
+        expected_pid = 2468
+        monkeypatch.setattr(jobs_utils.psutil, 'pid_exists',
+                            lambda pid: pid == expected_pid)
+
+        class _KeywordProcess:
+
+            def __init__(self, pid):
+                assert pid == expected_pid
+
+            def create_time(self):
+                return 1700000000.0
+
+            def cmdline(self):
+                return ['python', '-m', 'sky.jobs.controller']
+
+            def is_running(self):
+                return True
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _KeywordProcess)
+        record = managed_job_state.ControllerPidRecord(pid=expected_pid,
+                                                       started_at=None)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                True)
+
+        class _NoKeywordProcess(_KeywordProcess):
+
+            def cmdline(self):
+                return ['python', '-m', 'some.other.module']
+
+        monkeypatch.setattr(jobs_utils.psutil, 'Process', _NoKeywordProcess)
+        assert (jobs_utils.controller_process_alive(record, legacy_job_id=42) is
+                False)
+
+
+class TestStreamLogsByIdTaskFiltering:
+    """Tests for task filtering logic in stream_logs_by_id.
+
+    These tests verify that the task parameter correctly filters logs by
+    task ID (when int) or task name (when str).
+    """
+
+    def _create_task_info(
+        self,
+        tasks: List[Tuple[int, str]],
+        log_file: Optional[str] = None
+    ) -> List[Tuple[int, str, managed_job_state.ManagedJobStatus, Optional[str],
+                    Optional[str]]]:
+        """Create task info tuples for mocking.
+
+        Args:
+            tasks: List of (task_id, task_name) tuples.
+            log_file: Log file path for each task. If None, log reading is
+                skipped which is useful for unit tests that don't need to
+                verify log content.
+
+        Returns:
+            List of task info tuples (task_id, task_name, status, log_path,
+            logs_cleaned_at).
+        """
+        return [(t_id, t_name, managed_job_state.ManagedJobStatus.SUCCEEDED,
+                 log_file, None) for t_id, t_name in tasks]
+
+    def test_task_filter_by_int_matches_task_id(self, monkeypatch):
+        """Test that int task filter matches against task_id."""
+        job_id = 1
+        tasks = [(0, 'train'), (1, 'eval'), (2, 'export')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+
+        # Task filter is int 1, should match task_id=1 (eval)
+        # We need to verify the filter finds the right task by checking
+        # that it doesn't return NOT_FOUND
+        # Mock get_status to return a terminal status so we exit early
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_status',
+            lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+        # The function will try to stream logs, but we just want to verify
+        # task filtering works. If it returns NOT_FOUND, the filter failed.
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task=1)
+
+        # Should NOT return NOT_FOUND since task_id=1 exists
+        assert exit_code != exceptions.JobExitCode.NOT_FOUND
+        assert 'No task found matching' not in msg
+
+    def test_task_filter_by_str_matches_task_name(self, monkeypatch):
+        """Test that str task filter matches against task_name."""
+        job_id = 1
+        tasks = [(0, 'train'), (1, 'eval'), (2, 'export')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_status',
+            lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+        # Task filter is str 'eval', should match task_name='eval'
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task='eval')
+
+        # Should NOT return NOT_FOUND since task_name='eval' exists
+        assert exit_code != exceptions.JobExitCode.NOT_FOUND
+        assert 'No task found matching' not in msg
+
+    def test_task_filter_int_not_found(self, monkeypatch):
+        """Test that int task filter returns NOT_FOUND when task_id doesn't exist."""
+        job_id = 1
+        tasks = [(0, 'train'), (1, 'eval')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+
+        # Task filter is int 5, which doesn't exist
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task=5)
+
+        assert exit_code == exceptions.JobExitCode.NOT_FOUND
+        assert 'No task found matching 5' in msg
+        assert 'Valid task IDs are 0-1' in msg
+
+    def test_task_filter_str_not_found(self, monkeypatch):
+        """Test that str task filter returns NOT_FOUND when task_name doesn't exist."""
+        job_id = 1
+        tasks = [(0, 'train'), (1, 'eval')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+
+        # Task filter is str 'nonexistent', which doesn't exist
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task='nonexistent')
+
+        assert exit_code == exceptions.JobExitCode.NOT_FOUND
+        assert "No task found matching 'nonexistent'" in msg
+
+    def test_task_filter_int_does_not_match_task_name(self, monkeypatch):
+        """Test that int task filter does NOT match task_name even if numeric."""
+        job_id = 1
+        # Task with numeric name '99' but task_id=0
+        tasks = [(0, '99')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+
+        # Task filter is int 99, should NOT match task_name='99',
+        # should only try to match task_id
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task=99)
+
+        # Should return NOT_FOUND because task_id=99 doesn't exist
+        assert exit_code == exceptions.JobExitCode.NOT_FOUND
+        assert 'No task found matching 99' in msg
+
+    def test_task_filter_str_does_not_match_task_id(self, monkeypatch):
+        """Test that str task filter does NOT match task_id even if numeric."""
+        job_id = 1
+        tasks = [(0, 'train'), (1, 'eval')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+
+        # Task filter is str '1', should NOT match task_id=1,
+        # should only try to match task_name
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task='1')
+
+        # Should return NOT_FOUND because no task_name='1' exists
+        assert exit_code == exceptions.JobExitCode.NOT_FOUND
+        assert "No task found matching '1'" in msg
+
+    def test_task_filter_none_does_not_filter(self, monkeypatch):
+        """Test that None task filter shows all tasks (no filtering)."""
+        job_id = 1
+        tasks = [(0, 'train'), (1, 'eval')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state, 'get_status',
+            lambda jid: managed_job_state.ManagedJobStatus.SUCCEEDED)
+
+        # Task filter is None, should not filter
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task=None)
+
+        # Should NOT return NOT_FOUND
+        assert exit_code != exceptions.JobExitCode.NOT_FOUND
+        assert 'No task found matching' not in msg
+
+    def test_task_filter_single_task_valid_range_message(self, monkeypatch):
+        """Test that error message shows correct valid range for single task."""
+        job_id = 1
+        tasks = [(0, 'train')]
+        task_info = self._create_task_info(tasks)
+
+        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_num_tasks',
+                            lambda jid: len(tasks))
+        monkeypatch.setattr(
+            jobs_utils.managed_job_state,
+            'get_all_task_ids_names_statuses_logs',
+            lambda jid: task_info,
+        )
+
+        msg, exit_code = jobs_utils.stream_logs_by_id(job_id,
+                                                      follow=False,
+                                                      task=5)
+
+        assert exit_code == exceptions.JobExitCode.NOT_FOUND
+        # Single task should show '0' not '0-0'
+        assert 'Valid task IDs are 0.' in msg or 'Valid task IDs are 0,' in msg

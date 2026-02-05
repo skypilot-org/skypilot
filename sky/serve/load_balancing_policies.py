@@ -121,7 +121,7 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             return
         with self.lock:
             self.ready_replicas = ready_replicas
-            for r in self.ready_replicas:
+            for r in list(self.load_map.keys()):
                 if r not in ready_replicas:
                     del self.load_map[r]
             for replica in ready_replicas:

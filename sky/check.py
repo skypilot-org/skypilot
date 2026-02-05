@@ -14,6 +14,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -33,7 +34,8 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     # clouds. Also validate names with get_cloud_tuple.
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
-        [repr(c) for c in registry.CLOUD_REGISTRY.values()] + [cloudflare.NAME])
+        [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
+        [cloudflare.NAME, coreweave.NAME])
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -48,6 +50,32 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
         if c.lower() not in workspace_disabled_clouds
     ]
     return config_allowed_cloud_names
+
+
+def _get_workspace_cloud_capabilities(
+        workspace: str,
+        cloud: str) -> Optional[List[sky_cloud.CloudCapability]]:
+    """Get the capabilities for a cloud in a workspace.
+
+    Returns:
+        A list of capabilities for the cloud in the workspace.
+        None if the capabilities are not explicitly specified
+        in the workspace or global config.
+        Returned value of None does not mean the cloud is disabled.
+    """
+    cloud_config = skypilot_config.get_workspace_cloud(cloud,
+                                                       workspace=workspace)
+    cloud_capabilities = cloud_config.get('capabilities', None)
+    if not cloud_capabilities:
+        # get the capabilities from the global config
+        cloud_capabilities = skypilot_config.get_nested(
+            (cloud.lower(), 'capabilities'), default_value=None)
+    if cloud_capabilities:
+        return [
+            sky_cloud.CloudCapability(capability.lower())
+            for capability in cloud_capabilities
+        ]
+    return None
 
 
 def check_capabilities(
@@ -81,7 +109,7 @@ def check_capabilities(
 
     def get_all_clouds() -> Tuple[str, ...]:
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-                     [cloudflare.NAME])
+                     [cloudflare.NAME, coreweave.NAME])
 
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
@@ -121,9 +149,12 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare.
+            # the cloud object. Includes special handling for Cloudflare and
+            # CoreWeave.
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
+            elif cloud_name.lower().startswith('coreweave'):
+                return coreweave.NAME, coreweave
             else:
                 cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
@@ -147,12 +178,32 @@ def check_capabilities(
 
         # filter out the clouds that are disabled in the workspace config
         workspace_disabled_clouds = []
+        workspace_cloud_capabilities: Dict[
+            str, List[sky_cloud.CloudCapability]] = {}
         for cloud in config_allowed_cloud_names:
             cloud_config = skypilot_config.get_workspace_cloud(
                 cloud, workspace=current_workspace_name)
             cloud_disabled = cloud_config.get('disabled', False)
             if cloud_disabled:
                 workspace_disabled_clouds.append(cloud)
+            else:
+                specified_capabilities = _get_workspace_cloud_capabilities(
+                    current_workspace_name, cloud)
+                if specified_capabilities:
+                    # filter the capabilities to only the ones passed
+                    # in as argument to this function
+                    workspace_cloud_capabilities[cloud] = [
+                        enabled_capability
+                        for enabled_capability in specified_capabilities
+                        if enabled_capability in capabilities
+                    ]
+                    # mark capabilities that are not enabled
+                    # in the workspace config as disabled
+                    for capability in capabilities:
+                        if capability not in workspace_cloud_capabilities[
+                                cloud]:
+                            disabled_clouds.setdefault(cloud,
+                                                       []).append(capability)
 
         config_allowed_cloud_names = [
             c for c in config_allowed_cloud_names
@@ -172,7 +223,8 @@ def check_capabilities(
         for c in clouds_to_check:
             allowed = c[0] in config_allowed_cloud_names
             if allowed or check_explicit:
-                for capability in capabilities:
+                for capability in workspace_cloud_capabilities.get(
+                        c[0], capabilities):
                     combinations.append((c, capability, allowed))
 
         cloud2ctx2text: Dict[str, Dict[str, str]] = {}
@@ -219,23 +271,24 @@ def check_capabilities(
         # allowed_clouds in config.yaml, it will be disabled.
         all_enabled_clouds: Set[str] = set()
         for capability in capabilities:
-            # Cloudflare is not a real cloud in registry.CLOUD_REGISTRY, and
-            # should not be inserted into the DB (otherwise `sky launch` and
-            # other code would error out when it's trying to look it up in the
-            # registry).
+            # Cloudflare and CoreWeave are not real clouds in
+            # registry.CLOUD_REGISTRY, and should not be inserted into the DB
+            # (otherwise `sky launch` and other code would error out when it's
+            # trying to look it up in the registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and
-                not cloud.startswith('Cloudflare')
+                if capability in capabilities and not cloud.startswith(
+                    'Cloudflare') and not cloud.startswith('CoreWeave')
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and
-                not cloud.startswith('Cloudflare')
+                if capability in capabilities and not cloud.startswith(
+                    'Cloudflare') and not cloud.startswith('CoreWeave')
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not cloud.startswith('Cloudflare')
+                if not cloud.startswith('Cloudflare') and
+                not cloud.startswith('CoreWeave')
             }
             previously_enabled_clouds_set = {
                 repr(cloud)
@@ -430,6 +483,12 @@ def get_cloud_credential_file_mounts(
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
+
+    # Similarly, handle CoreWeave storage credentials
+    coreweave_is_enabled, _ = coreweave.check_storage_credentials()
+    if coreweave_is_enabled:
+        coreweave_credential_mounts = coreweave.get_credential_file_mounts()
+        file_mounts.update(coreweave_credential_mounts)
     return file_mounts
 
 
@@ -469,8 +528,9 @@ def _print_checked_cloud(
         # `dict` reasons for K8s and SSH will be printed in detail in
         # _format_enabled_cloud. Skip here unless the cloud is disabled.
         if not isinstance(reason, str):
-            if not ok and isinstance(cloud_tuple[1],
-                                     (sky_clouds.SSH, sky_clouds.Kubernetes)):
+            if not ok and isinstance(
+                    cloud_tuple[1],
+                (sky_clouds.SSH, sky_clouds.Kubernetes, sky_clouds.Slurm)):
                 if reason is not None:
                     reason_str = _format_context_details(cloud_tuple[1],
                                                          show_details=True,
@@ -494,9 +554,11 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if verbose and cloud is not cloudflare:
+        if verbose and cloud is not cloudflare and cloud is not coreweave:
             activated_account = cloud.get_active_user_identity_str()
-        if isinstance(cloud_tuple[1], (sky_clouds.SSH, sky_clouds.Kubernetes)):
+        if isinstance(
+                cloud_tuple[1],
+            (sky_clouds.SSH, sky_clouds.Kubernetes, sky_clouds.Slurm)):
             detail_string = _format_context_details(cloud_tuple[1],
                                                     show_details=True,
                                                     ctx2text=ctx2text)
@@ -527,6 +589,9 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
     if isinstance(cloud_type, sky_clouds.SSH):
         # Get the cluster names by reading from the node pools file
         contexts = sky_clouds.SSH.get_ssh_node_pool_contexts()
+    elif isinstance(cloud_type, sky_clouds.Slurm):
+        # Get the cluster names from SLURM config
+        contexts = sky_clouds.Slurm.existing_allowed_clusters()
     else:
         assert isinstance(cloud_type, sky_clouds.Kubernetes)
         contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
@@ -591,15 +656,19 @@ def _format_context_details(cloud: Union[str, sky_clouds.Cloud],
                                               'configuration.'))
                 else:
                     # Default case - not set up
-                    text_suffix = (': ' + _red_color('disabled. ') +
-                                   _dim_color('Reason: Not set up. Use '
-                                              '`sky ssh up --infra '
-                                              f'{context.lstrip("ssh-")}` '
-                                              'to set up.'))
+                    text_suffix = (': ' + _red_color('disabled. ') + _dim_color(
+                        'Reason: Not set up. Use '
+                        '`sky ssh up --infra '
+                        f'{common_utils.removeprefix(context, "ssh-")}` '
+                        'to set up.'))
         contexts_formatted.append(
             f'\n    {symbol}{cleaned_context}{text_suffix}')
-    identity_str = ('SSH Node Pools' if isinstance(cloud_type, sky_clouds.SSH)
-                    else 'Allowed contexts')
+    if isinstance(cloud_type, sky_clouds.SSH):
+        identity_str = 'SSH Node Pools'
+    elif isinstance(cloud_type, sky_clouds.Slurm):
+        identity_str = 'Allowed clusters'
+    else:
+        identity_str = 'Allowed contexts'
     return f'\n    {identity_str}:{"".join(contexts_formatted)}'
 
 
@@ -618,7 +687,11 @@ def _format_enabled_cloud(cloud_name: str,
     cloud_and_capabilities = f'{cloud_name} [{", ".join(capabilities)}]'
     title = _green_color(cloud_and_capabilities)
 
-    if cloud_name in [repr(sky_clouds.Kubernetes()), repr(sky_clouds.SSH())]:
+    if cloud_name in [
+            repr(sky_clouds.Kubernetes()),
+            repr(sky_clouds.SSH()),
+            repr(sky_clouds.Slurm())
+    ]:
         return (f'{title}' + _format_context_details(
             cloud_name, show_details=False, ctx2text=ctx2text))
     return _green_color(cloud_and_capabilities)

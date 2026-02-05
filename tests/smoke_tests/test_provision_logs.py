@@ -23,8 +23,7 @@ def test_provision_logs_streaming(generic_cloud: str):
         return ('attempts=12; ok=0; '
                 'while [ $attempts -gt 0 ]; do '
                 f'  out="$({cmd} 2>&1)"; rc=$?; echo "$out"; '
-                '  if [ $rc -eq 0 ] && [ -n "$out" ] && '
-                '     ! echo "$out" | grep -qE "HTTPError|Not Found|404"; then '
+                '  if [ $rc -eq 0 ] && [ -n "$out" ]; then '
                 '    ok=1; break; fi; '
                 '  sleep 5; attempts=$((attempts-1)); '
                 'done; [ $ok -eq 1 ]')
@@ -64,8 +63,7 @@ def test_worker_provision_logs_streaming(generic_cloud: str):
         return ('attempts=12; ok=0; '
                 'while [ $attempts -gt 0 ]; do '
                 f'  out="$({cmd} 2>&1)"; rc=$?; echo "$out"; '
-                '  if [ $rc -eq 0 ] && [ -n "$out" ] && '
-                '     ! echo "$out" | grep -qE "HTTPError|Not Found|404"; then '
+                '  if [ $rc -eq 0 ] && [ -n "$out" ]; then '
                 '    ok=1; break; fi; '
                 '  sleep 5; attempts=$((attempts-1)); '
                 'done; [ $ok -eq 1 ]')

@@ -3,12 +3,23 @@ resources:
   cpus: 0.1+
 volumes:
   /mnt/data0: pvc0
+  /mnt/data1: existing0
+  /mnt/data2:
+    size: 1Gi
+    labels:
+      key: value
 setup: |
   echo "running setup"
 
 run: |
   set -e
-  echo "check volume"
+  echo "check volumes"
+  df -h /mnt/data2 || (echo "df failed" && exit 1)
+  touch /mnt/data2/2.txt || (echo "touch failed" && exit 1)
+  ls -lart /mnt/data2 || (echo "ls failed" && exit 1)
   df -h /mnt/data0 || (echo "df failed" && exit 1)
   touch /mnt/data0/0.txt || (echo "touch failed" && exit 1)
   ls -lart /mnt/data0 || (echo "ls failed" && exit 1)
+  df -h /mnt/data1 || (echo "df failed" && exit 1)
+  touch /mnt/data1/1.txt || (echo "touch failed" && exit 1)
+  ls -lart /mnt/data1 || (echo "ls failed" && exit 1)

@@ -262,6 +262,10 @@ class VsphereClient:
 
     def get_pbm_manager(self):
         self.connect()
+        if self.servicemanager is None:
+            raise VsphereError('Failed to connect to vSphere.')
+        if self.servicemanager.si is None:
+            raise VsphereError('Failed to connect to vSphere.')
         pbm_si, pm_content = self._create_pbm_connection(  # pylint: disable=unused-variable
             self.servicemanager.si._stub)  # pylint: disable=protected-access
         pm = pm_content.profileManager
@@ -360,6 +364,8 @@ def initialize_vsphere_data():
         vcenter_name = vcenter['name']
         vc_object.connect()
         vc_servicemanager = vc_object.servicemanager
+        if vc_servicemanager is None or vc_servicemanager.content is None:
+            raise VsphereError('Failed to connect to vSphere.')
         vc_content = vc_servicemanager.content
 
         cluster_name_dicts = vc_object.clusters
@@ -370,4 +376,5 @@ def initialize_vsphere_data():
         initialize_images_csv(images_csv_path, vc_object, vcenter_name)
         initialize_instance_image_mapping_csv(vms_csv_path, images_csv_path,
                                               instance_image_mapping_csv_path)
-        vc_object.servicemanager.disconnect()
+        if vc_object.servicemanager is not None:
+            vc_object.servicemanager.disconnect()

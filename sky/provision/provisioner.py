@@ -25,9 +25,11 @@ from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
+from sky.provision import volume as provision_volume
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils
@@ -59,6 +61,11 @@ def _bulk_provision(
     region_name = region.name
 
     start = time.time()
+
+    provision_volume.provision_ephemeral_volumes(cloud, region_name,
+                                                 cluster_name.name_on_cloud,
+                                                 bootstrap_config)
+
     # TODO(suquark): Should we cache the bootstrapped result?
     #  Currently it is not necessary as bootstrapping takes
     #  only ~3s, caching it seems over-engineering and could
@@ -151,9 +158,9 @@ def bulk_provision(
             logger.debug(f'SkyPilot version: {sky.__version__}; '
                          f'commit: {sky.__commit__}')
             logger.debug(_TITLE.format('Provisioning'))
-            logger.debug(
-                'Provision config:\n'
-                f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
+            redacted_config = bootstrap_config.get_redacted_config()
+            logger.debug('Provision config:\n'
+                         f'{json.dumps(redacted_config, indent=2)}')
             return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
         except exceptions.NoClusterLaunchedError:
@@ -234,9 +241,20 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
             specific exceptions will be raised by the cloud APIs.
     """
     if terminate:
-        provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
-                                      provider_config)
+        try:
+            provision.terminate_instances(cloud_name,
+                                          cluster_name.name_on_cloud,
+                                          provider_config)
+        except RuntimeError as e:
+            if provision_constants.ERROR_NO_NODES_LAUNCHED in str(e):
+                logger.info(
+                    'Ignoring teardown failure as no nodes were launched.')
+                logger.debug(f'Stacktrace: {traceback.format_exc()}')
+            else:
+                raise
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        # This won't crash because not found volumes is ignored.
+        provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,
                                  provider_config)
@@ -282,15 +300,6 @@ def _ssh_probe_command(ip: str,
     return command
 
 
-def _shlex_join(command: List[str]) -> str:
-    """Join a command list into a shell command string.
-
-    This is copied from Python 3.8's shlex.join, which is not available in
-    Python 3.7.
-    """
-    return ' '.join(shlex.quote(arg) for arg in command)
-
-
 def _wait_ssh_connection_direct(ip: str,
                                 ssh_port: int,
                                 ssh_user: str,
@@ -334,7 +343,7 @@ def _wait_ssh_connection_direct(ip: str,
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
     logger.debug(f'Waiting for SSH to {ip}. Try: '
-                 f'{_shlex_join(command)}. '
+                 f'{shlex.join(command)}. '
                  f'{stderr}')
     return False, stderr
 
@@ -355,7 +364,7 @@ def _wait_ssh_connection_indirect(ip: str,
     del ssh_control_name, kwargs  # unused
     command = _ssh_probe_command(ip, ssh_port, ssh_user, ssh_private_key,
                                  ssh_probe_timeout, ssh_proxy_command)
-    message = f'Waiting for SSH using command: {_shlex_join(command)}'
+    message = f'Waiting for SSH using command: {shlex.join(command)}'
     logger.debug(message)
     try:
         proc = subprocess.run(command,
@@ -485,12 +494,14 @@ def _post_provision_setup(
         # ready by the provisioner, and we use kubectl instead of SSH to run the
         # commands and rsync on the pods. SSH will still be ready after a while
         # for the users to SSH into the pod.
-        if cloud_name.lower() != 'kubernetes':
+        is_k8s_cloud = cloud_name.lower() in ['kubernetes', 'ssh']
+        is_slurm_cloud = cloud_name.lower() == 'slurm'
+        if not is_k8s_cloud and not is_slurm_cloud:
             logger.debug(
                 f'\nWaiting for SSH to be available for {cluster_name!r} ...')
             wait_for_ssh(cluster_info, ssh_credentials)
             logger.debug(f'SSH Connection ready for {cluster_name!r}')
-        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
+        vm_str = 'Instance' if not is_k8s_cloud else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
         verb = 'is' if len(cluster_info.instances) == 1 else 'are'
         indent_str = (ux_utils.INDENT_SYMBOL
@@ -627,10 +638,15 @@ def _post_provision_setup(
         status.update(
             runtime_preparation_str.format(step=3, step_name='runtime'))
 
+        skip_ray_setup = False
         ray_port = constants.SKY_REMOTE_RAY_PORT
         head_ray_needs_restart = True
         ray_cluster_healthy = False
-        if (not provision_record.is_instance_just_booted(
+        if (launched_resources.cloud is not None and
+                not launched_resources.cloud.uses_ray()):
+            skip_ray_setup = True
+            logger.debug('Skip Ray cluster setup as cloud does not use Ray.')
+        elif (not provision_record.is_instance_just_booted(
                 head_instance.instance_id)):
             # Check if head node Ray is alive
             (ray_port, ray_cluster_healthy,
@@ -655,7 +671,9 @@ def _post_provision_setup(
                              'async setup to complete...')
                 time.sleep(1)
 
-        if head_ray_needs_restart:
+        if skip_ray_setup:
+            logger.debug('Skip Ray cluster setup on the head node.')
+        elif head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
@@ -678,7 +696,9 @@ def _post_provision_setup(
         # We don't need to restart ray on worker nodes if the ray cluster is
         # already healthy, i.e. the head node has expected number of nodes
         # connected to the ray cluster.
-        if cluster_info.num_instances > 1 and not ray_cluster_healthy:
+        if skip_ray_setup:
+            logger.debug('Skip Ray cluster setup on the worker nodes.')
+        elif cluster_info.num_instances > 1 and not ray_cluster_healthy:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
                 no_restart=not head_ray_needs_restart,

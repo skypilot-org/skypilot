@@ -1,0 +1,32 @@
+pool:
+  workers: 3
+
+resources:
+  accelerators: L40S:1
+
+
+file_mounts:
+  ~/.kaggle/kaggle.json: ~/.kaggle/kaggle.json
+  /outputs:
+    source: s3://my-skypilot-bucket
+
+workdir: .
+
+setup: |
+  # Setup runs once on all workers (must be non-blocking)
+  sudo apt-get update && sudo apt-get install -y unzip
+  uv venv .venv --python 3.12
+  source .venv/bin/activate
+  git clone https://github.com/deepseek-ai/DeepSeek-OCR.git
+  cd DeepSeek-OCR
+  pip install kaggle
+  uv pip install torch==2.6.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+  uv pip install vllm==0.8.5
+  uv pip install flash-attn==2.7.3 --no-build-isolation
+  uv pip install -r requirements.txt
+  cd ..
+  # Download dataset during setup (shared across all jobs)
+  kaggle datasets download goapgo/book-scan-ocr-vlm-finetuning
+  unzip -q book-scan-ocr-vlm-finetuning.zip -d book-scan-ocr
+
+  echo "Setup complete!"

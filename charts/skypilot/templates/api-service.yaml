@@ -1,7 +1,8 @@
+{{- $fullName := include "skypilot.fullname" . -}}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .Release.Name }}-api-service
+  name: {{ $fullName }}-api-service
   namespace: {{ .Release.Namespace }}
 spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
@@ -17,5 +18,5 @@ spec:
       protocol: TCP
   {{- end }}
   selector:
-    app: {{ .Release.Name }}-api
+    app: {{ $fullName }}-api
     skypilot.co/ready: "true"

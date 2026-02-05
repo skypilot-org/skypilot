@@ -1,0 +1,52 @@
+# Single-node SAM3 video segmentation for testing.
+# Combines setup and run in a single task without using pools.
+#
+# Usage:
+#
+#  sky launch -c sam3-test sam3-test-single.yaml \
+#    --env OUTPUT_BUCKET_NAME=my-bucket --secret HF_TOKEN
+#
+# For production workloads, use pools (sam3-pool.yaml) instead.
+
+resources:
+  accelerators: L40S:1
+
+envs:
+  OUTPUT_BUCKET_NAME:  # S3 bucket for storing datasets and results
+
+file_mounts:
+  ~/.kaggle/kaggle.json: ~/.kaggle/kaggle.json
+  /outputs:
+    name: $OUTPUT_BUCKET_NAME
+    mode: MOUNT
+
+secrets:
+  HF_TOKEN: null
+
+workdir: .
+
+setup: |
+  # Same setup as sam3-pool.yaml
+  sudo apt-get update && sudo apt-get install -y unzip ffmpeg
+  uv venv .venv --python 3.12
+  source .venv/bin/activate
+  uv pip install -r requirements.txt
+  # Download soccer video dataset from Kaggle (store in S3 to avoid re-downloading)
+  DATASET_PATH=/outputs/datasets/soccer-videos
+  if [ ! -d "$DATASET_PATH" ]; then
+    echo "Downloading dataset from Kaggle to S3..."
+    mkdir -p /outputs/datasets
+    kaggle datasets download shreyamainkar/football-soccer-videos-dataset --force
+    unzip -q football-soccer-videos-dataset.zip -d $DATASET_PATH
+    rm -f football-soccer-videos-dataset.zip
+  fi
+  echo "Setup complete!"
+
+run: |
+  source .venv/bin/activate
+  # Process all videos on a single node
+  for video in /outputs/datasets/soccer-videos/*.mp4; do
+    echo "Processing: $video"
+    python process_segmentation.py "$video" --max-frames 50 || echo "Failed: $video"
+  done
+  echo "All videos processed!"

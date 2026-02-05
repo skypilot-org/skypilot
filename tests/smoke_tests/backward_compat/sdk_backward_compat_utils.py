@@ -89,6 +89,21 @@ def managed_job_logs(job_name: str) -> None:
 def managed_job_queue() -> None:
     request_id = jobs_sdk.queue(refresh=True)
     records = sdk.stream_and_get(request_id)
+    if isinstance(records, tuple):
+        assert len(records) == 4, records
+        jobs = records[0]
+        assert len(jobs) > 0, jobs
+        assert 'job_id' in jobs[0], jobs[0]
+        total = records[1]
+        assert total > 0, total
+        status_counts = records[2]
+        assert len(status_counts) > 0, status_counts
+        total_no_filter = records[3]
+        assert total_no_filter > 0, total_no_filter
+    else:
+        jobs = records
+        assert len(jobs) > 0, jobs
+        assert 'job_id' in jobs[0], jobs[0]
     print(records)
 
 

@@ -8,6 +8,8 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from sky import models
+from sky.catalog import common
 from sky.schemas.api import responses
 from sky.server import constants as server_constants
 from sky.utils import serialize_utils
@@ -15,7 +17,6 @@ from sky.utils import serialize_utils
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
-    from sky import models
     from sky.provision.kubernetes import utils as kubernetes_utils
 
 handlers: Dict[str, Any] = {}
@@ -60,13 +61,28 @@ def encode_status(
         clusters: List[responses.StatusResponse]) -> List[Dict[str, Any]]:
     response = []
     for cluster in clusters:
-        response_cluster = cluster.model_dump()
+        response_cluster = cluster.model_dump(exclude_none=True)
+        # These default setting is needed because last_use and status_updated_at
+        # used to be not optional.
+        # TODO(syang): remove this after v0.12.0
+        if 'last_use' not in response_cluster:
+            response_cluster['last_use'] = ''
+        if 'status_updated_at' not in response_cluster:
+            response_cluster['status_updated_at'] = 0
+        # Ensure labels is always included, defaulting to empty dict if None
+        # This is needed because exclude_none=True would exclude None labels
+        if 'labels' not in response_cluster or response_cluster.get(
+                'labels') is None:
+            response_cluster['labels'] = {}
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])
         response_cluster['handle'] = pickle_and_encode(handle)
+        # TODO (syang) We still need to return this field for backwards
+        # compatibility.
+        # Remove this field at or after v0.12.0
         response_cluster['storage_mounts_metadata'] = pickle_and_encode(
-            response_cluster['storage_mounts_metadata'])
+            None)  # Always returns None.
         response.append(response_cluster)
     return response
 
@@ -206,10 +222,11 @@ def encode_enabled_clouds(clouds: List['clouds.Cloud']) -> List[str]:
 @register_encoder('storage_ls')
 def encode_storage_ls(
         return_value: List[responses.StorageRecord]) -> List[Dict[str, Any]]:
-    for storage_info in return_value:
+    response_list = [storage_info.model_dump() for storage_info in return_value]
+    for storage_info in response_list:
         storage_info['status'] = storage_info['status'].value
         storage_info['store'] = [store.value for store in storage_info['store']]
-    return [storage_info.model_dump() for storage_info in return_value]
+    return response_list
 
 
 @register_encoder('volume_list')
@@ -219,11 +236,11 @@ def encode_volume_list(
 
 
 @register_encoder('job_status')
-def encode_job_status(return_value: Dict[int, Any]) -> Dict[int, str]:
+def encode_job_status(return_value: Dict[int, Any]) -> Dict[str, str]:
     for job_id in return_value.keys():
         if return_value[job_id] is not None:
             return_value[job_id] = return_value[job_id].value
-    return return_value
+    return {str(k): v for k, v in return_value.items()}
 
 
 @register_encoder('kubernetes_node_info')
@@ -235,3 +252,52 @@ def encode_kubernetes_node_info(
 @register_encoder('endpoints')
 def encode_endpoints(return_value: Dict[int, str]) -> Dict[str, str]:
     return {str(k): v for k, v in return_value.items()}
+
+
+@register_encoder('realtime_kubernetes_gpu_availability')
+def encode_realtime_gpu_availability(
+    return_value: List[Tuple[str,
+                             List[Any]]]) -> List[Tuple[str, List[List[Any]]]]:
+    # Convert RealtimeGpuAvailability namedtuples to lists
+    # for JSON serialization.
+    encoded = []
+    for context, gpu_list in return_value:
+        converted_gpu_list = []
+        for gpu in gpu_list:
+            assert isinstance(gpu, models.RealtimeGpuAvailability), (
+                f'Expected RealtimeGpuAvailability, got {type(gpu)}')
+            converted_gpu_list.append(list(gpu))
+        encoded.append((context, converted_gpu_list))
+    return encoded
+
+
+@register_encoder('realtime_slurm_gpu_availability')
+def encode_realtime_slurm_gpu_availability(
+    return_value: List[Tuple[str,
+                             List[Any]]]) -> List[Tuple[str, List[List[Any]]]]:
+    # Convert RealtimeGpuAvailability namedtuples to lists
+    # for JSON serialization.
+    encoded = []
+    for context, gpu_list in return_value:
+        converted_gpu_list = []
+        for gpu in gpu_list:
+            assert isinstance(gpu, models.RealtimeGpuAvailability), (
+                f'Expected RealtimeGpuAvailability, got {type(gpu)}')
+            converted_gpu_list.append(list(gpu))
+        encoded.append((context, converted_gpu_list))
+    return encoded
+
+
+@register_encoder('list_accelerators')
+def encode_list_accelerators(
+        return_value: Dict[str, List[Any]]) -> Dict[str, Any]:
+    encoded: Dict[str, Any] = {}
+    for accelerator_name, instances in return_value.items():
+        # Convert InstanceTypeInfo namedtuples to lists for JSON serialization.
+        converted_instances: List[Any] = []
+        for instance in instances:
+            assert isinstance(instance, common.InstanceTypeInfo), (
+                f'Expected InstanceTypeInfo, got {type(instance)}')
+            converted_instances.append(list(instance))
+        encoded[accelerator_name] = converted_instances
+    return encoded

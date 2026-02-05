@@ -23,6 +23,7 @@ from sky import skypilot_config
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
+from sky.adaptors import coreweave
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
@@ -62,6 +63,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.OCI()),
     str(clouds.Nebius()),
     cloudflare.NAME,
+    coreweave.NAME,
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -93,6 +95,12 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         enabled_clouds.append(cloudflare.NAME)
+
+    # Similarly, handle CoreWeave storage credentials
+    coreweave_is_enabled, _ = coreweave.check_storage_credentials()
+    if coreweave_is_enabled:
+        enabled_clouds.append(coreweave.NAME)
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -107,10 +115,10 @@ def _is_storage_cloud_enabled(cloud_name: str,
     if cloud_name in enabled_storage_cloud_names:
         return True
     if try_fix_with_sky_check:
-        # TODO(zhwu): Only check the specified cloud to speed up.
         sky_check.check_capability(
             sky_cloud.CloudCapability.STORAGE,
             quiet=True,
+            clouds=[cloud_name],
             workspace=skypilot_config.get_active_workspace())
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
@@ -126,6 +134,7 @@ class StoreType(enum.Enum):
     IBM = 'IBM'
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
+    COREWEAVE = 'COREWEAVE'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -768,6 +777,11 @@ class Storage(object):
                         previous_store_type = store_type
                     else:
                         new_store_type = store_type
+                if previous_store_type is None or new_store_type is None:
+                    # This should not happen if the condition above is true,
+                    # but add check for type safety
+                    raise exceptions.StorageBucketCreateError(
+                        f'Bucket {self.name} has inconsistent store types.')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketCreateError(
                         f'Bucket {self.name} was previously created for '
@@ -798,8 +812,8 @@ class Storage(object):
                                                source=self.source,
                                                mode=self.mode)
 
-            for store in input_stores:
-                self.add_store(store)
+            for store_type in input_stores:
+                self.add_store(store_type)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
@@ -814,10 +828,11 @@ class Storage(object):
                     elif self.source.startswith('oci://'):
                         self.add_store(StoreType.OCI)
 
-                    store_type = StoreType.find_s3_compatible_config_by_prefix(
-                        self.source)
-                    if store_type:
-                        self.add_store(store_type)
+                    s3_compatible_store_type: Optional[StoreType] = (
+                        StoreType.find_s3_compatible_config_by_prefix(
+                            self.source))
+                    if s3_compatible_store_type:
+                        self.add_store(s3_compatible_store_type)
 
     def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
         """Adds the bucket sub path prefix to the blob path."""
@@ -905,7 +920,7 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -930,7 +945,8 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://. Got: {source}')
+                        f'r2://, cos://, oci://, nebius://, cw://. '
+                        f'Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -945,7 +961,16 @@ class Storage(object):
             """
             prefix = name.split('://')[0]
             prefix = prefix.lower()
-            if prefix in ['s3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius']:
+            if prefix in [
+                    's3',
+                    'gs',
+                    'https',
+                    'r2',
+                    'cos',
+                    'oci',
+                    'nebius',
+                    'cw',
+            ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
                         'Prefix detected: `name` cannot start with '
@@ -1087,6 +1112,12 @@ class Storage(object):
                         _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.NEBIUS:
                     store = NebiusStore.from_metadata(
+                        s_metadata,
+                        source=self.source,
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
+                elif s_type == StoreType.COREWEAVE:
+                    store = CoreWeaveStore.from_metadata(
                         s_metadata,
                         source=self.source,
                         sync_on_reconstruction=self.sync_on_reconstruction,
@@ -1456,6 +1487,7 @@ class S3CompatibleConfig:
     aws_profile: Optional[str] = None
     get_endpoint_url: Optional[Callable[[], str]] = None
     credentials_file: Optional[str] = None
+    config_file: Optional[str] = None
     extra_cli_args: Optional[List[str]] = None
 
     # Provider-specific settings
@@ -1476,8 +1508,8 @@ class S3CompatibleStore(AbstractStore):
     """Base class for S3-compatible object storage providers.
 
     This class provides a unified interface for all S3-compatible storage
-    providers (AWS S3, Cloudflare R2, Nebius, MinIO, etc.) by leveraging
-    a configuration-driven approach that eliminates code duplication.
+    providers (AWS S3, Cloudflare R2, Nebius, MinIO, CoreWeave, etc.) by
+    leveraging a configuration-driven approach that eliminates code duplication
 
     ## Adding a New S3-Compatible Store
 
@@ -1904,6 +1936,9 @@ class S3CompatibleStore(AbstractStore):
             if self.config.credentials_file:
                 cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
                 f'{self.config.credentials_file} {cmd}'
+            if self.config.config_file:
+                cmd = 'AWS_CONFIG_FILE=' + \
+                f'{self.config.config_file} {cmd}'
 
             return cmd
 
@@ -1949,6 +1984,9 @@ class S3CompatibleStore(AbstractStore):
             if self.config.credentials_file:
                 cmd = 'AWS_SHARED_CREDENTIALS_FILE=' + \
                 f'{self.config.credentials_file} {cmd}'
+            if self.config.config_file:
+                cmd = 'AWS_CONFIG_FILE=' + \
+                f'{self.config.config_file} {cmd}'
 
             return cmd
 
@@ -2002,6 +2040,9 @@ class S3CompatibleStore(AbstractStore):
                 if self.config.credentials_file:
                     command = (f'AWS_SHARED_CREDENTIALS_FILE='
                                f'{self.config.credentials_file} {command}')
+                if self.config.config_file:
+                    command = 'AWS_CONFIG_FILE=' + \
+                    f'{self.config.config_file} {command}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
@@ -2074,7 +2115,9 @@ class S3CompatibleStore(AbstractStore):
             remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
                               f'{self.config.credentials_file} '
                               f'{remove_command}')
-
+        if self.config.config_file:
+            remove_command = 'AWS_CONFIG_FILE=' + \
+            f'{self.config.config_file} {remove_command}'
         return self._execute_remove_command(
             remove_command, bucket_name,
             f'Deleting {self.config.store_type} bucket {bucket_name}',
@@ -2087,8 +2130,9 @@ class S3CompatibleStore(AbstractStore):
         try:
             with rich_utils.safe_status(
                     ux_utils.spinner_message(hint_operating)):
-                subprocess.check_output(command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                subprocess.check_output(command,
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
@@ -2131,7 +2175,9 @@ class S3CompatibleStore(AbstractStore):
             remove_command = (f'AWS_SHARED_CREDENTIALS_FILE='
                               f'{self.config.credentials_file} '
                               f'{remove_command}')
-
+        if self.config.config_file:
+            remove_command = 'AWS_CONFIG_FILE=' + \
+            f'{self.config.config_file} {remove_command}'
         return self._execute_remove_command(
             remove_command, bucket_name,
             (f'Removing objects from {self.config.store_type} bucket '
@@ -2209,6 +2255,10 @@ class GcsStore(AbstractStore):
             elif self.source.startswith('oci://'):
                 raise NotImplementedError(
                     'Moving data from OCI to GCS is currently not supported.')
+            elif self.source.startswith('cw://'):
+                raise NotImplementedError(
+                    'Moving data from CoreWeave Object Storage to GCS is'
+                    ' currently not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
         # Check if the storage is enabled
@@ -2833,6 +2883,10 @@ class AzureBlobStore(AbstractStore):
             elif self.source.startswith('oci://'):
                 raise NotImplementedError(
                     'Moving data from OCI to AZureBlob is not supported.')
+            elif self.source.startswith('cw://'):
+                raise NotImplementedError(
+                    'Moving data from CoreWeave Object Storage to AzureBlob is'
+                    ' currently not supported.')
         # Validate name
         self.name = self.validate_name(self.name)
 
@@ -3204,6 +3258,8 @@ class AzureBlobStore(AbstractStore):
                     raise NotImplementedError(error_message.format('OCI'))
                 elif self.source.startswith('nebius://'):
                     raise NotImplementedError(error_message.format('NEBIUS'))
+                elif self.source.startswith('cw://'):
+                    raise NotImplementedError(error_message.format('CoreWeave'))
                 else:
                     self.batch_az_blob_sync([self.source])
         except exceptions.StorageUploadError:
@@ -3625,6 +3681,10 @@ class IBMCosStore(AbstractStore):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'COS Bucket is specified as path, the name should be '
                     'the same as COS bucket.')
+            elif self.source.startswith('cw://'):
+                raise NotImplementedError(
+                    'Moving data from CoreWeave Object Storage to COS is '
+                    'currently not supported.')
         # Validate name
         self.name = IBMCosStore.validate_name(self.name)
 
@@ -3685,6 +3745,9 @@ class IBMCosStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
+        if self.region is None:
+            raise exceptions.StorageInitError(
+                'Region must be specified for IBM COS store.')
         self.client = ibm.get_cos_client(self.region)
         self.s3_resource = ibm.get_cos_resource(self.region)
         self.bucket, is_new_bucket = self._get_bucket()
@@ -3723,6 +3786,9 @@ class IBMCosStore(AbstractStore):
                 elif self.source.startswith('r2://'):
                     raise Exception('IBM COS currently not supporting'
                                     'data transfers between COS and r2')
+                elif self.source.startswith('cw://'):
+                    raise Exception('IBM COS currently not supporting'
+                                    'data transfers between COS and CoreWeave')
                 else:
                     self.batch_ibm_rsync([self.source])
 
@@ -4114,7 +4180,7 @@ class OciStore(AbstractStore):
                     'Storage \'store: oci\' specified, but ' \
                     'OCI access is disabled. To fix, enable '\
                     'OCI by running `sky check`. '\
-                    'More info: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
+                    'More info: https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
                     )
 
     @classmethod
@@ -4649,3 +4715,103 @@ class NebiusStore(S3CompatibleStore):
             rclone_config, rclone_profile_name, self.bucket.name, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
+
+
+@register_s3_compatible_store
+class CoreWeaveStore(S3CompatibleStore):
+    """CoreWeaveStore inherits from S3CompatibleStore and represents the backend
+    for CoreWeave Object Storage buckets.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for CoreWeave Object Storage."""
+        return S3CompatibleConfig(
+            store_type='COREWEAVE',
+            url_prefix='cw://',
+            client_factory=lambda region: data_utils.create_coreweave_client(),
+            resource_factory=lambda name: coreweave.resource('s3').Bucket(name),
+            split_path=data_utils.split_coreweave_path,
+            verify_bucket=data_utils.verify_coreweave_bucket,
+            aws_profile=coreweave.COREWEAVE_PROFILE_NAME,
+            get_endpoint_url=coreweave.get_endpoint,
+            credentials_file=coreweave.COREWEAVE_CREDENTIALS_PATH,
+            config_file=coreweave.COREWEAVE_CONFIG_PATH,
+            cloud_name=coreweave.NAME,
+            default_region=coreweave.DEFAULT_REGION,
+            mount_cmd_factory=cls._get_coreweave_mount_cmd,
+        )
+
+    def _get_bucket(self) -> Tuple[StorageHandle, bool]:
+        """Get or create bucket using CoreWeave's S3 API"""
+        bucket = self.config.resource_factory(self.name)
+
+        # Use our custom bucket verification instead of head_bucket
+        if data_utils.verify_coreweave_bucket(self.name):
+            self._validate_existing_bucket()
+            return bucket, False
+
+        # TODO(hailong): Enable the bucket creation for CoreWeave
+        # Disable this to avoid waiting too long until the following
+        # issue is resolved:
+        # https://github.com/skypilot-org/skypilot/issues/7736
+        raise exceptions.StorageBucketGetError(
+            f'Bucket {self.name!r} does not exist. CoreWeave buckets can take'
+            ' a long time to become accessible after creation, so SkyPilot'
+            ' does not create them automatically. Please create the bucket'
+            ' manually in CoreWeave and wait for it to be accessible before'
+            ' using it.')
+
+        # # Check if this is a source with URL prefix (existing bucket case)
+        # if isinstance(self.source, str) and self.source.startswith(
+        #         self.config.url_prefix):
+        #     with ux_utils.print_exception_no_traceback():
+        #         raise exceptions.StorageBucketGetError(
+        #             'Attempted to use a non-existent bucket as a source: '
+        #             f'{self.source}.')
+
+        # # If bucket cannot be found, create it if needed
+        # if self.sync_on_reconstruction:
+        #     bucket = self._create_bucket(self.name)
+        #     return bucket, True
+        # else:
+        #     raise exceptions.StorageExternalDeletionError(
+        #         'Attempted to fetch a non-existent bucket: '
+        #         f'{self.name}')
+
+    @classmethod
+    def _get_coreweave_mount_cmd(cls, bucket_name: str, mount_path: str,
+                                 bucket_sub_path: Optional[str]) -> str:
+        """Factory method for CoreWeave mount command."""
+        endpoint_url = coreweave.get_endpoint()
+        return mounting_utils.get_coreweave_mount_cmd(
+            coreweave.COREWEAVE_CREDENTIALS_PATH,
+            coreweave.COREWEAVE_PROFILE_NAME, bucket_name, endpoint_url,
+            mount_path, bucket_sub_path)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """CoreWeave-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.COREWEAVE.get_profile_name(
+                self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.COREWEAVE.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)
+
+    def _create_bucket(self, bucket_name: str) -> StorageHandle:
+        """Create bucket using S3 API with timing handling for CoreWeave."""
+        result = super()._create_bucket(bucket_name)
+        # Ensure bucket is created
+        # The newly created bucket ever takes about 18min to be accessible,
+        # here we just retry for 36 times (5s * 36 = 180s) to avoid waiting
+        # too long
+        # TODO(hailong): Update the logic here when the following
+        # issue is resolved:
+        # https://github.com/skypilot-org/skypilot/issues/7736
+        data_utils.verify_coreweave_bucket(bucket_name, retry=36)
+
+        return result

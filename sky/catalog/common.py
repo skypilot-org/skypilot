@@ -3,6 +3,7 @@ import ast
 import difflib
 import hashlib
 import os
+import tempfile
 import time
 import typing
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
@@ -243,9 +244,19 @@ def read_catalog(filename: str,
                             raise e
                 else:
                     # Download successful, save the catalog to a local file.
+                    # Use atomic write (write to temp file, then rename) to
+                    # avoid race conditions when multiple processes read/write
+                    # the catalog file concurrently during parallel test
+                    # execution.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w', encoding='utf-8') as f:
+                    with tempfile.NamedTemporaryFile(
+                            mode='w',
+                            dir=os.path.dirname(catalog_path),
+                            delete=False,
+                            encoding='utf-8') as f:
                         f.write(r.text)
+                        tmp_path = f.name
+                    os.rename(tmp_path, catalog_path)
                     with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
                         f.write(hashlib.md5(r.text.encode()).hexdigest())
             logger.debug(f'Updated {cloud} catalog {filename}.')
@@ -385,7 +396,7 @@ def get_hourly_cost_impl(
                              f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
-    return cheapest[price_str]
+    return float(cheapest[price_str])
 
 
 def _get_value(value):

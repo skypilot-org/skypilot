@@ -1,0 +1,1 @@
+../../generated-examples/sam3-video-segmentation.md

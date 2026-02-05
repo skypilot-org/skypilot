@@ -1,0 +1,20 @@
+ssh:
+  pod_config:
+    metadata:
+      labels:
+        test-label: ssh-value
+        source: ssh-config
+    spec:
+      containers:
+        - env:
+            - name: SSH_TEST_ENV
+              value: "from-ssh-config"
+  provision_timeout: 7200
+
+kubernetes:
+  pod_config:
+    metadata:
+      labels:
+        test-label: k8s-value
+        source: k8s-config
+  provision_timeout: 3600

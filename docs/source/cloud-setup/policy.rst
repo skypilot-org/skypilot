@@ -39,6 +39,51 @@ The order of policy application is demonstrated below:
 
     Client-side policy lacks enforcement capability, i.e., end-user may modify them. However, client policy is useful for automation that can only be applied at client-side. Refer to :ref:`use-local-gcp-credentials-policy` as an example.
 
+Quickstart
+----------
+
+Install the example policy package:
+
+.. code-block:: bash
+
+    git clone https://github.com/skypilot-org/skypilot.git
+    cd skypilot
+    pip install examples/admin_policy/example_policy
+
+Then, set the :ref:`admin_policy <config-yaml-admin-policy>` field in :ref:`the SkyPilot config <config-yaml>` to use an example policy.
+
+.. code-block:: yaml
+
+    admin_policy: example_policy.DoNothingPolicy
+
+
+.. tip::
+
+   You can replace ``DoNothingPolicy`` with any of the :ref:`example policies <example-policies>`.
+
+
+Then, run a task:
+
+.. code-block:: bash
+
+    $ sky launch
+
+You should see the admin policy is applied to the task.
+
+
+.. code-block:: bash
+
+    $ sky launch
+    Applying client admin policy: DoNothingPolicy
+    Applying server admin policy: DoNothingPolicy
+    ...
+
+
+You can also deploy an admin policy as a :ref:`RESTful server <host-admin-policy-as-server>`.
+
+Deploy an admin policy
+----------------------
+
 .. _server-side-admin-policy:
 
 Server-side
@@ -170,16 +215,18 @@ Optionally, the server can also be implemented in other languages as long as it 
 
 .. _implement-admin-policy:
 
-Implement an admin policy package
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Implement an admin policy
+-------------------------
 
 Admin policies are implemented by extending the ``sky.AdminPolicy`` `interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_:
 
-.. literalinclude:: ../../../sky/admin_policy.py
-    :language: python
-    :pyobject: AdminPolicy
-    :name: admin-policy-interface
-    :caption: `AdminPolicy Interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
+.. dropdown:: AdminPolicy Interface
+
+    .. literalinclude:: ../../../sky/admin_policy.py
+        :language: python
+        :pyobject: AdminPolicy
+        :name: admin-policy-interface
+        :caption: `AdminPolicy Interface <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
 Your custom admin policy should look like this:
 
@@ -197,17 +244,21 @@ Your custom admin policy should look like this:
 
 ``UserRequest`` and ``MutatedUserRequest`` are defined as follows (see `source code <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_ for more details):
 
-.. literalinclude:: ../../../sky/admin_policy.py
-    :language: python
-    :pyobject: UserRequest
-    :name: user-request-class
-    :caption: `UserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
+.. dropdown:: UserRequest Class
 
-.. literalinclude:: ../../../sky/admin_policy.py
-    :language: python
-    :pyobject: MutatedUserRequest
-    :name: mutated-user-request-class
-    :caption: `MutatedUserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
+    .. literalinclude:: ../../../sky/admin_policy.py
+        :language: python
+        :pyobject: UserRequest
+        :name: user-request-class
+        :caption: `UserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
+
+.. dropdown:: MutatedUserRequest Class
+
+    .. literalinclude:: ../../../sky/admin_policy.py
+        :language: python
+        :pyobject: MutatedUserRequest
+        :name: mutated-user-request-class
+        :caption: `MutatedUserRequest Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
 In other words, an ``AdminPolicy`` can mutate any fields of a user request, including
 the :ref:`task <yaml-spec>` and the :ref:`skypilot config <config-yaml>` for that specific user request,
@@ -219,16 +270,77 @@ a request should be rejected, the policy should raise an exception.
 
 The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
 
-.. literalinclude:: ../../../sky/utils/config_utils.py
-    :language: python
-    :pyobject: Config
-    :caption: `Config Class <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/config_utils.py>`_
+.. dropdown:: Config Class
+
+    .. literalinclude:: ../../../sky/utils/config_utils.py
+        :language: python
+        :pyobject: Config
+        :caption: `Config Class <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/config_utils.py>`_
+
+.. dropdown:: RequestOptions Class
+
+    .. literalinclude:: ../../../sky/admin_policy.py
+        :language: python
+        :pyobject: RequestOptions
+        :caption: `RequestOptions Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
 
 
-.. literalinclude:: ../../../sky/admin_policy.py
-    :language: python
-    :pyobject: RequestOptions
-    :caption: `RequestOptions Class <https://github.com/skypilot-org/skypilot/blob/master/sky/admin_policy.py>`_
+Tips for writing an admin policy
+--------------------------------
+
+When writing an admin policy, you can leverage the following tips to make your policy more robust and flexible.
+
+Access user information
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.user`` to access the user who made the request.
+This field is only available when the policy is applied at the server-side.
+
+Useful for:
+
+- Logging the user who made a specific request.
+- Implementing per-user quotas or rate limits.
+- Changing the behavior of the policy based on the user.
+
+Access request name
+~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.request_name`` to access the request name.
+
+Useful for:
+
+- Activating a policy selectively for certain request types.
+- Implementing per-request rate limits.
+- Changing the behavior of the policy based on the request name.
+
+Inspect and modify resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.task.get_resource_config()`` to get the resource configuration of a task.
+
+The resource configuration is a dictionary conforming to the :ref:`resource config schema <yaml-spec>`.
+
+Once the resource configuration is modified, you can use 
+``UserRequest.task.set_resources(resource_config)``
+to set the modified resource configuration back to the task.
+
+.. code-block:: python
+
+    resource_config = user_request.task.get_resource_config()
+    resource_config['use_spot'] = True
+    if 'any_of' in resource_config:
+        for any_of_config in resource_config['any_of']:
+            any_of_config['use_spot'] = True
+    elif 'ordered' in resource_config:
+        for ordered_config in resource_config['ordered']:
+            ordered_config['use_spot'] = True
+    user_request.task.set_resources(resource_config)
+
+Useful for:
+
+- Enforcing resource constraints (e.g. use spot instances for all GPU tasks, enforce autostop for all tasks).
+
+.. _example-policies:
 
 Example policies
 ----------------
@@ -312,6 +424,19 @@ Enforce autostop for all tasks
     :caption: `Config YAML for using EnforceAutostopPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/enforce_autostop.yaml>`_
 
 
+Set max autostop idle minutes for all tasks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: SetMaxAutostopIdleMinutesPolicy
+    :caption: `SetMaxAutostopIdleMinutesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/set_max_autostop_idle_minutes.yaml
+    :language: yaml
+    :caption: `Config YAML for using SetMaxAutostopIdleMinutesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/set_max_autostop_idle_minutes.yaml>`_
+
+
 .. _dynamic-kubernetes-contexts-update-policy:
 
 Dynamically update Kubernetes contexts to use
@@ -360,3 +485,49 @@ Add volumes to all tasks
     :language: yaml
     :caption: `Config YAML for using AddVolumesPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/add_volumes.yaml>`_
 
+
+.. _rate-limit-launch-policy:
+
+Rate limit cluster launch requests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: RateLimitLaunchPolicy
+    :caption: `RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+The ``RateLimitLaunchPolicy`` uses ``TokenBucketRateLimiter`` class to rate limit cluster launch requests.
+
+.. dropdown:: TokenBucketRateLimiter Class
+
+    .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+        :language: python
+        :pyobject: TokenBucketRateLimiter
+        :caption: `TokenBucketRateLimiter <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/rate_limit_launch.yaml
+    :language: yaml
+    :caption: `Config YAML for using RateLimitLaunchPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/rate_limit_launch.yaml>`_
+
+.. _gpu-static-quota-policy:
+
+Enforce a static GPU quota for each user on cluster launch requests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+
+    This policy calls sky.status() to get the total number 
+    of GPUs currently used by the user and therefore adds a 
+    few seconds of latency to every cluster launch request.
+
+    This policy should be considered an educational example and not a
+    production-ready policy.
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: GPUStaticQuotaPolicy
+    :caption: `GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/gpu_static_quota.yaml
+    :language: yaml
+    :caption: `Config YAML for using GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/gpu_static_quota.yaml>`_

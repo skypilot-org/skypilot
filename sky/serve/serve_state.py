@@ -86,6 +86,7 @@ version_specs_table = sqlalchemy.Table(
     sqlalchemy.Column('service_name', sqlalchemy.Text, primary_key=True),
     sqlalchemy.Column('version', sqlalchemy.Integer, primary_key=True),
     sqlalchemy.Column('spec', sqlalchemy.LargeBinary),
+    sqlalchemy.Column('yaml_content', sqlalchemy.Text, server_default=None),
 )
 
 serve_ha_recovery_script_table = sqlalchemy.Table(
@@ -472,6 +473,7 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
         'controller_pid': r['controller_pid'],
         'hash': r['hash'],
         'entrypoint': r['entrypoint'],
+        'yaml_content': r.get('yaml_content'),
     }
     latest_spec = get_spec(r['name'], current_version)
     if latest_spec is not None:
@@ -480,21 +482,48 @@ def _get_service_from_row(r: 'row.RowMapping') -> Dict[str, Any]:
     return record
 
 
+def _build_services_with_latest_version_query(
+        service_name: Optional[str] = None) -> sqlalchemy.sql.Select:
+    """Builds a query joining services with their latest version and yaml.
+
+    Args:
+        service_name: If provided, filter to this service only.
+
+    Returns:
+        A SQLAlchemy selectable for fetching rows, including columns:
+        - max_version (latest version per service)
+        - services_table.*
+        - yaml_content (from version_specs_table for latest version)
+    """
+    subquery = sqlalchemy.select(
+        version_specs_table.c.service_name,
+        sqlalchemy.func.max(version_specs_table.c.version).label('max_version'),
+    ).group_by(version_specs_table.c.service_name).alias('v')
+
+    query = sqlalchemy.select(
+        subquery.c.max_version,
+        services_table,
+        version_specs_table.c.yaml_content,
+    ).select_from(
+        services_table.join(
+            subquery, services_table.c.name == subquery.c.service_name).join(
+                version_specs_table,
+                sqlalchemy.and_(
+                    version_specs_table.c.service_name == services_table.c.name,
+                    version_specs_table.c.version == subquery.c.max_version,
+                ),
+            ))
+    if service_name is not None:
+        query = query.where(services_table.c.name == service_name)
+    return query
+
+
 @init_db
 def get_services() -> List[Dict[str, Any]]:
     """Get all existing service records."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        subquery = sqlalchemy.select(
-            version_specs_table.c.service_name,
-            sqlalchemy.func.max(
-                version_specs_table.c.version).label('max_version')).group_by(
-                    version_specs_table.c.service_name).alias('v')
-
-        query = sqlalchemy.select(
-            subquery.c.max_version, services_table).select_from(
-                services_table.join(
-                    subquery, services_table.c.name == subquery.c.service_name))
+        query = _build_services_with_latest_version_query()
         rows = session.execute(query).fetchall()
     records = []
     for row in rows:
@@ -517,20 +546,7 @@ def get_service_from_name(service_name: str) -> Optional[Dict[str, Any]]:
     """Get all existing service records."""
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        subquery = sqlalchemy.select(
-            version_specs_table.c.service_name,
-            sqlalchemy.func.max(
-                version_specs_table.c.version).label('max_version')
-        ).where(version_specs_table.c.service_name == service_name).group_by(
-            version_specs_table.c.service_name).alias('v')
-
-        query = sqlalchemy.select(
-            subquery.c.max_version, services_table).select_from(
-                services_table.join(
-                    subquery,
-                    services_table.c.name == subquery.c.service_name)).where(
-                        services_table.c.name == service_name)
-
+        query = _build_services_with_latest_version_query(service_name)
         rows = session.execute(query).fetchall()
     for row in rows:
         return _get_service_from_row(row._mapping)  # pylint: disable=protected-access
@@ -686,22 +702,6 @@ def total_number_terminating_replicas() -> int:
     return terminating_count
 
 
-@init_db
-def total_number_scheduled_to_terminate_replicas() -> int:
-    """Returns the total number of terminating replicas."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        rows = session.execute(sqlalchemy.select(
-            replicas_table.c.replica_info)).fetchall()
-    terminating_count = 0
-    for row in rows:
-        replica_info: 'replica_managers.ReplicaInfo' = pickle.loads(row[0])
-        if (replica_info.status_property.sky_down_status ==
-                common_utils.ProcessStatus.SCHEDULED):
-            terminating_count += 1
-    return terminating_count
-
-
 def get_replicas_at_status(
     service_name: str,
     status: ReplicaStatus,
@@ -737,7 +737,8 @@ def add_version(service_name: str) -> int:
 
 @init_db
 def add_or_update_version(service_name: str, version: int,
-                          spec: 'service_spec.SkyServiceSpec') -> None:
+                          spec: 'service_spec.SkyServiceSpec',
+                          yaml_content: str) -> None:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -750,24 +751,19 @@ def add_or_update_version(service_name: str, version: int,
             raise ValueError('Unsupported database dialect')
 
         insert_stmt = insert_func(version_specs_table).values(
-            service_name=service_name, version=version, spec=pickle.dumps(spec))
+            service_name=service_name,
+            version=version,
+            spec=pickle.dumps(spec),
+            yaml_content=yaml_content)
 
         insert_stmt = insert_stmt.on_conflict_do_update(
             index_elements=['service_name', 'version'],
-            set_={'spec': insert_stmt.excluded.spec})
+            set_={
+                'spec': insert_stmt.excluded.spec,
+                'yaml_content': insert_stmt.excluded.yaml_content
+            })
 
         session.execute(insert_stmt)
-        session.commit()
-
-
-@init_db
-def remove_service_versions(service_name: str) -> None:
-    """Removes a replica from the database."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.execute(
-            sqlalchemy.delete(version_specs_table).where(
-                version_specs_table.c.service_name == service_name))
         session.commit()
 
 
@@ -783,6 +779,19 @@ def get_spec(service_name: str,
                     version_specs_table.c.service_name == service_name,
                     version_specs_table.c.version == version))).fetchone()
     return pickle.loads(result[0]) if result else None
+
+
+@init_db
+def get_yaml_content(service_name: str, version: int) -> Optional[str]:
+    """Gets the yaml content of a version."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(version_specs_table.c.yaml_content).where(
+                sqlalchemy.and_(
+                    version_specs_table.c.service_name == service_name,
+                    version_specs_table.c.version == version))).fetchone()
+    return result[0] if result else None
 
 
 @init_db

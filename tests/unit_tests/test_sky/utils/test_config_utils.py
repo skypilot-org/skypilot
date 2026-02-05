@@ -439,6 +439,154 @@ def test_nested_config_override_with_nonexistent_key():
     assert result == override_config['kubernetes']['pod_config']
 
 
+def test_get_cloud_config_value_from_dict_ssh_with_context():
+    """Test get_cloud_config_value_from_dict for SSH cloud with context_configs."""
+    # Test SSH cloud with context_configs
+    dict_config = {
+        'ssh': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'default': 'true'
+                    }
+                }
+            },
+            'context_configs': {
+                'my-cluster': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'cluster': 'my-cluster'
+                            }
+                        }
+                    },
+                    'provision_timeout': 3600
+                }
+            }
+        }
+    }
+
+    # Get context-specific pod_config
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('pod_config',),
+        default_value={})
+
+    expected = {'metadata': {'labels': {'cluster': 'my-cluster'}}}
+    assert result == expected
+
+    # Get context-specific provision_timeout
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region='my-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert result == 3600
+
+    # Get config for non-existent context (should return default)
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region='non-existent-cluster',
+        keys=('provision_timeout',),
+        default_value=600)
+    assert result == 600
+
+
+def test_get_cloud_config_value_from_dict_ssh_without_context():
+    """Test get_cloud_config_value_from_dict for SSH cloud without context."""
+    dict_config = {
+        'ssh': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'default': 'true'
+                    }
+                }
+            },
+            'provision_timeout': 1800
+        }
+    }
+
+    # Get top-level pod_config (no context)
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region=None,
+        keys=('pod_config',),
+        default_value={})
+
+    expected = {'metadata': {'labels': {'default': 'true'}}}
+    assert result == expected
+
+    # Get top-level provision_timeout (no context)
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='ssh',
+        region=None,
+        keys=('provision_timeout',),
+        default_value=600)
+    assert result == 1800
+
+
+def test_get_cloud_config_value_from_dict_kubernetes_with_context():
+    """Test get_cloud_config_value_from_dict for Kubernetes cloud with context_configs."""
+    dict_config = {
+        'kubernetes': {
+            'pod_config': {
+                'metadata': {
+                    'labels': {
+                        'default': 'true'
+                    }
+                }
+            },
+            'context_configs': {
+                'k8s-cluster-1': {
+                    'pod_config': {
+                        'metadata': {
+                            'labels': {
+                                'cluster': 'k8s-cluster-1'
+                            }
+                        }
+                    },
+                    'autoscaler': 'gke'
+                }
+            }
+        }
+    }
+
+    # Get context-specific pod_config
+    # Note: Context configs are MERGED with default configs, not replaced
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='kubernetes',
+        region='k8s-cluster-1',
+        keys=('pod_config',),
+        default_value={})
+
+    expected = {
+        'metadata': {
+            'labels': {
+                'cluster': 'k8s-cluster-1',
+                'default': 'true'  # Default label is preserved and merged
+            }
+        }
+    }
+    assert result == expected
+
+    # Get context-specific autoscaler
+    result = config_utils.get_cloud_config_value_from_dict(
+        dict_config=dict_config,
+        cloud='kubernetes',
+        region='k8s-cluster-1',
+        keys=('autoscaler',),
+        default_value=None)
+    assert result == 'gke'
+
+
 def test_merge_k8s_configs_with_patch_merge_keys():
     """Test merging Kubernetes configs using patch merge keys."""
     base_config = {
@@ -488,3 +636,111 @@ def test_merge_k8s_configs_with_patch_merge_keys():
     port_9090 = next(
         p for p in base_config['ports'] if p['containerPort'] == 9090)
     assert port_9090['protocol'] == 'TCP'
+
+
+def test_merge_k8s_configs_with_sidecar_containers():
+    """Test merging Kubernetes configs with sidecar containers.
+
+    This test verifies that adding a sidecar container via pod_config
+    correctly adds a new container instead of replacing the primary container.
+    """
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'image': 'rayproject/ray:latest',
+                'command': ['/bin/bash', '-c', '--'],
+                'args': ['echo hello'],
+                'resources': {
+                    'requests': {
+                        'cpu': '2',
+                        'memory': '4Gi'
+                    }
+                }
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [{
+                'name': 'sidecar',
+                'image': 'busybox:latest',
+                'command': ['sh', '-c', 'while true; do sleep 60; done'],
+                'resources': {
+                    'requests': {
+                        'cpu': '100m',
+                        'memory': '64Mi'
+                    }
+                }
+            }]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Verify both containers exist
+    containers = base_config['spec']['containers']
+    assert len(containers) == 2
+
+    # Verify ray-node container is preserved
+    ray_node = next(c for c in containers if c['name'] == 'ray-node')
+    assert ray_node['image'] == 'rayproject/ray:latest'
+    assert ray_node['command'] == ['/bin/bash', '-c', '--']
+    assert ray_node['resources']['requests']['cpu'] == '2'
+
+    # Verify sidecar container is added
+    sidecar = next(c for c in containers if c['name'] == 'sidecar')
+    assert sidecar['image'] == 'busybox:latest'
+    assert sidecar['resources']['requests']['cpu'] == '100m'
+
+
+def test_merge_k8s_configs_with_sidecar_and_primary_container_override():
+    """Test merging configs that override the primary container and add a sidecar."""
+    base_config = {
+        'spec': {
+            'containers': [{
+                'name': 'ray-node',
+                'image': 'rayproject/ray:latest',
+                'resources': {
+                    'requests': {
+                        'cpu': '2',
+                        'memory': '4Gi'
+                    }
+                }
+            }]
+        }
+    }
+    override_config = {
+        'spec': {
+            'containers': [
+                {
+                    'name': 'ray-node',  # Override primary container
+                    'resources': {
+                        'limits': {
+                            'cpu': '4',
+                            'memory': '8Gi'
+                        }
+                    }
+                },
+                {
+                    'name': 'sidecar',  # Add sidecar container
+                    'image': 'busybox:latest',
+                }
+            ]
+        }
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    containers = base_config['spec']['containers']
+    assert len(containers) == 2
+
+    # Verify ray-node container is merged (not replaced)
+    ray_node = next(c for c in containers if c['name'] == 'ray-node')
+    assert ray_node['image'] == 'rayproject/ray:latest'  # Preserved
+    assert ray_node['resources']['requests']['cpu'] == '2'  # Preserved
+    assert ray_node['resources']['limits']['cpu'] == '4'  # Added from override
+
+    # Verify sidecar is added
+    sidecar = next(c for c in containers if c['name'] == 'sidecar')
+    assert sidecar['image'] == 'busybox:latest'

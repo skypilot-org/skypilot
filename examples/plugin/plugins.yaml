@@ -1,0 +1,13 @@
+# Path to a directory containing prebuilt wheel files (.whl) that will be uploaded
+# to remote clusters (jobs controller, serve controller).
+# All .whl files in this directory will be uploaded and installed.
+controller_wheel_path: dist
+
+plugins:
+- class: example_plugin.ExamplePlugin
+- class: example_plugin.ExampleParameterizedPlugin
+  parameters:
+    message: "Message from parameters"
+- class: example_plugin.ExampleMiddlewarePlugin
+- class: example_plugin.ExampleBackgroundTaskPlugin
+- class: example_plugin.ExamplePatchPlugin

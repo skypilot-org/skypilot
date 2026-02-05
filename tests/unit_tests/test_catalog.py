@@ -3,6 +3,8 @@ import tempfile
 import time
 from unittest import mock
 
+import numpy as np
+import orjson
 import pandas as pd
 import pytest
 
@@ -179,3 +181,71 @@ def test_get_instance_type_for_cpus_mem_impl_no_az(cpus, memory, region,
     result = catalog_common.get_instance_type_for_cpus_mem_impl(
         df, cpus=cpus, memory_gb_or_ratio=memory, region=region)
     assert result == expected
+
+
+def test_get_hourly_cost_returns_python_float():
+    """Test that get_hourly_cost_impl returns Python float, not numpy.float64.
+
+    This is a regression test for GitHub issue #7969 where numpy.float64
+    values couldn't be serialized by orjson in the API server.
+    """
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'test-instance',
+            'Price': np.float64(1.5),
+            'SpotPrice': np.float64(0.5),
+            'Region': 'us-west1',
+            'AvailabilityZone': 'us-west1-a'
+        },
+    ])
+
+    # Test on-demand pricing
+    cost = catalog_common.get_hourly_cost_impl(df,
+                                               'test-instance',
+                                               use_spot=False,
+                                               region=None,
+                                               zone=None)
+    assert isinstance(cost, float)
+    assert not isinstance(cost, np.floating)
+    assert type(cost) == float
+
+    # Test spot pricing
+    spot_cost = catalog_common.get_hourly_cost_impl(df,
+                                                    'test-instance',
+                                                    use_spot=True,
+                                                    region=None,
+                                                    zone=None)
+    assert isinstance(spot_cost, float)
+    assert not isinstance(spot_cost, np.floating)
+    assert type(spot_cost) == float
+
+
+def test_catalog_prices_are_json_serializable():
+    """Test that catalog prices can be serialized with orjson.
+
+    This is a regression test for GitHub issue #7969 where the API server
+    failed to serialize cost_report responses containing numpy.float64 values.
+    """
+    df = pd.DataFrame([
+        {
+            'InstanceType': 'test-instance',
+            'Price': np.float64(2.5),
+            'SpotPrice': np.float64(1.0),
+            'Region': 'us-west1',
+        },
+    ])
+
+    cost = catalog_common.get_hourly_cost_impl(df,
+                                               'test-instance',
+                                               use_spot=False,
+                                               region=None,
+                                               zone=None)
+
+    # Should serialize without TypeError
+    serialized = orjson.dumps(cost)
+    assert serialized == b'2.5'
+
+    # Should also work in a dict (simulating API response)
+    response = {'total_cost': cost}
+    serialized_dict = orjson.dumps(response)
+    assert orjson.loads(serialized_dict) == {'total_cost': 2.5}

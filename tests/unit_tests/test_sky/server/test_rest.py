@@ -11,6 +11,28 @@ from sky.server import rest
 request_err = requests.exceptions.ChunkedEncodingError("Test error")
 
 
+class TestHandleResponseText:
+    """Test cases for handle_response_text helper."""
+
+    def test_plain_text_response_returns_text(self):
+        mock_response = mock.Mock()
+        mock_response.text = 'Plain error message'
+        mock_response.headers = {'Content-Type': 'text/plain'}
+
+        assert rest.handle_response_text(mock_response) == 'Plain error message'
+
+    def test_html_response_extracts_title(self):
+        mock_response = mock.Mock()
+        mock_response.text = (
+            '<head><title>503 Service Temporarily Unavailable</title></head>\n'
+            '<body>\n'
+            '<center><h1>503 Service Temporarily Unavailable</h1></center>')
+        mock_response.headers = {'Content-Type': 'text/html; charset=UTF-8'}
+
+        assert rest.handle_response_text(
+            mock_response) == '503 Service Temporarily Unavailable'
+
+
 class TestHandleServerUnavailable:
     """Test cases for handle_server_unavailable function."""
 

@@ -5,7 +5,7 @@ set -e
 #   create_cluster.sh gcp <CLUSTER_NAME> <PROJECT_ID> <ZONE> <NODE_COUNT> <MACHINE_TYPE>
 #   create_cluster.sh aws <CLUSTER_NAME> <REGION> <NODE_COUNT> <INSTANCE_TYPE>
 
-# If EKS_VPC_CONFIG_PUBLIC is set, it will be injected verbatim into the eksctl config
+# If EKS_VPC_CONFIG_PRIVATE is set, it will be injected verbatim into the eksctl config
 
 PROVIDER=${1:-"gcp"}
 shift || true
@@ -52,8 +52,37 @@ case "$PROVIDER" in
     echo "Region: $REGION"
     echo "Node Count: $NODE_COUNT"
     echo "Instance Type: $INSTANCE_TYPE"
+    if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
+        echo "Using custom VPC configuration from EKS_VPC_CONFIG_PRIVATE"
+    else
+        echo "Using default VPC configuration (EKS_VPC_CONFIG_PRIVATE not set)"
+    fi
+
+    # Check if cluster exists and delete it if present
+    echo "Checking if EKS cluster '$CLUSTER_NAME' exists..."
+    set +e
+    aws eks describe-cluster --region "$REGION" --name "$CLUSTER_NAME" > /dev/null 2>&1
+    cluster_exists=$?
+    set -e
+
+    if [ $cluster_exists -eq 0 ]; then
+        echo "Found existing EKS cluster '$CLUSTER_NAME'. Deleting it first..."
+        # Get the directory where this script is located to find delete_cluster.sh
+        SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        "$SCRIPT_DIR/delete_cluster.sh" aws "$CLUSTER_NAME" "$REGION"
+        echo "Waiting for cluster deletion to complete before creating new cluster..."
+    else
+        echo "No existing EKS cluster found"
+    fi
 
     RESOLVED_CONFIG="/tmp/${CLUSTER_NAME}-eks-cluster-config.yaml"
+    # Convert literal \n to actual newlines if EKS_VPC_CONFIG_PRIVATE is set
+    if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
+        # Use printf to interpret escape sequences like \n
+        VPC_CONFIG=$(printf '%b\n' "$EKS_VPC_CONFIG_PRIVATE")
+    else
+        VPC_CONFIG=""
+    fi
     cat > "$RESOLVED_CONFIG" <<EOF
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
@@ -61,7 +90,7 @@ kind: ClusterConfig
 metadata:
   name: ${CLUSTER_NAME}
   region: ${REGION}
-${EKS_VPC_CONFIG_PUBLIC}
+${VPC_CONFIG}
 iam:
   withOIDC: true
 managedNodeGroups:
@@ -78,12 +107,14 @@ EOF
 
     aws eks --region "$REGION" update-kubeconfig --name "$CLUSTER_NAME"
 
-    # If user provided VPC/subnets via EKS_VPC_CONFIG_PUBLIC, tag those subnets so
+    # If user provided VPC/subnets via EKS_VPC_CONFIG_PRIVATE, tag those subnets so
     # Service type LoadBalancer can provision internet-facing ELB/NLB.
-    if [ -n "$EKS_VPC_CONFIG_PUBLIC" ]; then
+    if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
         echo "Tagging provided public subnets for internet-facing LoadBalancers..."
+        # Convert literal \n to actual newlines for parsing
+        VPC_CONFIG_FOR_PARSING=$(printf '%b\n' "$EKS_VPC_CONFIG_PRIVATE")
         # Extract all subnet IDs from the config (deduplicated)
-        mapfile -t SUBNET_IDS < <(echo "$EKS_VPC_CONFIG_PUBLIC" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
+        mapfile -t SUBNET_IDS < <(echo "$VPC_CONFIG_FOR_PARSING" | grep -E 'id:\s*subnet-' | awk '{print $2}' | tr -d '"' | sort -u)
         for subnet_id in "${SUBNET_IDS[@]}"; do
             if [ -n "$subnet_id" ]; then
                 echo "Tagging subnet $subnet_id"

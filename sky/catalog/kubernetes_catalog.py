@@ -204,6 +204,16 @@ def _list_accelerators(
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
     for node in nodes:
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+        node_is_cordoned = node.is_cordoned()
+        node_taints = node.get_taints(
+            exclude_cordon=True,
+            exclude_not_ready=True,
+            exclude_effects=['PreferNoSchedule'],
+            exclude_keys=kubernetes_utils.get_handled_taint_keys())
+        node_is_tainted = len(node_taints) > 0
+
         for key in keys:
             if key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
@@ -260,6 +270,16 @@ def _list_accelerators(
                         total_accelerators_capacity[
                             accelerator_name] += quantized_count
 
+                # Initialize the total_accelerators_available to make sure the
+                # key exists in the dictionary.
+                total_accelerators_available[accelerator_name] = (
+                    total_accelerators_available.get(accelerator_name, 0))
+
+                # Skip availability counting for not-ready, cordoned,
+                # or tainted nodes
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
+                    continue
+
                 if error_on_get_allocated_gpu_qty_by_node:
                     # If we can't get the allocated GPU quantity by each node,
                     # we can't get the GPU usage.
@@ -268,10 +288,6 @@ def _list_accelerators(
 
                 allocated_qty = allocated_qty_by_node[node.metadata.name]
                 accelerators_available = accelerator_count - allocated_qty
-                # Initialize the total_accelerators_available to make sure the
-                # key exists in the dictionary.
-                total_accelerators_available[accelerator_name] = (
-                    total_accelerators_available.get(accelerator_name, 0))
 
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (

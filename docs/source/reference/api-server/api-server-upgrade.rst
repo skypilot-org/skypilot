@@ -231,7 +231,7 @@ Here's an example of deploying the API server with the ``RollingUpdate`` strateg
 
 .. code-block:: bash
 
-    helm install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+    helm upgrade --install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
       --set apiService.upgradeStrategy=RollingUpdate \
       --set storage.enabled=false \
       --set apiService.dbConnectionSecretName=my-db-secret

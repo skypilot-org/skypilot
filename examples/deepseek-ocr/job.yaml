@@ -1,0 +1,35 @@
+name: deepseek-ocr-job
+
+resources:
+  accelerators: L40S:1
+
+run: |
+  # Calculate job range using SKYPILOT_JOB_RANK and SKYPILOT_NUM_JOBS
+  source .venv/bin/activate
+  echo "Job rank: ${SKYPILOT_JOB_RANK}/${SKYPILOT_NUM_JOBS}"
+
+  # Count total images in the dataset
+  IMAGE_DIR=./book-scan-ocr/Book-Scan-OCR/images
+  TOTAL_IMAGES=$(find ${IMAGE_DIR} -name "*.jpg" -o -name "*.png" | wc -l)
+  echo "Total images: ${TOTAL_IMAGES}"
+
+  # Calculate start and end indices for this job
+  CHUNK_SIZE=$((TOTAL_IMAGES / SKYPILOT_NUM_JOBS))
+  REMAINDER=$((TOTAL_IMAGES % SKYPILOT_NUM_JOBS))
+
+  # Calculate start index
+  START_IDX=$((SKYPILOT_JOB_RANK * CHUNK_SIZE))
+  if [ ${SKYPILOT_JOB_RANK} -lt ${REMAINDER} ]; then
+    START_IDX=$((START_IDX + SKYPILOT_JOB_RANK))
+    CHUNK_SIZE=$((CHUNK_SIZE + 1))
+  else
+    START_IDX=$((START_IDX + REMAINDER))
+  fi
+
+  END_IDX=$((START_IDX + CHUNK_SIZE))
+
+  echo "Processing images ${START_IDX} to ${END_IDX}"
+
+  # Pass indices to Python script via CLI arguments
+  python process_ocr.py --start-idx ${START_IDX} --end-idx ${END_IDX}
+  echo "Job complete! Results saved to S3 bucket."

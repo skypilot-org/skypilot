@@ -223,7 +223,8 @@ class TestQueue:
 
         def fake_get_job_table(skip_finished, accessible_workspaces, job_ids,
                                workspace_match, name_match, pool_match, page,
-                               limit, user_hashes, statuses, fields):
+                               limit, user_hashes, statuses, fields, sort_by,
+                               sort_order):
             # Return a payload containing all args for the loader to consume
             return {
                 'skip_finished': skip_finished,
@@ -237,6 +238,8 @@ class TestQueue:
                 'user_hashes': user_hashes,
                 'statuses': statuses,
                 'fields': fields,
+                'sort_by': sort_by,
+                'sort_order': sort_order,
             }
 
         def fake_load_managed_job_queue(payload):
@@ -631,9 +634,6 @@ class TestDumpManagedJobQueue:
                             jobs: List[Dict[str, Any]]):
         """Patch dependencies for dump_managed_job_queue."""
 
-        def fake_get_managed_jobs():
-            return jobs
-
         def fake_get_managed_jobs_total():
             return len(jobs)
 
@@ -656,12 +656,19 @@ class TestDumpManagedJobQueue:
                 result = [j for j in result if not j['status'].is_terminal()]
             return result
 
-        def fake_get_managed_jobs_with_filters(fields, job_ids,
+        def fake_get_managed_jobs_with_filters(fields,
+                                               job_ids,
                                                accessible_workspaces,
-                                               workspace_match, name_match,
-                                               pool_match, user_hashes,
-                                               statuses, skip_finished, page,
-                                               limit):
+                                               workspace_match,
+                                               name_match,
+                                               pool_match,
+                                               user_hashes,
+                                               statuses,
+                                               skip_finished,
+                                               page,
+                                               limit,
+                                               sort_by=None,
+                                               sort_order=None):
             # Apply pre-filters aligned with utils.get_managed_job_queue
             prefiltered = _apply_pre_filters(jobs, accessible_workspaces,
                                              job_ids, user_hashes,
@@ -713,8 +720,6 @@ class TestDumpManagedJobQueue:
             return None
 
         # Patch the dependencies
-        monkeypatch.setattr(jobs_utils.managed_job_state, 'get_managed_jobs',
-                            fake_get_managed_jobs)
         monkeypatch.setattr(jobs_utils.managed_job_state,
                             'get_managed_jobs_total',
                             fake_get_managed_jobs_total)
