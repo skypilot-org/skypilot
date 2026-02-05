@@ -16,6 +16,7 @@ Example usage:
 - :ref:`dynamic-kubernetes-contexts-update-policy`
 - :ref:`use-local-gcp-credentials-policy`
 - :ref:`add-volumes-policy`
+- :ref:`reject-old-clients-policy`
 
 Overview
 --------
@@ -94,13 +95,13 @@ If you have a :ref:`centralized API server <sky-api-server>` deployed, you can e
 .. tab-set::
 
   .. tab-item:: Use a RESTful policy
-  
+
     Open :ref:`SkyPilot dashboard <sky-api-server-config>` https://api.server.com/dashboard/config,  and set the :ref:`admin_policy <config-yaml-admin-policy>` field to the URL of the RESTful policy. To host a RESTful policy, see :ref:`here <host-admin-policy-as-server>`.
 
     .. code-block:: yaml
 
         admin_policy: https://example.com/policy
-    
+
   .. tab-item:: Use a Python package
 
     First, install the Python package that implements the policy on the API server host:
@@ -197,7 +198,7 @@ Optionally, the server can also be implemented in other languages as long as it 
           },
           "at_client_side": false
         }
-    
+
     Response body is a marshalled :ref:`sky.MutatedUserRequest <mutated-user-request-class>` in JSON format:
 
     .. code-block:: json
@@ -313,6 +314,28 @@ Useful for:
 - Implementing per-request rate limits.
 - Changing the behavior of the policy based on the request name.
 
+Access client version information
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``UserRequest.client_api_version`` and ``UserRequest.client_version`` to access the version information of the client making the request.
+
+- ``client_api_version``: The API version of the client (an integer, e.g., ``31``). This version is incremented when breaking changes are made to the API.
+- ``client_version``: The package version string of the client (e.g., ``"1.0.0"`` or ``"1.0.0-dev0 (commit: abc1234)"``).
+
+These fields are only available when the policy is applied at the server-side. When applied at the client-side, these fields will be ``None``.
+
+.. note::
+
+    For very old clients that don't send version headers (pre-v0.11.0), ``client_api_version`` will be ``None`` and ``client_version`` will be ``"unknown"``.
+
+Useful for:
+
+- Enforcing minimum client versions to ensure compatibility.
+- Logging client version information for debugging.
+- Implementing version-specific behavior or deprecation warnings.
+
+See :ref:`reject-old-clients-policy` for an example policy that uses client version information.
+
 Inspect and modify resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -320,7 +343,7 @@ Use ``UserRequest.task.get_resource_config()`` to get the resource configuration
 
 The resource configuration is a dictionary conforming to the :ref:`resource config schema <yaml-spec>`.
 
-Once the resource configuration is modified, you can use 
+Once the resource configuration is modified, you can use
 ``UserRequest.task.set_resources(resource_config)``
 to set the modified resource configuration back to the task.
 
@@ -516,8 +539,8 @@ Enforce a static GPU quota for each user on cluster launch requests
 
 .. note::
 
-    This policy calls sky.status() to get the total number 
-    of GPUs currently used by the user and therefore adds a 
+    This policy calls sky.status() to get the total number
+    of GPUs currently used by the user and therefore adds a
     few seconds of latency to every cluster launch request.
 
     This policy should be considered an educational example and not a
@@ -531,3 +554,19 @@ Enforce a static GPU quota for each user on cluster launch requests
 .. literalinclude:: ../../../examples/admin_policy/gpu_static_quota.yaml
     :language: yaml
     :caption: `Config YAML for using GPUStaticQuotaPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/gpu_static_quota.yaml>`_
+
+.. _reject-old-clients-policy:
+
+Reject requests from old clients
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This policy demonstrates how to use client version information to enforce minimum client versions. It rejects requests from clients with an API version below a specified threshold.
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: RejectOldClientsPolicy
+    :caption: `RejectOldClientsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/reject_old_clients.yaml
+    :language: yaml
+    :caption: `Config YAML for using RejectOldClientsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/reject_old_clients.yaml>`_
