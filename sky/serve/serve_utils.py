@@ -788,6 +788,18 @@ def add_version_encoded(service_name: str) -> str:
     return message_utils.encode_payload(new_version)
 
 
+def backfill_version_yaml_content(service_name: str, version: int) -> None:
+    """Populate yaml_content and spec for a version from its task YAML file."""
+    task_yaml_path = generate_task_yaml_file_name(service_name, version)
+    with open(task_yaml_path, 'r', encoding='utf-8') as f:
+        yaml_content = f.read()
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import service_spec
+    service = service_spec.SkyServiceSpec.from_yaml_str(yaml_content)
+    serve_state.add_or_update_version(service_name, version, service,
+                                      yaml_content)
+
+
 # TODO (kyuds): remove when serve codegen is removed
 def load_version_string(payload: str) -> str:
     return message_utils.decode_payload(payload)
@@ -1817,6 +1829,15 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.add_version_encoded({service_name!r})',
             'print(msg, end="", flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def backfill_version_yaml_content(cls, service_name: str,
+                                      version: int) -> str:
+        code = [
+            f'serve_utils.backfill_version_yaml_content({service_name!r}, '
+            f'{version})', 'print("ok", end="", flush=True)'
         ]
         return cls._build(code)
 
