@@ -66,7 +66,7 @@ To use TPU VMs/Pods, set the following in a task YAML's ``resources`` field:
          runtime_version: v2-alpha-tpuv6e  # optional
 
 The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the optional :code:`tpu_vm` bool (defaults to true, which means TPU VM is used), and an optional TPU ``runtime_version`` field.
-To show what TPU types are supported, run :code:`sky show-gpus`.
+To show what TPU types are supported, run :code:`sky gpus list`.
 
 Here is a complete task YAML that trains a `Llama 3 model <https://ai.meta.com/blog/meta-llama-3/>`_ on a TPU VM using Torch XLA.
 
@@ -166,7 +166,7 @@ To use a TPU Pod, simply change the ``accelerators`` field in the task YAML  (e.
 
    Both TPU architectures, TPU VMs and TPU Nodes, can be used with TPU Pods. The example below is based on TPU VMs.
 
-To show all available TPU Pod types, run :code:`sky show-gpus` (more than 8 cores means Pods):
+To show all available TPU Pod types, run :code:`sky gpus list` (more than 8 cores means Pods):
 
 .. code-block:: console
 

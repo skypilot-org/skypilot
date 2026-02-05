@@ -292,7 +292,7 @@ Some commands to try:
 
 * ``sky dashboard`` to open the dashboard in your browser
 * ``sky launch -c test --gpus H100:1 -- nvidia-smi`` to launch a job with 1 H100 GPU
-* ``sky show-gpus`` to show available GPUs
+* ``sky gpus list`` to show available GPUs
 * ``sky status`` to see SkyPilot status and infra available
 
 ✨ Bonus: Infiniband, Nebius shared filesystem, and volumes

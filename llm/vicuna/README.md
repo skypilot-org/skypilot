@@ -48,7 +48,7 @@ sky launch -c vicuna-openai-api -s serve-openai-api-endpoint.yaml
 
 
 ## Training Vicuna with SkyPilot
-Currently, training requires GPUs with 80GB memory.  See `sky show-gpus --all` for supported GPUs.
+Currently, training requires GPUs with 80GB memory.  See `sky gpus list --all` for supported GPUs.
 
 We can start the training of Vicuna model on the dummy data [dummy.json](https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/dummy.json)[^1] **with a single command**. It will automatically find the available cheapest VM on any cloud.
 
