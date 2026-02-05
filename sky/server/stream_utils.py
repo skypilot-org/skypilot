@@ -189,8 +189,15 @@ async def _tail_log_file(
         # which may not lead to exact tail lines when showing on the client
         # side.
         lines: Deque[str] = collections.deque(maxlen=tail)
-        async for line_str in _yield_log_file_with_payloads_skipped(f):
-            lines.append(line_str)
+        try:
+            async for line_str in _yield_log_file_with_payloads_skipped(f):
+                lines.append(line_str)
+        except OSError as e:
+            logger.warning(f'Error reading log file during tail: {e}')
+            # Yield whatever lines we managed to read before the error.
+            for line_str in lines:
+                yield line_str
+            return
         for line_str in lines:
             yield line_str
 
@@ -227,7 +234,11 @@ async def _tail_log_file(
                 yield chunk
 
         # Read file in chunks for better I/O performance
-        file_chunk: bytes = await f.read(_READ_CHUNK_SIZE)
+        try:
+            file_chunk: bytes = await f.read(_READ_CHUNK_SIZE)
+        except OSError as e:
+            logger.warning(f'Error reading log file: {e}')
+            break
         if not file_chunk:
             # Process any remaining incomplete line
             if incomplete_line:
