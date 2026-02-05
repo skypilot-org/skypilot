@@ -432,7 +432,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'cloud': r.get('cloud'),
         'region': r.get('region'),
         'zone': r.get('zone'),
-        'node_names': r.get('node_names'),
+        'node_names': common_utils.get_display_node_names(r.get('node_names')),
     }
 
 
@@ -1873,7 +1873,7 @@ def set_job_infra(job_id: int,
                   cloud: Optional[str] = None,
                   region: Optional[str] = None,
                   zone: Optional[str] = None,
-                  node_names: Optional[str] = None) -> None:
+                  current_node_names: Optional[List[str]] = None) -> None:
     """Update the infrastructure info for a job.
 
     This is called after a job is launched to record the cloud/region/zone
@@ -1884,18 +1884,25 @@ def set_job_infra(job_id: int,
         cloud: The cloud provider (e.g., 'GCP', 'AWS').
         region: The region (e.g., 'us-central1').
         zone: The zone (e.g., 'us-central1-a').
-        node_names: Comma-separated node names for dashboard display.
+        current_node_names: List of current node names (head first) to merge
+            into the existing lineage.
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        update_values = {}
+        update_values: Dict[Any, Any] = {}
         if cloud is not None:
             update_values[job_info_table.c.cloud] = cloud
         if region is not None:
             update_values[job_info_table.c.region] = region
         if zone is not None:
             update_values[job_info_table.c.zone] = zone
-        if node_names is not None:
+        if current_node_names is not None:
+            row = session.query(job_info_table.c.node_names).filter(
+                job_info_table.c.spot_job_id ==
+                job_id).with_for_update().first()
+            existing_json = row.node_names if row else None
+            node_names = common_utils.merge_node_names_lineage(
+                existing_json, current_node_names)
             update_values[job_info_table.c.node_names] = node_names
         if update_values:
             session.query(job_info_table).filter(

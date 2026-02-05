@@ -700,12 +700,12 @@ def add_or_update_cluster(cluster_name: str,
             region = str(lr.region) if getattr(lr, 'region', None) else None
             zone = str(lr.zone) if getattr(lr, 'zone', None) else None
 
-    # Extract node_names from cached_cluster_info for dashboard display
-    node_names = None
+    # Extract node_names from cached_cluster_info and merge with lineage
+    current_names = None
     if hasattr(cluster_handle, 'cached_cluster_info'):
         ci = cluster_handle.cached_cluster_info
         if ci is not None:
-            node_names = ci.get_node_names_str()
+            current_names = ci.get_node_names()
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
@@ -757,6 +757,12 @@ def add_or_update_cluster(cluster_name: str,
         # is called, or until the code escapes the with block.
         cluster_row = session.query(cluster_table).filter_by(
             name=cluster_name).with_for_update().first()
+
+        # Merge current node names into existing lineage
+        existing_node_names = (cluster_row.node_names if cluster_row else None)
+        node_names = common_utils.merge_node_names_lineage(
+            existing_node_names, current_names)
+
         if (not cluster_row or
                 cluster_row.status == status_lib.ClusterStatus.STOPPED.value):
             conditional_values.update({
@@ -1229,18 +1235,24 @@ def update_cluster_handle(cluster_name: str,
     assert _SQLALCHEMY_ENGINE is not None
     handle = pickle.dumps(cluster_handle)
 
-    # Extract node_names from cached_cluster_info for dashboard display
-    node_names = None
+    # Extract current node names and merge with existing lineage
+    current_names = None
     if hasattr(cluster_handle, 'cached_cluster_info'):
         ci = cluster_handle.cached_cluster_info
         if ci is not None:
-            node_names = ci.get_node_names_str()
+            current_names = ci.get_node_names()
 
-    update_dict = {cluster_table.c.handle: handle}
-    if node_names is not None:
-        update_dict[cluster_table.c.node_names] = node_names
+    update_dict: Dict[Any, Any] = {cluster_table.c.handle: handle}
 
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if current_names is not None:
+            row = session.query(cluster_table.c.node_names).filter_by(
+                name=cluster_name).with_for_update().first()
+            existing_json = row.node_names if row else None
+            node_names = common_utils.merge_node_names_lineage(
+                existing_json, current_names)
+            update_dict[cluster_table.c.node_names] = node_names
+
         session.query(cluster_table).filter_by(
             name=cluster_name).update(update_dict)
         session.commit()
@@ -1991,7 +2003,7 @@ def get_clusters(
             'workspace': row.workspace,
             'is_managed': False
                           if exclude_managed_clusters else bool(row.is_managed),
-            'node_names': row.node_names,
+            'node_names': common_utils.get_display_node_names(row.node_names),
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
@@ -2161,7 +2173,7 @@ def get_clusters_from_history(
             'user_name': user_name,
             'workspace': workspace,
             'last_event': last_event,
-            'node_names': row.node_names,
+            'node_names': common_utils.get_display_node_names(row.node_names),
         }
         if not abbreviate_response:
             record['last_creation_yaml'] = row.last_creation_yaml
