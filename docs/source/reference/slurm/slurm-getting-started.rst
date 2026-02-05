@@ -74,7 +74,9 @@ Create the configuration file:
 
 .. note::
 
-    ``HostName``, ``User``, and ``IdentityFile`` are required fields.
+    ``HostName`` and ``User`` are required fields. ``IdentityFile`` is optional;
+    if not specified, SSH will use keys from ssh-agent or default key locations
+    (e.g., ``~/.ssh/id_rsa``, ``~/.ssh/id_ed25519``).
 
 Verify your SSH connection works by running:
 

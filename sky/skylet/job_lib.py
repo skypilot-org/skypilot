@@ -1210,6 +1210,61 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def set_job_info_without_job_id(cls,
+                                    name: str,
+                                    workspace: str,
+                                    entrypoint: str,
+                                    pool: Optional[str],
+                                    pool_hash: Optional[str],
+                                    user_hash: Optional[str],
+                                    task_ids: List[int],
+                                    task_names: List[str],
+                                    resources_str: str,
+                                    metadata_jsons: List[str],
+                                    is_primary_in_job_groups: List[bool],
+                                    execution: str,
+                                    num_jobs: int = 1) -> str:
+        pool_str = f'{pool!r}' if pool is not None else 'None'
+        pool_hash_str = f'{pool_hash!r}' if pool_hash is not None else 'None'
+        user_hash_str = f'{user_hash!r}' if user_hash is not None else 'None'
+        # Build the tasks data as Python code
+        task_ids_str = '[' + ','.join(str(tid) for tid in task_ids) + ']'
+        task_names_str = ('[' + ','.join(f'{name!r}' for name in task_names) +
+                          ']')
+        metadata_jsons_str = ('[' +
+                              ','.join(f'{md!r}' for md in metadata_jsons) +
+                              ']')
+        is_primary_in_job_groups_str = ('[' + ','.join(
+            str(is_primary) for is_primary in is_primary_in_job_groups) + ']')
+        code = [
+            '\nfrom sky.jobs import state as managed_job_state',
+            f'\nnum_jobs = {num_jobs}',
+            f'\ntask_ids = {task_ids_str}',
+            f'\ntask_names = {task_names_str}',
+            f'\nresources_str = {resources_str!r}',
+            f'\nmetadata_jsons = {metadata_jsons_str}',
+            f'\nis_primary_in_job_groups = {is_primary_in_job_groups_str}',
+            '\njob_ids = []',
+            '\nfor _ in range(num_jobs):'
+            '\n  job_id = managed_job_state.set_job_info_without_job_id('
+            f'name={name!r},'
+            f'workspace={workspace!r},'
+            f'entrypoint={entrypoint!r},'
+            f'pool={pool_str},'
+            f'pool_hash={pool_hash_str},'
+            f'user_hash={user_hash_str},'
+            f'execution={execution!r})',
+            '\n  job_ids.append(job_id)',
+            '\n  # Set pending state for all tasks',
+            '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long
+            '\n      task_ids, task_names, metadata_jsons, is_primary_in_job_groups):'  # pylint: disable=line-too-long
+            '\n    managed_job_state.set_pending('
+            '\n      job_id, task_id, task_name, resources_str, metadata_json, is_primary_in_job_group)',  # pylint: disable=line-too-long
+            '\nprint("Job IDs: " + ",".join(map(str, job_ids)), flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def queue_job(cls, job_id: int, cmd: str) -> str:
         code = [
             'job_lib.scheduler.queue('

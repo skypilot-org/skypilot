@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
+from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import slurm
@@ -21,6 +22,7 @@ logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
+SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
 # Regex pattern for parsing GPU GRES strings.
 # Format: 'gpu[:acc_type]:acc_count(optional_extra_info)'
@@ -29,6 +31,8 @@ _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
                                re.IGNORECASE)
 
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
+# Proctrack type is highly unlikely to change.
+_SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -43,6 +47,11 @@ def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
     return match.group('type'), int(match.group('count'))
 
 
+def pyxis_container_name(cluster_name_on_cloud: str) -> str:
+    """Get the pyxis container name that gets passed to --container-name."""
+    return cluster_name_on_cloud
+
+
 # SSH host key filename for sshd.
 SLURM_SSHD_HOST_KEY_FILENAME = 'skypilot_host_key'
 
@@ -52,6 +61,23 @@ def get_slurm_ssh_config() -> SSHConfig:
     slurm_config_path = os.path.expanduser(DEFAULT_SLURM_PATH)
     slurm_config = SSHConfig.from_path(slurm_config_path)
     return slurm_config
+
+
+def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
+    """Get the first identity file from SSH config, or None if not specified."""
+    identity_files = ssh_config_dict.get('identityfile')
+    if identity_files:
+        return identity_files[0]
+    return None
+
+
+def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
+    """Check if IdentitiesOnly is set to yes in SSH config.
+
+    Returns True if IdentitiesOnly is explicitly set to 'yes', False otherwise.
+    """
+    identities_only = ssh_config_dict.get('identitiesonly', '')
+    return identities_only.lower() == 'yes'
 
 
 @annotations.lru_cache(scope='request')
@@ -68,9 +94,10 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
     nodes_info = client.info_nodes()
 
@@ -88,6 +115,39 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
                      f'{common_utils.format_exception(e)}')
 
     return nodes_info
+
+
+def get_proctrack_type(cluster: str) -> Optional[str]:
+    """Get the ProctrackType setting from Slurm configuration."""
+    cache_key = f'slurm:proctrack_type:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm proctrack type found in cache ({cache_key})')
+        return cached
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    proctrack_type = client.get_proctrack_type()
+
+    if proctrack_type is not None:
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, proctrack_type,
+                time.time() + _SLURM_PROCTRACK_TYPE_CACHE_TTL)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache slurm proctrack type for {cluster}: '
+                         f'{common_utils.format_exception(e)}')
+
+    return proctrack_type
 
 
 class SlurmInstanceType:
@@ -272,9 +332,10 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
 
     return client.get_default_partition()
@@ -453,9 +514,10 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
             ssh_config_dict['hostname'],
             int(ssh_config_dict.get('port', 22)),
             ssh_config_dict['user'],
-            ssh_config_dict['identityfile'][0],
+            get_identity_file(ssh_config_dict),
             ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
             ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(ssh_config_dict),
         )
 
         nodes = client.info_nodes()
@@ -491,22 +553,20 @@ def _get_slurm_node_info_list(
     # can raise FileNotFoundError if config file does not exist.
     slurm_config = get_slurm_ssh_config()
     if slurm_cluster_name is None:
-        slurm_cluster_names = get_all_slurm_cluster_names()
-        if slurm_cluster_names:
-            slurm_cluster_name = slurm_cluster_names[0]
-    if slurm_cluster_name is None:
-        raise ValueError(
-            f'No Slurm cluster name found in the {DEFAULT_SLURM_PATH} '
-            f'configuration.')
+        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
+        if not slurm_cluster_names:
+            return []
+        slurm_cluster_name = slurm_cluster_names[0]
     slurm_config_dict = slurm_config.lookup(slurm_cluster_name)
     logger.debug(f'Slurm config dict: {slurm_config_dict}')
     slurm_client = slurm.SlurmClient(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
-        slurm_config_dict['identityfile'][0],
+        get_identity_file(slurm_config_dict),
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(slurm_config_dict),
     )
     node_infos = slurm_client.info_nodes()
 
@@ -590,7 +650,7 @@ def slurm_node_info(
     try:
         node_list = _get_slurm_node_info_list(
             slurm_cluster_name=slurm_cluster_name)
-    except (RuntimeError, exceptions.NotSupportedError) as e:
+    except (FileNotFoundError, RuntimeError, exceptions.NotSupportedError) as e:
         logger.debug(f'Could not retrieve Slurm node info: {e}')
         return []
     return node_list
@@ -652,9 +712,10 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             slurm_config_dict['hostname'],
             int(slurm_config_dict.get('port', 22)),
             slurm_config_dict['user'],
-            slurm_config_dict['identityfile'][0],
+            get_identity_file(slurm_config_dict),
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(slurm_config_dict),
         )
 
         partitions_info = client.get_partitions_info()
@@ -697,6 +758,8 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
+    cluster_name_on_cloud: str,
+    is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
 
@@ -707,6 +770,8 @@ def srun_sshd_command(
         job_id: The Slurm job ID
         target_node: The target compute node hostname
         unix_user: The Unix user for the job
+        cluster_name_on_cloud: SkyPilot cluster name on Slurm side.
+        is_container_image: Whether the cluster is on containers.
 
     Returns:
         List of command arguments to be extended to ssh base command
@@ -714,6 +779,59 @@ def srun_sshd_command(
     # We use ~username to ensure we use the real home of the user ssh'ing in,
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
+
+    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
+    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
+    # to a file and sourcing it.
+
+    if is_container_image:
+        # Dropbear + socat bridge for container mode.
+        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
+        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
+        # provides pipes. socat bridges stdin/stdout to a TCP socket.
+        ssh_bootstrap_cmd = (
+            # Find dropbear in PATH
+            'DROPBEAR=$(command -v dropbear); '
+            'if [ -z "$DROPBEAR" ]; then '
+            'echo "dropbear not found" >&2; exit 1; fi; '
+            # Find a free port in the ephemeral range
+            'while :; do '
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
+            'done; '
+            # Start dropbear and wait for it to bind
+            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'for i in $(seq 1 50); do '
+            'ss -tlnp 2>/dev/null | grep -q ":$PORT.*pid=$DROPBEAR_PID" '
+            '&& break; sleep 0.1; done; '
+            'if ! ss -tlnp 2>/dev/null | '
+            'grep -q ":$PORT.*pid=$DROPBEAR_PID"; then '
+            'echo "Error: Timed out waiting for dropbear to start." >&2; '
+            'exit 1; fi; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
+        return shlex.join([
+            'srun',
+            '--overlap',
+            '--quiet',
+            '--unbuffered',
+            '--jobid',
+            job_id,
+            '--nodes=1',
+            '--ntasks=1',
+            '--ntasks-per-node=1',
+            '-w',
+            target_node,
+            '--container-remap-root',
+            f'--container-name='
+            f'{pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash',
+            '-c',
+            ssh_bootstrap_cmd,
+        ])
+
+    # Non-container: OpenSSH sshd
     return shlex.join([
         'srun',
         '--quiet',

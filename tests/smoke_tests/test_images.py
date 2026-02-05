@@ -613,7 +613,7 @@ def private_docker_registry_setup(request):
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
 @pytest.mark.no_shadeform
-@pytest.mark.no_slurm  # Slurm does not support docker images and/or image_id
+@pytest.mark.no_slurm  # Slurm does not support private docker registries yet
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
@@ -674,6 +674,38 @@ def test_private_docker_registry(generic_cloud,
         test_name,
         [
             f'sky launch -c {name} -y --infra {cloud_provider} {smoke_tests_utils.LOW_RESOURCE_ARG} {private_docker_registry_setup}',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_docker_nonroot_user(generic_cloud: str):
+    """Test Docker image with non-root default user and ENV HOME override.
+
+    Tests that SkyPilot correctly handles Docker images where:
+    1. The default USER is non-root
+    2. ENV HOME is explicitly set to the non-root user's home directory
+
+    SkyPilot should:
+    - Detect the container's default user (not root)
+    - Place SSH keys in the correct home directory
+    - SSH as the default user successfully
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'docker_nonroot_user',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} --image-id docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-nonroot-home:latest tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            # Verify we're running as the non-root user
+            f'sky exec {name} "whoami | grep testuser"',
+            f'sky logs {name} 2 --status',
+            # Verify HOME is set correctly
+            f'sky exec {name} "echo \\$HOME | grep /home/testuser"',
+            f'sky logs {name} 3 --status',
+            # Test SSH works
+            f'ssh {name} -- "echo hello"',
         ],
         f'sky down -y {name}',
     )

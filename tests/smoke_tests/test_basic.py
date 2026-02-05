@@ -27,7 +27,7 @@ import tempfile
 import textwrap
 import threading
 import time
-from typing import Generator
+from typing import Generator, Optional
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -89,13 +89,16 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 5 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo "$SKYPILOT_CLUSTER_INFO" | jq .cloud | grep -i {generic_cloud}\'',
             f'sky logs {name} 6 --status',  # Ensure the job succeeded.
+            # Check SKYPILOT_USER is set
+            f'sky exec {name} \'[[ ! -z "$SKYPILOT_USER" ]] && echo "SKYPILOT_USER=$SKYPILOT_USER"\'',
+            f'sky logs {name} 7 --status',  # Ensure the job succeeded.
             # Test '-c' for exec
             f'sky exec -c {name} echo',
-            f'sky logs {name} 7 --status',
-            f'sky exec echo -c {name}',
             f'sky logs {name} 8 --status',
+            f'sky exec echo -c {name}',
+            f'sky logs {name} 9 --status',
             f'sky exec -c {name} echo hi test',
-            f'sky logs {name} 9 | grep "hi test"',
+            f'sky logs {name} 10 | grep "hi test"',
             f'sky exec {name} && exit 1 || true',
             f'sky exec -c {name} && exit 1 || true',
             f's=$(sky cost-report --all) && echo $s && echo $s | grep {name} && echo $s | grep "Total Cost"',
@@ -224,7 +227,6 @@ def test_minimal_with_git_workdir(generic_cloud: str):
 
 
 @pytest.mark.no_runpod
-@pytest.mark.no_slurm  # Slurm does not support containers yet
 def test_minimal_with_git_workdir_docker(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -850,7 +852,22 @@ def test_aws_manual_restart_recovery():
             # instance would get a new IP address.
             # We should see a warning message on how to recover
             # from this state.
-            f's=$(sky status -r {name}) && echo "$s" && echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."',
+            # Note: We retry this command because the background status refresh
+            # daemon may cause lock contention, resulting in cached status being
+            # returned instead of the expected warning message.
+            (f'start_time=$SECONDS; '
+             f'while true; do '
+             f'if (( $SECONDS - $start_time > 120 )); then '
+             f'  echo "Timeout after 120 seconds waiting for Failed getting cluster status message"; exit 1; '
+             f'fi; '
+             f's=$(sky status -r {name}); '
+             f'echo "$s"; '
+             f'if echo "$s" | grep -i "Failed getting cluster status" | grep -i "sky start" | grep -i "to recover from INIT status."; then '
+             f'  echo "Got expected warning message"; break; '
+             f'fi; '
+             f'echo "Retrying sky status -r in 10 seconds..."; '
+             f'sleep 10; '
+             f'done'),
             # Recover the cluster.
             f'sky start -y {name}',
             # Wait for the cluster to be up.
@@ -1129,8 +1146,10 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             task.set_resources(
                 sky.Resources(infra=generic_cloud,
                               **smoke_tests_utils.LOW_RESOURCE_PARAM))
-            job_id, handle = sky.stream_and_get(sky.jobs.launch(task,
-                                                                name=name))
+            job_ids, handle = sky.stream_and_get(
+                sky.jobs.launch(task, name=name))
+            assert len(job_ids) == 1
+            job_id = job_ids[0]
             assert handle is not None
             # Check the job status from the dashboard
             queue_request_id = (
@@ -1352,7 +1371,9 @@ def unreachable_context():
         # TODO(aylei): There is a implicit API server restart before starting
         # smoke tests in CI pipeline. We should move that to fixture to make
         # the test coherent.
-        'sky api stop || true && sky api start',
+        # Run sky check after restart to populate the enabled clouds cache
+        # synchronously, avoiding race with the background on-boot check.
+        'sky api stop || true && sky api start && sky check kubernetes',
         shell=True,
         check=True)
 
@@ -1433,7 +1454,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'output=$(sky gpus list --infra kubernetes/{context}) && echo "$output" && ! echo "$output" | grep H100',
                 # H100 should be displayed as long as it is available in one of the contexts
                 'output=$(sky gpus list --infra kubernetes) && echo "$output" && echo "$output" | grep H100',
-                f'sky launch -y -c {name}-1 --cpus 1 echo hi',
+                f'sky launch -y -c {name}-1 --cpus 1 --infra kubernetes echo hi',
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
                 f'sky status -v {name}-1 | grep "{context}"',
@@ -1455,7 +1476,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'kubectl config use-context {unreachable_context}',
                 f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
-                f'sky launch -y -c {name}-5 --cpus 1 echo hi',
+                f'sky launch -y -c {name}-5 --cpus 1 --infra kubernetes echo hi',
                 # switch back to kind-skypilot where GPU cluster is launched
                 f'kubectl config use-context kind-skypilot',
                 # test if sky status-kubernetes shows H100
@@ -2156,21 +2177,100 @@ def test_cancel_logs_request(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_runpod
 @pytest.mark.no_azure
-def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str):
+@pytest.mark.parametrize('image_id', [None, 'docker:ubuntu:24.04'])
+def test_kubernetes_slurm_ssh_proxy_connection(generic_cloud: str,
+                                               image_id: Optional[str]):
     """Test Kubernetes/Slurm SSH proxy connection.
     """
     cluster_name = smoke_tests_utils.get_cluster_name()
+    image_id_arg = ''
+    if image_id:
+        image_id_arg = f'--image-id {image_id}'
 
     test = smoke_tests_utils.Test(
         'kubernetes_ssh_proxy_connection',
         [
             # Launch a minimal Kubernetes/Slurm cluster for SSH proxy testing
-            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
+            f'sky launch -y -c {cluster_name} --infra {generic_cloud} {image_id_arg} {smoke_tests_utils.LOW_RESOURCE_ARG} echo "SSH test cluster ready"',
             # Run an SSH command on the cluster.
             f'ssh {cluster_name} echo "SSH command executed"',
         ],
         f'sky down -y {cluster_name}',
         timeout=15 * 60,  # 15 minutes timeout
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_ssh_agent_auth(generic_cloud: str):
+    """Test Slurm SSH authentication via ssh-agent (no IdentityFile in config).
+
+    This tests the fix for IdentitiesOnly=yes preventing ssh-agent fallback.
+    The test temporarily removes IdentityFile from ~/.slurm/config and relies
+    on ssh-agent for authentication.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    agent_env_file = f'/tmp/sky_test_ssh_agent_env_{name}'
+    backup_config = f'/tmp/sky_test_slurm_config_backup_{name}'
+
+    # Helper to source agent env at start of each command
+    source_agent = f'[ -f {agent_env_file} ] && source {agent_env_file};'
+
+    test = smoke_tests_utils.Test(
+        'slurm_ssh_agent_auth',
+        [
+            # Backup config, extract keys, remove IdentityFile lines, start ssh-agent
+            f'''
+            set -e
+            SLURM_CONFIG=~/.slurm/config
+
+            # Backup original config
+            cp "$SLURM_CONFIG" {backup_config}
+            echo "Backed up config to {backup_config}"
+
+            # Extract unique IdentityFile paths
+            IDENTITY_FILES=$(grep -i "^[[:space:]]*IdentityFile" "$SLURM_CONFIG" | awk '{{print $2}}' | sort -u)
+            echo "Found identity files: $IDENTITY_FILES"
+
+            # Remove all IdentityFile lines (macOS-compatible)
+            grep -v -i "^[[:space:]]*IdentityFile" "$SLURM_CONFIG" > "$SLURM_CONFIG.new" || true
+            mv "$SLURM_CONFIG.new" "$SLURM_CONFIG"
+            echo "Removed IdentityFile lines from config"
+            cat "$SLURM_CONFIG"
+
+            # Start ssh-agent and save env vars
+            eval "$(ssh-agent -s)"
+            echo "export SSH_AUTH_SOCK=$SSH_AUTH_SOCK" > {agent_env_file}
+            echo "export SSH_AGENT_PID=$SSH_AGENT_PID" >> {agent_env_file}
+
+            # Add keys to agent
+            for key in $IDENTITY_FILES; do
+                expanded_key=$(eval echo "$key")
+                if [ -f "$expanded_key" ]; then
+                    ssh-add "$expanded_key" 2>/dev/null && echo "Added key: $expanded_key" || true
+                fi
+            done
+            ssh-add -l
+            ''',
+            f'{source_agent} sky check slurm 2>&1 | tee /dev/stderr | grep -E "(├──|└──)" | grep -v "disabled"',
+            f'{source_agent} sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -- echo "SSH agent auth works"',
+            f'{source_agent} sky logs {name} 1 --status',
+            f'{source_agent} ssh {name} whoami',
+            f'{source_agent} sky status {name} -r | grep UP',
+        ],
+        # Cleanup: restore config, kill ssh-agent, down cluster
+        f'''
+        # Restore original config
+        [ -f {backup_config} ] && cp {backup_config} ~/.slurm/config && rm -f {backup_config}
+
+        # Kill ssh-agent
+        [ -f {agent_env_file} ] && source {agent_env_file} && kill $SSH_AGENT_PID 2>/dev/null || true
+        rm -f {agent_env_file}
+
+        # Down the cluster
+        sky down -y {name} 2>/dev/null || true
+        ''',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -2344,3 +2444,21 @@ def test_docker_pass_redacted(generic_cloud: str):
             teardown=f'sky down -y {name}',
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+@pytest.mark.no_auto_retry
+def test_slurm_multi_node_proctrack():
+    """Test Slurm multi-node against proctrack/cgroup behaviour."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'slurm_multi_node_proctrack',
+        [
+            f'sky launch -y -c {name} --infra slurm --num-nodes 2 tests/test_yamls/slurm_bg_proc.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 1 | grep "SUCCESS"',
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout('slurm'),
+    )
+    smoke_tests_utils.run_one_test(test)

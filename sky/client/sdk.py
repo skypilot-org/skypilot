@@ -352,7 +352,7 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(32)
+@versions.minimal_api_version(34)
 @annotations.client_api
 def kubernetes_label_gpus(
     context: Optional[str] = None,
@@ -1229,8 +1229,12 @@ def start(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def down(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+def down(
+    cluster_name: str,
+    purge: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+) -> server_common.RequestId[None]:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -1245,6 +1249,10 @@ def down(cluster_name: str,
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Returns:
         The request ID of the down request.
@@ -1260,9 +1268,15 @@ def down(cluster_name: str,
             jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/down', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1272,8 +1286,12 @@ def down(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stop(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+def stop(
+    cluster_name: str,
+    purge: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+) -> server_common.RequestId[None]:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -1306,9 +1324,15 @@ def stop(cluster_name: str,
             cluster, or a TPU VM Pod cluster, or the managed jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/stop', json=json.loads(body.model_dump_json()), timeout=5)

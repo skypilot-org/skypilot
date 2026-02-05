@@ -91,6 +91,7 @@ class SlurmClient:
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
         is_inside_slurm_cluster: bool = False,
+        identities_only: Optional[bool] = None,
     ):
         """Initialize SlurmClient.
 
@@ -103,6 +104,9 @@ class SlurmClient:
             ssh_proxy_jump: Optional SSH proxy jump destination.
             is_inside_slurm_cluster: If True, uses local execution mode (for
             when running on the Slurm cluster itself). Defaults to False.
+            identities_only: If True, only use the specified identity file and
+                don't try ssh-agent keys. If None, defaults to False (allows
+                ssh-agent fallback for backward compatibility).
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -122,6 +126,8 @@ class SlurmClient:
             assert ssh_host is not None
             assert ssh_port is not None
             assert ssh_user is not None
+            # If user has IdentitiesOnly=yes in their config, respect it by
+            # NOT disabling IdentitiesOnly. Otherwise, allow ssh-agent fallback.
             self._runner = command_runner.SSHCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
@@ -129,6 +135,7 @@ class SlurmClient:
                 ssh_proxy_command=ssh_proxy_command,
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
+                disable_identities_only=not identities_only,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
@@ -625,3 +632,22 @@ class SlurmClient:
             at the end of the name.
         """
         return [partition.name for partition in self.get_partitions_info()]
+
+    def get_proctrack_type(self) -> Optional[str]:
+        """Get the ProctrackType from Slurm configuration.
+
+        Returns:
+            The proctrack type (e.g., 'cgroup', 'linuxproc', 'pgid'),
+            or None if it cannot be determined.
+        """
+        cmd = 'scontrol show config | grep -i "^ProctrackType"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.warning(f'Failed to get ProctrackType: {stderr}')
+            return None
+
+        # Parse output like "ProctrackType           = proctrack/cgroup"
+        match = re.search(r'ProctrackType\s*=\s*proctrack/(\w+)', stdout)
+        if match:
+            return match.group(1)
+        return None

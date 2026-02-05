@@ -25,11 +25,17 @@ setup: |
   uv pip install vllm==0.10.0
   # Have to use triton==3.2.0 to avoid https://github.com/triton-lang/triton/issues/6698
   uv pip install triton==3.2.0
+  # Pin transformers to avoid https://github.com/verl-project/verl/issues/4337
+  uv pip install transformers==4.57.3
   uv pip install openai
 
 run: |
   source .venv/bin/activate
   export PATH=$PATH:/sbin
+  # Use XFORMERS backend to avoid Triton compilation issues on T4/Turing GPUs
+  # See: https://github.com/vllm-project/vllm/issues/17639
+  export VLLM_ATTENTION_BACKEND=XFORMERS
+  export VLLM_USE_TRITON_FLASH_ATTN=0
   vllm serve $MODEL_NAME --trust-remote-code \
     --host 0.0.0.0 --port 8087 \
     --api-key $AUTH_TOKEN

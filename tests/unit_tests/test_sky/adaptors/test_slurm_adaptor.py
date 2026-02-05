@@ -475,3 +475,58 @@ class TestParseMaxtime:
         line = 'PartitionName=dev Default=YES Nodes=node1'
         result = slurm._parse_maxtime(line)
         assert result is None
+
+
+class TestGetProctrackType:
+    """Test SlurmClient.get_proctrack_type()."""
+
+    @pytest.mark.parametrize(
+        'mock_output,expected',
+        [
+            # Standard output with padding
+            ('ProctrackType           = proctrack/cgroup\n', 'cgroup'),
+            ('ProctrackType           = proctrack/linuxproc\n', 'linuxproc'),
+            ('ProctrackType           = proctrack/pgid\n', 'pgid'),
+            # Minimal spacing
+            ('ProctrackType=proctrack/cgroup\n', 'cgroup'),
+            # No match
+            ('SomeOtherConfig = value\n', None),
+            ('', None),
+        ])
+    def test_get_proctrack_type_parsing(self, mock_output, expected):
+        """Test parsing various proctrack type outputs."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, mock_output, '')
+
+            result = client.get_proctrack_type()
+            mock_run.assert_called_once_with(
+                'scontrol show config | grep -i "^ProctrackType"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+
+            assert result == expected
+
+    def test_get_proctrack_type_command_failure(self):
+        """Test handling command failure returns None."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (1, '', 'command not found')
+
+            result = client.get_proctrack_type()
+
+            assert result is None

@@ -25,7 +25,7 @@ import {
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, Clock } from 'lucide-react';
+import { Settings, User, Clock, FileCode } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -39,12 +39,14 @@ const ICON_MAP = {
   volume: VolumeIcon,
   clock: Clock,
   kueue: KueueIcon,
+  filecode: FileCode,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { UpgradeHint } from '@/components/elements/version-display';
 import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -524,6 +526,15 @@ export function TopBar() {
               <div className="border-l border-gray-200 h-6 mx-1"></div>
 
               <Link
+                href="/recipes"
+                className={getLinkClasses('/recipes')}
+                prefetch={false}
+              >
+                <FileCode className="w-4 h-4" />
+                <span>Recipes</span>
+              </Link>
+
+              <Link
                 href="/infra"
                 className={getLinkClasses('/infra')}
                 prefetch={false}
@@ -712,6 +723,13 @@ export function TopBar() {
                     >
                       See all users
                     </Link>
+                    <PluginSlot
+                      name="user-menu"
+                      wrapperClassName="contents"
+                      context={{
+                        closeDropdown: () => setIsDropdownOpen(false),
+                      }}
+                    />
                   </div>
                 )}
               </div>
@@ -783,6 +801,20 @@ export function TopBar() {
                 </Link>
 
                 <div className="border-t border-gray-200 my-4"></div>
+
+                <Link
+                  href="/recipes"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/recipes')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <FileCode className="w-5 h-5 mr-3" />
+                  Recipes
+                </Link>
 
                 <Link
                   href="/infra"

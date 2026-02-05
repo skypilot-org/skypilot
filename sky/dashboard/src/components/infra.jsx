@@ -89,6 +89,7 @@ import {
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
@@ -267,10 +268,10 @@ export function InfrastructureSection({
               <div
                 className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                   isTableRefreshing ? 'infra-table-refreshing' : ''
-                }`}
+                } ${safeContexts.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
               >
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                         Name
@@ -302,9 +303,7 @@ export function InfrastructureSection({
                       </th>
                     </tr>
                   </thead>
-                  <tbody
-                    className={`bg-white divide-y divide-gray-200 ${safeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                  >
+                  <tbody className="bg-white divide-y divide-gray-200">
                     {safeContexts.map((context) => {
                       const gpus = groupedPerContextGPUs[context] || [];
                       const nodes = groupedPerNodeGPUs[context] || [];
@@ -491,10 +490,10 @@ export function InfrastructureSection({
                 <div
                   className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                     isTableRefreshing ? 'infra-table-refreshing' : ''
-                  }`}
+                  } ${gpus.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
                 >
                   <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
                           GPU
@@ -515,9 +514,7 @@ export function InfrastructureSection({
                         </th>
                       </tr>
                     </thead>
-                    <tbody
-                      className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                    >
+                    <tbody className="bg-white divide-y divide-gray-200">
                       {gpus.map((gpu) => {
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs
@@ -578,6 +575,7 @@ export function ContextDetails({
   gpusInContext,
   nodesInContext,
   gpuMetricsRefreshTrigger = 0,
+  isSlurm = false,
 }) {
   // Determine if this is an SSH context
   const isSSHContext = contextName.startsWith('ssh-');
@@ -709,209 +707,220 @@ export function ContextDetails({
       <div className="rounded-lg border bg-card text-card-foreground shadow-sm h-full">
         <div className="p-5">
           <div className="flex items-center justify-between mb-4">
-            <h4 className="text-lg font-semibold">Available GPUs</h4>
+            <h4 className="text-lg font-semibold">Nodes</h4>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            {gpusInContext.map((gpu) => {
-              return (
-                <div
-                  key={gpu.gpu_name}
-                  className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
-                >
-                  <div className="flex justify-between items-center mb-1.5 flex-wrap">
-                    <div className="font-medium text-gray-800 text-sm">
-                      {gpu.gpu_name}
-                      <span className="text-xs text-gray-500 ml-2">
-                        (Requestable: {gpu.gpu_requestable_qty_per_node} / node)
-                      </span>
+          {gpusInContext.length > 0 && (
+            <div className="mb-6">
+              <h4 className="text-base font-semibold mb-3">Available GPUs</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {gpusInContext.map((gpu) => {
+                  return (
+                    <div
+                      key={gpu.gpu_name}
+                      className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
+                    >
+                      <div className="flex justify-between items-center mb-1.5 flex-wrap">
+                        <div className="font-medium text-gray-800 text-sm">
+                          {gpu.gpu_name}
+                          <span className="text-xs text-gray-500 ml-2">
+                            (Requestable: {gpu.gpu_requestable_qty_per_node} /
+                            node)
+                          </span>
+                        </div>
+                        <span className="text-xs font-medium">
+                          {gpu.gpu_free} free / {gpu.gpu_total} total
+                        </span>
+                      </div>
+                      <div className="w-full">
+                        <GpuUtilizationBar
+                          gpu={gpu}
+                          heightClass="h-4"
+                          wrapperClassName="w-full"
+                        />
+                      </div>
                     </div>
-                    <span className="text-xs font-medium">
-                      {gpu.gpu_free} free / {gpu.gpu_total} total
-                    </span>
-                  </div>
-                  <div className="w-full">
-                    <GpuUtilizationBar
-                      gpu={gpu}
-                      heightClass="h-4"
-                      wrapperClassName="w-full"
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {nodesInContext && nodesInContext.length > 0 && (
-            <>
-              <h4 className="text-lg font-semibold mb-4">Nodes</h4>
-              <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-gray-100">
-                    <tr>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Node
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        IP Address
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        vCPU
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Memory (GB)
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        GPU
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        GPU Utilization
-                      </th>
-                      <th className="p-3 text-left font-medium text-gray-600">
-                        Node Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {nodesInContext.map((node, index) => {
-                      // Format CPU display: "X of Y free" or just "Y" if free is unknown
-                      let cpuDisplay = '-';
-                      if (
-                        node.cpu_count !== null &&
-                        node.cpu_count !== undefined
-                      ) {
-                        const cpuTotal = formatCpu(node.cpu_count);
-                        if (
-                          node.cpu_free !== null &&
-                          node.cpu_free !== undefined
-                        ) {
-                          const cpuFree = formatCpu(node.cpu_free);
-                          cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
-                        } else {
-                          cpuDisplay = cpuTotal;
-                        }
-                      }
-
-                      // Format memory display: "X of Y free" or just "Y" if free is unknown
-                      // (GB is in column header, so don't include it in values)
-                      let memoryDisplay = '-';
-                      if (
-                        node.memory_gb !== null &&
-                        node.memory_gb !== undefined
-                      ) {
-                        const memoryTotal = Math.round(node.memory_gb);
-                        if (
-                          node.memory_free_gb !== null &&
-                          node.memory_free_gb !== undefined
-                        ) {
-                          const memoryFree = Math.round(node.memory_free_gb);
-                          memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
-                        } else {
-                          memoryDisplay = memoryTotal;
-                        }
-                      }
-
-                      // Build utilization string
-                      const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
-
-                      // Build node status string
-                      const statusInfo = [];
-
-                      // Add not ready info
-                      if (node.is_ready === false) {
-                        statusInfo.push('NotReady');
-                      }
-
-                      // Add cordoned info
-                      if (node.is_cordoned === true) {
-                        statusInfo.push('Cordoned');
-                      }
-
-                      // Build taint info separately
-                      const taints = node.taints || [];
-                      let taintInfo = null;
-                      if (taints.length > 0) {
-                        const taintsByEffect = {};
-                        for (const taint of taints) {
-                          const effect = taint.effect;
-                          const key = taint.key;
-                          if (!taintsByEffect[effect]) {
-                            taintsByEffect[effect] = [];
-                          }
-                          taintsByEffect[effect].push(key);
-                        }
-                        const taintStrs = Object.entries(taintsByEffect).map(
-                          ([effect, keys]) =>
-                            `${effect} Taint [${keys.join(', ')}]`
-                        );
-                        if (taintStrs.length > 0) {
-                          taintInfo = taintStrs.join(', ');
-                        }
-                      }
-
-                      const nodeStatusStr =
-                        statusInfo.length > 0 || taintInfo
-                          ? statusInfo.join(', ')
-                          : 'Healthy';
-                      const isNodeHealthy =
-                        statusInfo.length === 0 && !taintInfo;
-
-                      return (
-                        <tr
-                          key={`${node.node_name}-${index}`}
-                          className="hover:bg-gray-50"
-                        >
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.node_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.ip_address || '-'}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {cpuDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {memoryDisplay}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {node.gpu_name}
-                          </td>
-                          <td className="p-3 whitespace-nowrap text-gray-700">
-                            {utilizationStr}
-                          </td>
-                          <td className="p-3 max-w-xs">
-                            <div className="flex flex-col gap-1.5">
-                              {nodeStatusStr && (
-                                <span
-                                  className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
-                                    isNodeHealthy
-                                      ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
-                                      : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
-                                  }`}
-                                >
-                                  {nodeStatusStr}
-                                </span>
-                              )}
-                              {taintInfo && (
-                                <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
-                                  {taintInfo}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                  );
+                })}
               </div>
-            </>
+            </div>
           )}
 
-          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools */}
+          {nodesInContext.length > 0 && (
+            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      Node
+                    </th>
+                    {!isSlurm && (
+                      <>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          IP Address
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          vCPU
+                        </th>
+                        <th className="p-3 text-left font-medium text-gray-600">
+                          Memory (GB)
+                        </th>
+                      </>
+                    )}
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      GPU
+                    </th>
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      GPU Utilization
+                    </th>
+                    <th className="p-3 text-left font-medium text-gray-600">
+                      Node Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {nodesInContext.map((node, index) => {
+                    // Format CPU display: "X of Y free" or just "Y" if free is unknown
+                    let cpuDisplay = '-';
+                    if (
+                      node.cpu_count !== null &&
+                      node.cpu_count !== undefined
+                    ) {
+                      const cpuTotal = formatCpu(node.cpu_count);
+                      if (
+                        node.cpu_free !== null &&
+                        node.cpu_free !== undefined
+                      ) {
+                        const cpuFree = formatCpu(node.cpu_free);
+                        cpuDisplay = `${cpuFree} of ${cpuTotal} free`;
+                      } else {
+                        cpuDisplay = cpuTotal;
+                      }
+                    }
+
+                    // Format memory display: "X of Y free" or just "Y" if free is unknown
+                    // (GB is in column header, so don't include it in values)
+                    let memoryDisplay = '-';
+                    if (
+                      node.memory_gb !== null &&
+                      node.memory_gb !== undefined
+                    ) {
+                      const memoryTotal = node.memory_gb.toFixed(1);
+                      if (
+                        node.memory_free_gb !== null &&
+                        node.memory_free_gb !== undefined
+                      ) {
+                        const memoryFree = node.memory_free_gb.toFixed(1);
+                        memoryDisplay = `${memoryFree} of ${memoryTotal} free`;
+                      } else {
+                        memoryDisplay = memoryTotal;
+                      }
+                    }
+
+                    // Build utilization string
+                    const utilizationStr = `${node.gpu_free} of ${node.gpu_total} free`;
+
+                    // Build node status string
+                    const statusInfo = [];
+
+                    // Add not ready info
+                    if (node.is_ready === false) {
+                      statusInfo.push('NotReady');
+                    }
+
+                    // Add cordoned info
+                    if (node.is_cordoned === true) {
+                      statusInfo.push('Cordoned');
+                    }
+
+                    // Build taint info separately
+                    const taints = node.taints || [];
+                    let taintInfo = null;
+                    if (taints.length > 0) {
+                      const taintsByEffect = {};
+                      for (const taint of taints) {
+                        const effect = taint.effect;
+                        const key = taint.key;
+                        if (!taintsByEffect[effect]) {
+                          taintsByEffect[effect] = [];
+                        }
+                        taintsByEffect[effect].push(key);
+                      }
+                      const taintStrs = Object.entries(taintsByEffect).map(
+                        ([effect, keys]) =>
+                          `${effect} Taint [${keys.join(', ')}]`
+                      );
+                      if (taintStrs.length > 0) {
+                        taintInfo = taintStrs.join(', ');
+                      }
+                    }
+
+                    const nodeStatusStr =
+                      statusInfo.length > 0 || taintInfo
+                        ? statusInfo.join(', ')
+                        : 'Healthy';
+                    const isNodeHealthy = statusInfo.length === 0 && !taintInfo;
+
+                    return (
+                      <tr
+                        key={`${node.node_name}-${index}`}
+                        className="hover:bg-gray-50"
+                      >
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.node_name}
+                        </td>
+                        {!isSlurm && (
+                          <>
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {node.ip_address || '-'}
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {cpuDisplay}
+                            </td>
+                            <td className="p-3 whitespace-nowrap text-gray-700">
+                              {memoryDisplay}
+                            </td>
+                          </>
+                        )}
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {node.gpu_name}
+                        </td>
+                        <td className="p-3 whitespace-nowrap text-gray-700">
+                          {utilizationStr}
+                        </td>
+                        <td className="p-3 max-w-xs">
+                          <div className="flex flex-col gap-1.5">
+                            {nodeStatusStr && (
+                              <span
+                                className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
+                                  isNodeHealthy
+                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
+                                    : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+                                }`}
+                              >
+                                {nodeStatusStr}
+                              </span>
+                            )}
+                            {taintInfo && (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                                {taintInfo}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* GPU Metrics Section - only show for k8s contexts, not SSH node pools or Slurm */}
           {isGrafanaAvailable &&
             gpusInContext &&
             gpusInContext.length > 0 &&
-            !isSSHContext && (
+            !isSSHContext &&
+            !isSlurm && (
               <>
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
 
@@ -2785,6 +2794,7 @@ export function GPUs() {
         gpusInContext={gpusInContext}
         nodesInContext={nodesInContext}
         gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
+        isSlurm={isSlurmCluster}
       />
     );
   };
@@ -3121,6 +3131,13 @@ export function GPUs() {
                   className="text-sky-blue hover:underline cursor-pointer"
                 >
                   SSH Node Pool
+                </Link>
+              ) : slurmClusters.includes(selectedContext) ? (
+                <Link
+                  href="/infra"
+                  className="text-sky-blue hover:underline cursor-pointer"
+                >
+                  Slurm
                 </Link>
               ) : (
                 <Link

@@ -1238,7 +1238,9 @@ class Kubernetes(clouds.Cloud):
                             return (
                                 KubernetesHighPerformanceNetworkType.TOGETHER,
                                 None)
-                        if label_key.startswith('k8s.io/cloud-provider-aws'):
+                        if label_key.startswith(
+                            ('k8s.io/cloud-provider-aws', 'topology.k8s.aws',
+                             'topology.ebs.csi.aws.com')):
                             network_type = (
                                 KubernetesHighPerformanceNetworkType.AWS_EFA)
                             metadata: Optional[Dict[str, Any]] = None

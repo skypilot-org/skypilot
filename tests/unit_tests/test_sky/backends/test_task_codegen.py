@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from sky.backends import task_codegen
+from sky.provision.slurm import utils as slurm_utils
 
 TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'ray_codegen'
 SLURM_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'slurm_codegen'
@@ -150,7 +151,10 @@ def test_slurm_single_node_with_gpu():
 
     Mirrors test_single_node_with_gpu() but for SlurmCodeGen.
     """
-    codegen = task_codegen.SlurmCodeGen(slurm_job_id='12345')
+    codegen = task_codegen.SlurmCodeGen(
+        slurm_job_id='12345',
+        container_name=None,
+    )
     codegen.add_prologue(job_id=2)
 
     resources_dict = {'CPU': 4.0, 'GPU': 1.0}
@@ -188,13 +192,49 @@ def test_slurm_single_node_with_gpu():
                                     testdata_dir=SLURM_TESTDATA_DIR)
 
 
+def test_slurm_codegen_with_container():
+    codegen = task_codegen.SlurmCodeGen(
+        slurm_job_id='12345',
+        container_name=slurm_utils.pyxis_container_name('test-cluster'),
+    )
+    codegen.add_prologue(job_id=2)
+
+    resources_dict = {'CPU': 2.0}
+    task_env_vars = {}
+
+    codegen.add_setup(
+        1,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=['10.0.0.1'],
+        env_vars=task_env_vars,
+        log_dir='/sky/logs',
+        setup_cmd=None,
+    )
+
+    codegen.add_task(
+        1,
+        bash_script='echo hello',
+        task_name='hello',
+        resources_dict={'CPU': 1.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
+
+    codegen.add_epilogue()
+
+    result = codegen.build()
+    assert_codegen_matches_snapshot('slurm_codegen_with_container',
+                                    result,
+                                    testdata_dir=SLURM_TESTDATA_DIR)
+
+
 class TestRcloneFlushScript:
     """Unit tests for the rclone flush script output format."""
 
     def test_flush_script_contains_elapsed_time(self):
         """Test that flush script reports elapsed time in status messages."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should track and report elapsed time
         assert 'FLUSH_START_TIME=$(date +%s)' in flush_script
@@ -204,7 +244,7 @@ class TestRcloneFlushScript:
     def test_flush_script_shows_cache_status(self):
         """Test that flush script extracts and shows vfs cache status."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should extract cache status from log
         assert 'CACHE_STATUS=' in flush_script
@@ -214,7 +254,7 @@ class TestRcloneFlushScript:
     def test_flush_script_shows_uploading_files(self):
         """Test that flush script shows files currently being uploaded."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should extract uploading files from log
         assert 'UPLOADING_FILES=' in flush_script
@@ -226,7 +266,7 @@ class TestRcloneFlushScript:
     def test_flush_script_has_fallback_output(self):
         """Test that flush script falls back to last log line if parsing fails."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should have fallback to last line
         assert 'LAST_LINE=' in flush_script
@@ -237,7 +277,7 @@ class TestRcloneFlushScript:
     def test_flush_script_shows_completion_time(self):
         """Test that flush script shows total time when upload completes."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Should report total flush time on completion
         assert 'TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))' in flush_script
@@ -246,7 +286,7 @@ class TestRcloneFlushScript:
     def test_flush_script_output_message_formats(self):
         """Test that all output message variants are present."""
         codegen = task_codegen.RayCodeGen()
-        flush_script = codegen._get_rclone_flush_script()
+        flush_script = codegen.get_rclone_flush_script()
 
         # Format 1: cache status + uploading files
         assert (
@@ -267,9 +307,12 @@ class TestRcloneFlushScript:
     def test_slurm_flush_script_same_as_ray(self):
         """Test that SlurmCodeGen uses the same flush script as RayCodeGen."""
         ray_codegen = task_codegen.RayCodeGen()
-        slurm_codegen = task_codegen.SlurmCodeGen(slurm_job_id='12345')
+        slurm_codegen = task_codegen.SlurmCodeGen(
+            slurm_job_id='12345',
+            container_name=None,
+        )
 
-        ray_script = ray_codegen._get_rclone_flush_script()
-        slurm_script = slurm_codegen._get_rclone_flush_script()
+        ray_script = ray_codegen.get_rclone_flush_script()
+        slurm_script = slurm_codegen.get_rclone_flush_script()
 
         assert ray_script == slurm_script

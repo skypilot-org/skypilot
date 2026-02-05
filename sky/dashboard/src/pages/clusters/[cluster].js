@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CircularProgress } from '@mui/material';
 import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
@@ -18,7 +18,6 @@ import {
   ChevronRightIcon,
   CopyIcon,
   CheckIcon,
-  ExternalLinkIcon,
 } from 'lucide-react';
 import yaml from 'js-yaml';
 import {
@@ -26,11 +25,7 @@ import {
   NonCapitalizedTooltip,
   formatFullTimestamp,
 } from '@/components/utils';
-import {
-  checkGrafanaAvailability,
-  getGrafanaUrl,
-  buildGrafanaUrl,
-} from '@/utils/grafana';
+import { checkGrafanaAvailability } from '@/utils/grafana';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
@@ -41,6 +36,7 @@ import { formatYaml } from '@/lib/yamlUtils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { YamlHighlighter } from '@/components/YamlHighlighter';
 import { PluginSlot } from '@/plugins/PluginSlot';
+import { GPUMetricsSection } from '@/components/GPUMetricsSection';
 
 // Helper function to format autostop information, similar to _get_autostop in CLI utils
 const formatAutostop = (autostop, toDown) => {
@@ -78,10 +74,6 @@ function ClusterDetails() {
   // When this value changes, the iframe key changes, causing React to remount the iframe.
   const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
   const isMobile = useMobile();
-  const [timeRange, setTimeRange] = useState({
-    from: 'now-1h',
-    to: 'now',
-  });
   const {
     clusterData,
     clusterJobData,
@@ -93,8 +85,6 @@ function ClusterDetails() {
   } = useClusterDetails({ cluster });
 
   // GPU metrics state
-  const [matchedClusterName, setMatchedClusterName] = useState(null);
-  const [isLoadingClusterMatch, setIsLoadingClusterMatch] = useState(false);
   const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
 
   // Check Grafana availability on mount
@@ -103,69 +93,8 @@ function ClusterDetails() {
       const available = await checkGrafanaAvailability();
       setIsGrafanaAvailable(available);
     };
-
-    if (typeof window !== 'undefined') {
-      checkGrafana();
-    }
+    checkGrafana();
   }, []);
-
-  // Fetch available clusters from Grafana and find matching cluster
-  const fetchMatchingCluster = useCallback(async () => {
-    if (!isGrafanaAvailable || !clusterData?.cluster) return;
-
-    setIsLoadingClusterMatch(true);
-    try {
-      const grafanaUrl = getGrafanaUrl();
-      const endpoint =
-        '/api/datasources/proxy/uid/prometheus/api/v1/label/label_skypilot_cluster_name/values';
-
-      const response = await fetch(`${grafanaUrl}${endpoint}`, {
-        method: 'GET',
-        credentials: 'include',
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.data && data.data.length > 0) {
-          // Find cluster that matches our current cluster name as prefix
-          const matchingCluster = data.data.find((cluster) =>
-            cluster.startsWith(clusterData.cluster_name_on_cloud)
-          );
-          if (matchingCluster) {
-            setMatchedClusterName(matchingCluster);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching matching cluster:', error);
-    } finally {
-      setIsLoadingClusterMatch(false);
-    }
-  }, [
-    clusterData?.cluster,
-    clusterData?.cluster_name_on_cloud,
-    isGrafanaAvailable,
-  ]);
-
-  // Fetch matching cluster when component mounts and Grafana is available
-  useEffect(() => {
-    if (isGrafanaAvailable && clusterData?.cluster) {
-      fetchMatchingCluster();
-    }
-  }, [clusterData?.cluster, fetchMatchingCluster, isGrafanaAvailable]);
-
-  // Function to build Grafana panel URL with filters
-  const buildGrafanaMetricsUrl = (panelId) => {
-    const grafanaUrl = getGrafanaUrl();
-    // Use the matched cluster name if available, otherwise fall back to the cluster name on cloud
-    const clusterParam =
-      matchedClusterName || clusterData?.cluster_name_on_cloud;
-
-    return `${grafanaUrl}/d-solo/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics?orgId=1&from=${encodeURIComponent(timeRange.from)}&to=${encodeURIComponent(timeRange.to)}&timezone=browser&var-cluster=${encodeURIComponent(clusterParam)}&var-node=$__all&var-gpu=$__all&theme=light&panelId=${panelId}&__feature.dashboardSceneSolo`;
-  };
 
   // Update isInitialLoad when cluster details are first loaded (not waiting for jobs)
   React.useEffect(() => {
@@ -218,13 +147,6 @@ function ClusterDetails() {
 
   const handleVSCodeClick = () => {
     setIsVSCodeModalOpen(true);
-  };
-
-  const handleTimeRangePreset = (preset) => {
-    setTimeRange({
-      from: `now-${preset}`,
-      to: 'now',
-    });
   };
 
   // Render loading state until data is available
@@ -305,11 +227,6 @@ function ClusterDetails() {
             refreshClusterJobsOnly={refreshClusterJobsOnly}
             isVSCodeModalOpen={isVSCodeModalOpen}
             setIsVSCodeModalOpen={setIsVSCodeModalOpen}
-            timeRange={timeRange}
-            handleTimeRangePreset={handleTimeRangePreset}
-            buildGrafanaMetricsUrl={buildGrafanaMetricsUrl}
-            matchedClusterName={matchedClusterName}
-            isLoadingClusterMatch={isLoadingClusterMatch}
             isGrafanaAvailable={isGrafanaAvailable}
             gpuMetricsRefreshTrigger={gpuMetricsRefreshTrigger}
             isHistoricalCluster={false}
@@ -322,11 +239,6 @@ function ClusterDetails() {
             refreshClusterJobsOnly={() => {}}
             isVSCodeModalOpen={false}
             setIsVSCodeModalOpen={() => {}}
-            timeRange={timeRange}
-            handleTimeRangePreset={handleTimeRangePreset}
-            buildGrafanaMetricsUrl={buildGrafanaMetricsUrl}
-            matchedClusterName={null}
-            isLoadingClusterMatch={false}
             isGrafanaAvailable={false}
             gpuMetricsRefreshTrigger={0}
             isHistoricalCluster={true}
@@ -364,46 +276,16 @@ function ActiveTab({
   refreshClusterJobsOnly,
   isVSCodeModalOpen,
   setIsVSCodeModalOpen,
-  timeRange,
-  handleTimeRangePreset,
-  buildGrafanaMetricsUrl,
-  matchedClusterName,
-  isLoadingClusterMatch,
   isGrafanaAvailable,
   gpuMetricsRefreshTrigger,
   isHistoricalCluster = false,
 }) {
-  // Define panel data
-  const gpuPanels = [
-    { id: '1', title: 'GPU Utilization', keyPrefix: 'gpu-util' },
-    { id: '2', title: 'GPU Memory Utilization', keyPrefix: 'gpu-memory' },
-    { id: '3', title: 'GPU Temperature', keyPrefix: 'gpu-temp' },
-    { id: '4', title: 'GPU Power Usage', keyPrefix: 'gpu-power' },
-  ];
-
-  const GPU_METRICS_EXPANDED_KEY = 'skypilot-gpu-metrics-expanded';
-
   const [isYamlExpanded, setIsYamlExpanded] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isCommandCopied, setIsCommandCopied] = useState(false);
-  const [isGpuMetricsExpanded, setIsGpuMetricsExpanded] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(GPU_METRICS_EXPANDED_KEY);
-      return saved === 'true';
-    }
-    return false;
-  });
 
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
-  };
-
-  const toggleGpuMetricsExpanded = () => {
-    const newValue = !isGpuMetricsExpanded;
-    setIsGpuMetricsExpanded(newValue);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(GPU_METRICS_EXPANDED_KEY, String(newValue));
-    }
   };
 
   const copyYamlToClipboard = async () => {
@@ -760,134 +642,6 @@ function ActiveTab({
         </div>
       </div>
 
-      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
-      {clusterData &&
-        clusterData.full_infra &&
-        clusterData.full_infra.includes('Kubernetes') &&
-        !clusterData.full_infra.includes('SSH') &&
-        !clusterData.full_infra.includes('ssh') &&
-        isGrafanaAvailable && (
-          <div className="mb-6">
-            <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-              <div
-                className={`flex items-center justify-between px-4 ${isGpuMetricsExpanded ? 'pt-4' : 'py-4'}`}
-              >
-                <button
-                  onClick={toggleGpuMetricsExpanded}
-                  className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
-                >
-                  {isGpuMetricsExpanded ? (
-                    <ChevronDownIcon className="w-5 h-5 mr-2" />
-                  ) : (
-                    <ChevronRightIcon className="w-5 h-5 mr-2" />
-                  )}
-                  <h3 className="text-lg font-semibold">GPU Metrics</h3>
-                </button>
-                <Tooltip content="Open in Grafana">
-                  <button
-                    onClick={() => {
-                      const clusterParam =
-                        matchedClusterName ||
-                        clusterData?.cluster_name_on_cloud ||
-                        clusterData?.cluster;
-                      const dashboardPath =
-                        '/d/skypilot-dcgm-gpu/skypilot-dcgm-gpu-metrics';
-                      const queryParams = new URLSearchParams({
-                        orgId: '1',
-                        from: timeRange.from,
-                        to: timeRange.to,
-                        timezone: 'browser',
-                        'var-cluster': clusterParam,
-                        'var-node': '$__all',
-                        'var-gpu': '$__all',
-                      });
-                      window.open(
-                        buildGrafanaUrl(
-                          `${dashboardPath}?${queryParams.toString()}`
-                        ),
-                        '_blank'
-                      );
-                    }}
-                    className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
-                    aria-label="Open in Grafana"
-                  >
-                    <ExternalLinkIcon className="w-4 h-4" />
-                  </button>
-                </Tooltip>
-              </div>
-              {isGpuMetricsExpanded && (
-                <div className="p-5">
-                  {/* Filtering Controls */}
-                  <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
-                    <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
-                      {/* Time Range Selection */}
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
-                          Time Range:
-                        </label>
-                        <div className="flex gap-1">
-                          {[
-                            { label: '15m', value: '15m' },
-                            { label: '1h', value: '1h' },
-                            { label: '6h', value: '6h' },
-                            { label: '24h', value: '24h' },
-                            { label: '7d', value: '7d' },
-                          ].map((preset) => (
-                            <button
-                              key={preset.value}
-                              onClick={() =>
-                                handleTimeRangePreset(preset.value)
-                              }
-                              className={`px-2 py-1 text-xs font-medium rounded border transition-colors ${
-                                timeRange.from === `now-${preset.value}` &&
-                                timeRange.to === 'now'
-                                  ? 'bg-sky-blue text-white border-sky-blue'
-                                  : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              {preset.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Show current selection info */}
-                    <div className="mt-2 text-xs text-gray-500">
-                      Showing: {clusterData?.cluster} • Time: {timeRange.from}{' '}
-                      to {timeRange.to}
-                      {isLoadingClusterMatch && (
-                        <span> • Finding cluster data...</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]">
-                    {gpuPanels.map((panel) => (
-                      <div
-                        key={panel.id}
-                        className="bg-white rounded-md border border-gray-200 shadow-sm"
-                      >
-                        <div className="p-2">
-                          <iframe
-                            src={buildGrafanaMetricsUrl(panel.id)}
-                            width="100%"
-                            height="400"
-                            frameBorder="0"
-                            title={panel.title}
-                            className="rounded"
-                            key={`${panel.keyPrefix}-${clusterData?.cluster}-${timeRange.from}-${timeRange.to}-${gpuMetricsRefreshTrigger || 0}`}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
       {/* Jobs Table - Only show for active clusters */}
       {!isHistoricalCluster && (
         <div className="mb-8">
@@ -900,6 +654,23 @@ function ActiveTab({
           />
         </div>
       )}
+
+      {/* GPU Metrics Section - Show for all Kubernetes clusters (in-cluster and external), but not SSH node pools */}
+      {clusterData &&
+        clusterData.full_infra &&
+        clusterData.full_infra.includes('Kubernetes') &&
+        !clusterData.full_infra.includes('SSH') &&
+        !clusterData.full_infra.includes('ssh') &&
+        isGrafanaAvailable && (
+          <div className="mb-6">
+            <GPUMetricsSection
+              clusterNameOnCloud={clusterData?.cluster_name_on_cloud}
+              displayName={clusterData?.cluster}
+              refreshTrigger={gpuMetricsRefreshTrigger}
+              storageKey="skypilot-gpu-metrics-expanded"
+            />
+          </div>
+        )}
 
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot

@@ -13,13 +13,14 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 
 from sky import exceptions
 from sky.adaptors import aws
 from sky.adaptors import common as adaptors_common
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -67,8 +68,21 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 # The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Arch'
+    'InstanceType',
+    'AcceleratorName',
+    'AcceleratorCount',
+    'vCPUs',
+    'MemoryGiB',
+    'GpuInfo',
+    'Price',
+    'SpotPrice',
+    'Region',
+    'AvailabilityZone',
+    'Arch',
+    'LocalDiskType',
+    'NVMeSupported',
+    'LocalDiskSize',
+    'LocalDiskCount',
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -269,6 +283,31 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 return row['MemoryInfo']['SizeInMiB'] / 1024
             return float(row['Memory'].split(' GiB')[0])
 
+        def get_local_disk_info(row) -> Dict[str, Any]:
+            info: Dict[str, Any] = {}
+            local_disk_supported = row['InstanceStorageSupported']
+            info['LocalDiskType'] = None
+            info['NVMeSupported'] = False
+            info['LocalDiskSize'] = None
+            info['LocalDiskCount'] = None
+
+            if local_disk_supported:
+                raw_info = row['InstanceStorageInfo']
+                info['NVMeSupported'] = raw_info['NvmeSupport'] == 'required'
+                # This is always 1. AWS probably made this as a list
+                # with future changes in consideration.
+                assert len(raw_info['Disks']) == 1, (
+                    f'Instance type {row["InstanceType"]} has '
+                    f'{len(raw_info["Disks"])} disk entries, expected 1.')
+                disk_info = raw_info['Disks'][0]
+                assert disk_info['Type'] in constants.LOCAL_DISK_TYPES, (
+                    f'Instance type {row["InstanceType"]} has unknown '
+                    f'disk type {disk_info["Type"]}.')
+                info['LocalDiskType'] = disk_info['Type']
+                info['LocalDiskSize'] = disk_info['SizeInGB']
+                info['LocalDiskCount'] = disk_info['Count']
+            return info
+
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS instance type workarounds for incorrect/missing GPU info.
@@ -300,12 +339,16 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 acc_count = round(fraction, 3)
             elif row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
+            elif row['InstanceType'].startswith('g7e'):
+                # Change name from "RTX PRO Server 6000" to "RTXPRO6000" for consistency
+                acc_name = 'RTXPRO6000'
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,
                 'vCPUs': get_vcpus(row),
                 'MemoryGiB': get_memory_gib(row),
                 'Arch': get_arch(row),
+                **get_local_disk_info(row)
             })
 
         # The AWS API may not have all the instance types in the pricing table,
