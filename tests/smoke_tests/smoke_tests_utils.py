@@ -527,7 +527,7 @@ def override_sky_config(
         original_config = skypilot_config.parse_and_validate_config_file(
             env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
     else:
-        original_config = skypilot_config.config_utils.Config()
+        original_config = skypilot_config.get_user_config()
     overlay_config = skypilot_config.overlay_skypilot_config(
         original_config, override_sky_config_dict)
     temp_config_file.write(yaml_utils.dump_yaml_str(dict(overlay_config)))
