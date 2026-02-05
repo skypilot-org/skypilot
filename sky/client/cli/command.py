@@ -5652,9 +5652,39 @@ def jobs_cancel(
 
     if not yes:
         plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = (f'managed job{plural} with ID{plural} {job_id_str}'
-                            if job_ids else f'{name!r}' if name is not None else
-                            f'managed jobs in pool {pool!r}')
+        job_identity_str = None
+        if job_ids:
+            # Query job names to show in confirmation message
+            try:
+                request_id, _ = cli_utils.get_managed_job_queue(
+                    refresh=False,
+                    job_ids=list(job_ids),
+                    fields=['job_id', 'job_name'])
+                job_records = sdk.stream_and_get(request_id)
+                # Handle both V1 (list) and V2 (tuple) response formats
+                if isinstance(job_records, tuple):
+                    job_records = job_records[0]
+                # Build a mapping of job_id to job_name
+                job_id_to_name = {
+                    r.job_id: r.job_name
+                    for r in job_records
+                    if r.job_id is not None
+                }
+                # Format job IDs with names
+                job_strs = [
+                    f'{jid} ({jname})' if
+                    (jname := job_id_to_name.get(jid)) else str(jid)
+                    for jid in job_ids
+                ]
+                job_identity_str = f'managed job{plural}: {", ".join(job_strs)}'
+            except Exception as e:  # pylint: disable=broad-except
+                # If querying fails, fall back to just showing IDs
+                logger.debug(f'Failed to query job names for confirmation: {e}')
+                job_identity_str = (
+                    f'managed job{plural} with ID{plural} {job_id_str}')
+        if job_identity_str is None:
+            job_identity_str = (f'{name!r}' if name is not None else
+                                f'managed jobs in pool {pool!r}')
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
         elif all:
