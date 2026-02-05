@@ -2038,19 +2038,18 @@ async def api_cancel(request: fastapi.Request,
 
 
 @app.get('/api/status')
-async def api_status(request_ids: Optional[List[str]] = fastapi.Query(
-    None, description='Request ID prefixes to get status for.'),
-                     all_status: bool = fastapi.Query(
-                         False, description='Get finished requests as well.'),
-                     limit: Optional[int] = fastapi.Query(
-                         None, description='Number of requests to show.'),
-                     fields: Optional[List[str]] = fastapi.Query(
-                         None,
-                         description='Fields to get. If None, get all fields.'),
-                     cluster_name: Optional[str] = fastapi.Query(
-                         None,
-                         description='Filter requests by cluster name.',
-                     )) -> List[payloads.RequestPayload]:
+async def api_status(
+    request_ids: Optional[List[str]] = fastapi.Query(
+        None, description='Request ID prefixes to get status for.'),
+    all_status: bool = fastapi.Query(
+        False, description='Get finished requests as well.'),
+    limit: Optional[int] = fastapi.Query(
+        None, description='Number of requests to show.'),
+    fields: Optional[List[str]] = fastapi.Query(
+        None, description='Fields to get. If None, get all fields.'),
+    cluster_name: Optional[str] = fastapi.Query(
+        None, description='Filter requests by cluster name.'),
+) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
         statuses = None
