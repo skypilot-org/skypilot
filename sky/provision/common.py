@@ -255,11 +255,11 @@ class ClusterInfo:
         ]
         return head_instance_port + worker_instance_ports
 
-    def get_node_names_str(self) -> Optional[str]:
-        """Get comma-separated node names for dashboard display, head first.
+    def get_node_names(self) -> Optional[List[str]]:
+        """Get current node names as a list, head first.
 
         Returns:
-            Comma-separated string of node names, or None if unavailable.
+            List of node names ordered head-first, or None if unavailable.
             For Kubernetes, this is the k8s node name the pod runs on.
             For clouds, this is the instance name.
         """
@@ -270,7 +270,7 @@ class ClusterInfo:
         for worker in self.get_worker_instances():
             if worker.node_name and worker.node_name not in node_names:
                 node_names.append(worker.node_name)
-        return ','.join(node_names) if node_names else None
+        return node_names if node_names else None
 
 
 class Endpoint:
