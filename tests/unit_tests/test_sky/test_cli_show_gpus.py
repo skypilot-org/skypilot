@@ -408,8 +408,8 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
-                                            ['--cloud', 'kubernetes'])
+                result = self.runner.invoke(
+                    command.show_gpus, ['--cloud', 'kubernetes', '--nodes'])
 
         assert result.exit_code == 0
 
@@ -608,8 +608,8 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
-                                            ['--cloud', 'kubernetes'])
+                result = self.runner.invoke(
+                    command.show_gpus, ['--cloud', 'kubernetes', '--nodes'])
 
         assert result.exit_code == 0
 
@@ -686,8 +686,8 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
-                                            ['--cloud', 'kubernetes'])
+                result = self.runner.invoke(
+                    command.show_gpus, ['--cloud', 'kubernetes', '--nodes'])
 
         assert result.exit_code == 0
 
@@ -736,11 +736,11 @@ class TestShowGpus:
             with mock.patch.object(sdk,
                                    'kubernetes_node_info',
                                    return_value=mock.MagicMock()):
-                result = self.runner.invoke(command.show_gpus,
-                                            ['--cloud', 'kubernetes'])
+                result = self.runner.invoke(
+                    command.show_gpus, ['--cloud', 'kubernetes', '--nodes'])
 
         assert result.exit_code == 0
-        # Verify hint message appears in output
+        # Verify hint message appears in output (only shown with --nodes)
         assert 'resource constraints' in result.output
 
     def test_show_gpus_kubernetes_labeled_zero_gpu_hint(self):
