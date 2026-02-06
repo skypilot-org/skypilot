@@ -86,7 +86,7 @@ def serialize_realtime_slurm_gpu_availability(return_value: List[Any]) -> str:
         return orjson.dumps(return_value).decode('utf-8')
     encoded = return_value
     remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is not None and remote_api_version < 35:
+    if remote_api_version is not None and remote_api_version < 36:
         # Strip error field and filter out error entries for old clients.
         # Old servers never included failed clusters in the response.
         encoded = [

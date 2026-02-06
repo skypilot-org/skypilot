@@ -98,10 +98,11 @@ def get_vcpus_mem_from_instance_type(
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
     """Get default instance type based on requirements."""
-    del disk_tier  # Shadeform doesn't support custom disk tiers yet
+    del disk_tier, local_disk  # Shadeform doesn't support custom disk tiers yet
     return _call_or_default(
         lambda: common.get_instance_type_for_cpus_mem_impl(
             _get_df(), cpus, memory, region, zone), None)
@@ -121,9 +122,11 @@ def get_instance_type_for_accelerator(
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         use_spot: bool = False,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types that have the given accelerator."""
+    del local_disk  # unused
     if use_spot:
         # Return empty lists since spot is not supported
         return None, ['Spot instances are not supported on Shadeform']

@@ -77,6 +77,8 @@ class Cudo(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on Cudo.'
             ),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}')
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 60
 
@@ -188,11 +190,13 @@ class Cudo(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='cudo')
@@ -264,6 +268,7 @@ class Cudo(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -281,6 +286,7 @@ class Cudo(clouds.Cloud):
              use_spot=resources.use_spot,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='cudo')
