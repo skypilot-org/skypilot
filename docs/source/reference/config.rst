@@ -1385,6 +1385,8 @@ Can be one of:
 - ``nebius``: `Nebius autoscaler <https://docs.nebius.com/kubernetes/node-groups/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
 
+If you want to use the autoscaler, set :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>` to at least 600.
+
 .. _config-yaml-kubernetes-pod-config:
 
 ``kubernetes.pod_config``
