@@ -58,6 +58,9 @@ class CloudImplementationFeatures(enum.Enum):
     # Pod/VM can have customized multiple network interfaces
     # e.g. GCP GPUDirect TCPX
     CUSTOM_MULTI_NETWORK = 'custom_multi_network'
+    # Some cloud providers provide additional, directly connected
+    # storage devices to VMs (eg: AWS Instance Storage).
+    LOCAL_DISK = 'local_disk'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
@@ -361,15 +364,25 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        """Returns the local disk specs from instance type, if any."""
+        del instance_type  # unused
+        return None
+
+    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory,
-        disk tier, region, and zone.
+        disk tier, local disk, region, and zone.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
@@ -381,6 +394,11 @@ class Cloud:
 
         If disk_tier=DiskTier.MEDIUM, this method returns the default instance
         type that support medium disk tier.
+
+        If local_disk='nvme:300+', this method returns the default instance
+        type that supports NVMe compatible 300GB+ on-instance storage. This is
+        different from disk_tier in that local disks are directly attached to
+        underlying VMs.
 
         When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
