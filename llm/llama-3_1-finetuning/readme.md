@@ -38,55 +38,50 @@ The finetuning job is packaged in a SkyPilot YAML. It can be launched on any of 
 #
 #  HF_TOKEN=xxx sky launch lora.yaml -c llama31 --secret HF_TOKEN
 #
-# To finetune a 70B model:  
+# To finetune a 70B model:
 #
 #  HF_TOKEN=xxx sky launch lora.yaml -c llama31-70 --secret HF_TOKEN --env MODEL_SIZE=70B
 
-envs:
-  MODEL_SIZE: 8B
-  HF_TOKEN:
-  DATASET: "yahma/alpaca-cleaned"
-  # Change this to your own checkpoint bucket
-  CHECKPOINT_BUCKET_NAME: sky-llama-31-checkpoints
-
-
 resources:
   accelerators: A100:8
-  disk_tier: best
-  use_spot: true
+
+envs:
+  MODEL_SIZE: 8B
+  DATASET: yahma/alpaca-cleaned
+
+secrets:
+  HF_TOKEN:  # Passed via --secret HF_TOKEN
 
 file_mounts:
-  /configs: ./configs
   /output:
-    name: $CHECKPOINT_BUCKET_NAME
+    source: s3://my-skypilot-bucket # Change to your object storage bucket
     mode: MOUNT
-    # Optionally, specify the store to enforce to use one of the stores below:
-    #   r2/azure/gcs/s3/cos
-    # store: r2
 
 setup: |
-  pip install torch torchvision
-
-  # Install torch tune from source for the latest Llama 3.1 model
-  pip install git+https://github.com/pytorch/torchtune.git@58255001bd0b1e3a81a6302201024e472af05379
-  # pip install torchtune
-  
+  uv venv
+  source .venv/bin/activate
+  uv pip install torch==2.9.1 torchvision torchao torchtune
   tune download meta-llama/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
-    --hf-token $HF_TOKEN \
-    --output-dir /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
-    --ignore-patterns "original/consolidated*"
+  --hf-token $HF_TOKEN \
+  --output-dir /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct \
+  --ignore-patterns "original/consolidated*"
 
 run: |
+  source .venv/bin/activate
+  # Generated a platform-specific config
+  tune cp llama3_1/${MODEL_SIZE}_lora /tmp/${MODEL_SIZE}-lora.yaml
+
+  # Run distributed LoRA fine-tuning across all GPUs
   tune run --nproc_per_node $SKYPILOT_NUM_GPUS_PER_NODE \
-    lora_finetune_distributed \
-    --config /configs/${MODEL_SIZE}-lora.yaml \
-    dataset.source=$DATASET
+  lora_finetune_distributed \
+  --config /tmp/${MODEL_SIZE}-lora.yaml \
+  dataset.source=$DATASET
 
   # Remove the checkpoint files to save space, LoRA serving only needs the
   # adapter files.
   rm /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/*.pt
   rm /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct/*.safetensors
-  
+
   mkdir -p /output/$MODEL_SIZE-lora
   rsync -Pavz /tmp/Meta-Llama-3.1-${MODEL_SIZE}-Instruct /output/$MODEL_SIZE-lora
   cp -r /tmp/lora_finetune_output /output/$MODEL_SIZE-lora/
@@ -105,17 +100,13 @@ export HF_TOKEN=xxxx
 
 # It takes about 40 mins on 8 A100 GPUs to finetune a 8B
 # Llama3.1 model with LoRA on Alpaca dataset.
-sky launch -c llama31 lora.yaml \
-  --secret HF_TOKEN  --env MODEL_SIZE=8B \
-  --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name"
+sky launch -c llama31 lora.yaml --secret HF_TOKEN
 ```
 
 
 To finetune a larger model with 70B parameters, you can simply change the parameters as below:
 ```bash
-sky launch -c llama31-70 lora.yaml \
-  --secret HF_TOKEN  --env MODEL_SIZE=70B \
-  --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name"
+sky launch -c llama31-70 lora.yaml --secret HF_TOKEN --env MODEL_SIZE=70B
 ```
 
 **Finetuning Llama 3.1 405B**: Work in progress! If you want to follow the work, join the [SkyPilot community Slack](https://slack.skypilot.co/) for discussions.
@@ -128,9 +119,7 @@ You can do so by specifying the huggingface path to your own dataset as followin
 # It takes about 1 hour on 8 A100 GPUs to finetune a 8B
 # Llama3.1 model with LoRA on finance dataset.
 sky launch -c llama31 lora.yaml \
-  --secret HF_TOKEN  --env MODEL_SIZE=8B \
-  --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name" \
-  --env DATASET="gbharti/finance-alpaca"
+  --secret HF_TOKEN --env DATASET="gbharti/finance-alpaca"
 ```
 
 <figure>
@@ -150,7 +139,7 @@ With a finetuned Llama 3.1 trained on your dataset, you can now serve the finetu
 ```bash
 sky launch -c serve-llama31 serve.yaml \
   --env LORA_NAME="my-finance-lora" \
-  --env CHECKPOINT_BUCEKT_NAME="your-own-bucket-name"
+  --env CHECKPOINT_BUCKET_NAME="your-own-bucket-name"
 ```
 
 You can interact with the model in a terminal:
