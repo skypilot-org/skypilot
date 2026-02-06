@@ -2063,6 +2063,8 @@ async def api_status(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
         None, description='Fields to get. If None, get all fields.'),
+    cluster_name: Optional[str] = fastapi.Query(
+        None, description='Cluster name to filter requests for.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -2072,9 +2074,11 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
+        cluster_names = [cluster_name] if cluster_name else None
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
+                cluster_names=cluster_names,
                 limit=limit,
                 fields=fields,
                 sort=True,

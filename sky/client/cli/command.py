@@ -7234,11 +7234,19 @@ INT_OR_NONE = IntOrNone()
     required=False,
     help=(f'Number of requests to show, default is {_NUM_REQUESTS_TO_SHOW},'
           f' set to "none" or "all" to show all requests.'))
+@click.option('--cluster',
+              '-c',
+              'cluster_name',
+              default=None,
+              type=str,
+              required=False,
+              help='Filter requests by cluster name.')
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: Optional[int]):
+               verbose: bool, limit: Optional[int],
+               cluster_name: Optional[str]):
     """List requests on SkyPilot API server."""
     if not request_id_prefixes:
         request_id_prefixes = None
@@ -7246,7 +7254,7 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
     request_list = sdk.api_status(request_id_prefixes, all_status, limit,
-                                  fields)
+                                  fields, cluster_name)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
