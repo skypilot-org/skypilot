@@ -61,6 +61,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
+from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
@@ -3711,19 +3712,21 @@ def show_gpus(
         all_regions: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
+    NOTE: This command is deprecated. Use ``sky gpus list`` instead.
+
     The names and counts shown can be set in the ``accelerators`` field in task
     YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
     table shows 8x V100s are supported, then the string ``V100:8`` will be
     accepted by the above.
 
     To show the detailed information of a GPU/TPU type (its price, which clouds
-    offer it, the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
+    offer it, the quantity in each VM type, etc.), use ``sky gpus list <gpu>``.
 
     To show all accelerators, including less common ones and their detailed
-    information, use ``sky show-gpus --all``.
+    information, use ``sky gpus list --all``.
 
     To show all regions for a specified accelerator, use
-    ``sky show-gpus <accelerator> --all-regions``.
+    ``sky gpus list <accelerator> --all-regions``.
 
     If ``--region`` or ``--all-regions`` is not specified, the price displayed
     for each instance type is the lowest across all regions for both on-demand
@@ -3751,6 +3754,18 @@ def show_gpus(
     * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
       in the Kubernetes cluster.
     """
+    # Call the shared implementation
+    _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
+
+
+def _show_gpus_impl(
+        accelerator_str: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        all_regions: bool):
+    """Shared implementation for show_gpus and gpus_list commands."""
     cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
                                                                cloud,
                                                                region,
@@ -3857,7 +3872,7 @@ def show_gpus(
                 identity_short = 'SSH Node Pool' if is_ssh else 'Kubernetes'
                 debug_msg = (
                     f'To show available accelerators in {identity_short}, '
-                    f'run: sky show-gpus --cloud {cloud_name}')
+                    f'run: sky gpus list --cloud {cloud_name}')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -4008,7 +4023,7 @@ def show_gpus(
                 err_msg = (f'Resources{gpu_info_msg} not found '
                            'in any Slurm partition. ')
                 debug_msg = ('To show available accelerators on Slurm,'
-                             ' run: sky show-gpus --cloud slurm ')
+                             ' run: sky gpus list --cloud slurm ')
             raise ValueError(err_msg + debug_msg)
 
         realtime_gpu_infos = []
@@ -4670,7 +4685,7 @@ def show_gpus(
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
-            yield 'To show available accelerators, run: sky show-gpus --all'
+            yield 'To show available accelerators, run: sky gpus list --all'
             return
 
         for i, (gpu, items) in enumerate(list_accelerators_result.items()):
@@ -4736,6 +4751,159 @@ def show_gpus(
         for out in outputs:
             click.echo(out, nl=False)
         click.echo()
+
+
+@cli.group('gpus', cls=_NaturalOrderGroup)
+def gpus_cli():
+    """SkyPilot GPU/Accelerator CLI."""
+    pass
+
+
+@gpus_cli.command('list', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('accelerator_str', required=False)
+@flags.all_option('Show details of all GPU/TPU/accelerator offerings.')
+@click.option('--infra',
+              default=None,
+              type=str,
+              help='Infrastructure to query. Examples: "aws", "aws/us-east-1"')
+@click.option('--cloud',
+              default=None,
+              type=str,
+              help='Cloud provider to query.',
+              hidden=True)
+@click.option(
+    '--region',
+    required=False,
+    type=str,
+    help=
+    ('The region to use. If not specified, shows accelerators from all regions.'
+    ),
+    hidden=True,
+)
+@click.option(
+    '--all-regions',
+    is_flag=True,
+    default=False,
+    help='Show pricing and instance details for a specified accelerator across '
+    'all regions and clouds.')
+@catalog.fallback_to_default_catalog
+@usage_lib.entrypoint
+def gpus_list(
+        accelerator_str: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        all_regions: bool):
+    """Show supported GPU/TPU/accelerators and their prices.
+
+    The names and counts shown can be set in the ``accelerators`` field in task
+    YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
+    table shows 8x V100s are supported, then the string ``V100:8`` will be
+    accepted by the above.
+
+    To show the detailed information of a GPU/TPU type (its price, which clouds
+    offer it, the quantity in each VM type, etc.), use ``sky gpus list <gpu>``.
+
+    To show all accelerators, including less common ones and their detailed
+    information, use ``sky gpus list --all``.
+
+    To show all regions for a specified accelerator, use
+    ``sky gpus list <accelerator> --all-regions``.
+
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
+
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
+
+    If ``--cloud slurm`` is specified, it will show the maximum quantities of
+    the GPU available on a single node and the real-time availability of the
+    GPU across all nodes in the Slurm cluster.
+
+    Definitions of certain fields:
+
+    * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
+      count of the instance (VM).
+
+    * ``HOST_MEM``: Memory of the host instance (VM).
+
+    * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
+      on a single node.
+
+    * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
+      in the Kubernetes cluster.
+    """
+    # Call the shared implementation
+    _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
+
+
+@gpus_cli.command('label', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('--context',
+              '-c',
+              type=str,
+              default=None,
+              help='Kubernetes context to use. If not specified, uses the '
+              'current context from the API server.')
+@click.option('--cleanup',
+              is_flag=True,
+              default=False,
+              help='Only cleanup existing GPU labeler resources.')
+@click.option('--async',
+              'async_mode',
+              is_flag=True,
+              default=False,
+              help='Do not wait for GPU labeling to complete.')
+@usage_lib.entrypoint
+def gpus_label(context: Optional[str], cleanup: bool, async_mode: bool):
+    """Label GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    This command runs on the API server to label GPU nodes with
+    skypilot.co/accelerator labels. This is required for SkyPilot to
+    identify GPU types on nodes that don't have pre-configured labels.
+
+    Note: This command currently only supports NVIDIA GPUs. AMD GPUs
+    must be labeled manually.
+
+    Example usage:
+
+      # Label GPUs in the current Kubernetes context
+      sky gpus label
+
+      # Label GPUs in a specific context
+      sky gpus label --context my-k8s-cluster
+
+      # Cleanup labeling resources
+      sky gpus label --cleanup
+
+      # Start labeling without waiting for completion
+      sky gpus label --async
+    """
+    request_id = sdk.kubernetes_label_gpus(
+        context=context,
+        cleanup_only=cleanup,
+        wait_for_completion=not async_mode,
+    )
+    # Stream logs to show progress (spinners, node info, etc.)
+    # The actual output is in the streamed logs, not just the return value
+    result = sdk.stream_and_get(request_id)
+
+    # Exit with appropriate code based on success
+    if not result.get('success', False):
+        sys.exit(1)
+
+
+# Deprecate 'sky show-gpus' in favor of 'sky gpus list'
+# pylint: disable=protected-access
+deprecation_utils._deprecate_and_hide_command(
+    group=None,
+    command_to_deprecate=show_gpus,
+    alternative_command='sky gpus list')
 
 
 @cli.group(cls=_NaturalOrderGroup)

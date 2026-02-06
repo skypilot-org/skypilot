@@ -163,11 +163,11 @@ When connected to a shared :ref:`SkyPilot API server <sky-api-server>`, you can 
     dev        alice@example.com ml-team    Kubernetes (k8s-context2)  1x(gpus=H100:1, cpus=4, mem=16, ...) UP      10m       1 hr ago
     training   bob@example.com   ml-team    Kubernetes (k8s-context1)  1x(gpus=L4:4, cpus=8, mem=32, ...)   UP      -         2 hrs ago
 
-You can also inspect the real-time GPU usage on the cluster with :code:`sky show-gpus --infra k8s`.
+You can also inspect the real-time GPU usage on the cluster with :code:`sky gpus list --infra k8s`.
 
 .. code-block:: console
 
-    $ sky show-gpus --infra k8s
+    $ sky gpus list --infra k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  UTILIZATION
     L4    1, 2, 4                   12 of 12 free

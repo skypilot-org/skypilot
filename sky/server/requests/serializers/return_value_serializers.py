@@ -79,14 +79,14 @@ def serialize_kubernetes_node_info(return_value: Dict[str, Any]) -> str:
 def serialize_realtime_slurm_gpu_availability(return_value: List[Any]) -> str:
     """Serialize Slurm GPU availability with version compatibility.
 
-    The error field (3rd element) was added in API version 34. Strip it
+    The error field (3rd element) was added in API version 35. Strip it
     for old clients that don't recognize it.
     """
     if not return_value:
         return orjson.dumps(return_value).decode('utf-8')
     encoded = return_value
     remote_api_version = versions.get_remote_api_version()
-    if remote_api_version is not None and remote_api_version < 34:
+    if remote_api_version is not None and remote_api_version < 35:
         # Strip error field and filter out error entries for old clients.
         # Old servers never included failed clusters in the response.
         encoded = [item[:2] for item in return_value if item[2] is None]

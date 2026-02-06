@@ -51,7 +51,7 @@ Most Slurm concepts map directly to SkyPilot concepts.
      - ``sky jobs queue``
      - View job history
    * - ``sinfo``
-     - ``sky show-gpus``
+     - ``sky gpus list``
      - View available resources
 
 SkyPilot also provides features not available in Slurm:
@@ -512,4 +512,3 @@ Further reading
 - :ref:`Interactive development <dev-cluster>`: Develop on your laptop and run on the cloud
 - :ref:`Distributed jobs <dist-jobs>`: Multi-node training guide
 - :ref:`Managed jobs <managed-jobs>`: Fault-tolerant batch jobs
-
