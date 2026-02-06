@@ -444,6 +444,18 @@ def get_resources_schema():
                     'items': {
                         'type': 'string',
                     }
+                }, {
+                    # Support list of dicts for ordered accelerator preferences
+                    # e.g., [{T4: 1}, {L4: 1}]
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'required': [],
+                        'maxProperties': 1,
+                        'additionalProperties': {
+                            'type': 'number'
+                        }
+                    }
                 }]
             },
             'any_of': {
