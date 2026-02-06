@@ -1659,7 +1659,8 @@ def realtime_slurm_gpu_availability(
             logger.debug(
                 f'Error querying Slurm cluster {slurm_cluster_name!r}: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-            return [], 'Could not query Slurm cluster for info'
+            return [], (f'Could not query Slurm cluster for info: '
+                        f'{common_utils.format_exception(e)}')
 
         # --- Format the output ---
         realtime_gpu_availability_list: List[
