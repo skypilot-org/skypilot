@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { TopBar, SidebarProvider } from './sidebar';
+import { TopBar, SidebarProvider, useSidebar } from './sidebar';
 import { useMobile } from '@/hooks/useMobile';
 import { WelcomeNotification } from './WelcomeNotification';
 import { TourButton } from './TourButton';
@@ -12,6 +12,7 @@ import { installUpgradeInterceptor } from '@/utils/apiInterceptor';
 
 function LayoutContent({ children, highlighted }) {
   const isMobile = useMobile();
+  const { isSidebarCollapsed } = useSidebar();
   const { reportUpgrade, clearUpgrade, isUpgrading } = useUpgradeDetection();
 
   // Install the fetch interceptor on mount
@@ -21,18 +22,16 @@ function LayoutContent({ children, highlighted }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Fixed top bar with navigation */}
-      <div className="fixed top-0 left-0 right-0 z-50 shadow-sm">
-        <TopBar />
-      </div>
+      {/* Sidebar (desktop) or top bar (mobile) */}
+      <TopBar />
 
       {/* Upgrade banner */}
       <UpgradeBanner />
 
       {/* Main content */}
       <div
-        className="transition-all duration-200 ease-in-out min-h-screen"
-        style={{ paddingTop: isUpgrading ? '112px' : '56px' }}
+        className={`transition-all duration-200 ease-in-out min-h-screen ${isMobile ? '' : (isSidebarCollapsed ? 'ml-14' : 'ml-40')}`}
+        style={isMobile ? { paddingTop: isUpgrading ? '112px' : '56px' } : {}}
       >
         <main className="p-6">{children}</main>
       </div>
