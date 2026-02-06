@@ -14,10 +14,12 @@ Key areas tested:
 import atexit
 import importlib
 import os
+import random
 import socket
 import tempfile
 import threading
 import time
+from collections import defaultdict
 from typing import Optional, Tuple
 from unittest import mock
 
@@ -86,7 +88,7 @@ def policy_server():
     """Pytest fixture that provides a clean PolicyServer instance."""
     with PolicyServer() as server:
         # Clear any previous requests before each test
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
         yield server
 
 
@@ -104,14 +106,24 @@ class DoNothingPolicy(sky.AdminPolicy):
 class ImageIdInspectorPolicy(sky.AdminPolicy):
     """A policy that inspects and logs what it receives for debugging."""
 
-    received_requests = []
+    received_requests_by_port = defaultdict(list)
+
+    @classmethod
+    def get_received_requests(cls, port: int):
+        return cls.received_requests_by_port[port]
+
+    @classmethod
+    def clear_received_requests(cls, port: int):
+        cls.received_requests_by_port[port].clear()
+
+    @classmethod
+    def record_request(cls, port: int, user_request: sky.UserRequest):
+        cls.received_requests_by_port[port].append(user_request)
 
     @classmethod
     def validate_and_mutate(
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         """Logs what the policy receives and returns it unchanged."""
-        # Store what we received for inspection
-        cls.received_requests.append(user_request)
         return sky.MutatedUserRequest(user_request.task,
                                       user_request.skypilot_config)
 
@@ -128,8 +140,11 @@ async def apply_policy(request: Request) -> JSONResponse:
         json_data = await request.json()
         user_request = sky.UserRequest.decode(json_data)
 
+        # Record per-server request for test inspection
+        ImageIdInspectorPolicy.record_request(request.url.port, user_request)
+
         # Apply the policy
-        policies = [ImageIdInspectorPolicy]
+        policies: list[type[sky.AdminPolicy]] = [ImageIdInspectorPolicy]
 
         for policy in policies:
             mutated_request = policy.validate_and_mutate(user_request)
@@ -149,20 +164,19 @@ async def apply_policy(request: Request) -> JSONResponse:
 class PolicyServer:
     """Test policy server that runs in a background thread with automatic port assignment."""
 
-    def __init__(self, port=None):
-        self.port = port or common_utils.find_free_port(50000)
+    def __init__(self):
+        self.port = None
         self.server = None
         self.thread = None
         self._started = False
+        self._exception: Optional[BaseException] = None
+        self._exiting = False
 
         # Register this server for global cleanup
         _active_servers.append(self)
 
-    def start(self):
-        """Start the policy server in a background thread."""
-        if self._started:
-            return
-
+    def attempt_start(self):
+        self.port = common_utils.find_free_port(50000)
         config = uvicorn.Config(
             app,
             host="127.0.0.1",
@@ -174,36 +188,77 @@ class PolicyServer:
         def run_server():
             try:
                 self.server.run()
-            except Exception:
-                # Ignore errors during shutdown
-                pass
+            except BaseException as e:
+                self._started = False
+                self._exception = e
 
         self.thread = threading.Thread(target=run_server, daemon=True)
         self.thread.start()
-        self._started = True
 
-        # Wait for server to start and verify it's responding
-        max_attempts = 10
-        for _ in range(max_attempts):
-            try:
-                import requests
-                response = requests.get(f"http://127.0.0.1:{self.port}/docs",
-                                        timeout=1)
-                if response.status_code in (
-                        200, 404):  # Either docs or 404 means server is up
-                    break
-            except (requests.exceptions.RequestException,
-                    requests.exceptions.ConnectionError):
-                time.sleep(0.1)
-        else:
-            raise RuntimeError(
-                f"Policy server failed to start on port {self.port}")
-
-    def stop(self):
-        """Stop the policy server gracefully."""
-        if not self._started:
+    def start(self):
+        """Start the policy server in a background thread."""
+        if self._started:
             return
+        
+        # We may be racing with other servers starting, so try several times to start.
+        # We might get a different port each time.
+        max_start_attempts = 20
+        for _ in range(max_start_attempts):
+            # Clean up previous attempt
+            self.end_thread()
+            self.thread = None
+            if self._exception is not None:
+                print(self._exception)
+                self._exception = None
 
+            # Jitter the starts to avoid racing
+            time.sleep(random.random() * 0.1)
+            
+            # Try to start the server
+            self.attempt_start()
+
+            # Seems to usually take around 0.05 seconds to start.
+            # We will try to connect for up to 0.5 seconds.
+            start_check_timeout_ms = 500
+            start_check_gap_ms = 50
+            for _ in range(start_check_timeout_ms // start_check_gap_ms):
+                if self.server and self.server.started:
+                    self._started = True
+                    break
+                if not self.thread or not self.thread.is_alive():
+                    # did not start
+                    break
+                time.sleep(start_check_gap_ms / 1000)
+            
+            if self._started:
+                break
+            # Otherwise, we didn't succesfully start, so we'll try again.
+        
+        if not self._started:
+            exc = RuntimeError(f"Policy server failed to start after {max_start_attempts} attempts")
+            if self._exception:
+                raise exc from self._exception
+            raise exc
+        
+        # # Wait for server to start and verify it's responding
+        # max_attempts = 10
+        # for _ in range(max_attempts):
+        #     try:
+        #         import requests
+        #         response = requests.get(f"http://127.0.0.1:{self.port}/docs",
+        #                                 timeout=1)
+        #         if response.status_code in (
+        #                 200, 404):  # Either docs or 404 means server is up
+        #             break
+        #     except (requests.exceptions.RequestException,
+        #             requests.exceptions.ConnectionError):
+        #         time.sleep(0.1)
+        # else:
+        #     raise RuntimeError(
+        #         f"Policy server failed to start on port {self.port}")
+        
+    def end_thread(self):
+        self._exiting = True
         if self.server:
             self.server.should_exit = True
             # Give it a moment to stop gracefully
@@ -211,12 +266,24 @@ class PolicyServer:
 
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=2)
-
+            if self.thread.is_alive():
+                raise RuntimeError(f"Policy server thread did not stop")
+            
         self._started = False
+
+    def stop(self):
+        """Stop the policy server gracefully."""
+        if not self._started:
+            return
+        
+        self.end_thread()
 
         # Remove from active servers
         if self in _active_servers:
             _active_servers.remove(self)
+
+        if self._exception:
+            raise self._exception
 
     def force_stop(self):
         """Force stop the server (used by cleanup)."""
@@ -252,6 +319,13 @@ def create_test_task() -> sky.Task:
 
     return sky.Task.from_yaml_config(task_config)
 
+def test_policy_server_start_and_stop():
+    """Test policy server start and stop."""
+    with PolicyServer() as server:
+        #server._exception = RuntimeError('test exception')
+        assert server.port is not None
+        #assert 1==2
+
 
 def test_none_key_serialization_through_real_policy_flow(monkeypatch):
     """Test None key preservation through the real admin policy application flow.
@@ -266,7 +340,7 @@ def test_none_key_serialization_through_real_policy_flow(monkeypatch):
     # Use context manager for automatic cleanup
     with PolicyServer() as server:
         # Clear previous requests
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create task with None key in image_id (k8s + docker scenario)
         task = create_test_task()
@@ -289,8 +363,8 @@ def test_none_key_serialization_through_real_policy_flow(monkeypatch):
                 task, config_path, monkeypatch)
 
             # Check what the policy server actually received during the real flow
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            received_request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            received_request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Verify the request has proper structure (like real SkyPilot requests)
             assert received_request.task is not None
@@ -341,7 +415,7 @@ def test_none_key_serialization_through_real_policy_flow(monkeypatch):
 def test_restful_policy_with_request_options(monkeypatch):
     """Test RESTful admin policy with proper RequestOptions (like real usage)."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a test task
         task = create_test_task()
@@ -357,8 +431,8 @@ def test_restful_policy_with_request_options(monkeypatch):
                                                       monkeypatch)
 
             # Verify the policy was called with proper request structure
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Check that RequestOptions were properly included (like real usage)
             assert request.request_options is not None
@@ -416,7 +490,7 @@ def test_restful_policy_with_user(monkeypatch):
 def test_restful_policy_basic_functionality(monkeypatch):
     """Test basic RESTful admin policy functionality using real patterns."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a simple test task
         task = create_test_task()
@@ -432,7 +506,7 @@ def test_restful_policy_basic_functionality(monkeypatch):
                                                       monkeypatch)
 
             # Check that the policy was called
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
 
             # Check that we got valid results (like real SkyPilot would expect)
             assert dag is not None
@@ -446,7 +520,7 @@ def test_restful_policy_basic_functionality(monkeypatch):
 def test_task_without_run_command(monkeypatch):
     """Test RESTful admin policy with task that has no run command."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a task without run command
         task_config = {
@@ -472,8 +546,8 @@ def test_task_without_run_command(monkeypatch):
                                                       monkeypatch)
 
             # Verify the policy was called and handled the task correctly
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Check that the task structure is preserved
             assert request.task.run is None
@@ -496,7 +570,7 @@ def test_task_without_run_command(monkeypatch):
 def test_task_without_resources(monkeypatch):
     """Test RESTful admin policy with task that has no resources specified."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a task without resources
         task_config = {
@@ -522,8 +596,8 @@ def test_task_without_resources(monkeypatch):
                                                       monkeypatch)
 
             # Verify the policy was called and handled the task correctly
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Check that the task structure is preserved
             assert request.task.run == 'echo "Hello World"'
@@ -540,7 +614,7 @@ def test_task_without_resources(monkeypatch):
 def test_task_without_skypilot_config(monkeypatch):
     """Test RESTful admin policy when no skypilot config is provided."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a standard task
         task = create_test_task()
@@ -556,8 +630,8 @@ def test_task_without_skypilot_config(monkeypatch):
                                                       monkeypatch)
 
             # Verify the policy was called
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Check that skypilot_config handling works (should have default config)
             assert request.skypilot_config is not None
@@ -579,7 +653,7 @@ def test_task_without_skypilot_config(monkeypatch):
 def test_minimal_task(monkeypatch):
     """Test RESTful admin policy with the most minimal task possible."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a completely minimal task (just run command)
         task_config = {'run': 'echo "minimal"'}
@@ -596,8 +670,8 @@ def test_minimal_task(monkeypatch):
                                                       monkeypatch)
 
             # Verify the policy was called and everything worked
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Check basic structure
             assert request.task.run == 'echo "minimal"'
@@ -617,7 +691,7 @@ def test_minimal_task(monkeypatch):
 def test_complex_task_serialization(monkeypatch):
     """Test RESTful admin policy with a complex task to ensure all fields serialize correctly."""
     with PolicyServer() as server:
-        ImageIdInspectorPolicy.received_requests.clear()
+        ImageIdInspectorPolicy.clear_received_requests(server.port)
 
         # Create a complex task with various configurations
         task_config = {
@@ -655,8 +729,8 @@ def test_complex_task_serialization(monkeypatch):
                                                       monkeypatch)
 
             # Verify the policy was called
-            assert len(ImageIdInspectorPolicy.received_requests) == 1
-            request = ImageIdInspectorPolicy.received_requests[0]
+            assert len(ImageIdInspectorPolicy.get_received_requests(server.port)) == 1
+            request = ImageIdInspectorPolicy.get_received_requests(server.port)[0]
 
             # Check that all task properties are preserved through serialization
             received_task = request.task
