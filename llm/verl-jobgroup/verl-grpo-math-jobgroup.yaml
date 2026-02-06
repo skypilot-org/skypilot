@@ -1,0 +1,226 @@
+# VeRL GRPO Math Training with Job Groups (Simplified)
+#
+# This is a simpler version that trains on GSM8K math problems without
+# the retrieval service. Good for getting started with VeRL job groups.
+#
+# Architecture:
+#   - data-server (auxiliary): Serves GSM8K math prompts
+#   - reward-server (auxiliary): Verifies math answers
+#   - verl-trainer (primary): VeRL GRPO training
+#
+# Usage:
+#   sky jobs launch llm/verl-jobgroup/verl-grpo-math-jobgroup.yaml
+#
+#   # With WandB logging
+#   sky jobs launch llm/verl-jobgroup/verl-grpo-math-jobgroup.yaml --secret WANDB_API_KEY
+---
+name: verl-math
+execution: parallel
+primary_tasks: [verl-trainer]
+termination_delay: 10s
+
+---
+# Data Server: Serves math prompts from GSM8K dataset
+name: data-server
+resources:
+  cpus: 4
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/verl-jobgroup/code
+
+setup: |
+  echo "=== Data Server Setup ==="
+  uv pip install fastapi uvicorn datasets --system
+
+run: |
+  echo "Starting data server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Data API at http://data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+
+  cd /code
+  python data_server.py --port 8000
+
+---
+# Reward Server: Verifies math answers against ground truth
+name: reward-server
+resources:
+  cpus: 4
+  memory: 8+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/verl-jobgroup/code
+
+setup: |
+  echo "=== Reward Server Setup ==="
+  uv pip install fastapi uvicorn sympy --system
+
+run: |
+  echo "Starting reward server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Reward API at http://reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8001"
+
+  cd /code
+  python reward_server.py --port 8001
+
+---
+# VeRL Trainer: GRPO training for math
+name: verl-trainer
+num_nodes: 1
+resources:
+  accelerators: H100:1
+  memory: 128+
+  infra: kubernetes
+  image_id: docker:verlai/verl:app-verl0.6-transformers4.56.1-sglang0.5.2-mcore0.13.0-te2.2
+  ports:
+    - 8265  # Ray dashboard
+
+config:
+  docker:
+    run_options:
+      - --cap-add=SYS_PTRACE
+      - --ipc=host
+      - --shm-size=16g
+
+envs:
+  MODEL_NAME: Qwen/Qwen2.5-1.5B-Instruct
+  TOTAL_EPOCHS: 1
+  TOTAL_STEPS: 50
+  TRAIN_BATCH_SIZE: 128
+  VAL_BATCH_SIZE: 64
+  SAVE_FREQ: 25
+  TEST_FREQ: 10
+  WANDB_PROJECT_NAME: verl-math-jobgroup
+  WANDB_EXPERIMENT_NAME: grpo-gsm8k
+
+file_mounts:
+  /code: llm/verl-jobgroup/code
+
+secrets:
+  WANDB_API_KEY: ""
+
+setup: |
+  rm -f ~/.pip/pip.conf
+  rm -f ~/.config/pip/pip.conf
+
+  set -e
+  echo "=== VeRL Trainer Setup ==="
+
+  sudo apt update && sudo apt install -y iproute2
+
+  uv venv --python 3.10 --seed
+  source .venv/bin/activate
+
+  rm -rf verl
+  git clone https://github.com/volcengine/verl.git
+  cd verl
+  git checkout v0.6.0
+
+  uv pip install "torch==2.8.*" torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+  uv pip install "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiFALSE-cp310-cp310-linux_x86_64.whl"
+  uv pip install -v -e .
+  uv pip install wheel packaging
+  uv pip install -r ./requirements_sglang.txt
+  uv pip install uvloop==0.21.0 httpx
+
+  # Prepare GSM8K dataset
+  python3 examples/data_preprocess/gsm8k.py
+
+  echo "Setup complete!"
+
+run: |
+  set -e
+  echo "=== VeRL GRPO Math Training ==="
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+
+  # Service endpoints
+  DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+  REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8001"
+
+  echo "Data server: http://${DATA_SERVER}"
+  echo "Reward server: http://${REWARD_SERVER}"
+
+  export REWARD_SERVER_URL="http://${REWARD_SERVER}"
+
+  # Network config
+  NETWORK_INTERFACE=$(ip route get 8.8.8.8 | grep -oP 'dev \K\S+')
+  export GLOO_SOCKET_IFNAME=$NETWORK_INTERFACE
+  export NCCL_SOCKET_IFNAME=$NETWORK_INTERFACE
+  export TORCH_MULTIPROCESSING_SHARING_STRATEGY=file_system
+
+  source .venv/bin/activate
+  cd verl
+  export PYTHONPATH="$(pwd):$PYTHONPATH"
+
+  # Wait for services
+  echo "Waiting for services..."
+  max_retries=60
+  for i in $(seq 1 $max_retries); do
+    data_ok=$(curl -s -o /dev/null -w "%{http_code}" "http://${DATA_SERVER}/health" 2>/dev/null || echo "000")
+    reward_ok=$(curl -s -o /dev/null -w "%{http_code}" "http://${REWARD_SERVER}/health" 2>/dev/null || echo "000")
+
+    if [ "$data_ok" = "200" ] && [ "$reward_ok" = "200" ]; then
+      echo "Services ready!"
+      break
+    fi
+    echo "Waiting... (data: $data_ok, reward: $reward_ok)"
+    sleep 5
+  done
+
+  # WandB (optional)
+  if [ -n "$WANDB_API_KEY" ]; then
+    python3 -c "import wandb; wandb.login(relogin=True, key='$WANDB_API_KEY')"
+    LOGGER_CONFIG='["console","wandb"]'
+    WANDB_ARGS="trainer.project_name=$WANDB_PROJECT_NAME trainer.experiment_name=$WANDB_EXPERIMENT_NAME"
+  else
+    LOGGER_CONFIG='["console"]'
+    WANDB_ARGS=""
+  fi
+
+  HEAD_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  NUM_GPUS_PER_NODE=$SKYPILOT_NUM_GPUS_PER_NODE
+
+  echo "Starting Ray..."
+  ray start --head --disable-usage-stats --port=6379 --dashboard-host=0.0.0.0 --dashboard-port=8265
+  ray status
+
+  ulimit -n 65535
+
+  echo "Starting GRPO training on GSM8K..."
+
+  python3 -m verl.trainer.main_ppo \
+    algorithm.adv_estimator=grpo \
+    data.train_files=$HOME/data/gsm8k/train.parquet \
+    data.val_files=$HOME/data/gsm8k/test.parquet \
+    data.train_batch_size=$TRAIN_BATCH_SIZE \
+    data.val_batch_size=$VAL_BATCH_SIZE \
+    data.max_prompt_length=512 \
+    data.max_response_length=512 \
+    actor_rollout_ref.model.path=$MODEL_NAME \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=4 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.name=sglang \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.5 \
+    actor_rollout_ref.rollout.n=4 \
+    algorithm.use_kl_in_reward=False \
+    trainer.critic_warmup=0 \
+    trainer.val_before_train=False \
+    trainer.logger="$LOGGER_CONFIG" \
+    $WANDB_ARGS \
+    trainer.n_gpus_per_node=$NUM_GPUS_PER_NODE \
+    trainer.nnodes=1 \
+    trainer.save_freq=$SAVE_FREQ \
+    trainer.test_freq=$TEST_FREQ \
+    trainer.total_epochs=$TOTAL_EPOCHS \
+    trainer.total_training_steps=$TOTAL_STEPS
+
+  echo "Training complete!"
