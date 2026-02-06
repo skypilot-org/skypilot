@@ -1081,7 +1081,7 @@ Default: ``null``
 ``auth.oauth.cookie-refresh``
 '''''''''''''''''''''''''''''
 
-Duration in seconds after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
+Duration in seconds (integer) after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
 
 Default: ``null``
 
@@ -1089,14 +1089,14 @@ Default: ``null``
 
   auth:
     oauth:
-      cookie-refresh: 3540  # 59 minutes (for a 60-minute access token)
+      cookie-refresh: 3540s  # 59 minutes (3540 seconds) for a 60-minute access token
 
 .. _helm-values-auth-oauth-cookie-expire:
 
 ``auth.oauth.cookie-expire``
 ''''''''''''''''''''''''''''
 
-Expiration time for cookies in seconds. Should match the refresh token lifespan from your OIDC provider.
+Expiration time for cookies in seconds (integer). Should match the refresh token lifespan from your OIDC provider.
 
 Default: ``null``
 
@@ -1104,7 +1104,7 @@ Default: ``null``
 
   auth:
     oauth:
-      cookie-expire: 86400  # 24 hours
+      cookie-expire: 86400s  # 24 hours (86400 seconds)
 
 .. _helm-values-auth-serviceAccount:
 
@@ -1666,7 +1666,7 @@ Default: ``null``
 ``ingress.oauth2-proxy.cookie-refresh``
 '''''''''''''''''''''''''''''''''''''''
 
-Duration in seconds after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
+Duration in seconds (integer) after which to refresh the access token. This should typically be set to the access token lifespan minus 1 minute. If not set, tokens will not be refreshed automatically.
 
 Default: ``null``
 
@@ -1674,14 +1674,14 @@ Default: ``null``
 
   ingress:
     oauth2-proxy:
-      cookie-refresh: 3540  # 59 minutes (for a 60-minute access token)
+      cookie-refresh: 3540s  # 59 minutes (3540 seconds) for a 60-minute access token
 
 .. _helm-values-ingress-oauth2-proxy-cookie-expire:
 
 ``ingress.oauth2-proxy.cookie-expire``
 ''''''''''''''''''''''''''''''''''''''
 
-Expiration time for cookies in seconds. Should match the refresh token lifespan from your OIDC provider.
+Expiration time for cookies in seconds (integer). Should match the refresh token lifespan from your OIDC provider.
 
 Default: ``null``
 
@@ -1689,7 +1689,7 @@ Default: ``null``
 
   ingress:
     oauth2-proxy:
-      cookie-expire: 86400  # 24 hours
+      cookie-expire: 86400s  # 24 hours (86400 seconds)
 
 .. _helm-values-ingress-tls:
 
