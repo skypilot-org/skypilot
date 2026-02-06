@@ -543,7 +543,7 @@ def get_mount_cached_cmd(
         # Use a faster fingerprint algorithm to detect changes in files.
         # Recommended by rclone documentation for buckets like s3.
         '--vfs-fast-fingerprint '
-        # Other customizable rclone flags. Refer to `sky/data/config.py`.
+        # Other customizable rclone flags. Refer to `MountCachedConfig`.
         f'{mount_cached_config.to_rclone_flags()} '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
