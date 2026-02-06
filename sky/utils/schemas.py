@@ -348,6 +348,13 @@ def _get_single_resources_schema():
                     'gcp_queued_resource': {
                         'type': 'boolean',
                     },
+                    'valid_until_duration': {
+                        # Duration in seconds for how long the queued resource
+                        # request remains valid. Example: 10800 for 3 hours.
+                        # Only used when gcp_queued_resource is true.
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
                 }
             },
             '_no_missing_accel_warnings': {

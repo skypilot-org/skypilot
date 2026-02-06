@@ -7,6 +7,10 @@ resources:
   accelerator_args:
     runtime_version: v2-alpha-tpuv5-lite
     gcp_queued_resource: true
+    # Optional: Set how long the queued resource request remains valid.
+    # SkyPilot's polling timeout will align with this value.
+    # Example: 10800 = 3 hours. Default is 6000 seconds (100 minutes).
+    # valid_until_duration: 10800
 
 setup: |
   echo "running setup"
@@ -23,5 +27,5 @@ run: |
 
   for i in tqdm.trange(240):
     time.sleep(1)
-  
+
   EOF

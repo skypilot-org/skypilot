@@ -139,6 +139,9 @@ available_node_types:
   {%- endif %}
   {%- if gcp_queued_resource %}
       gcp_queued_resource: {{gcp_queued_resource}}
+    {%- if valid_until_duration %}
+      valid_until_duration: {{valid_until_duration}}
+    {%- endif %}
   {%- endif %}
 {%- else %}
       machineType: {{instance_type}}

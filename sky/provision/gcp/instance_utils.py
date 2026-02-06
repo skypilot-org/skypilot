@@ -1436,12 +1436,25 @@ class GCPTPUVMInstance(GCPInstance):
         cls.wait_for_operation(operation, project_id, availability_zone)
 
     @classmethod
-    def wait_for_queued_resource(cls, project_id: str, zone: str,
-                                 queued_resource_id: str) -> None:
-        """Wait for queued resource to be ready."""
+    def wait_for_queued_resource(cls,
+                                 project_id: str,
+                                 zone: str,
+                                 queued_resource_id: str,
+                                 timeout: Optional[int] = None) -> None:
+        """Wait for queued resource to be ready.
+
+        Args:
+            project_id: The GCP project ID.
+            zone: The zone where the queued resource is created.
+            queued_resource_id: The ID of the queued resource.
+            timeout: Optional timeout in seconds. If not specified, uses
+                GCP_QUEUED_RESOURCE_TIMEOUT (6000s).
+        """
+        if timeout is None:
+            timeout = GCP_QUEUED_RESOURCE_TIMEOUT
         logger.debug(
             f'Waiting for queued resource {queued_resource_id} to be ready '
-            f'(timeout={GCP_QUEUED_RESOURCE_TIMEOUT}s)...')
+            f'(timeout={timeout}s)...')
 
         @_retry_on_gcp_http_exception()
         def get_queued_resource():
@@ -1451,7 +1464,7 @@ class GCPTPUVMInstance(GCPInstance):
                 f'{queued_resource_id}').execute()
 
         wait_start = time.time()
-        while time.time() - wait_start < GCP_QUEUED_RESOURCE_TIMEOUT:
+        while time.time() - wait_start < timeout:
             try:
                 qr = get_queued_resource()
             except Exception as e:  # pylint: disable=broad-except
@@ -1556,6 +1569,11 @@ class GCPTPUVMInstance(GCPInstance):
         operations = []
         queued_resource_ids = []
 
+        # Extract valid_until_duration for queueingPolicy and polling timeout.
+        # This aligns SkyPilot's polling timeout with GCP's queued resource
+        # validity duration.
+        valid_until_duration = config.get('valid_until_duration')
+
         for i, name in enumerate(names):
             node_config = config.copy()
             if i == 0:
@@ -1564,11 +1582,12 @@ class GCPTPUVMInstance(GCPInstance):
                 node_config['labels'].update(
                     provision_constants.WORKER_NODE_TAGS)
             node_config.pop('gcp_queued_resource')
+            node_config.pop('valid_until_duration', None)
 
             qr_id = f'{name}-q'  # TODO: should this be configurable?
             parent = f'projects/{project_id}/locations/{zone}'
 
-            qr_body = {
+            qr_body: Dict[str, Any] = {
                 'tpu': {
                     'nodeSpec': {
                         'parent': parent,
@@ -1577,6 +1596,13 @@ class GCPTPUVMInstance(GCPInstance):
                     }
                 }
             }
+
+            # Add queueingPolicy if valid_until_duration is specified.
+            # See: https://cloud.google.com/tpu/docs/queued-resources
+            if valid_until_duration is not None:
+                qr_body['queueingPolicy'] = {
+                    'validUntilDuration': f'{valid_until_duration}s',
+                }
 
             if config.get('schedulingConfig', {}).get('preemptible'):
                 qr_body['spot'] = {}
@@ -1633,8 +1659,13 @@ class GCPTPUVMInstance(GCPInstance):
             cls.wait_for_operation(operation, project_id, zone=zone)
 
         # 2. Wait for Queued Resources to be ACTIVE
+        # Use valid_until_duration as the polling timeout if specified,
+        # otherwise use the default GCP_QUEUED_RESOURCE_TIMEOUT.
         for qr_id in queued_resource_ids:
-            cls.wait_for_queued_resource(project_id, zone, qr_id)
+            cls.wait_for_queued_resource(project_id,
+                                         zone,
+                                         qr_id,
+                                         timeout=valid_until_duration)
         return None, names
 
     @classmethod
