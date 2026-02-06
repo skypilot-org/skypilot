@@ -335,7 +335,7 @@ class MountCachedConfig:
     buffer_size: Optional[str] = None
     # Maximum total size of the VFS cache on disk (e.g. "20G").
     # rclone flag: --vfs-cache-max-size
-    _vfs_cache_max_size: Optional[str] = None
+    vfs_cache_max_size: Optional[str] = None
     # Maximum age of objects in the VFS cache (e.g. "1h").
     # rclone flag: --vfs-cache-max-age
     vfs_cache_max_age: Optional[str] = None
@@ -354,22 +354,10 @@ class MountCachedConfig:
     fast_list: Optional[bool] = None
     # Delay before writing back to remote (e.g. "5s").
     # rclone flag: --vfs-write-back
-    _vfs_write_back: Optional[str] = None
+    vfs_write_back: Optional[str] = None
     # Mount as read-only.
     # rclone flag: --read-only
     read_only: Optional[bool] = None
-
-    @property
-    def vfs_cache_max_size(self) -> str:
-        if self._vfs_cache_max_size is None:
-            return '10G'  # SkyPilot default
-        return self._vfs_cache_max_size
-
-    @property
-    def vfs_write_back(self) -> str:
-        if self._vfs_write_back is None:
-            return '1s'  # SkyPilot default
-        return self._vfs_write_back
 
     def to_rclone_flags(self) -> str:
         """Convert non-None fields to rclone CLI flag string."""
@@ -382,7 +370,7 @@ class MountCachedConfig:
             flags.append(f'--multi-thread-streams {self.multi_thread_streams}')
         if self.buffer_size is not None:
             flags.append(f'--buffer-size {self.buffer_size}')
-        flags.append(f'--vfs-cache-max-size {self.vfs_cache_max_size}')
+        flags.append(f'--vfs-cache-max-size {self.vfs_cache_max_size or "10G"}')
         if self.vfs_cache_max_age is not None:
             flags.append(f'--vfs-cache-max-age {self.vfs_cache_max_age}')
         if self.vfs_read_ahead is not None:
@@ -394,7 +382,7 @@ class MountCachedConfig:
                 f'--vfs-read-chunk-streams {self.vfs_read_chunk_streams}')
         if self.fast_list:
             flags.append('--fast-list')
-        flags.append(f'--vfs-write-back {self.vfs_write_back}')
+        flags.append(f'--vfs-write-back {self.vfs_write_back or "1s"}')
         if self.read_only:
             flags.append('--read-only')
         return ' '.join(flags)
@@ -1477,14 +1465,6 @@ class Storage(object):
         if persistent is None:
             persistent = True
 
-        assert not config, f'Invalid storage args: {config.keys()}'
-
-        # Validation of the config object happens on instantiation.
-        if store is not None:
-            stores = [StoreType(store.upper())]
-        else:
-            stores = None
-
         storage_config = config.pop('config', None)
 
         # Parse mount_cached config if present
@@ -1495,6 +1475,13 @@ class Storage(object):
                 mount_cached_config = MountCachedConfig.from_yaml_config(
                     mount_cached_dict)
 
+        assert not config, f'Invalid storage args: {config.keys()}'
+
+        # Validation of the config object happens on instantiation.
+        if store is not None:
+            stores = [StoreType(store.upper())]
+        else:
+            stores = None
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
