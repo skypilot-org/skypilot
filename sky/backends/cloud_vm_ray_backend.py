@@ -2163,7 +2163,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             ip_list = (self.cached_external_ips
                        if force_cached else self.external_ips())
             if ip_list is None:
-                return []
+                raise exceptions.FetchClusterInfoError(
+                    exceptions.FetchClusterInfoError.Reason.HEAD)
             # Potentially refresh the external SSH ports, in case the existing
             # cluster before #2491 was launched without external SSH ports
             # cached.
