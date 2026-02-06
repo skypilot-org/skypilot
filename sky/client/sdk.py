@@ -469,7 +469,7 @@ def validate(
     omit_local_disk = (remote_api_version is None or remote_api_version < 35)
     if omit_local_disk:
         logger.debug('`local_disk` is ignored because the server does '
-                       'not support it yet.')
+                     'not support it yet.')
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
