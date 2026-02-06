@@ -17,6 +17,7 @@ import pytest
 pytestmark = pytest.mark.xdist_group(name="pytest_api_compatibility")
 
 from sky import serve
+from sky.server import common as server_common
 from sky.server import constants as current_constants
 from sky.server.requests import payloads as current_payloads
 from sky.utils import common as common_lib
