@@ -337,15 +337,25 @@ class TestGpusList:
 
         assert 'Slurm is not enabled' in result.output
 
-    def _invoke_slurm_gpus_list(self, gpu_availability, node_info):
+    def _invoke_slurm_gpus_list(self,
+                                gpu_availability,
+                                node_info,
+                                extra_args=None):
         """Helper to invoke gpus_list with Slurm mocks.
 
         Sets up the Slurm cloud mock, configures stream_and_get to return
         gpu_availability then node_info, and invokes the CLI command.
+
+        Args:
+            extra_args: Additional CLI arguments (e.g. ['-v']).
         """
         self.cloud_registry_mock.return_value = clouds.Slurm()
         self.sdk_get_mock.return_value = ['slurm']
         self.stream_and_get_mock.side_effect = [gpu_availability, node_info]
+
+        cli_args = ['--cloud', 'slurm']
+        if extra_args:
+            cli_args.extend(extra_args)
 
         with mock.patch.object(sdk,
                                'realtime_slurm_gpu_availability',
@@ -353,7 +363,7 @@ class TestGpusList:
              mock.patch.object(sdk,
                                'slurm_node_info',
                                return_value=mock.MagicMock()):
-            return self.runner.invoke(command.gpus_list, ['--cloud', 'slurm'])
+            return self.runner.invoke(command.gpus_list, cli_args)
 
     def test_gpus_list_slurm_basic_partition_aggregation(self):
         """Test that multiple nodes in the same partition are aggregated."""
@@ -387,7 +397,9 @@ class TestGpusList:
             },
         ]
 
-        result = self._invoke_slurm_gpus_list(gpu_availability, node_info)
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
 
         assert result.exit_code == 0
         assert 'per-partition' in result.output
@@ -440,7 +452,9 @@ class TestGpusList:
             },
         ]
 
-        result = self._invoke_slurm_gpus_list(gpu_availability, node_info)
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
 
         assert result.exit_code == 0
         assert 'gpu' in result.output
@@ -468,7 +482,9 @@ class TestGpusList:
             },
         ]
 
-        result = self._invoke_slurm_gpus_list(gpu_availability, node_info)
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
 
         assert result.exit_code == 0
         assert 'gpu' in result.output
@@ -505,10 +521,61 @@ class TestGpusList:
             },
         ]
 
-        result = self._invoke_slurm_gpus_list(gpu_availability, node_info)
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
 
         assert result.exit_code == 0
         assert '0 of 0 free' in result.output
+
+    def test_gpus_list_slurm_no_verbose_hides_partition_table(self):
+        """Test that partition table is NOT shown without -v."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 24, 12)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'node1',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability, node_info)
+
+        assert result.exit_code == 0
+        # The summary table should still be shown
+        assert 'A100' in result.output
+        # But per-partition details should NOT be shown
+        assert 'per-partition' not in result.output
+
+    def test_gpus_list_slurm_verbose_shows_partition_table(self):
+        """Test that partition table IS shown with -v."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 24, 12)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'node1',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert 'A100' in result.output
+        # Per-partition details should be shown with -v
+        assert 'per-partition' in result.output
 
     def test_gpus_list_ssh_disabled_shows_message(self):
         """Test that disabled SSH shows appropriate message when requested."""

@@ -3701,6 +3701,7 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
+@flags.verbose_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
@@ -3709,7 +3710,8 @@ def show_gpus(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     NOTE: This command is deprecated. Use ``sky gpus list`` instead.
@@ -3739,7 +3741,8 @@ def show_gpus(
 
     If ``--cloud slurm`` is specified, it will show the maximum quantities of
     the GPU available on a single node and the real-time availability of the
-    GPU across all nodes in the Slurm cluster.
+    GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
+    accelerator details.
 
     Definitions of certain fields:
 
@@ -3755,7 +3758,13 @@ def show_gpus(
       in the Kubernetes cluster.
     """
     # Call the shared implementation
-    _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
+    _show_gpus_impl(accelerator_str,
+                    all,
+                    infra,
+                    cloud,
+                    region,
+                    all_regions,
+                    verbose=verbose)
 
 
 def _show_gpus_impl(
@@ -3764,7 +3773,8 @@ def _show_gpus_impl(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool = False):
     """Shared implementation for show_gpus and gpus_list commands."""
     cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
                                                                cloud,
@@ -4479,9 +4489,10 @@ def _show_gpus_impl(
                     if k8s_printed:
                         yield '\n'
 
-                    yield from _format_slurm_realtime_gpu(total_table,
-                                                          slurm_realtime_infos,
-                                                          show_node_info=True)
+                    yield from _format_slurm_realtime_gpu(
+                        total_table,
+                        slurm_realtime_infos,
+                        show_node_info=verbose)
 
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
@@ -4764,6 +4775,7 @@ def gpus_cli():
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
+@flags.verbose_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def gpus_list(
@@ -4772,7 +4784,8 @@ def gpus_list(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -4800,7 +4813,8 @@ def gpus_list(
 
     If ``--cloud slurm`` is specified, it will show the maximum quantities of
     the GPU available on a single node and the real-time availability of the
-    GPU across all nodes in the Slurm cluster.
+    GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
+    accelerator details.
 
     Definitions of certain fields:
 
@@ -4816,7 +4830,13 @@ def gpus_list(
       in the Kubernetes cluster.
     """
     # Call the shared implementation
-    _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
+    _show_gpus_impl(accelerator_str,
+                    all,
+                    infra,
+                    cloud,
+                    region,
+                    all_regions,
+                    verbose=verbose)
 
 
 @gpus_cli.command('label', cls=_DocumentedCodeCommand)
