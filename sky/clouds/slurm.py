@@ -376,7 +376,9 @@ class Slurm(clouds.Cloud):
                 provision_timeout = 24 * 60 * 60  # 24 hours
             else:
                 # Otherwise, we still want failover, but also wait sufficiently
-                # long for the Slurm scheduler to allocate the resources.
+                # long for the Slurm scheduler to allocate the resources. We
+                # have seen Slurm taking minutes to schedule a job, when there
+                # are a lot of pending jobs to be processed.
                 provision_timeout = 5 * 60  # 5 minutes
 
         deploy_vars = {
