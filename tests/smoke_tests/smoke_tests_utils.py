@@ -623,26 +623,25 @@ _PROVISION_FAILED_PATTERN = 'ResourcesUnavailableError'
 
 
 def _check_and_skip_if_provision_failed(
-        log_to_stdout: Optional[str],
-        log_file: Optional['tempfile.NamedTemporaryFile']) -> None:
+        log_file_path: Optional[str]) -> None:
     """Skip the test if the log contains a provisioning failure.
 
     When resources like TPUs are unavailable, we want to skip the test
     rather than fail it, so it doesn't block releases.
     """
-    log_content = None
-    if not log_to_stdout and log_file is not None:
-        try:
-            with open(log_file.name, 'r', encoding='utf-8') as f:
-                log_content = f.read()
-        except OSError:
-            pass
-    if log_content and _PROVISION_FAILED_PATTERN in log_content:
+    if log_file_path is None:
+        return
+    try:
+        with open(log_file_path, 'r', encoding='utf-8') as f:
+            log_content = f.read()
+    except OSError:
+        return
+    if _PROVISION_FAILED_PATTERN in log_content:
         # Extract the relevant error line for the skip message.
         for line in log_content.splitlines():
             if _PROVISION_FAILED_PATTERN in line:
-                pytest.skip(f'Resource provisioning failed: {line.strip()}')
-        # Fallback if pattern found but not on a single line.
+                pytest.skip(
+                    f'Resource provisioning failed: {line.strip()}')
         pytest.skip('Resource provisioning failed due to '
                     'ResourcesUnavailableError')
 
@@ -653,6 +652,15 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
         test.commands.insert(0, 'sky status -u')
 
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
+    # When skip_if_failed_to_provision is True and output goes to stdout,
+    # we need a capture file to check for provisioning errors later.
+    # Commands will be wrapped with tee to stream output while capturing.
+    capture_file = None
+    if test.skip_if_failed_to_provision and log_to_stdout:
+        capture_file = tempfile.NamedTemporaryFile('a',
+                                                   prefix=f'{test.name}-',
+                                                   suffix='.capture.log',
+                                                   delete=False)
     if log_to_stdout:
         write = test.echo
         flush = lambda: None
@@ -692,8 +700,17 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 continue
             write(f'+ {command}\n')
             flush()
+            run_command = command
+            if capture_file is not None:
+                # Wrap with tee to capture output while still streaming
+                # to the original destination (e.g. stderr).
+                # PIPESTATUS[0] preserves the original command's exit
+                # code through the pipe.
+                run_command = (f'{command} 2>&1 | '
+                               f'tee -a {capture_file.name}; '
+                               f'exit ${{PIPESTATUS[0]}}')
             proc = subprocess.Popen(
-                command,
+                run_command,
                 stdout=subprocess_out,
                 stderr=subprocess.STDOUT,
                 shell=True,
@@ -792,8 +809,13 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
                 # Check if the failure was due to resource unavailability.
                 # If so, skip the test instead of failing it. This is useful
                 # for tests depending on scarce resources like TPUs.
-                _check_and_skip_if_provision_failed(
-                    log_to_stdout, log_file if not log_to_stdout else None)
+                # Use capture_file (LOG_TO_STDOUT mode) or log_file.
+                check_path = None
+                if capture_file is not None:
+                    check_path = capture_file.name
+                elif not log_to_stdout:
+                    check_path = log_file.name
+                _check_and_skip_if_provision_failed(check_path)
             if log_to_stdout:
                 raise Exception(f'test failed')
             else:
