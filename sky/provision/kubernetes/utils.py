@@ -469,9 +469,9 @@ def get_gke_accelerator_name(accelerator: str) -> str:
 class SkyPilotLabelFormatter(GPULabelFormatter):
     """Custom label formatter for SkyPilot
 
-     Uses skypilot.co/accelerator as the key, and SkyPilot accelerator str as the
-     value.
-     """
+    Uses skypilot.co/accelerator as the key, and SkyPilot accelerator str as the
+    value.
+    """
 
     LABEL_KEY = 'skypilot.co/accelerator'
 
