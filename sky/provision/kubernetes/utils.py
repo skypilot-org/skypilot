@@ -768,7 +768,7 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 class NebiusLabelFormatter(GPULabelFormatter):
     """Custom label formatter for Nebius
 
-    Uses nebius.com/gpu-name as the key, , and the uppercase SkyPilot
+    Uses nebius.com/gpu-name as the key, and the uppercase SkyPilot
     accelerator str as the value.
     """
 
@@ -784,8 +784,7 @@ class NebiusLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_label_values(cls, accelerator: str) -> List[str]:
-        # For SkyPilot formatter, we use the accelerator str directly.
-        # See sky.utils.kubernetes.gpu_labeler.
+        # For Nebius formatter, we use the uppercase accelerator str.
         return [accelerator.upper()]
 
     @classmethod
