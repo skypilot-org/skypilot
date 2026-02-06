@@ -506,6 +506,7 @@ def get_mount_cached_cmd(
         # pylint: disable=import-outside-toplevel
         from sky.data import storage
 
+        # initialize an empty one for SkyPilot defaults.
         mount_cached_config = storage.MountCachedConfig()
 
     # Check if sequential upload is enabled via config.
