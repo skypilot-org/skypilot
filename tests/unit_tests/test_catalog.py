@@ -337,8 +337,8 @@ _LOCAL_DISK_DF = pd.DataFrame([
 def test_filter_with_local_disk(local_disk, expected):
     """Test that filter_with_local_disk + instance selection picks the
     correct (cheapest) instance satisfying local disk requirements."""
-    filtered = catalog_common.filter_with_local_disk(
-        _LOCAL_DISK_DF.copy(), local_disk)
+    filtered = catalog_common.filter_with_local_disk(_LOCAL_DISK_DF.copy(),
+                                                     local_disk)
     result = catalog_common.get_instance_type_for_cpus_mem_impl(
         filtered, cpus='1+', memory_gb_or_ratio=None, region=None)
     assert result == expected
@@ -357,7 +357,7 @@ def test_filter_with_local_disk(local_disk, expected):
 )
 def test_filter_with_local_disk_instance_sets(local_disk, expected_instances):
     """Test that filter_with_local_disk returns the correct candidate set."""
-    filtered = catalog_common.filter_with_local_disk(
-        _LOCAL_DISK_DF.copy(), local_disk)
+    filtered = catalog_common.filter_with_local_disk(_LOCAL_DISK_DF.copy(),
+                                                     local_disk)
     assert sorted(
         filtered['InstanceType'].tolist()) == sorted(expected_instances)
