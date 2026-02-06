@@ -465,6 +465,11 @@ def validate(
     # TODO(kevin): remove this in v0.13.0
     omit_user_specified_yaml = (remote_api_version is None or
                                 remote_api_version < 15)
+    # TODO (kyuds): remove this in v0.13.0
+    omit_local_disk = (remote_api_version is None or remote_api_version < 35)
+    if omit_local_disk:
+        logger.debug('`local_disk` is ignored because the server does '
+                     'not support it yet.')
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -472,6 +477,11 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
+        if omit_local_disk:
+            for resource in task.resources:
+                # pylint: disable=protected-access
+                resource._set_local_disk(None)
+
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
