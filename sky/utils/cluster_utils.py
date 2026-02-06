@@ -69,6 +69,7 @@ def _get_windows_userprofile_via_cmd() -> Optional[str]:
             text=True,
             timeout=5,
             check=False,
+            errors='replace'
         )
         if result.returncode == 0:
             userprofile = result.stdout.strip()
