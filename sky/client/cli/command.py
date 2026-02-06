@@ -3977,7 +3977,7 @@ def show_gpus(
         quantity_filter: Optional[int] = None,
         slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
-               Optional['prettytable.PrettyTable']]:
+               Optional['prettytable.PrettyTable'], List[Tuple[str, str]]]:
         """Get Slurm GPU availability tables.
 
         Args:
@@ -4012,11 +4012,24 @@ def show_gpus(
             raise ValueError(err_msg + debug_msg)
 
         realtime_gpu_infos = []
+        failed_infos: List[Tuple[str, str]] = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
 
-        for (slurm_cluster,
-             availability_list) in realtime_gpu_availability_lists:
+        for entry in realtime_gpu_availability_lists:
+            # Handle both 2-element (old server) and 3-element (new server)
+            # tuples for backward compatibility.
+            # TODO(kevin): remove this in v0.13.0
+            if len(entry) == 3:
+                slurm_cluster, availability_list, error = entry
+            else:
+                slurm_cluster, availability_list = entry
+                error = None
+
+            if error is not None:
+                failed_infos.append((slurm_cluster, error))
+                continue
+
             realtime_gpu_table = log_utils.create_table(
                 ['GPU', qty_header, 'UTILIZATION'])
             for realtime_gpu_availability in sorted(availability_list):
@@ -4050,7 +4063,7 @@ def show_gpus(
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table
+        return realtime_gpu_infos, total_realtime_gpu_table, failed_infos
 
     def _format_kubernetes_node_info_combined(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
@@ -4377,7 +4390,7 @@ def show_gpus(
         return False, print_section_titles
 
     def _format_slurm_realtime_gpu(
-            total_table, slurm_realtime_infos,
+            total_table, slurm_realtime_infos, failed_infos,
             show_node_info: bool) -> Generator[str, None, None]:
         # print total table
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
@@ -4395,7 +4408,16 @@ def show_gpus(
                    f'{colorama.Style.RESET_ALL}\n')
             yield from slurm_realtime_table.get_string()
             yield '\n'
-        if show_node_info:
+
+        for (cluster_name, error_msg) in failed_infos:
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Slurm Cluster: {cluster_name}'
+                   f'{colorama.Style.RESET_ALL}\n')
+            yield (f'  {colorama.Fore.YELLOW}'
+                   f'{error_msg}'
+                   f'{colorama.Style.RESET_ALL}\n')
+
+        if show_node_info and slurm_realtime_infos:
             cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
             yield _format_slurm_node_info(cluster_names)
 
@@ -4449,7 +4471,7 @@ def show_gpus(
                     # If --cloud slurm is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    slurm_realtime_infos, total_table = (
+                    slurm_realtime_infos, total_table, failed_infos = (
                         _get_slurm_realtime_gpu_tables(
                             slurm_cluster_name=region))
                 except ValueError as e:
@@ -4464,6 +4486,7 @@ def show_gpus(
 
                     yield from _format_slurm_realtime_gpu(total_table,
                                                           slurm_realtime_infos,
+                                                          failed_infos,
                                                           show_node_info=True)
 
             if cloud_is_slurm:
@@ -4580,13 +4603,14 @@ def show_gpus(
             # accelerator is requested
             print_section_titles = True
             try:
-                slurm_realtime_infos, total_table = (
+                slurm_realtime_infos, total_table, failed_infos = (
                     _get_slurm_realtime_gpu_tables(name_filter=name,
                                                    quantity_filter=quantity,
                                                    slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
+                                                      failed_infos,
                                                       show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
