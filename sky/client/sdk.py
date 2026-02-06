@@ -466,7 +466,7 @@ def validate(
     omit_user_specified_yaml = (remote_api_version is None or
                                 remote_api_version < 15)
     # TODO (kyuds): remove this in v0.13.0
-    omit_local_disk = (remote_api_version is None or remote_api_version < 36)
+    omit_local_disk = (remote_api_version is None or remote_api_version < 35)
     if omit_local_disk:
         logger.warning('`local_disk` is ignored because the server does '
                        'not support it yet.')
