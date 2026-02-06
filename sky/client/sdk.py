@@ -3018,3 +3018,45 @@ def slurm_node_info(
         json=json.loads(body.model_dump_json()),
     )
     return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(24)
+@annotations.client_api
+def realtime_slurm_gpu_availability_per_partition(
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None,
+        slurm_cluster_name: Optional[str] = None) -> server_common.RequestId:
+    """Gets the real-time Slurm GPU availability grouped by partition.
+
+    This function provides a more detailed view of GPU availability by showing
+    per-partition breakdowns within each Slurm cluster. This is useful for
+    users who need to know GPU availability in specific partitions.
+
+    Note: A node can belong to multiple partitions. In such cases, the node's
+    GPUs are counted in each partition it belongs to.
+
+    Args:
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
+
+    Returns:
+        The request ID of the Slurm GPU availability request.
+
+    Request Returns:
+        Dict[str, Dict[str, List[RealtimeGpuAvailability]]]: A nested dict
+            mapping cluster_name -> partition_name -> list of GPU availability.
+    """
+    body = payloads.SlurmGpuAvailabilityRequestBody(
+        slurm_cluster_name=slurm_cluster_name,
+        name_filter=name_filter,
+        quantity_filter=quantity_filter,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/slurm_gpu_availability_per_partition',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)

@@ -3987,31 +3987,49 @@ def _show_gpus_impl(
 
         return realtime_gpu_infos, total_realtime_gpu_table, all_nodes_info
 
+    # Type alias for per-partition GPU data
+    # cluster -> partition -> table
+    PerPartitionTables = Dict[str, List[Tuple[str, 'prettytable.PrettyTable']]]
+
     def _get_slurm_realtime_gpu_tables(
         name_filter: Optional[str] = None,
         quantity_filter: Optional[int] = None,
         slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
-               Optional['prettytable.PrettyTable']]:
-        """Get Slurm GPU availability tables.
+               Optional['prettytable.PrettyTable'], PerPartitionTables]:
+        """Get Slurm GPU availability tables with per-partition breakdown.
 
         Args:
             name_filter: Filter GPUs by name.
             quantity_filter: Filter GPUs by quantity.
+            slurm_cluster_name: Filter by specific Slurm cluster.
 
         Returns:
-            A tuple of (realtime_gpu_infos, total_realtime_gpu_table).
+            A tuple of:
+            - realtime_gpu_infos: List of (cluster_name, cluster_table) tuples
+            - total_realtime_gpu_table: Aggregated table across all clusters
+            - per_partition_tables: Dict mapping cluster -> list of
+              (partition_name, partition_table) tuples
         """
         if quantity_filter:
             qty_header = 'QTY_FILTER'
         else:
             qty_header = 'REQUESTABLE_QTY_PER_NODE'
 
+        # Fetch cluster-level data (for backwards compatibility and totals)
         realtime_gpu_availability_lists = sdk.stream_and_get(
             sdk.realtime_slurm_gpu_availability(
                 name_filter=name_filter,
                 quantity_filter=quantity_filter,
                 slurm_cluster_name=slurm_cluster_name))
+
+        # Fetch per-partition data
+        per_partition_data = sdk.stream_and_get(
+            sdk.realtime_slurm_gpu_availability_per_partition(
+                name_filter=name_filter,
+                quantity_filter=quantity_filter,
+                slurm_cluster_name=slurm_cluster_name))
+
         if not realtime_gpu_availability_lists:
             err_msg = 'No GPUs found in any Slurm partition. '
             debug_msg = 'To further debug, run: sky check slurm '
@@ -4054,8 +4072,8 @@ def _show_gpus_impl(
                     total_gpu_info[gpu][1] += available
             realtime_gpu_infos.append((slurm_cluster, realtime_gpu_table))
 
-        # display an aggregated table for all partitions
-        # if there are more than one partitions with GPUs
+        # display an aggregated table for all clusters
+        # if there are more than one clusters with GPUs
         if len(realtime_gpu_infos) > 1:
             total_realtime_gpu_table = log_utils.create_table(
                 ['GPU', 'UTILIZATION'])
@@ -4065,7 +4083,29 @@ def _show_gpus_impl(
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table
+        # Build per-partition tables
+        per_partition_tables: PerPartitionTables = {}
+        if per_partition_data:
+            for cluster_name, partitions in per_partition_data.items():
+                partition_tables = []
+                for partition_name, gpu_list in sorted(partitions.items()):
+                    partition_table = log_utils.create_table(
+                        ['GPU', qty_header, 'UTILIZATION'])
+                    for gpu_data in sorted(gpu_list):
+                        gpu_availability = models.RealtimeGpuAvailability(
+                            *gpu_data)
+                        requestable_quantities = gpu_availability.counts
+                        partition_table.add_row([
+                            gpu_availability.gpu,
+                            _list_to_str(requestable_quantities),
+                            (f'{gpu_availability.available} of '
+                             f'{gpu_availability.capacity} free'),
+                        ])
+                    partition_tables.append((partition_name, partition_table))
+                per_partition_tables[cluster_name] = partition_tables
+
+        return (realtime_gpu_infos, total_realtime_gpu_table,
+                per_partition_tables)
 
     def _format_kubernetes_node_info_combined(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
@@ -4383,6 +4423,7 @@ def _show_gpus_impl(
 
     def _format_slurm_realtime_gpu(
             total_table, slurm_realtime_infos,
+            per_partition_tables: PerPartitionTables,
             show_node_info: bool) -> Generator[str, None, None]:
         # print total table
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
@@ -4392,14 +4433,42 @@ def _show_gpus_impl(
             yield from total_table.get_string()
             yield '\n'
 
-        # print individual infos.
-        for (partition, slurm_realtime_table) in slurm_realtime_infos:
-            partition_str = f'Slurm Cluster: {partition}'
+        # print individual cluster infos with per-partition breakdowns
+        for (cluster_name, cluster_table) in slurm_realtime_infos:
+            cluster_str = f'Slurm Cluster: {cluster_name}'
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                   f'{partition_str}'
+                   f'{cluster_str}'
                    f'{colorama.Style.RESET_ALL}\n')
-            yield from slurm_realtime_table.get_string()
+            yield from cluster_table.get_string()
             yield '\n'
+
+            # Show per-partition breakdown for this cluster
+            if cluster_name in per_partition_tables:
+                partition_tables = per_partition_tables[cluster_name]
+                if len(partition_tables) > 1:
+                    # Only show per-partition breakdown if there are multiple
+                    # partitions (otherwise it's redundant with cluster total)
+                    yield (f'{colorama.Fore.YELLOW}'
+                           f'  Per-partition breakdown:'
+                           f'{colorama.Style.RESET_ALL}\n')
+                    for (partition_name, partition_table) in partition_tables:
+                        yield (f'{colorama.Fore.LIGHTBLUE_EX}'
+                               f'  Partition: {partition_name}'
+                               f'{colorama.Style.RESET_ALL}\n')
+                        # Indent the table output
+                        table_str = partition_table.get_string()
+                        indented_lines = [
+                            '  ' + line for line in table_str.split('\n')
+                        ]
+                        yield '\n'.join(indented_lines)
+                        yield '\n'
+                elif len(partition_tables) == 1:
+                    # Single partition - just mention its name
+                    partition_name = partition_tables[0][0]
+                    yield (f'{colorama.Fore.LIGHTBLUE_EX}'
+                           f'  (Partition: {partition_name})'
+                           f'{colorama.Style.RESET_ALL}\n')
+
         if show_node_info:
             cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
             yield _format_slurm_node_info(cluster_names)
@@ -4454,9 +4523,9 @@ def _show_gpus_impl(
                     # If --cloud slurm is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    slurm_realtime_infos, total_table = (
-                        _get_slurm_realtime_gpu_tables(
-                            slurm_cluster_name=region))
+                    (slurm_realtime_infos, total_table,
+                     per_partition_tables) = (_get_slurm_realtime_gpu_tables(
+                         slurm_cluster_name=region))
                 except ValueError as e:
                     if not cloud_is_slurm:
                         # Make it a note if cloud is not slurm
@@ -4469,6 +4538,7 @@ def _show_gpus_impl(
 
                     yield from _format_slurm_realtime_gpu(total_table,
                                                           slurm_realtime_infos,
+                                                          per_partition_tables,
                                                           show_node_info=True)
 
             if cloud_is_slurm:
@@ -4585,13 +4655,15 @@ def _show_gpus_impl(
             # accelerator is requested
             print_section_titles = True
             try:
-                slurm_realtime_infos, total_table = (
-                    _get_slurm_realtime_gpu_tables(name_filter=name,
-                                                   quantity_filter=quantity,
-                                                   slurm_cluster_name=region))
+                (slurm_realtime_infos, total_table,
+                 per_partition_tables) = (_get_slurm_realtime_gpu_tables(
+                     name_filter=name,
+                     quantity_filter=quantity,
+                     slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
+                                                      per_partition_tables,
                                                       show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message

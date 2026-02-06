@@ -11,6 +11,8 @@ class RequestName(str, enum.Enum):
         'realtime_kubernetes_gpu_availability')
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
     REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
+    REALTIME_SLURM_GPU_AVAILABILITY_PER_PARTITION = (
+        'realtime_slurm_gpu_availability_per_partition')
     SLURM_NODE_INFO = 'slurm_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
     KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'

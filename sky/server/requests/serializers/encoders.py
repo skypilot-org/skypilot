@@ -288,6 +288,31 @@ def encode_realtime_slurm_gpu_availability(
     return encoded
 
 
+@register_encoder('realtime_slurm_gpu_availability_per_partition')
+def encode_realtime_slurm_gpu_availability_per_partition(
+    return_value: Dict[str, Dict[str, List[Any]]]
+) -> Dict[str, Dict[str, List[List[Any]]]]:
+    """Encode per-partition Slurm GPU availability for JSON serialization.
+
+    Args:
+        return_value: Nested dict mapping cluster -> partition -> gpu list
+
+    Returns:
+        Same structure with RealtimeGpuAvailability converted to lists.
+    """
+    encoded: Dict[str, Dict[str, List[List[Any]]]] = {}
+    for cluster_name, partitions in return_value.items():
+        encoded[cluster_name] = {}
+        for partition_name, gpu_list in partitions.items():
+            converted_gpu_list = []
+            for gpu in gpu_list:
+                assert isinstance(gpu, models.RealtimeGpuAvailability), (
+                    f'Expected RealtimeGpuAvailability, got {type(gpu)}')
+                converted_gpu_list.append(list(gpu))
+            encoded[cluster_name][partition_name] = converted_gpu_list
+    return encoded
+
+
 @register_encoder('list_accelerators')
 def encode_list_accelerators(
         return_value: Dict[str, List[Any]]) -> Dict[str, Any]:

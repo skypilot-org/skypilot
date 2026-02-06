@@ -1687,6 +1687,113 @@ def realtime_slurm_gpu_availability(
     return availability_lists
 
 
+# Type alias for per-partition GPU availability data structure
+# Maps: cluster_name -> partition_name -> List[RealtimeGpuAvailability]
+PerPartitionGpuAvailability = Dict[str,
+                                   Dict[str,
+                                        List[models.RealtimeGpuAvailability]]]
+
+
+def realtime_slurm_gpu_availability_per_partition(
+        slurm_cluster_name: Optional[str] = None,
+        name_filter: Optional[str] = None,
+        quantity_filter: Optional[int] = None,
+        env_vars: Optional[Dict[str, str]] = None,
+        **kwargs) -> PerPartitionGpuAvailability:
+    """Gets Slurm real-time GPU availability grouped by cluster and partition.
+
+    This function provides a more detailed view of GPU availability by showing
+    per-partition breakdowns within each Slurm cluster. This is useful for
+    users who need to know GPU availability in specific partitions.
+
+    Note: A node can belong to multiple partitions. In such cases, the node's
+    GPUs are counted in each partition it belongs to. This means the sum of
+    GPUs across all partitions may exceed the actual cluster total.
+
+    Args:
+        slurm_cluster_name: Optional Slurm cluster name to filter by.
+        name_filter: Optional name filter for GPUs.
+        quantity_filter: Optional quantity filter for GPUs.
+        env_vars: Environment variables (may be needed for backend).
+        kwargs: Additional keyword arguments.
+
+    Returns:
+        A nested dictionary structure:
+        {
+            'cluster_name': {
+                'partition_1': [
+                    RealtimeGpuAvailability(gpu='V100', counts=[4, 8],
+                                            capacity=16, available=10),
+                    ...
+                ],
+                'partition_2': [...],
+            },
+            ...
+        }
+    """
+    del env_vars, kwargs  # Currently unused
+
+    if slurm_cluster_name is None:
+        slurm_cluster_names = clouds.Slurm.existing_allowed_clusters()
+    else:
+        slurm_cluster_names = [slurm_cluster_name]
+
+    def get_per_partition_availability(
+            cluster_name: str
+    ) -> Dict[str, List[models.RealtimeGpuAvailability]]:
+        # Import slurm_catalog dynamically to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import slurm_catalog
+        try:
+            per_partition_data = slurm_catalog.\
+                list_accelerators_realtime_per_partition(
+                    name_filter=name_filter,
+                    quantity_filter=quantity_filter,
+                    case_sensitive=False,
+                    slurm_cluster_name=cluster_name,
+                )
+        except exceptions.NotSupportedError as e:
+            logger.error(f'Failed to query Slurm GPU availability: {e}')
+            raise
+        except ValueError as e:
+            logger.debug(f'No GPUs found in Slurm cluster {cluster_name}: {e}')
+            return {}
+        except Exception as e:
+            logger.error(
+                'Error querying Slurm GPU availability per partition: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+            raise ValueError(
+                f'Error querying Slurm GPU availability: {e}') from e
+
+        # Convert to RealtimeGpuAvailability format
+        result: Dict[str, List[models.RealtimeGpuAvailability]] = {}
+        for partition, (qtys_map, capacity,
+                        available) in per_partition_data.items():
+            availability_list: List[models.RealtimeGpuAvailability] = []
+            for gpu_type in sorted(qtys_map.keys()):
+                availability_list.append(
+                    models.RealtimeGpuAvailability(
+                        gpu_type,
+                        qtys_map[gpu_type],
+                        capacity[gpu_type],
+                        available[gpu_type],
+                    ))
+            if availability_list:
+                result[partition] = availability_list
+        return result
+
+    parallel_queried = subprocess_utils.run_in_parallel(
+        get_per_partition_availability, slurm_cluster_names)
+
+    result: PerPartitionGpuAvailability = {}
+    for cluster_name, partition_data in zip(slurm_cluster_names,
+                                            parallel_queried):
+        if partition_data:
+            result[cluster_name] = partition_data
+
+    return result
+
+
 # =================
 # = Local Cluster =
 # =================

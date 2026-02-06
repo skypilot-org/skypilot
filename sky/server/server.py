@@ -1035,6 +1035,23 @@ async def slurm_node_info(
     )
 
 
+@app.post('/slurm_gpu_availability_per_partition')
+async def slurm_gpu_availability_per_partition(
+    request: fastapi.Request,
+    slurm_gpu_availability_body: payloads.SlurmGpuAvailabilityRequestBody
+) -> None:
+    """Gets real-time Slurm GPU availability grouped by partition."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.
+        REALTIME_SLURM_GPU_AVAILABILITY_PER_PARTITION,
+        request_body=slurm_gpu_availability_body,
+        func=core.realtime_slurm_gpu_availability_per_partition,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
     """[Experimental] Get all SkyPilot resources (including from other '

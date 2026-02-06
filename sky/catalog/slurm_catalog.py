@@ -229,6 +229,147 @@ def list_accelerators_realtime(
     return final_qtys_map, dict(total_capacity), dict(total_available)
 
 
+# Type alias for per-partition GPU data
+# Maps partition -> (qtys_map, total_capacity, total_available)
+PerPartitionGpuData = Dict[str, Tuple[Dict[str, List[common.InstanceTypeInfo]],
+                                      Dict[str, int], Dict[str, int]]]
+
+
+def list_accelerators_realtime_per_partition(
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    case_sensitive: bool = True,
+    slurm_cluster_name: Optional[str] = None,
+) -> PerPartitionGpuData:
+    """Fetches real-time accelerator information grouped by Slurm partition.
+
+    This function returns GPU availability data broken down by partition,
+    allowing users to see how many GPUs are available in each partition.
+
+    Note: A node can belong to multiple partitions. In such cases, the node's
+    GPUs are counted in each partition it belongs to. This means the sum of
+    GPUs across all partitions may exceed the actual total if nodes are shared.
+
+    Args:
+        name_filter: Regex filter for accelerator names (e.g., 'V100', 'gpu').
+        quantity_filter: Minimum number of accelerators required per node.
+        case_sensitive: Whether name_filter is case-sensitive.
+        slurm_cluster_name: The Slurm cluster to query.
+
+    Returns:
+        A dictionary mapping partition names to tuples of:
+        - qtys_map: Maps GPU type to list of InstanceTypeInfo objects
+        - total_capacity: Maps GPU type to total count in this partition
+        - total_available: Maps GPU type to free count in this partition
+    """
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        cloud.CloudCapability.COMPUTE)
+    if not sky_clouds.cloud_in_iterable(sky_clouds.Slurm(), enabled_clouds):
+        return {}
+
+    if slurm_cluster_name is None:
+        all_clusters = slurm_utils.get_all_slurm_cluster_names()
+        if not all_clusters:
+            return {}
+        slurm_cluster_name = all_clusters[0]
+
+    slurm_nodes_info = slurm_utils.slurm_node_info(
+        slurm_cluster_name=slurm_cluster_name)
+
+    if not slurm_nodes_info:
+        return {}
+
+    # Per-partition data structures
+    # partition -> gpu_type -> set of InstanceTypeInfo
+    partition_qtys: Dict[str, Dict[
+        str, Set[common.InstanceTypeInfo]]] = collections.defaultdict(
+            lambda: collections.defaultdict(set))
+    # partition -> gpu_type -> total capacity
+    partition_capacity: Dict[str, Dict[str, int]] = collections.defaultdict(
+        lambda: collections.defaultdict(int))
+    # partition -> gpu_type -> available count
+    partition_available: Dict[str, Dict[str, int]] = collections.defaultdict(
+        lambda: collections.defaultdict(int))
+
+    for node_info in slurm_nodes_info:
+        gpu_type = node_info['gpu_type']
+        node_total_gpus = node_info['total_gpus']
+        node_free_gpus = node_info['free_gpus']
+        # Partition field may contain comma-separated partitions
+        partitions_str = node_info['partition']
+
+        # Skip nodes without GPUs
+        if not gpu_type or node_total_gpus <= 0:
+            continue
+
+        # Apply name filter
+        regex_flags = 0 if case_sensitive else re.IGNORECASE
+        if name_filter and not re.match(
+                name_filter, gpu_type, flags=regex_flags):
+            continue
+
+        # Apply quantity filter
+        if quantity_filter and node_total_gpus < quantity_filter:
+            continue
+
+        # Process each partition this node belongs to
+        partitions = [p.strip() for p in partitions_str.split(',')]
+        for partition in partitions:
+            if not partition:
+                continue
+
+            # Add capacity and availability for this partition
+            partition_capacity[partition][gpu_type] += node_total_gpus
+            partition_available[partition][gpu_type] += node_free_gpus
+
+            # Generate requestable quantities (powers of 2 up to total)
+            count = 1
+            while count <= node_total_gpus:
+                instance_info = common.InstanceTypeInfo(
+                    instance_type=None,
+                    accelerator_name=gpu_type,
+                    accelerator_count=count,
+                    cpu_count=node_info['vcpu_count'],
+                    memory=node_info['memory_gb'],
+                    price=0.0,
+                    region=partition,
+                    cloud='slurm',
+                    device_memory=0.0,
+                    spot_price=0.0,
+                )
+                partition_qtys[partition][gpu_type].add(instance_info)
+                count *= 2
+
+            # Add actual total if not a power of 2
+            if count // 2 != node_total_gpus:
+                instance_info = common.InstanceTypeInfo(
+                    instance_type=None,
+                    accelerator_name=gpu_type,
+                    accelerator_count=node_total_gpus,
+                    cpu_count=node_info['vcpu_count'],
+                    memory=node_info['memory_gb'],
+                    price=0.0,
+                    region=partition,
+                    cloud='slurm',
+                    device_memory=0.0,
+                    spot_price=0.0,
+                )
+                partition_qtys[partition][gpu_type].add(instance_info)
+
+    # Convert to final format
+    result: PerPartitionGpuData = {}
+    for partition in sorted(partition_capacity.keys()):
+        # Convert sets to sorted lists
+        qtys_map = {
+            gpu: sorted(list(instances), key=lambda x: x.accelerator_count)
+            for gpu, instances in partition_qtys[partition].items()
+        }
+        result[partition] = (qtys_map, dict(partition_capacity[partition]),
+                             dict(partition_available[partition]))
+
+    return result
+
+
 def validate_region_zone(
     region_name: Optional[str],
     zone_name: Optional[str],
