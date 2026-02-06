@@ -581,6 +581,48 @@ def get_storage_schema():
                     'attach_mode': {
                         'type': 'string',
                     },
+                    'mount_cached': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'transfers': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'multi_thread_streams': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'buffer_size': {
+                                'type': 'string',
+                            },
+                            'vfs_cache_max_size': {
+                                'type': 'string',
+                            },
+                            'vfs_cache_max_age': {
+                                'type': 'string',
+                            },
+                            'vfs_read_ahead': {
+                                'type': 'string',
+                            },
+                            'vfs_read_chunk_size': {
+                                'type': 'string',
+                            },
+                            'vfs_read_chunk_streams': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'fast_list': {
+                                'type': 'boolean',
+                            },
+                            'vfs_write_back': {
+                                'type': 'string',
+                            },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
+                    },
                 },
             },
             '_is_sky_managed': {
