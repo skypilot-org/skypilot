@@ -193,15 +193,15 @@ def _get_df() -> 'pd.DataFrame':
     with _apply_az_mapping_lock:
         if _user_df is None:
             try:
-                _user_df = _fetch_and_apply_az_mapping(_default_df)
+                df = _fetch_and_apply_az_mapping(_default_df)
             except (RuntimeError, ImportError) as e:
                 if config.get_use_default_catalog_if_failed():
                     logger.warning('Failed to fetch availability zone mapping. '
                                    f'{common_utils.format_exception(e)}')
-                    return _default_df
+                    df = _default_df
                 else:
                     raise
-            _user_df = _deduplicate_catalog(_user_df)
+            _user_df = _deduplicate_catalog(df)
     return _user_df
 
 

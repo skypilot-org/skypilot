@@ -8,6 +8,7 @@ import orjson
 import pandas as pd
 import pytest
 
+from sky.catalog import aws_catalog
 from sky.catalog import common as catalog_common
 from sky.utils import annotations
 
@@ -257,8 +258,6 @@ def test_get_hourly_cost_with_duplicate_catalog_entries():
     This is a regression test for GitHub issue #8638 where stale local
     catalogs had duplicate p4de.24xlarge rows with conflicting SpotPrice.
     """
-    from sky.catalog import aws_catalog
-
     df = pd.DataFrame([
         {
             'InstanceType': 'p4de.24xlarge',
