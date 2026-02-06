@@ -2977,8 +2977,8 @@ def test_kubernetes_pod_config_sidecar():
     This test verifies that SkyPilot correctly handles pods with multiple
     containers (sidecars) by:
     1. Launching a cluster with a sidecar container via pod_config
-    2. Verifying the pod has both ray-node and sidecar containers
-    3. Verifying sky exec commands run in the ray-node container
+    2. Verifying the pod has both skypilot-node and sidecar containers
+    3. Verifying sky exec commands run in the skypilot-node container
     4. Verifying the sidecar container is running
     """
     name = smoke_tests_utils.get_cluster_name()
@@ -3004,14 +3004,14 @@ def test_kubernetes_pod_config_sidecar():
                 # Launch SkyPilot cluster with sidecar
                 f'sky launch -y -c {name} --infra kubernetes '
                 f'{smoke_tests_utils.LOW_RESOURCE_ARG} {task_yaml_path}',
-                # Verify pod has 2 containers (ray-node and sidecar)
+                # Verify pod has 2 containers (skypilot-node and sidecar)
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
                     f'kubectl get pod -l skypilot-cluster-name={name_on_cloud} '
                     '-o jsonpath=\'{.items[0].spec.containers[*].name}\' | '
-                    'grep -E "ray-node.*sidecar|sidecar.*ray-node"'),
-                # Verify sky exec runs in ray-node container
-                f'sky exec {name} "echo CONTAINER_CHECK: ray-node is working"',
+                    'grep -E "skypilot-node.*sidecar|sidecar.*skypilot-node"'),
+                # Verify sky exec runs in skypilot-node container
+                f'sky exec {name} "echo CONTAINER_CHECK: skypilot-node is working"',
                 # Verify sidecar is running
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,

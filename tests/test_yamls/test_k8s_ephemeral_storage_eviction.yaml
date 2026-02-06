@@ -11,7 +11,7 @@ config:
     pod_config:
       spec:
         containers:
-          - name: ray-node
+          - name: skypilot-node
             resources:
               requests:
                 ephemeral-storage: "100Mi"

@@ -896,7 +896,7 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         logger.info(f'{"-"*20}Start: Pre-init in pod {pod_name!r} {"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
             ((namespace, context), pod_name),
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME)
+            container=k8s_constants.SKYPILOT_NODE_CONTAINER_NAME)
 
         # Run the combined pre-init command
         rc, stdout, _ = runner.run(pre_init_cmd,
@@ -968,7 +968,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # Remove the AppArmor annotation
             annotations = pod_spec.get('metadata', {}).get('annotations', {})
             apparmor_key = ('container.apparmor.security.beta.kubernetes.io/'
-                            f'{k8s_constants.RAY_NODE_CONTAINER_NAME}')
+                            f'{k8s_constants.SKYPILOT_NODE_CONTAINER_NAME}')
             if apparmor_key in annotations:
                 del annotations[apparmor_key]
                 pod_spec['metadata']['annotations'] = annotations
@@ -1657,7 +1657,6 @@ def get_cluster_info(
     logger.debug(f'Running pods: {list(running_pods.keys())}')
 
     pods: Dict[str, List[common.InstanceInfo]] = {}
-    head_pod_name = None
 
     port = 22
     if not provider_config.get('use_internal_ips', False):
@@ -1665,9 +1664,13 @@ def get_cluster_info(
                                                   namespace, context)
 
     head_pod_name = None
+    head_primary_container_name = None
     cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
+        primary_container = kubernetes_utils.get_pod_primary_container(pod)
+        primary_container_name = getattr(primary_container, 'name', None)
+        assert primary_container_name is not None
         pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,
@@ -1678,13 +1681,14 @@ def get_cluster_info(
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
                 internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
+                primary_container_name=primary_container_name,
             )
         ]
         if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
-            primary_container = kubernetes_utils.get_pod_primary_container(pod)
+            head_primary_container_name = primary_container_name
             resources = getattr(primary_container, 'resources', None)
             requests = (getattr(resources, 'requests', None)
                         if resources else None)
@@ -1705,7 +1709,7 @@ def get_cluster_info(
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name),
-        container=k8s_constants.RAY_NODE_CONTAINER_NAME)
+        container=head_primary_container_name)
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -2205,22 +2209,25 @@ def get_command_runners(
         head_instance_info = instances[pod_name][0]
         deployment = head_instance_info.tags.get(
             k8s_constants.TAG_SKYPILOT_DEPLOYMENT_NAME)
+        container = head_instance_info.primary_container_name
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0],
             deployment=deployment,
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
+            container=container,
             **credentials)
         runners.append(head_runner)
 
-    node_list = [((namespace, context), pod_name)
-                 for pod_name in instances.keys()
-                 if pod_name != cluster_info.head_instance_id]
-    runners.extend(
-        command_runner.KubernetesCommandRunner.make_runner_list(
-            node_list,
-            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
-            **credentials))
+    for pod_name, instance_info in instances.items():
+        if pod_name == cluster_info.head_instance_id:
+            continue
+        node_list = [((namespace, context), pod_name)]
+        container = instance_info[0].primary_container_name
+        runner = command_runner.KubernetesCommandRunner(node_list[0],
+                                                        deployment=None,
+                                                        container=container,
+                                                        **credentials)
+        runners.append(runner)
 
     return runners
