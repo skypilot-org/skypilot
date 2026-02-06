@@ -269,157 +269,170 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
     service_dir = os.path.expanduser(
         serve_utils.generate_remote_service_dir_name(service_name))
-
-    if not is_recovery:
-        with filelock.FileLock(controller_utils.get_resources_lock_path()):
-            if not controller_utils.can_start_new_process(task.service.pool):
+    os.makedirs(service_dir, exist_ok=True)
+    controller_lock = filelock.FileLock(
+        os.path.join(service_dir, 'controller.lock'))
+    try:
+        controller_lock.acquire(timeout=0)
+    except filelock.Timeout:
+        logger.warning('Controller already running for service '
+                       f'{service_name!r}; skipping start.')
+        return
+    try:
+        if not is_recovery:
+            with filelock.FileLock(controller_utils.get_resources_lock_path()):
+                if not controller_utils.can_start_new_process(
+                        task.service.pool):
+                    cleanup_storage(yaml_content)
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR)
+                success = serve_state.add_service(
+                    service_name,
+                    controller_job_id=job_id,
+                    policy=service_spec.autoscaling_policy_str(),
+                    requested_resources_str=backend_utils.
+                    get_task_resources_str(task),
+                    load_balancing_policy=service_spec.load_balancing_policy,
+                    status=serve_state.ServiceStatus.CONTROLLER_INIT,
+                    tls_encrypted=service_spec.tls_credential is not None,
+                    pool=service_spec.pool,
+                    controller_pid=os.getpid(),
+                    entrypoint=entrypoint)
+            # Directly throw an error here. See sky/serve/api.py::up
+            # for more details.
+            if not success:
                 cleanup_storage(yaml_content)
                 with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR)
-            success = serve_state.add_service(
-                service_name,
-                controller_job_id=job_id,
-                policy=service_spec.autoscaling_policy_str(),
-                requested_resources_str=backend_utils.get_task_resources_str(
-                    task),
-                load_balancing_policy=service_spec.load_balancing_policy,
-                status=serve_state.ServiceStatus.CONTROLLER_INIT,
-                tls_encrypted=service_spec.tls_credential is not None,
-                pool=service_spec.pool,
-                controller_pid=os.getpid(),
-                entrypoint=entrypoint)
-        # Directly throw an error here. See sky/serve/api.py::up
-        # for more details.
-        if not success:
-            cleanup_storage(yaml_content)
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Service {service_name} already exists.')
+                    raise ValueError(f'Service {service_name} already exists.')
 
-        # Create the service working directory.
-        os.makedirs(service_dir, exist_ok=True)
-
-        version = constants.INITIAL_VERSION
-        # Add initial version information to the service state.
-        serve_state.add_or_update_version(service_name, version, service_spec,
-                                          yaml_content)
-    else:
-        version = serve_state.get_latest_version(service_name)
-        if version is None:
-            raise ValueError(f'No version found for service {service_name}')
-        serve_state.update_service_controller_pid(service_name, os.getpid())
-
-    controller_process = None
-    load_balancer_process = None
-    try:
-        with filelock.FileLock(
-                os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
-            # Start the controller.
-            controller_port = (
-                common_utils.find_free_port(constants.CONTROLLER_PORT_START)
-                if not is_recovery else
-                serve_state.get_service_controller_port(service_name))
-
-            def _get_controller_host():
-                """Get the controller host address.
-                We expose the controller to the public network when running
-                inside a kubernetes cluster to allow external load balancers
-                (example, for high availability load balancers) to communicate
-                with the controller.
-                """
-                if 'KUBERNETES_SERVICE_HOST' in os.environ:
-                    return '0.0.0.0'
-                # Not using localhost to avoid using ipv6 address and causing
-                # the following error:
-                # ERROR:    [Errno 99] error while attempting to bind on address
-                # ('::1', 20001, 0, 0): cannot assign requested address
-                return '127.0.0.1'
-
-            controller_host = _get_controller_host()
-            controller_process = multiprocessing.Process(
-                target=controller.run_controller,
-                args=(service_name, service_spec, version, controller_host,
-                      controller_port))
-            controller_process.start()
-
-            if not is_recovery:
-                serve_state.set_service_controller_port(service_name,
-                                                        controller_port)
-
-            controller_addr = f'http://{controller_host}:{controller_port}'
-
-            # Start the load balancer.
-            load_balancer_port = (
-                common_utils.find_free_port(constants.LOAD_BALANCER_PORT_START)
-                if not is_recovery else
-                serve_state.get_service_load_balancer_port(service_name))
-            load_balancer_log_file = os.path.expanduser(
-                serve_utils.generate_remote_load_balancer_log_file_name(
-                    service_name))
-
-            # TODO(tian): Probably we could enable multiple ports specified in
-            # service spec and we could start multiple load balancers.
-            # After that, we will have a mapping from replica port to endpoint.
-            # NOTE(tian): We don't need the load balancer for pool.
-            # Skip the load balancer process for pool.
-            if not service_spec.pool:
-                load_balancer_process = multiprocessing.Process(
-                    target=ux_utils.RedirectOutputForProcess(
-                        load_balancer.run_load_balancer,
-                        load_balancer_log_file).run,
-                    args=(controller_addr, load_balancer_port,
-                          service_spec.load_balancing_policy,
-                          service_spec.tls_credential,
-                          service_spec.target_qps_per_replica))
-                load_balancer_process.start()
-
-            if not is_recovery:
-                serve_state.set_service_load_balancer_port(
-                    service_name, load_balancer_port)
-
-        while True:
-            _handle_signal(service_name)
-            time.sleep(1)
-    except exceptions.ServeUserTerminatedError:
-        serve_state.set_service_status_and_active_versions(
-            service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
-    finally:
-        # Kill load balancer process first since it will raise errors if failed
-        # to connect to the controller. Then the controller process.
-        process_to_kill = [
-            proc for proc in [load_balancer_process, controller_process]
-            if proc is not None
-        ]
-        subprocess_utils.kill_children_processes(
-            parent_pids=[process.pid for process in process_to_kill],
-            force=True)
-        for process in process_to_kill:
-            process.join()
-
-        # Catch any exception here to avoid it kill the service monitoring
-        # process. In which case, the service will not only fail to clean
-        # up, but also cannot be terminated in the future as no process
-        # will handle the user signal anymore. Instead, we catch any error
-        # and set it to FAILED_CLEANUP instead.
-        try:
-            failed = _cleanup(service_name, service_spec.pool)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Failed to clean up service {service_name}: {e}')
-            with ux_utils.enable_traceback():
-                logger.error(f'  Traceback: {traceback.format_exc()}')
-            failed = True
-
-        if failed:
-            serve_state.set_service_status_and_active_versions(
-                service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
-            logger.error(f'Service {service_name} failed to clean up.')
+            version = constants.INITIAL_VERSION
+            # Add initial version information to the service state.
+            serve_state.add_or_update_version(service_name, version,
+                                              service_spec, yaml_content)
         else:
-            shutil.rmtree(service_dir)
-            serve_state.remove_service(service_name)
-            serve_state.delete_all_versions(service_name)
-            logger.info(f'Service {service_name} terminated successfully.')
+            version = serve_state.get_latest_version(service_name)
+            if version is None:
+                raise ValueError(f'No version found for service {service_name}')
+            serve_state.update_service_controller_pid(service_name, os.getpid())
 
-        _cleanup_task_run_script(job_id)
+        controller_process = None
+        load_balancer_process = None
+        try:
+            with filelock.FileLock(
+                    os.path.expanduser(
+                        constants.PORT_SELECTION_FILE_LOCK_PATH)):
+                # Start the controller.
+                controller_port = (
+                    common_utils.find_free_port(constants.CONTROLLER_PORT_START)
+                    if not is_recovery else
+                    serve_state.get_service_controller_port(service_name))
+
+                def _get_controller_host():
+                    """Get the controller host address.
+                    We expose the controller to the public network when running
+                    inside a kubernetes cluster to allow external load balancers
+                    (example, for high availability load balancers) to
+                    communicate with the controller.
+                    """
+                    if 'KUBERNETES_SERVICE_HOST' in os.environ:
+                        return '0.0.0.0'
+                    # Not using localhost to avoid using ipv6 address and
+                    # causing the following error:
+                    # ERROR:    [Errno 99] error while attempting to bind on
+                    # address ('::1', 20001, 0, 0): cannot assign requested
+                    # address
+                    return '127.0.0.1'
+
+                controller_host = _get_controller_host()
+                controller_process = multiprocessing.Process(
+                    target=controller.run_controller,
+                    args=(service_name, service_spec, version, controller_host,
+                          controller_port))
+                controller_process.start()
+
+                if not is_recovery:
+                    serve_state.set_service_controller_port(
+                        service_name, controller_port)
+
+                controller_addr = f'http://{controller_host}:{controller_port}'
+
+                # Start the load balancer.
+                load_balancer_port = (
+                    common_utils.find_free_port(
+                        constants.LOAD_BALANCER_PORT_START)
+                    if not is_recovery else
+                    serve_state.get_service_load_balancer_port(service_name))
+                load_balancer_log_file = os.path.expanduser(
+                    serve_utils.generate_remote_load_balancer_log_file_name(
+                        service_name))
+
+                # TODO(tian): Probably we could enable multiple ports specified
+                # in service spec and we could start multiple load balancers.
+                # After that, we will have a mapping from replica port to
+                # endpoint.
+                # NOTE(tian): We don't need the load balancer for pool.
+                # Skip the load balancer process for pool.
+                if not service_spec.pool:
+                    load_balancer_process = multiprocessing.Process(
+                        target=ux_utils.RedirectOutputForProcess(
+                            load_balancer.run_load_balancer,
+                            load_balancer_log_file).run,
+                        args=(controller_addr, load_balancer_port,
+                              service_spec.load_balancing_policy,
+                              service_spec.tls_credential,
+                              service_spec.target_qps_per_replica))
+                    load_balancer_process.start()
+
+                if not is_recovery:
+                    serve_state.set_service_load_balancer_port(
+                        service_name, load_balancer_port)
+
+            while True:
+                _handle_signal(service_name)
+                time.sleep(1)
+        except exceptions.ServeUserTerminatedError:
+            serve_state.set_service_status_and_active_versions(
+                service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
+        finally:
+            # Kill load balancer process first since it will raise errors
+            # if failed to connect to the controller. Then the controller
+            # process.
+            process_to_kill = [
+                proc for proc in [load_balancer_process, controller_process]
+                if proc is not None
+            ]
+            subprocess_utils.kill_children_processes(
+                parent_pids=[process.pid for process in process_to_kill],
+                force=True)
+            for process in process_to_kill:
+                process.join()
+
+            # Catch any exception here to avoid it kill the service
+            # monitoring process. In which case, the service will not only
+            # fail to clean up, but also cannot be terminated in the future
+            # as no process will handle the user signal anymore. Instead,
+            # we catch any error and set it to FAILED_CLEANUP instead.
+            try:
+                failed = _cleanup(service_name, service_spec.pool)
+            except Exception:  # pylint: disable=broad-except
+                with ux_utils.enable_traceback():
+                    logger.exception(
+                        f'Failed to clean up service {service_name}')
+                failed = True
+
+            if failed:
+                serve_state.set_service_status_and_active_versions(
+                    service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+                logger.error(f'Service {service_name} failed to clean up.')
+            else:
+                shutil.rmtree(service_dir)
+                serve_state.remove_service(service_name)
+                logger.info(f'Service {service_name} terminated successfully.')
+
+            _cleanup_task_run_script(job_id)
+    finally:
+        controller_lock.release()
 
 
 if __name__ == '__main__':
