@@ -166,6 +166,8 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
+    # Node names for dashboard display (comma-separated)
+    sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -430,6 +432,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'cloud': r.get('cloud'),
         'region': r.get('region'),
         'zone': r.get('zone'),
+        'node_names': common_utils.get_display_node_names(r.get('node_names')),
     }
 
 
@@ -1869,27 +1872,38 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
 def set_job_infra(job_id: int,
                   cloud: Optional[str] = None,
                   region: Optional[str] = None,
-                  zone: Optional[str] = None) -> None:
+                  zone: Optional[str] = None,
+                  current_node_names: Optional[List[str]] = None) -> None:
     """Update the infrastructure info for a job.
 
     This is called after a job is launched to record the cloud/region/zone
-    for sorting and filtering purposes.
+    and node names for sorting, filtering, and dashboard display purposes.
 
     Args:
         job_id: The job ID to update.
         cloud: The cloud provider (e.g., 'GCP', 'AWS').
         region: The region (e.g., 'us-central1').
         zone: The zone (e.g., 'us-central1-a').
+        current_node_names: List of current node names (head first) to merge
+            into the existing lineage.
     """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        update_values = {}
+        update_values: Dict[Any, Any] = {}
         if cloud is not None:
             update_values[job_info_table.c.cloud] = cloud
         if region is not None:
             update_values[job_info_table.c.region] = region
         if zone is not None:
             update_values[job_info_table.c.zone] = zone
+        if current_node_names is not None:
+            row = session.query(job_info_table.c.node_names).filter(
+                job_info_table.c.spot_job_id ==
+                job_id).with_for_update().first()
+            existing_json = row.node_names if row else None
+            node_names = common_utils.merge_node_names_lineage(
+                existing_json, current_node_names)
+            update_values[job_info_table.c.node_names] = node_names
         if update_values:
             session.query(job_info_table).filter(
                 job_info_table.c.spot_job_id == job_id).update(update_values)

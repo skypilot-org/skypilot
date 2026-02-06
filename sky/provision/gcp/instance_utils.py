@@ -945,6 +945,8 @@ class GCPComputeInstance(GCPInstance):
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=result.get('labels', {}),
+                # GCP instance name is the instance_id
+                node_name=instance_id,
             )
         ]
 
@@ -1821,6 +1823,8 @@ class GCPTPUVMInstance(GCPInstance):
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=result.get('labels', {}),
+                # GCP TPU instance name is the instance_id
+                node_name=instance_id,
             ) for internal_ip, external_ip in zip(internal_ips, external_ips)
         ]
 

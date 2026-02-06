@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from types import MethodType
 from typing import (Any, BinaryIO, Callable, Dict, Generator, List, NamedTuple,
@@ -1292,3 +1293,23 @@ def write_blob(file: BinaryIO, total_size: int):
     if remaining_size > 0:
         file.write(os.urandom(remaining_size))
     file.flush()
+
+
+def wait_for_managed_job_status_sdk(job_name: str,
+                                    target_statuses: list,
+                                    timeout: int = 360) -> dict:
+    """Wait for a managed job to reach one of the target statuses.
+
+    Returns the job record when the status is reached.
+    """
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        jobs_list = sky.get(sky.jobs.queue(refresh=False))
+        for job in jobs_list:
+            if job['job_name'] == job_name:
+                if job['status'] in target_statuses:
+                    return job
+            print(f'Job {job_name} status: {job["status"]}')
+        time.sleep(5)
+    raise TimeoutError(
+        f'Timeout waiting for job {job_name} to reach {target_statuses}')

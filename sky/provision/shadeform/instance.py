@@ -291,6 +291,7 @@ def get_cluster_info(
             external_ip=instance.get('ip', ''),
             ssh_port=instance.get('ssh_port', 22),
             tags={},
+            node_name=instance_id,
         )
         # ClusterInfo expects Dict[InstanceId, List[InstanceInfo]]
         cluster_instances[instance_id] = [instance_info]

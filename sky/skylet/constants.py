@@ -682,3 +682,6 @@ SSD_LOCAL_DISK = 'ssd'
 HDD_LOCAL_DISK = 'hdd'
 
 LOCAL_DISK_TYPES = {SSD_LOCAL_DISK, HDD_LOCAL_DISK}
+
+# Maximum number of node name entries to keep per node in the lineage.
+MAX_NODE_NAME_LINEAGE = 10

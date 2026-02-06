@@ -2526,3 +2526,70 @@ def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_job_node_names_single_node(generic_cloud: str):
+    """Test that node_names is populated for a single-node managed job."""
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            task = sky.Task(run='echo hi')
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            try:
+                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Wait for job to be running and node_names to be populated
+                # Use longer timeout to account for controller startup
+                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=300)
+                # Give time for node_names to be populated after launch
+                time.sleep(10)
+                # Re-fetch to get updated node_names
+                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                job = [j for j in jobs_list if j['job_name'] == name][0]
+                node_names = job['node_names']
+                assert node_names, (f'node_names should not be empty, '
+                                    f'got: {node_names}')
+                print(f'node_names: {node_names}')
+            finally:
+                sky.jobs.cancel(name=name)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_job_node_names_multi_node(generic_cloud: str):
+    """Test that node_names contains multiple nodes for a multi-node job."""
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            task = sky.Task(run='echo hi', num_nodes=2)
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            try:
+                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Wait for job to be running
+                # Use longer timeout to account for controller startup
+                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=300)
+                # Give time for node_names to be populated after launch
+                time.sleep(10)
+                # Re-fetch to get updated node_names
+                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                job = [j for j in jobs_list if j['job_name'] == name][0]
+                node_names = job['node_names']
+                assert node_names, (f'node_names should not be empty, '
+                                    f'got: {node_names}')
+                nodes = node_names.split(',')
+                assert len(nodes) >= 2, (f'Expected 2+ nodes, '
+                                         f'got {len(nodes)}: {nodes}')
+                print(f'node_names: {node_names} ({len(nodes)} nodes)')
+            finally:
+                sky.jobs.cancel(name=name)
