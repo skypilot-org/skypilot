@@ -487,3 +487,46 @@ class GPUStaticQuotaPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(
             task=user_request.task,
             skypilot_config=user_request.skypilot_config)
+
+
+class RejectOldClientsPolicy(sky.AdminPolicy):
+    """Example policy: reject clients with an old API version.
+
+    This policy demonstrates how to use the client version information
+    to enforce minimum client versions. This is useful for ensuring all
+    users are running a compatible version of SkyPilot.
+
+    The policy checks the client's API version and rejects requests from
+    clients that are below the minimum required version.
+    """
+
+    # Minimum required API version. Clients with a lower version will be
+    # rejected. This should be updated when breaking changes are introduced
+    # that require all clients to upgrade.
+    MIN_REQUIRED_API_VERSION = 25
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Reject requests from clients with an old API version."""
+        # Version check is only applied at the server-side.
+        if not user_request.at_client_side:
+            # Check client API version
+            if user_request.client_api_version is not None:
+                if user_request.client_api_version < cls.MIN_REQUIRED_API_VERSION:
+                    raise RuntimeError(
+                        f'Client API version {user_request.client_api_version} '
+                        f'is below the minimum required version '
+                        f'{cls.MIN_REQUIRED_API_VERSION}. '
+                        f'Please upgrade your SkyPilot client. '
+                        f'Your client version: {user_request.client_version}')
+            else:
+                # client_api_version is None for very old clients that don't send
+                # version headers. You may choose to reject these clients as well.
+                raise RuntimeError(
+                    'Client version information is not available. '
+                    'Please upgrade your SkyPilot client to a recent version.')
+
+        return sky.MutatedUserRequest(
+            task=user_request.task,
+            skypilot_config=user_request.skypilot_config)

@@ -10,7 +10,7 @@ Supported accelerators
 
 .. code-block:: console
 
-   $ sky show-gpus -a
+   $ sky gpus list -a
 
 .. literalinclude:: show-gpus-all.txt
    :language: text
@@ -26,7 +26,7 @@ You can query the accelerators available in your Kubernetes clusters with:
 
 .. code-block:: console
 
-   $ sky show-gpus --infra k8s
+   $ sky gpus list --infra k8s
 
 
 .. code-block:: text
@@ -52,7 +52,7 @@ You can query the details of a supported accelerator config, ``accelerator:count
 
 .. code-block:: console
 
-   $ sky show-gpus H100:8
+   $ sky gpus list H100:8
 
 .. literalinclude:: show-gpus-h100-8.txt
    :language: text

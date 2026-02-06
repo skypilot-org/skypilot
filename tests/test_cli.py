@@ -244,69 +244,69 @@ def mock_api_server_calls(monkeypatch):
 
 class TestWithNoCloudEnabled:
 
-    def test_show_gpus(self, monkeypatch):
-        """Tests `sky show-gpus` can be invoked (but not correctness).
+    def test_gpus_list(self, monkeypatch):
+        """Tests `sky gpus list` can be invoked (but not correctness).
 
         Tests below correspond to the following terminal commands, in order:
 
-        -> sky show-gpus
-        -> sky show-gpus --all
-        -> sky show-gpus V100:4
-        -> sky show-gpus :4
-        -> sky show-gpus V100:0
-        -> sky show-gpus V100:-2
-        -> sky show-gpus --cloud aws --region us-west-1
-        -> sky show-gpus --cloud lambda
-        -> sky show-gpus --cloud lambda --all
-        -> sky show-gpus V100:4 --cloud lambda
-        -> sky show-gpus V100:4 --cloud lambda --all
+        -> sky gpus list
+        -> sky gpus list --all
+        -> sky gpus list V100:4
+        -> sky gpus list :4
+        -> sky gpus list V100:0
+        -> sky gpus list V100:-2
+        -> sky gpus list --cloud aws --region us-west-1
+        -> sky gpus list --cloud lambda
+        -> sky gpus list --cloud lambda --all
+        -> sky gpus list V100:4 --cloud lambda
+        -> sky gpus list V100:4 --cloud lambda --all
         """
         mock_api_server_calls(monkeypatch)
 
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.show_gpus, [])
+        result = cli_runner.invoke(command.gpus_list, [])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['--all'])
+        result = cli_runner.invoke(command.gpus_list, ['--all'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['V100:4'])
+        result = cli_runner.invoke(command.gpus_list, ['V100:4'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, [':4'])
+        result = cli_runner.invoke(command.gpus_list, [':4'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['V100:0'])
+        result = cli_runner.invoke(command.gpus_list, ['V100:0'])
         assert isinstance(result.exception, SystemExit)
 
-        result = cli_runner.invoke(command.show_gpus, ['V100:-2'])
+        result = cli_runner.invoke(command.gpus_list, ['V100:-2'])
         assert isinstance(result.exception, SystemExit)
 
-        result = cli_runner.invoke(command.show_gpus,
+        result = cli_runner.invoke(command.gpus_list,
                                    ['--cloud', 'aws', '--region', 'us-west-1'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus,
+        result = cli_runner.invoke(command.gpus_list,
                                    ['--infra', 'aws/us-west-1'])
         assert not result.exit_code
 
         for cloud in CLOUDS_TO_TEST:
-            result = cli_runner.invoke(command.show_gpus, ['--infra', cloud])
+            result = cli_runner.invoke(command.gpus_list, ['--infra', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['--cloud', cloud, '--all'])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['V100', '--cloud', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['V100:4', '--cloud', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['V100:4', '--cloud', cloud, '--all'])
             assert isinstance(result.exception, SystemExit)
 
@@ -537,8 +537,8 @@ class TestHelperFunctions:
         assert _list_to_str([1.0]) == '1'
         assert _list_to_str([1.5]) == '1.5'
 
-    def test_show_gpus_k8s_float_formatting(self, monkeypatch):
-        """Integration test for sky show-gpus --infra k8s output formatting.
+    def test_gpus_list_k8s_float_formatting(self, monkeypatch):
+        """Integration test for sky gpus list --infra k8s output formatting.
 
         Regression test for GitHub issue #6484 to ensure that requestable quantities
         are displayed as integers (1, 2, 4, 8) instead of floats (1.0, 2.0, 4.0, 8.0).
@@ -593,7 +593,7 @@ class TestHelperFunctions:
 
         # Run the command
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.show_gpus, ['--infra', 'k8s'])
+        result = cli_runner.invoke(command.gpus_list, ['--infra', 'k8s'])
 
         # Check that command succeeded
         assert result.exit_code == 0, f"Command failed with output: {result.output}"
