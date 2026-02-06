@@ -98,6 +98,53 @@ def test_managed_jobs_basic(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test dashboard shows managed jobs ----------
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+@pytest.mark.no_remote_server  # Dashboard tests require local API server
+def test_dashboard_shows_managed_jobs(generic_cloud: str):
+    """Test that managed jobs appear correctly in the dashboard."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'dashboard_shows_managed_jobs',
+        [
+            # Launch a managed job
+            f'sky jobs launch -n {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d "echo hello && sleep 30"',
+            # Wait for the job to be running
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.PENDING,
+                    sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
+                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
+                ],
+                timeout=120),
+            # Verify the job appears in the dashboard
+            lambda: smoke_tests_utils.verify_job_in_dashboard(
+                name,
+                expected_status=[
+                    'PENDING', 'SUBMITTED', 'STARTING', 'RUNNING', 'SUCCEEDED'
+                ],
+                timeout=120),
+            # Wait for the job to succeed
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=300),
+            # Verify the dashboard shows SUCCEEDED status
+            lambda: smoke_tests_utils.verify_job_in_dashboard(
+                name, expected_status=['SUCCEEDED'], timeout=60),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.managed_jobs
 @pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
 @pytest.mark.no_shadeform  # Shadeform does not support host controllers

@@ -109,6 +109,38 @@ def test_minimal(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Test dashboard shows cluster ----------
+@pytest.mark.no_remote_server  # Dashboard tests require local API server
+def test_dashboard_shows_cluster(generic_cloud: str):
+    """Test that clusters appear correctly in the dashboard."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'dashboard_shows_cluster',
+        [
+            # Launch a cluster
+            f'sky launch -y -c {name} --infra {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
+            # Verify the cluster appears in the dashboard with UP status
+            lambda: smoke_tests_utils.verify_cluster_in_dashboard(
+                name, expected_status='UP', timeout=120),
+            # Verify via sky status as well
+            f'sky status {name} | grep UP',
+            # Stop the cluster
+            f'sky stop -y {name}',
+            # Wait for the cluster to be stopped
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=300),
+            # Verify the dashboard shows STOPPED status
+            lambda: smoke_tests_utils.verify_cluster_in_dashboard(
+                name, expected_status='STOPPED', timeout=120),
+        ],
+        f'sky down -y {name}',
+        smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 def test_refresh_during_launch(generic_cloud: str):
     name1 = smoke_tests_utils.get_cluster_name()
     name2 = name1 + '-2'
