@@ -383,6 +383,11 @@ class Test(NamedTuple):
     env: Optional[Dict[str, str]] = None
     # Config dictionary to override the skypilot config.
     config_dict: Optional[Dict[str, Any]] = None
+    # If True, the test will be skipped (via pytest.skip) instead of failed
+    # when provisioning fails due to resource unavailability. This is useful
+    # for tests that depend on scarce resources (e.g., TPUs) that may not
+    # always be available.
+    skip_if_failed_to_provision: bool = False
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -614,6 +619,34 @@ def ensure_iterable_result(func):
         return [result]
 
 
+_PROVISION_FAILED_PATTERN = 'ResourcesUnavailableError'
+
+
+def _check_and_skip_if_provision_failed(
+        log_to_stdout: Optional[str],
+        log_file: Optional['tempfile.NamedTemporaryFile']) -> None:
+    """Skip the test if the log contains a provisioning failure.
+
+    When resources like TPUs are unavailable, we want to skip the test
+    rather than fail it, so it doesn't block releases.
+    """
+    log_content = None
+    if not log_to_stdout and log_file is not None:
+        try:
+            with open(log_file.name, 'r') as f:
+                log_content = f.read()
+        except OSError:
+            pass
+    if log_content and _PROVISION_FAILED_PATTERN in log_content:
+        # Extract the relevant error line for the skip message.
+        for line in log_content.splitlines():
+            if _PROVISION_FAILED_PATTERN in line:
+                pytest.skip(f'Resource provisioning failed: {line.strip()}')
+        # Fallback if pattern found but not on a single line.
+        pytest.skip('Resource provisioning failed due to '
+                    'ResourcesUnavailableError')
+
+
 def run_one_test(test: Test, check_sky_status: bool = True) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     if check_sky_status:
@@ -755,6 +788,12 @@ def run_one_test(test: Test, check_sky_status: bool = True) -> None:
             )
 
         if proc.returncode:
+            if test.skip_if_failed_to_provision:
+                # Check if the failure was due to resource unavailability.
+                # If so, skip the test instead of failing it. This is useful
+                # for tests depending on scarce resources like TPUs.
+                _check_and_skip_if_provision_failed(
+                    log_to_stdout, log_file if not log_to_stdout else None)
             if log_to_stdout:
                 raise Exception(f'test failed')
             else:

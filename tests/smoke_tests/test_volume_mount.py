@@ -29,7 +29,6 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 
-@pytest.mark.xfail(reason="TPU availability is flaky", strict=False)
 @pytest.mark.gcp
 def test_volume_mount_tpu():
     name = smoke_tests_utils.get_cluster_name()
@@ -48,6 +47,7 @@ def test_volume_mount_tpu():
             test_commands,
             clean_cmd,
             timeout=15 * 60,
+            skip_if_failed_to_provision=True,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -72,6 +72,7 @@ def test_volume_mount_tpu_container():
             test_commands,
             clean_cmd,
             timeout=15 * 60,
+            skip_if_failed_to_provision=True,
         )
         smoke_tests_utils.run_one_test(test)
 

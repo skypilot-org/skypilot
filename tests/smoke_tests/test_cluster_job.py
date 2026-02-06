@@ -779,6 +779,7 @@ def test_tpu_vm():
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
+        skip_if_failed_to_provision=True,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -797,6 +798,7 @@ def test_tpu_vm_pod():
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
+        skip_if_failed_to_provision=True,
     )
     smoke_tests_utils.run_one_test(test)
 

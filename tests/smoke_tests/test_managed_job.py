@@ -1258,6 +1258,7 @@ def test_managed_jobs_tpu():
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
+        skip_if_failed_to_provision=True,
     )
     smoke_tests_utils.run_one_test(test)
 
