@@ -204,6 +204,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'coreweave': aws_dependencies + kubernetes_dependencies,
+    'tigris': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'],
     'kubernetes': kubernetes_dependencies,

@@ -1562,6 +1562,57 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+.. _tigris-installation:
+
+Tigris
+~~~~~~
+
+`Tigris <https://www.tigrisdata.com/>`__ is a globally distributed, S3-compatible object storage with zero egress fees.
+SkyPilot can download/upload data to Tigris buckets and mount them as local filesystem on clusters launched by SkyPilot.
+
+Tigris uses S3-compatible APIs with the endpoint ``https://t3.storage.dev``. Tigris access keys start with ``tid_`` and secret keys start with ``tsec_``.
+
+**Option 1: Use an AWS profile (recommended)**
+
+.. code-block:: shell
+
+  # Default profile name is 'tigris'
+  aws configure --profile tigris
+
+  # Or use a custom profile name
+  aws configure --profile my-tigris-profile
+  export TIGRIS_PROFILE=my-tigris-profile
+
+**Option 2: Use Tigris SDK environment variables**
+
+If you already use the `Tigris Storage SDK <https://www.tigrisdata.com/docs/sdks/tigris/>`_, you can source your credentials from the environment variables used by the SDK:
+
+.. code-block:: shell
+
+  export TIGRIS_STORAGE_ACCESS_KEY_ID=tid_...
+  export TIGRIS_STORAGE_SECRET_ACCESS_KEY=tsec_...
+
+**Option 3: Use AWS environment variables**
+
+.. code-block:: shell
+
+  export AWS_ACCESS_KEY_ID=tid_...
+  export AWS_SECRET_ACCESS_KEY=tsec_...
+
+When prompted for credentials (Option 1), enter your Tigris Access Key ID (starts with ``tid_``) and Secret Access Key (starts with ``tsec_``). See `Tigris documentation <https://www.tigrisdata.com/docs/iam/manage-access-key/>`_ to generate credentials. For the region, enter :code:`auto`.
+
+To use Tigris in your SkyPilot YAML, use the ``tigris://`` URL scheme:
+
+.. code-block:: yaml
+
+  file_mounts:
+    /data:
+      source: tigris://my-tigris-bucket
+
+.. note::
+
+  Support for Tigris is in beta. Please report any issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
 
 Prime Intellect |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

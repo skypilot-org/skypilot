@@ -201,6 +201,50 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
     return mount_cmd
 
 
+def get_tigris_mount_cmd(bucket_name: str,
+                         mount_path: str,
+                         endpoint_url: str,
+                         _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount Tigris bucket using s3fs/rclone.
+
+    Tigris credentials are read from ~/.aws/credentials using the profile
+    specified by TIGRIS_PROFILE env var (default: 'tigris').
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import tigris
+    tigris_profile = tigris.get_tigris_profile()
+
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
+
+    # Use rclone for ARM64 architectures since goofys doesn't support them
+    arch_check = 'ARCH=$(uname -m) && '
+    rclone_mount = (
+        f'{FUSE3_INSTALL_CMD} && '
+        f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
+        f'AWS_PROFILE={tigris_profile} '
+        f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
+        f'--s3-force-path-style=false '
+        f'--s3-endpoint {endpoint_url} --daemon --allow-other')
+    goofys_mount = (f'AWS_PROFILE={tigris_profile} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--subdomain '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+
+    mount_cmd = (f'{arch_check}'
+                 f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                 f'  {rclone_mount}; '
+                 f'else '
+                 f'  {goofys_mount}; '
+                 f'fi')
+    return mount_cmd
+
+
 def get_gcs_mount_install_cmd() -> str:
     """Returns a command to install GCS mount utility gcsfuse."""
     install_cmd = ('ARCH=$(uname -m) && '
