@@ -289,7 +289,8 @@ class TestStorageFromYamlWithMountCachedConfig:
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         assert storage_obj.mount_cached_config is not None
-        assert storage_obj.mount_cached_config == storage_lib.MountCachedConfig()
+        assert storage_obj.mount_cached_config == storage_lib.MountCachedConfig(
+        )
 
     def test_config_without_mount_cached(self):
         yaml_config = {
