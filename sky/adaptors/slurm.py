@@ -4,7 +4,7 @@ import ipaddress
 import logging
 import re
 import time
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
 from sky.utils import command_runner
@@ -26,7 +26,6 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
 
 # Default timeout for waiting for job nodes to be allocated, in seconds.
-_SLURM_DEFAULT_PROVISION_TIMEOUT = 10
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
@@ -392,18 +391,51 @@ class SlurmClient:
 
         return output if output != 'None' else None
 
+    def get_pending_job_count(self,
+                              partition: str,
+                              exclude_job_id: Optional[str] = None) -> int:
+        """Count pending jobs in a partition, excluding our own job.
+
+        Args:
+            partition: The Slurm partition to query.
+            exclude_job_id: Optional job ID to exclude from the count.
+
+        Returns:
+            The number of pending jobs, or -1 if the query fails.
+        """
+        cmd = f'squeue -h -p {partition} --states=pending -o "%i"'
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return -1
+        job_ids = [j.strip() for j in stdout.strip().splitlines() if j.strip()]
+        if exclude_job_id:
+            job_ids = [j for j in job_ids if j != exclude_job_id]
+        return len(job_ids)
+
     @timeline.event
-    def wait_for_job_nodes(self, job_id: str, timeout: int) -> None:
+    def wait_for_job_nodes(
+        self,
+        job_id: str,
+        timeout: int,
+        partition: Optional[str] = None,
+        on_pending: Optional[Callable[[str, Optional[str], Optional[int]],
+                                      None]] = None
+    ) -> None:
         """Wait for a Slurm job to have nodes allocated.
 
         Args:
             job_id: The Slurm job ID.
-            timeout: Maximum time to wait in seconds.
+            timeout: Maximum time to wait in seconds. If negative, wait
+                indefinitely.
+            partition: Optional partition name for querying pending job count.
+            on_pending: Optional callback invoked when the job is pending or
+                configuring. Called with (state, reason, pending_count) where
+                reason and pending_count may be None.
         """
         start_time = time.time()
         last_state = None
 
-        while time.time() - start_time < timeout:
+        while timeout < 0 or time.time() - start_time < timeout:
             state = self.get_job_state(job_id)
 
             if state != last_state:
@@ -418,7 +450,19 @@ class SlurmClient:
                 raise RuntimeError(
                     f'Job {job_id} terminated with state {state} '
                     'before nodes were allocated.')
-            # TODO(kevin): Log reason for pending.
+            if state in ('PENDING', 'CONFIGURING') and on_pending is not None:
+                try:
+                    reason = self.get_job_reason(job_id)
+                    pending_count: Optional[int] = None
+                    if partition is not None:
+                        pending_count = self.get_pending_job_count(
+                            partition, exclude_job_id=job_id)
+                        if pending_count < 0:
+                            pending_count = None
+                    on_pending(state, reason, pending_count)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to get pending status for job '
+                                 f'{job_id}: {e}')
 
             # Check if nodes are allocated by trying to get node list
             cmd = f'squeue -h --jobs {job_id} -o "%N"'
@@ -441,10 +485,14 @@ class SlurmClient:
 
     @timeline.event
     def get_job_nodes(
-            self,
-            job_id: str,
-            wait: bool = True,
-            timeout: Optional[int] = None) -> Tuple[List[str], List[str]]:
+        self,
+        job_id: str,
+        wait: bool = True,
+        timeout: Optional[int] = None,
+        partition: Optional[str] = None,
+        on_pending: Optional[Callable[[str, Optional[str], Optional[int]],
+                                      None]] = None
+    ) -> Tuple[List[str], List[str]]:
         """Get the list of nodes and their IPs for a given job ID.
 
         The ordering is guaranteed to be stable for the lifetime of the job.
@@ -453,6 +501,10 @@ class SlurmClient:
             job_id: The Slurm job ID.
             wait: If True, wait for nodes to be allocated before returning.
             timeout: Maximum time to wait in seconds. Only used when wait=True.
+            partition: Optional partition name for querying pending job count.
+                Only used when wait=True.
+            on_pending: Optional callback for pending status updates. Only used
+                when wait=True. See wait_for_job_nodes for details.
 
         Returns:
             A tuple of (nodes, node_ips) where nodes is a list of node names
@@ -460,9 +512,11 @@ class SlurmClient:
         """
         # Wait for nodes to be allocated if requested
         if wait:
-            if timeout is None:
-                timeout = _SLURM_DEFAULT_PROVISION_TIMEOUT
-            self.wait_for_job_nodes(job_id, timeout=timeout)
+            assert timeout is not None, 'Timeout is required when wait=True'
+            self.wait_for_job_nodes(job_id,
+                                    timeout=timeout,
+                                    partition=partition,
+                                    on_pending=on_pending)
 
         cmd = (
             f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '

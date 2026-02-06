@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import slurm
 from sky.provision import common
 from sky.provision import constants
@@ -17,9 +16,11 @@ from sky.skylet import constants as skylet_constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import rich_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -111,7 +112,7 @@ def _wait_for_job_ready(
 
 @timeline.event
 def _create_virtual_instance(
-        region: str, cluster_name_on_cloud: str,
+        region: str, cluster_name: str, cluster_name_on_cloud: str,
         config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Creates a Slurm virtual instance from the config.
 
@@ -184,13 +185,36 @@ def _create_virtual_instance(
         ['pending', 'running'],
     )
 
-    # Get provision_timeout from config. If not specified, use None,
-    # which will use the default timeout specified in the Slurm adaptor.
-    provision_timeout = skypilot_config.get_effective_region_config(
-        cloud='slurm',
-        region=region,
-        keys=('provision_timeout',),
-        default_value=None)
+    # Get provision_timeout from provider_config (set by
+    # make_deploy_resources_variables based on whether the user specified
+    # a partition).
+    provision_timeout = provider_config.get('provision_timeout')
+    wait_str = ('indefinitely' if provision_timeout is not None and
+                provision_timeout < 0 else f'for {provision_timeout}s')
+    logger.debug(f'Waiting {wait_str} for '
+                 f'job to be allocated on partition {partition}')
+
+    num_nodes = config.count
+    last_status_msg = None
+
+    def _on_pending(state: str, reason: Optional[str],
+                    pending_count: Optional[int]) -> None:
+        nonlocal last_status_msg
+        del state  # unused
+        parts = []
+        if reason:
+            parts.append(f'pending: {reason}')
+        if pending_count is not None and pending_count > 0:
+            word = 'other' if pending_count == 1 else 'others'
+            parts.append(f'{pending_count} {word} pending')
+        if parts:
+            msg = f'Launching ({", ".join(parts)})'
+        else:
+            msg = 'Launching'
+        status_msg = ux_utils.spinner_message(msg, cluster_name=cluster_name)
+        if status_msg != last_status_msg:
+            rich_utils.force_update_status(status_msg)
+            last_status_msg = status_msg
 
     if existing_jobs:
         assert len(existing_jobs) == 1, (
@@ -204,7 +228,9 @@ def _create_virtual_instance(
         # Wait for nodes to be allocated (job might be in PENDING state)
         nodes, _ = client.get_job_nodes(job_id,
                                         wait=True,
-                                        timeout=provision_timeout)
+                                        timeout=provision_timeout,
+                                        partition=partition,
+                                        on_pending=_on_pending)
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=partition,
@@ -221,8 +247,6 @@ def _create_virtual_instance(
     # In the future we can consider running sbatch with --no-kill to not
     # automatically terminate a job if one of the nodes it has been
     # allocated fails.
-    num_nodes = config.count
-
     accelerator_type = resources.get('accelerator_type')
     accelerator_count_raw = resources.get('accelerator_count')
     try:
@@ -434,7 +458,9 @@ touch {sky_cluster_home_dir}/.hushlogin
 
     nodes, _ = client.get_job_nodes(job_id,
                                     wait=True,
-                                    timeout=provision_timeout)
+                                    timeout=provision_timeout,
+                                    partition=partition,
+                                    on_pending=_on_pending)
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
@@ -573,13 +599,11 @@ def query_instances(
     return statuses
 
 
-def run_instances(
-        region: str,
-        cluster_name: str,  # pylint: disable=unused-argument
-        cluster_name_on_cloud: str,
-        config: common.ProvisionConfig) -> common.ProvisionRecord:
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
+                  config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Run instances for the given cluster (Slurm in this case)."""
-    return _create_virtual_instance(region, cluster_name_on_cloud, config)
+    return _create_virtual_instance(region, cluster_name, cluster_name_on_cloud,
+                                    config)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
