@@ -4,7 +4,7 @@ import shlex
 import tempfile
 import threading
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
@@ -35,6 +35,67 @@ def _sbatch_log_path(job_id: str) -> str:
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
+
+
+def _wait_for_job_nodes(
+    client: 'slurm.SlurmClient',
+    job_id: str,
+    timeout: int,
+    partition: str,
+    on_pending: Callable[[str, Optional[str], Optional[int]], None],
+) -> None:
+    """Wait for a Slurm job to have nodes allocated.
+
+    Args:
+        client: The Slurm client to use for queries.
+        job_id: The Slurm job ID.
+        timeout: Maximum time to wait in seconds. If negative, wait
+            indefinitely.
+        partition: Optional partition name for querying pending job count.
+        on_pending: Optional callback invoked when the job is pending or
+            configuring. Called with (state, reason, pending_count) where
+            reason and pending_count may be None.
+    """
+    start_time = time.time()
+    last_state = None
+
+    while timeout < 0 or time.time() - start_time < timeout:
+        state = client.get_job_state(job_id)
+
+        if state != last_state:
+            logger.debug(f'Job {job_id} state: {state}')
+            last_state = state
+
+        if state is None:
+            raise RuntimeError(f'Job {job_id} not found. It may have been '
+                               'cancelled or failed.')
+
+        if state in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT'):
+            raise RuntimeError(f'Job {job_id} terminated with state {state} '
+                               'before nodes were allocated.')
+
+        if state in ('PENDING', 'CONFIGURING') and on_pending is not None:
+            try:
+                reason = client.get_job_reason(job_id)
+                pending_count: Optional[int] = None
+                if partition is not None:
+                    pending_count = client.get_pending_job_count(
+                        partition, exclude_job_id=job_id)
+                    if pending_count < 0:
+                        pending_count = None
+                on_pending(state, reason, pending_count)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to get pending status for job '
+                             f'{job_id}: {e}')
+
+        if client.check_job_has_nodes(job_id):
+            logger.debug(f'Job {job_id} has nodes allocated')
+            return
+
+        time.sleep(2)
+
+    raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
+                       f'{timeout} seconds. Last state: {last_state}')
 
 
 def _sky_cluster_home_dir(home_dir: str, cluster_name_on_cloud: str) -> str:
@@ -185,12 +246,9 @@ def _create_virtual_instance(
         ['pending', 'running'],
     )
 
-    # Get provision_timeout from provider_config (set by
-    # make_deploy_resources_variables based on whether the user specified
-    # a partition).
-    provision_timeout = provider_config.get('provision_timeout')
-    wait_str = ('indefinitely' if provision_timeout is not None and
-                provision_timeout < 0 else f'for {provision_timeout}s')
+    provision_timeout: int = provider_config['provision_timeout']
+    wait_str = ('indefinitely'
+                if provision_timeout < 0 else f'for {provision_timeout}s')
     logger.debug(f'Waiting {wait_str} for '
                  f'job to be allocated on partition {partition}')
 
@@ -226,11 +284,9 @@ def _create_virtual_instance(
                      f'(JOBID: {job_id})')
 
         # Wait for nodes to be allocated (job might be in PENDING state)
-        nodes, _ = client.get_job_nodes(job_id,
-                                        wait=True,
-                                        timeout=provision_timeout,
-                                        partition=partition,
-                                        on_pending=_on_pending)
+        _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                            _on_pending)
+        nodes, _ = client.get_job_nodes(job_id)
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=partition,
@@ -456,11 +512,9 @@ touch {sky_cluster_home_dir}/.hushlogin
     # Track start time to calculate remaining timeout after node allocation
     provision_start_time = time.time()
 
-    nodes, _ = client.get_job_nodes(job_id,
-                                    wait=True,
-                                    timeout=provision_timeout,
-                                    partition=partition,
-                                    on_pending=_on_pending)
+    _wait_for_job_nodes(client, job_id, provision_timeout, partition,
+                        _on_pending)
+    nodes, _ = client.get_job_nodes(job_id)
     created_instance_ids = [
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
@@ -586,7 +640,7 @@ def query_instances(
                     continue
                 statuses[job_id] = (sky_status, reason)
             else:
-                nodes, _ = client.get_job_nodes(job_id, wait=False)
+                nodes, _ = client.get_job_nodes(job_id)
                 for node in nodes:
                     instance_id = slurm_utils.instance_id(job_id, node)
                     statuses[instance_id] = (sky_status, None)
@@ -663,8 +717,8 @@ def get_cluster_info(
         f'{running_jobs}')
 
     job_id = running_jobs[0]
-    # Running jobs should already have nodes allocated, so don't wait
-    nodes, node_ips = client.get_job_nodes(job_id, wait=False)
+    # Running jobs should already have nodes allocated
+    nodes, node_ips = client.get_job_nodes(job_id)
 
     instances = {
         f'{slurm_utils.instance_id(job_id, node)}': [

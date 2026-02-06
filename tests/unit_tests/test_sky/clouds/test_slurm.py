@@ -441,8 +441,8 @@ class TestSlurmProvisionTimeout:
         return deploy_vars, mock_config
 
     @pytest.mark.parametrize('zone,config_return,expected_timeout', [
-        (None, None, 600),
-        ('gpu', None, -1),
+        (None, None, 300),
+        ('gpu', None, 86400),
         (None, 1800, 1800),
         ('gpu', 30, 30),
     ])
@@ -460,6 +460,7 @@ class TestProvisionTimeoutPassthrough:
     """Test that provision_timeout from provider_config is used in
     _create_virtual_instance."""
 
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
@@ -467,8 +468,9 @@ class TestProvisionTimeoutPassthrough:
     def test_default_timeout_when_not_in_config(self, mock_ssh_runner,
                                                 mock_slurm_client,
                                                 mock_get_partition_info,
-                                                mock_get_proctrack_type):
-        """When provider_config omits provision_timeout, get_job_nodes receives None."""
+                                                mock_get_proctrack_type,
+                                                mock_wait_for_job_nodes):
+        """When provider_config omits provision_timeout, _wait_for_job_nodes receives None."""
         from sky.adaptors.slurm import SlurmPartition
         from sky.provision import common
 
@@ -521,13 +523,16 @@ class TestProvisionTimeoutPassthrough:
         )
 
         # provision_timeout is None (not in provider_config), so
-        # get_job_nodes should be called with timeout=None
-        mock_client.get_job_nodes.assert_called_once_with(mock.ANY,
-                                                          wait=True,
-                                                          timeout=None,
-                                                          partition='gpu',
-                                                          on_pending=mock.ANY)
+        # _wait_for_job_nodes should be called with timeout=None
+        mock_wait_for_job_nodes.assert_called_once_with(mock_client,
+                                                        mock.ANY,
+                                                        timeout=None,
+                                                        partition='gpu',
+                                                        on_pending=mock.ANY)
+        # get_job_nodes should be called without wait params
+        mock_client.get_job_nodes.assert_called_once_with(mock.ANY)
 
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
@@ -535,7 +540,8 @@ class TestProvisionTimeoutPassthrough:
     def test_explicit_timeout_passthrough(self, mock_ssh_runner,
                                           mock_slurm_client,
                                           mock_get_partition_info,
-                                          mock_get_proctrack_type):
+                                          mock_get_proctrack_type,
+                                          mock_wait_for_job_nodes):
         """When provider_config has provision_timeout, it passes through."""
         from sky.adaptors.slurm import SlurmPartition
         from sky.provision import common
@@ -589,12 +595,14 @@ class TestProvisionTimeoutPassthrough:
             config=config,
         )
 
-        # provision_timeout=120 should be passed to get_job_nodes
-        mock_client.get_job_nodes.assert_called_once_with(mock.ANY,
-                                                          wait=True,
-                                                          timeout=120,
-                                                          partition='gpu',
-                                                          on_pending=mock.ANY)
+        # provision_timeout=120 should be passed to _wait_for_job_nodes
+        mock_wait_for_job_nodes.assert_called_once_with(mock_client,
+                                                        mock.ANY,
+                                                        timeout=120,
+                                                        partition='gpu',
+                                                        on_pending=mock.ANY)
+        # get_job_nodes should be called without wait params
+        mock_client.get_job_nodes.assert_called_once_with(mock.ANY)
 
 
 class TestCreateVirtualInstance:
@@ -644,13 +652,15 @@ class TestCreateVirtualInstance:
         assert written_script is not None, 'Script was not written'
         return written_script
 
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
     def test_container_script_format(self, mock_ssh_runner, mock_slurm_client,
                                      mock_get_partition_info,
-                                     mock_get_proctrack_type):
+                                     mock_get_proctrack_type,
+                                     mock_wait_for_job_nodes):
         """Test that sbatch provision script for containers is correct."""
         from sky.provision import common
 
@@ -687,6 +697,7 @@ class TestCreateVirtualInstance:
         written_script = self._run_and_capture_script('test-cluster', config)
         assert_sbatch_matches_snapshot('containers', written_script)
 
+    @patch('sky.provision.slurm.instance._wait_for_job_nodes')
     @patch('sky.provision.slurm.instance.slurm_utils.get_proctrack_type')
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
@@ -694,7 +705,8 @@ class TestCreateVirtualInstance:
     def test_non_container_script_format(self, mock_ssh_runner,
                                          mock_slurm_client,
                                          mock_get_partition_info,
-                                         mock_get_proctrack_type):
+                                         mock_get_proctrack_type,
+                                         mock_wait_for_job_nodes):
         """Test that sbatch provision script without containers is correct."""
         from sky.provision import common
 
