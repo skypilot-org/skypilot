@@ -23,6 +23,9 @@ _PORT_HINT_MSG = ('Invalid port {}. '
                   'Please use a port number between 1 and 65535.')
 _DEFAULT_MESSAGE_HANDLE_INITIALIZING = '<initializing>'
 
+# Default size when only mode is specified for local disk
+DEFAULT_LOCAL_DISK_SIZE = '100+'
+
 
 class DiskTier(enum.Enum):
     """All disk tiers supported by SkyPilot."""
@@ -103,6 +106,137 @@ class ClusterName:
 
     def __str__(self) -> str:
         return self.display_name
+
+
+def normalize_local_disk(local_disk: str) -> str:
+    """Validate and normalize a local_disk string to canonical form.
+
+    Accepts various input formats and normalizes to 'mode:size[+]'.
+
+    Args:
+        local_disk: Input string in one of these formats:
+            - 'mode:size[+]' (e.g., 'nvme:1000+', 'ssd:500')
+            - 'mode' only (e.g., 'nvme', 'ssd') -> defaults to 100+
+            - 'size[+]' only (e.g., '1000+', '500') -> defaults to nvme
+
+    Returns:
+        Normalized string in 'mode:size[+]' format.
+
+    Raises:
+        ValueError: If the input format is invalid.
+
+    Examples:
+        >>> normalize_local_disk('nvme:1000+')
+        'nvme:1000+'
+        >>> normalize_local_disk('nvme')
+        'nvme:100+'
+        >>> normalize_local_disk('1000+')
+        'nvme:1000+'
+        >>> normalize_local_disk('ssd:500')
+        'ssd:500'
+    """
+    local_disk = str(local_disk).lower().strip()
+    parts = local_disk.split(':')
+
+    def _check_size(size_str: str) -> None:
+        size_to_check = size_str.rstrip('+')
+        try:
+            size = float(size_to_check)
+            if size <= 0:
+                raise ValueError()
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(  # pylint: disable=raise-missing-from
+                    f'Invalid local_disk: {local_disk!r}. '
+                    'Expected "mode:size[+]", "mode", or "size[+]". Mode '
+                    'must be "nvme" or "ssd", size must be positive (GB), '
+                    'optionally with "+".')
+
+    if len(parts) == 1:
+        part = parts[0]
+        if part in ('nvme', 'ssd'):
+            mode = part
+            size_str = DEFAULT_LOCAL_DISK_SIZE
+        else:
+            mode = 'nvme'
+            size_str = part
+            _check_size(size_str)
+    elif len(parts) == 2:
+        mode, size_str = parts
+        if mode not in ('nvme', 'ssd'):
+            raise ValueError(f'Invalid local_disk mode: {mode!r}. '
+                             'Must be "nvme" or "ssd".')
+        _check_size(size_str)
+    else:
+        raise ValueError(f'Invalid local_disk format: {local_disk!r}. '
+                         'Expected "mode:size[+]", "mode", or "size[+]". '
+                         'Examples: "nvme:1000+", "ssd:500", "nvme", "1000+".')
+
+    return f'{mode}:{size_str}'
+
+
+def parse_local_disk_str(local_disk: str) -> Tuple[str, float, bool]:
+    """Parse a normalized local_disk string.
+
+    Args:
+        local_disk: Normalized form 'mode:size[+]' (e.g., 'nvme:1000+')
+
+    Returns:
+        Tuple of (mode, size, at_least) where:
+        - mode: 'nvme' or 'ssd'
+        - size: size in GB as float
+        - at_least: True if '+' suffix was present
+    """
+    parts = local_disk.split(':')
+    mode = parts[0]
+    size_str = parts[1]
+    at_least = size_str.endswith('+')
+    if at_least:
+        size_str = size_str[:-1]
+    size = float(size_str)
+    return (mode, size, at_least)
+
+
+def local_disk_satisfied(requested: Optional[str],
+                         launched: Optional[str]) -> bool:
+    #  pylint: disable=line-too-long
+    """Check if launched local disk satisfies the requested requirement.
+
+    Used by Resources.less_demanding_than() to validate that a task's
+    local disk requirement can be satisfied by a cluster's local disk.
+
+    Args:
+        requested: The task's local_disk requirement
+            (normalized form 'mode:size[+]')
+        launched: The cluster's local_disk (normalized form 'mode:size[+]')
+
+    Returns:
+        True if the launched local disk satisfies the requested requirement.
+
+    Examples:
+        >>> local_disk_satisfied('nvme:500+', 'nvme:1000')  # True (1000 >= 500)
+        >>> local_disk_satisfied('nvme:1000+', 'nvme:500')  # False (500 < 1000)
+        >>> local_disk_satisfied('ssd:500+', 'nvme:1000')   # True (nvme satisfies ssd)
+        >>> local_disk_satisfied('nvme:500+', 'ssd:1000')   # False (ssd doesn't satisfy nvme)
+        >>> local_disk_satisfied('nvme:500', 'nvme:500')    # True (exact match)
+        >>> local_disk_satisfied('nvme:500', 'nvme:600')    # False (exact, no match)
+    """
+    if requested is None:
+        return True
+    if launched is None:
+        return False
+    req_mode, req_size, req_at_least = parse_local_disk_str(requested)
+    launched_mode, launched_size, _ = parse_local_disk_str(launched)
+
+    if req_mode == 'nvme' and launched_mode != 'nvme':
+        return False
+    if req_mode == 'ssd' and launched_mode not in ('ssd', 'nvme'):
+        return False
+
+    if req_at_least:
+        return launched_size >= req_size
+    else:
+        return abs(launched_size - req_size) < 1.0  # for float approx.
 
 
 def check_port_str(port: str) -> None:
