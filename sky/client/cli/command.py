@@ -4197,7 +4197,8 @@ def show_gpus(
             except Exception as e:  # pylint: disable=broad-except
                 # Log and skip this cluster instead of failing the entire query
                 logger.warning(f'Skipping Slurm cluster {cluster_name!r} '
-                               f'node info due to error: {e}')
+                               f'node info due to error: '
+                               f'{common_utils.format_exception(e)}')
                 failed_clusters.append(cluster_name)
                 continue
 
@@ -4413,8 +4414,8 @@ def show_gpus(
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Slurm Cluster: {cluster_name}'
                    f'{colorama.Style.RESET_ALL}\n')
-            yield (f'  {colorama.Fore.YELLOW}'
-                   f'{error_msg}'
+            yield (f'{colorama.Fore.YELLOW}'
+                   f'Error: {error_msg}'
                    f'{colorama.Style.RESET_ALL}\n')
 
         if show_node_info and slurm_realtime_infos:
