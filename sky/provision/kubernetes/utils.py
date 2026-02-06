@@ -768,7 +768,7 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
 class NebiusLabelFormatter(GPULabelFormatter):
     """Custom label formatter for Nebius
 
-    Uses nebius.com/gpu-name as the key, , and the uppercase SkyPilot
+    Uses nebius.com/gpu-name as the key, and the uppercase SkyPilot
     accelerator str as the value.
     """
 
