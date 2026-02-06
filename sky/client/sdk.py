@@ -2866,9 +2866,14 @@ def api_login(endpoint: Optional[str] = None,
                 raise ValueError('Malformed token - bad key/value: '
                                  f'{name}: {value}')
 
-            # See CookieJar._cookie_from_cookie_tuple
-            # oauth2proxy default is Max-Age 604800
-            expires = int(time.time()) + 604800
+            # Use a short expiration (1 hour) to match typical OAuth2 access token
+            # lifetimes. Cookies will be refreshed from HTTP responses which have
+            # the correct expiration times from the OAuth2 proxy. This prevents
+            # issues where the OAuth2 proxy session expires before the hardcoded
+            # expiration time, causing frequent re-authentication.
+            # 1 hour matches common OAuth2 access token expiration times and ensures
+            # cookies are refreshed from responses before they become invalid.
+            expires = int(time.time()) + (60 * 60)  # 1 hour
             domain = str(parsed_url.hostname)
             domain_initial_dot = domain.startswith('.')
             secure = parsed_url.scheme == 'https'
