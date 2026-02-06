@@ -476,9 +476,10 @@ def validate(
             task._user_specified_yaml = None
         task.expand_and_validate_workdir()
         if not workdir_only:
-            task.expand_and_validate_file_mounts()   
+            task.expand_and_validate_file_mounts()
         if omit_local_disk:
             for resource in task.resources:
+                # pylint: disable=protected-access
                 resource._set_local_disk(None)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
