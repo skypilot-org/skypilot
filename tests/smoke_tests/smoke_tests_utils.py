@@ -622,8 +622,7 @@ def ensure_iterable_result(func):
 _PROVISION_FAILED_PATTERN = 'ResourcesUnavailableError'
 
 
-def _check_and_skip_if_provision_failed(
-        log_file_path: Optional[str]) -> None:
+def _check_and_skip_if_provision_failed(log_file_path: Optional[str]) -> None:
     """Skip the test if the log contains a provisioning failure.
 
     When resources like TPUs are unavailable, we want to skip the test
@@ -640,8 +639,7 @@ def _check_and_skip_if_provision_failed(
         # Extract the relevant error line for the skip message.
         for line in log_content.splitlines():
             if _PROVISION_FAILED_PATTERN in line:
-                pytest.skip(
-                    f'Resource provisioning failed: {line.strip()}')
+                pytest.skip(f'Resource provisioning failed: {line.strip()}')
         pytest.skip('Resource provisioning failed due to '
                     'ResourcesUnavailableError')
 
