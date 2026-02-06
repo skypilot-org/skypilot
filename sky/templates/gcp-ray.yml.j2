@@ -142,6 +142,9 @@ available_node_types:
     {%- if valid_until_duration %}
       valid_until_duration: {{valid_until_duration}}
     {%- endif %}
+    {%- if valid_until_time %}
+      valid_until_time: {{valid_until_time}}
+    {%- endif %}
   {%- endif %}
 {%- else %}
       machineType: {{instance_type}}

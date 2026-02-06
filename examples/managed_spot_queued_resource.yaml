@@ -9,8 +9,15 @@ resources:
     gcp_queued_resource: true
     # Optional: Set how long the queued resource request remains valid.
     # SkyPilot's polling timeout will align with this value.
-    # Example: 10800 = 3 hours. Default is 6000 seconds (100 minutes).
+    # Use ONE of the following (not both):
+    #
+    # Option 1: Duration in seconds (e.g., 10800 = 3 hours)
     # valid_until_duration: 10800
+    #
+    # Option 2: Absolute timestamp in RFC 3339 format
+    # valid_until_time: "2024-12-31T23:59:59Z"
+    #
+    # Default timeout is 6000 seconds (100 minutes) if neither is specified.
 
 setup: |
   echo "running setup"

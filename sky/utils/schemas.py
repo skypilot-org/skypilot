@@ -352,8 +352,16 @@ def _get_single_resources_schema():
                         # Duration in seconds for how long the queued resource
                         # request remains valid. Example: 10800 for 3 hours.
                         # Only used when gcp_queued_resource is true.
+                        # Cannot be used together with valid_until_time.
                         'type': 'integer',
                         'minimum': 1,
+                    },
+                    'valid_until_time': {
+                        # Absolute timestamp (RFC 3339) when the queued resource
+                        # request expires. Example: "2024-12-31T23:59:59Z".
+                        # Only used when gcp_queued_resource is true.
+                        # Cannot be used together with valid_until_duration.
+                        'type': 'string',
                     },
                 }
             },

@@ -1,5 +1,6 @@
 """Utilities for GCP instances."""
 import copy
+import datetime
 import enum
 import functools
 from multiprocessing import pool
@@ -1569,10 +1570,18 @@ class GCPTPUVMInstance(GCPInstance):
         operations = []
         queued_resource_ids = []
 
-        # Extract valid_until_duration for queueingPolicy and polling timeout.
-        # This aligns SkyPilot's polling timeout with GCP's queued resource
-        # validity duration.
+        # Extract valid_until_duration/valid_until_time for queueingPolicy and
+        # polling timeout. This aligns SkyPilot's polling timeout with GCP's
+        # queued resource validity duration/time.
         valid_until_duration = config.get('valid_until_duration')
+        valid_until_time = config.get('valid_until_time')
+
+        # Validate that only one of valid_until_duration or valid_until_time
+        # is specified, as GCP only allows one.
+        if valid_until_duration is not None and valid_until_time is not None:
+            raise ValueError(
+                'Cannot specify both valid_until_duration and '
+                'valid_until_time. Please use only one of these parameters.')
 
         for i, name in enumerate(names):
             node_config = config.copy()
@@ -1583,6 +1592,7 @@ class GCPTPUVMInstance(GCPInstance):
                     provision_constants.WORKER_NODE_TAGS)
             node_config.pop('gcp_queued_resource')
             node_config.pop('valid_until_duration', None)
+            node_config.pop('valid_until_time', None)
 
             qr_id = f'{name}-q'  # TODO: should this be configurable?
             parent = f'projects/{project_id}/locations/{zone}'
@@ -1597,11 +1607,16 @@ class GCPTPUVMInstance(GCPInstance):
                 }
             }
 
-            # Add queueingPolicy if valid_until_duration is specified.
+            # Add queueingPolicy if valid_until_duration or valid_until_time
+            # is specified. Note: GCP only allows one of the two options.
             # See: https://cloud.google.com/tpu/docs/queued-resources
             if valid_until_duration is not None:
                 qr_body['queueingPolicy'] = {
                     'validUntilDuration': f'{valid_until_duration}s',
+                }
+            elif valid_until_time is not None:
+                qr_body['queueingPolicy'] = {
+                    'validUntilTime': valid_until_time,
                 }
 
             if config.get('schedulingConfig', {}).get('preemptible'):
@@ -1659,13 +1674,34 @@ class GCPTPUVMInstance(GCPInstance):
             cls.wait_for_operation(operation, project_id, zone=zone)
 
         # 2. Wait for Queued Resources to be ACTIVE
-        # Use valid_until_duration as the polling timeout if specified,
-        # otherwise use the default GCP_QUEUED_RESOURCE_TIMEOUT.
+        # Calculate the polling timeout based on valid_until_duration or
+        # valid_until_time if specified, otherwise use the default
+        # GCP_QUEUED_RESOURCE_TIMEOUT.
+        polling_timeout = None
+        if valid_until_duration is not None:
+            polling_timeout = valid_until_duration
+        elif valid_until_time is not None:
+            # Parse the RFC 3339 timestamp and calculate remaining seconds.
+            # Example format: "2024-12-31T23:59:59Z"
+            try:
+                # Handle both 'Z' suffix and timezone offset formats.
+                if valid_until_time.endswith('Z'):
+                    dt = datetime.datetime.fromisoformat(
+                        valid_until_time.replace('Z', '+00:00'))
+                else:
+                    dt = datetime.datetime.fromisoformat(valid_until_time)
+                now = datetime.datetime.now(datetime.timezone.utc)
+                polling_timeout = int((dt - now).total_seconds())
+                if polling_timeout < 0:
+                    polling_timeout = 0
+            except ValueError:
+                logger.warning(f'Invalid valid_until_time format: '
+                               f'{valid_until_time}. Using default timeout.')
         for qr_id in queued_resource_ids:
             cls.wait_for_queued_resource(project_id,
                                          zone,
                                          qr_id,
-                                         timeout=valid_until_duration)
+                                         timeout=polling_timeout)
         return None, names
 
     @classmethod
