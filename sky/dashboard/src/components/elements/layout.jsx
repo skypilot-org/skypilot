@@ -30,7 +30,7 @@ function LayoutContent({ children, highlighted }) {
 
       {/* Main content */}
       <div
-        className={`transition-all duration-200 ease-in-out min-h-screen ${isMobile ? '' : (isSidebarCollapsed ? 'ml-14' : 'ml-40')}`}
+        className={`transition-all duration-200 ease-in-out min-h-screen ${isMobile ? '' : (isSidebarCollapsed ? 'ml-14' : 'ml-48')}`}
         style={isMobile ? { paddingTop: isUpgrading ? '112px' : '56px' } : {}}
       >
         <main className="p-6">{children}</main>
