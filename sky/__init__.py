@@ -37,7 +37,7 @@ def _get_git_commit():
 
 
 __commit__ = _get_git_commit()
-__version__ = '0.11.2rc2'
+__version__ = '0.11.2rc3'
 __root_dir__ = directory_utils.get_sky_dir()
 
 
