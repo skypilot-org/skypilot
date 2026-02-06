@@ -181,19 +181,27 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     return df
 
 
+def _deduplicate_catalog(df: 'pd.DataFrame') -> 'pd.DataFrame':
+    """Drops duplicate rows per AZ, keeping the one with a valid SpotPrice."""
+    df = df.sort_values('SpotPrice', ascending=True, na_position='last')
+    return df.drop_duplicates(
+        subset=['InstanceType', 'Region', 'AvailabilityZone'], keep='first')
+
+
 def _get_df() -> 'pd.DataFrame':
     global _user_df
     with _apply_az_mapping_lock:
         if _user_df is None:
             try:
-                _user_df = _fetch_and_apply_az_mapping(_default_df)
+                df = _fetch_and_apply_az_mapping(_default_df)
             except (RuntimeError, ImportError) as e:
                 if config.get_use_default_catalog_if_failed():
                     logger.warning('Failed to fetch availability zone mapping. '
                                    f'{common_utils.format_exception(e)}')
-                    return _default_df
+                    df = _default_df
                 else:
                     raise
+            _user_df = _deduplicate_catalog(df)
     return _user_df
 
 
