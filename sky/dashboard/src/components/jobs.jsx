@@ -1378,56 +1378,6 @@ export function ManagedJobsTable({
         },
       },
       {
-        id: 'node',
-        order: 6.5,
-        renderHeader: () => (
-          <TableHead
-            className="sortable whitespace-nowrap"
-            onClick={() => requestSort('node_names')}
-          >
-            Node{getSortDirection('node_names')}
-          </TableHead>
-        ),
-        renderCell: (item, ctx) => {
-          const { renderMode } = ctx || {};
-          const nodeNames = item.node_names;
-
-          // For group parent, show simplified node info
-          if (renderMode === 'groupParent') {
-            return (
-              <TableCell>
-                <span>-</span>
-              </TableCell>
-            );
-          }
-
-          // Single task or group child - show node with tooltip
-          const nodes = nodeNames ? nodeNames.split(',') : [];
-          if (nodes.length === 0) {
-            return <TableCell>-</TableCell>;
-          }
-          const hasMultipleNodes = nodes.length > 1;
-          const tooltipText = nodes.join('\n');
-          return (
-            <TableCell>
-              <NonCapitalizedTooltip
-                content={tooltipText}
-                className="text-sm text-muted-foreground"
-              >
-                <span>
-                  {nodes[0]}
-                  {hasMultipleNodes && (
-                    <span className="border-b border-dotted border-gray-400 cursor-help ml-1">
-                      (+{nodes.length - 1} more)
-                    </span>
-                  )}
-                </span>
-              </NonCapitalizedTooltip>
-            </TableCell>
-          );
-        },
-      },
-      {
         id: 'requested_resources',
         order: 7,
         renderHeader: () => (
