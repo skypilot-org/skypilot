@@ -198,6 +198,11 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
+  :ref:`runpod <config-yaml-runpod>`:
+    :ref:`allowed_cuda_versions <config-yaml-runpod-allowed-cuda-versions>`:
+      - '11.8'
+      - '12.0'
+
   :ref:`vast <config-yaml-vast>`:
     :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
     :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
@@ -1785,6 +1790,41 @@ Example:
 
   nebius:
     domain: api.nebius.cloud:443
+
+.. _config-yaml-runpod:
+
+``runpod``
+~~~~~~~~~~
+
+Advanced RunPod configuration (optional).
+
+.. _config-yaml-runpod-allowed-cuda-versions:
+
+``runpod.allowed_cuda_versions``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restrict RunPod instances to specific CUDA versions (optional).
+
+List of CUDA versions to allow when provisioning RunPod instances. When set,
+SkyPilot will only select RunPod instances that support the specified CUDA
+versions. This uses the RunPod API's ``allowedCudaVersions`` parameter.
+
+This is useful when you need to ensure compatibility with specific CUDA
+versions for your workloads.
+
+Available CUDA versions: ``12.9``, ``12.8``, ``12.7``, ``12.6``, ``12.5``, ``12.4``, ``12.3``, ``12.2``, ``12.1``, ``12.0``, ``11.8``
+
+Default: ``null`` (no CUDA version restrictions).
+
+Example:
+
+.. code-block:: yaml
+
+  runpod:
+    allowed_cuda_versions:
+      - '11.8'
+      - '12.0'
+      - '12.1'
 
 .. _config-yaml-vast:
 

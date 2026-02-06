@@ -291,6 +291,7 @@ def launch(
     *,
     network_volume_id: Optional[str] = None,
     volume_mount_path: Optional[str] = None,
+    allowed_cuda_versions: Optional[List[str]] = None,
 ) -> str:
     """Launches an instance with the given parameters.
 
@@ -393,6 +394,7 @@ def launch(
     else:
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
+            allowed_cuda_versions=allowed_cuda_versions,
             **params,  # type: ignore[arg-type]
         )
 
