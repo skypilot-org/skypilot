@@ -20,11 +20,12 @@ import {
   UsersIcon,
   StarIcon,
   VolumeIcon,
-  KueueIcon,
+  PieChartIcon,
+  RepeatIcon,
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, Clock, FileCode, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -36,8 +37,8 @@ const ICON_MAP = {
   book: BookDocIcon,
   users: UsersIcon,
   volume: VolumeIcon,
-  clock: Clock,
-  kueue: KueueIcon,
+  repeat: RepeatIcon,
+  piechart: PieChartIcon,
   filecode: FileCode,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
@@ -50,13 +51,15 @@ import { PluginSlot } from '@/plugins/PluginSlot';
 const primaryNavItems = [
   { href: '/clusters', icon: ServerIcon, label: 'Clusters' },
   { href: '/jobs', icon: BriefcaseIcon, label: 'Jobs' },
-  { href: '/volumes', icon: VolumeIcon, label: 'Volumes' },
 ];
 const secondaryNavItems = [
-  { href: '/recipes', icon: FileCode, label: 'Recipes' },
   { href: '/infra', icon: ChipIcon, label: 'Infra' },
-  { href: '/workspaces', icon: BookDocIcon, label: 'Workspaces' },
+  { href: '/volumes', icon: VolumeIcon, label: 'Volumes' },
+];
+const teamsNavItems = [
+  { href: '/recipes', icon: FileCode, label: 'Recipes' },
   { href: '/users', icon: UsersIcon, label: 'Users' },
+  { href: '/workspaces', icon: BookDocIcon, label: 'Workspaces' },
 ];
 const externalLinks = [
   {
@@ -289,15 +292,18 @@ export function TopBar() {
   };
 
   // Render a plugin nav link for the sidebar (desktop + mobile)
-  const renderSidebarPluginNavLink = (link, onClick) => {
+  const renderSidebarPluginNavLink = (link, onClick, sidebarCollapsed = false) => {
+    // Plugin hrefs are raw paths like "/plugins/credentials" which won't match
+    // the Next.js dynamic pathname "/plugins/[...slug]", so compare against asPath.
+    const isActive = router.asPath.startsWith(link.href);
     const content = (
       <>
         {link.icon && (
-          <span className="text-base leading-none mr-3" aria-hidden="true">
-            {renderPluginIcon(link.icon, 'w-4 h-4')}
+          <span className="text-base leading-none shrink-0" aria-hidden="true">
+            {renderPluginIcon(link.icon, `w-4 h-4 ${isActive ? 'text-blue-600' : 'text-gray-400'}`)}
           </span>
         )}
-        <span className="flex items-center gap-2">
+        <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 flex items-center gap-2 ${sidebarCollapsed ? 'opacity-0' : 'opacity-100'}`}>
           <span>{link.label}</span>
           {link.badge && (
             <span className="text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">
@@ -308,6 +314,12 @@ export function TopBar() {
       </>
     );
 
+    const linkClasses = `flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+      isActive
+        ? 'bg-blue-50 text-blue-600 font-medium'
+        : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
+    }`;
+
     if (link.external) {
       return (
         <a
@@ -315,8 +327,9 @@ export function TopBar() {
           href={link.href}
           target={link.target}
           rel={link.rel}
-          className={getSidebarLinkClasses(link.href, true)}
+          className={linkClasses}
           onClick={onClick}
+          title={sidebarCollapsed ? link.label : undefined}
         >
           {content}
         </a>
@@ -327,9 +340,10 @@ export function TopBar() {
       <Link
         key={link.id}
         href={resolvePluginHref(link.href)}
-        className={getSidebarLinkClasses(link.href)}
+        className={linkClasses}
         onClick={onClick}
         prefetch={false}
+        title={sidebarCollapsed ? link.label : undefined}
       >
         {content}
       </Link>
@@ -520,16 +534,26 @@ export function TopBar() {
           </div>
           {secondaryNavItems.map((item) => renderNavItem(item, undefined, collapsed))}
 
+          <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
+            <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Teams</span>
+          </div>
+          {teamsNavItems.map((item) => renderNavItem(item, undefined, collapsed))}
+
           {/* Plugin links */}
-          {(ungrouped.length > 0 || Object.keys(groups).length > 0) && (
-            <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
+          {ungrouped.length > 0 && (
+            <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider overflow-hidden whitespace-nowrap flex items-center gap-1.5">
               <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Plugins</span>
             </div>
           )}
-          {ungrouped.map((link) => renderSidebarPluginNavLink(link))}
-          {Object.entries(groups).map(([groupName, links]) =>
-            renderSidebarGroupedPlugins(groupName, links)
-          )}
+          {ungrouped.map((link) => renderSidebarPluginNavLink(link, undefined, collapsed))}
+          {Object.entries(groups).map(([groupName, links]) => (
+            <React.Fragment key={groupName}>
+              <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider overflow-hidden whitespace-nowrap flex items-center gap-1.5">
+                <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>{groupName}</span>
+              </div>
+              {links.map((link) => renderSidebarPluginNavLink(link, undefined, collapsed))}
+            </React.Fragment>
+          ))}
         </nav>
 
         {/* Footer: pinned at bottom */}
@@ -699,24 +723,28 @@ export function TopBar() {
             </div>
             {secondaryNavItems.map((item) => renderNavItem(item, toggleMobileSidebar))}
 
-            {/* Ungrouped plugins */}
-            {(ungrouped.length > 0 || Object.keys(groups).length > 0) && (
-              <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider">
+            <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider">
+              Teams
+            </div>
+            {teamsNavItems.map((item) => renderNavItem(item, toggleMobileSidebar))}
+
+            {/* Plugin links */}
+            {ungrouped.length > 0 && (
+              <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider flex items-center gap-1.5">
                 Plugins
               </div>
             )}
             {ungrouped.map((link) =>
               renderSidebarPluginNavLink(link, toggleMobileSidebar)
             )}
-
-            {/* Grouped plugins */}
-            {Object.entries(groups).map(([groupName, links]) =>
-              renderSidebarGroupedPlugins(
-                groupName,
-                links,
-                toggleMobileSidebar
-              )
-            )}
+            {Object.entries(groups).map(([groupName, links]) => (
+              <React.Fragment key={groupName}>
+                <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider flex items-center gap-1.5">
+                  {groupName}
+                </div>
+                {links.map((link) => renderSidebarPluginNavLink(link, toggleMobileSidebar))}
+              </React.Fragment>
+            ))}
 
             <div className="border-t border-gray-200 my-3"></div>
 
