@@ -63,8 +63,6 @@ class Shadeform(clouds.Cloud):
             'Docker images not supported on Shadeform yet.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Custom multiple network interfaces not supported.',
-        clouds.CloudImplementationFeatures.LOCAL_DISK:
-            'Local disk is not supported on Shadeform.',
     }
     # yapf: enable
 
@@ -159,12 +157,11 @@ class Shadeform(clouds.Cloud):
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None,
-        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> Optional[str]:
         """Get default instance type."""
-        del disk_tier, local_disk  # Not supported
+        del disk_tier  # Not supported
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=None,

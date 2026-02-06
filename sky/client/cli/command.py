@@ -578,7 +578,6 @@ def _parse_override_params(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     network_tier: Optional[str] = None,
-    local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -638,11 +637,6 @@ def _parse_override_params(
             override_params['network_tier'] = None
         else:
             override_params['network_tier'] = network_tier
-    if local_disk is not None:
-        if local_disk.lower() == 'none':
-            override_params['local_disk'] = None
-        else:
-            override_params['local_disk'] = local_disk
     if ports:
         if any(p.lower() == 'none' for p in ports):
             if len(ports) > 1:
@@ -834,7 +828,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     network_tier: Optional[str] = None,
-    local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     secret: Optional[List[Tuple[str, str]]] = None,
@@ -888,7 +881,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              network_tier=network_tier,
-                                             local_disk=local_disk,
                                              ports=ports,
                                              config_override=config_override)
     if field_to_ignore is not None:
@@ -1174,7 +1166,6 @@ def launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
-    local_disk: Optional[str],
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
@@ -1235,7 +1226,6 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        local_disk=local_disk,
         ports=ports,
         config_override=config_override,
         git_url=git_url,
@@ -1369,7 +1359,6 @@ def exec(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
-    local_disk: Optional[str],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1471,11 +1460,8 @@ def exec(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        local_disk=local_disk,
         ports=ports,
-        field_to_ignore=[
-            'cpus', 'memory', 'disk_size', 'disk_tier', 'local_disk', 'ports'
-        ],
+        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
@@ -5313,7 +5299,6 @@ def jobs_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
-    local_disk: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
@@ -5369,7 +5354,6 @@ def jobs_launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        local_disk=local_disk,
         ports=ports,
         job_recovery=job_recovery,
         config_override=config_override,
@@ -5852,7 +5836,6 @@ def jobs_pool_apply(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
-    local_disk: Optional[str],
     mode: str,
     workers: Optional[int],
     yes: bool,
@@ -5915,7 +5898,6 @@ def jobs_pool_apply(
             disk_size=disk_size,
             disk_tier=disk_tier,
             network_tier=network_tier,
-            local_disk=local_disk,
             ports=ports,
             not_supported_cmd='sky jobs pool up',
             pool=True,
@@ -6363,7 +6345,6 @@ def _generate_task_with_service(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
-    local_disk: Optional[str],
     not_supported_cmd: str,
     pool: bool,  # pylint: disable=redefined-outer-name
     git_url: Optional[str] = None,
@@ -6397,7 +6378,6 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        local_disk=local_disk,
         ports=ports,
         git_url=git_url,
         git_ref=git_ref,
@@ -6524,7 +6504,6 @@ def serve_up(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
-    local_disk: Optional[str],
     yes: bool,
     async_call: bool,
     git_url: Optional[str] = None,
@@ -6584,7 +6563,6 @@ def serve_up(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        local_disk=local_disk,
         ports=ports,
         not_supported_cmd='sky serve up',
         pool=False,
@@ -6640,8 +6618,8 @@ def serve_update(
         secret_file: Optional[Dict[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-        disk_tier: Optional[str], network_tier: Optional[str],
-        local_disk: Optional[str], mode: str, yes: bool, async_call: bool):
+        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
+        yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -6696,7 +6674,6 @@ def serve_update(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
-        local_disk=local_disk,
         ports=ports,
         not_supported_cmd='sky serve update',
         pool=False,

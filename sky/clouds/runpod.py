@@ -43,8 +43,6 @@ class RunPod(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces are not supported on '
              'RunPod.'),
-        clouds.CloudImplementationFeatures.LOCAL_DISK:
-            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _MAX_VOLUME_NAME_LEN_LIMIT = 30
@@ -157,14 +155,12 @@ class RunPod(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for RunPod."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
-                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='runpod')
@@ -261,7 +257,6 @@ class RunPod(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
-                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -280,7 +275,6 @@ class RunPod(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
-             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='runpod')

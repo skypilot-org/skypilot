@@ -20,6 +20,7 @@ import numpy as np
 from sky import exceptions
 from sky.adaptors import aws
 from sky.adaptors import common as adaptors_common
+from sky.skylet import constants
 from sky.utils import log_utils
 from sky.utils import ux_utils
 
@@ -299,7 +300,7 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                     f'Instance type {row["InstanceType"]} has '
                     f'{len(raw_info["Disks"])} disk entries, expected 1.')
                 disk_info = raw_info['Disks'][0]
-                assert disk_info['Type'] in ('ssd', 'hdd'), (
+                assert disk_info['Type'] in constants.LOCAL_DISK_TYPES, (
                     f'Instance type {row["InstanceType"]} has unknown '
                     f'disk type {disk_info["Type"]}.')
                 info['LocalDiskType'] = disk_info['Type']
