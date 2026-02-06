@@ -2121,7 +2121,7 @@ def format_job_table(
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
                                                             absolute=True)
-            submitted = log_utils.readable_time_duration(submitted_at)
+            submitted = log_utils.readable_time_duration_ago(submitted_at)
             total_duration = log_utils.readable_time_duration(submitted_at,
                                                               end_at,
                                                               absolute=True)
@@ -2184,7 +2184,8 @@ def format_job_table(
             # dump_managed_job_queue().
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
-            submitted = log_utils.readable_time_duration(task['submitted_at'])
+            submitted = log_utils.readable_time_duration_ago(
+                task['submitted_at'])
             user_values = get_user_column_values(task)
             task_workspace = '-' if len(job_tasks) > 1 else workspace
             pool = task.get('pool')
