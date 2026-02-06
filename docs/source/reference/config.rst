@@ -1382,6 +1382,7 @@ Can be one of:
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
 - ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
+- ``nebius``: `Nebius autoscaler <https://docs.nebius.com/kubernetes/node-groups/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
 
 .. _config-yaml-kubernetes-pod-config:
