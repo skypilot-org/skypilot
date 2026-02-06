@@ -2018,6 +2018,7 @@ def get_config_schema():
         else:
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
 
+    # TODO (kyuds): deprecated; remove v0.13.0
     data_schema = {
         'type': 'object',
         'required': [],

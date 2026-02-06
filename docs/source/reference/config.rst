@@ -214,10 +214,6 @@ Below is the configuration syntax and some example values. See detailed explanat
     gcp:
       project_id: my-project-id
 
-  :ref:`data <config-yaml-data>`:
-    :ref:`mount_cached <config-yaml-data-mount-cached>`:
-      :ref:`sequential_upload <config-yaml-data-mount-cached-sequential-upload>`: false
-
   :ref:`daemons <config-yaml-daemons>`:
     skypilot-status-refresh-daemon:
       log_level: DEBUG
@@ -1993,46 +1989,6 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
-
-.. _config-yaml-data:
-
-``data``
-~~~~~~~~
-
-Data storage configuration (optional).
-
-.. code-block:: yaml
-
-  data:
-    mount_cached:
-      sequential_upload: false
-
-.. _config-yaml-data-mount-cached:
-
-``data.mount_cached``
-~~~~~~~~~~~~~~~~~~~~~
-
-Configuration for MOUNT_CACHED storage mode.
-
-.. _config-yaml-data-mount-cached-sequential-upload:
-
-``data.mount_cached.sequential_upload``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Whether to upload files sequentially to the remote storage (default: ``false``).
-
-When set to ``true``, files written to the mounted directory are uploaded one at a time
-in the order they were written. This is useful when your framework relies on the order
-of files being uploaded (e.g., checkpoint files that need to appear in sequence).
-
-When set to ``false`` (default), files are uploaded in parallel for better performance.
-The upload order is not guaranteed, but throughput is significantly higher.
-
-.. code-block:: yaml
-
-  data:
-    mount_cached:
-      sequential_upload: true
 
 .. _config-yaml-daemons:
 
