@@ -2063,6 +2063,10 @@ async def api_status(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
         None, description='Fields to get. If None, get all fields.'),
+    user_filter: Optional[str] = fastapi.Query(
+        None, description='Filter requests by user name.'),
+    request_name_filter: Optional[str] = fastapi.Query(
+        None, description='Filter requests by request name.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -2072,12 +2076,18 @@ async def api_status(
                 requests_lib.RequestStatus.PENDING,
                 requests_lib.RequestStatus.RUNNING,
             ]
+        # Build include_request_names list if request_name_filter is provided
+        include_request_names = None
+        if request_name_filter is not None:
+            include_request_names = [request_name_filter]
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 limit=limit,
                 fields=fields,
                 sort=True,
+                user_id=user_filter,
+                include_request_names=include_request_names,
             ))
         return requests_lib.encode_requests(request_tasks)
     else:

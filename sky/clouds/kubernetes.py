@@ -864,6 +864,64 @@ class Kubernetes(clouds.Cloud):
                         'To add additional disk, use volumes.'
                         f'{colorama.Style.RESET_ALL}')
 
+    def get_feasible_launchable_resources(
+            self,
+            resources: 'resources_lib.Resources',
+            num_nodes: int = 1) -> 'resources_utils.FeasibleResources':
+        """Override to check total cluster GPU capacity for multi-node requests.
+
+        For Kubernetes clusters without autoscaling, we check if the total
+        requested accelerators (num_nodes * accelerators_per_node) exceeds the
+        total cluster capacity. If so, we fail early with a helpful message
+        instead of getting stuck in LAUNCHING state.
+        """
+        # Check if accelerators are requested and num_nodes > 1
+        accelerators = resources.accelerators
+        if accelerators and num_nodes > 1:
+            # Only check capacity if autoscaler is NOT configured
+            context = resources.region
+            autoscaler_type = kubernetes_utils.get_autoscaler_type(
+                context=context)
+            if autoscaler_type is None:
+                # No autoscaler - check total cluster capacity
+                try:
+                    acc_type, acc_count = list(accelerators.items())[0]
+                    total_requested = num_nodes * acc_count
+
+                    # Get total cluster GPU capacity
+                    node_info = kubernetes_utils.get_kubernetes_node_info(
+                        context=context)
+                    total_capacity = 0
+                    for node in node_info.node_info_dict.values():
+                        node_acc_count = node.total.get('accelerator_count', 0)
+                        total_capacity += node_acc_count
+
+                    if total_requested > total_capacity:
+                        hint = (
+                            f'Requested {num_nodes} nodes x {acc_count} '
+                            f'{acc_type} = {total_requested} total GPUs, '
+                            f'but cluster only has {total_capacity} GPUs. '
+                            'Either reduce the resource request or enable '
+                            'cluster autoscaling.')
+                        return resources_utils.FeasibleResources(
+                            resources_list=[],
+                            fuzzy_candidate_list=[],
+                            hint=hint)
+                except KeyboardInterrupt:
+                    raise
+                except exceptions.KubeAPIUnreachableError as e:
+                    # This can happen if the user has no permission to access
+                    # the cluster, or the cluster is not reachable.
+                    logger.warning('Could not check cluster capacity due to '
+                                   f'Kubernetes API error: {e}')
+                except Exception as e:  # pylint: disable=broad-except
+                    # If we can't determine capacity for other reasons,
+                    # fall through to parent
+                    logger.debug(f'Could not check cluster capacity: {e!r}')
+
+        # Call parent implementation for standard feasibility checks
+        return super().get_feasible_launchable_resources(resources, num_nodes)
+
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
