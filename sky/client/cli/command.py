@@ -4206,7 +4206,13 @@ def _show_gpus_impl(
         gpu_counts: Dict[Tuple[str, str, str],
                          List[int]] = collections.defaultdict(lambda: [0, 0])
         for cluster_name, request_id in request_ids:
-            nodes_info = sdk.stream_and_get(request_id)
+            try:
+                nodes_info = sdk.stream_and_get(request_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to get partition info for '
+                               f'Slurm cluster {cluster_name!r}: '
+                               f'{common_utils.format_exception(e)}')
+                continue
 
             for node_info in nodes_info:
                 gpu_type = node_info.get('gpu_type') or ''
