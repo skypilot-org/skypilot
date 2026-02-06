@@ -220,6 +220,10 @@ class TestNormalizeLocalDisk:
         with pytest.raises(ValueError, match='Invalid local_disk'):
             resources_utils.normalize_local_disk(':')
 
+    def test_weird_device_name(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('fakessd')
+
 
 class TestParseLocalDiskStr:
     """Tests for parse_local_disk_str function."""
