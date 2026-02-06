@@ -1075,19 +1075,21 @@ class GCPManagedInstanceGroup(GCPComputeInstance):
         # create managed instance group
         instance_template_url = (f'projects/{project_id}/regions/{region}/'
                                  f'instanceTemplates/{instance_template_name}')
+        managed_instance_group_config = config[
+            constants.MANAGED_INSTANCE_GROUP_CONFIG]
         if not mig_exists:
             # Create a new MIG with size 0 and resize it later for triggering
             # DWS, according to the doc: https://cloud.google.com/compute/docs/instance-groups/create-mig-with-gpu-vms # pylint: disable=line-too-long
+            termination_action = managed_instance_group_config.get(
+                'termination_action', 'DO_NOTHING')
             operation = mig_utils.create_managed_instance_group(
                 project_id,
                 zone,
                 managed_instance_group_name,
                 instance_template_url,
-                size=0)
+                size=0,
+                termination_action=termination_action)
             cls.wait_for_operation(operation, project_id, zone=zone)
-
-        managed_instance_group_config = config[
-            constants.MANAGED_INSTANCE_GROUP_CONFIG]
         if count > 0:
             # Use resize to trigger DWS for creating VMs.
             operation = mig_utils.resize_managed_instance_group(

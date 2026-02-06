@@ -102,6 +102,9 @@ available_node_types:
         {%- if provision_timeout is defined and provision_timeout is not none %}
         provision_timeout: {{ provision_timeout }}
         {%- endif %}
+        {%- if termination_action is defined and termination_action is not none %}
+        termination_action: {{ termination_action }}
+        {%- endif %}
       {%- endif %}
       {%- if specific_reservations %}
       reservationAffinity:
