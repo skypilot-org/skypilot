@@ -268,8 +268,7 @@ class ClusterInfo:
         if head is not None and head.node_name:
             node_names.append(head.node_name)
         for worker in self.get_worker_instances():
-            if worker.node_name and worker.node_name not in node_names:
-                node_names.append(worker.node_name)
+            node_names.append(worker.node_name or '')
         return node_names if node_names else None
 
 
