@@ -144,12 +144,13 @@ def normalize_local_disk(local_disk: str) -> str:
             size = float(size_to_check)
             if size <= 0:
                 raise ValueError()
-        except ValueError as exc:
-            raise ValueError(
-                f'Invalid local_disk: {local_disk!r}. '
-                'Expected "mode:size[+]", "mode", or "size[+]". Mode '
-                'must be "nvme" or "ssd", size must be positive (GB), '
-                'optionally with "+".') from exc
+        except ValueError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(  # pylint: disable=raise-missing-from
+                    f'Invalid local_disk: {local_disk!r}. '
+                    'Expected "mode:size[+]", "mode", or "size[+]". Mode '
+                    'must be "nvme" or "ssd", size must be positive (GB), '
+                    'optionally with "+".')
 
     if len(parts) == 1:
         part = parts[0]

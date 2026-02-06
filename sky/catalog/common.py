@@ -488,8 +488,9 @@ def filter_with_local_disk(df: 'pd.DataFrame',
 
     # Disk Type
     if mode not in ('nvme', 'ssd'):
-        raise ValueError('Local disk should be either nvme or ssd. '
-                         f'Got {local_disk}.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Local disk should be either nvme or ssd. '
+                             f'Got {local_disk}.')
     df = df[df['LocalDiskType'] == 'ssd']  # SSD is always required.
     if mode == 'nvme':
         df = df[df['NVMeSupported'] == True]  # pylint: disable=singleton-comparison
