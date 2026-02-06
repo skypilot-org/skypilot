@@ -633,7 +633,7 @@ def _check_and_skip_if_provision_failed(
     log_content = None
     if not log_to_stdout and log_file is not None:
         try:
-            with open(log_file.name, 'r') as f:
+            with open(log_file.name, 'r', encoding='utf-8') as f:
                 log_content = f.read()
         except OSError:
             pass
