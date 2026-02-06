@@ -293,9 +293,10 @@ export function TopBar() {
 
   // Render a plugin nav link for the sidebar (desktop + mobile)
   const renderSidebarPluginNavLink = (link, onClick, sidebarCollapsed = false) => {
-    // Plugin hrefs are raw paths like "/plugins/credentials" which won't match
-    // the Next.js dynamic pathname "/plugins/[...slug]", so compare against asPath.
-    const isActive = router.asPath.startsWith(link.href);
+    // Plugin hrefs are raw paths like "/plugins/credentials". The router.asPath
+    // includes the basePath prefix (e.g. "/dashboard/plugins/credentials"), so
+    // check if asPath ends with or contains the plugin href.
+    const isActive = router.asPath.includes(link.href);
     const content = (
       <>
         {link.icon && (
