@@ -206,8 +206,25 @@ class DockerInitializer:
         self.initialized = False
         # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
-        self.docker_cmd = 'podman' if use_podman else 'docker'
+        self._docker_cmd = 'podman' if use_podman else 'docker'
         self.log_path = log_path
+        # Whether sudo is needed for docker commands. This is determined
+        # during _check_docker_installed() based on whether the user has
+        # permission to access docker socket.
+        self._use_sudo_for_docker: Optional[bool] = None
+
+    @property
+    def docker_cmd(self) -> str:
+        """Returns the docker command, with sudo prefix if needed.
+
+        On some cloud providers (e.g., Nebius), the SSH user may not be in
+        the docker group, or the group membership may not have taken effect
+        yet (requires re-login after usermod). In these cases, we need to
+        use sudo to run docker commands.
+        """
+        if self._use_sudo_for_docker:
+            return f'sudo {self._docker_cmd}'
+        return self._docker_cmd
 
     def _run(
         self,
@@ -491,18 +508,35 @@ class DockerInitializer:
         # before checking if docker is installed to avoid permission issues.
         docker_cmd = ('id -nG $USER | grep -qw docker || '
                       'sudo usermod -aG docker $USER > /dev/null 2>&1;'
-                      f'command -v {self.docker_cmd} || echo {no_exist!r}')
+                      f'command -v {self._docker_cmd} || echo {no_exist!r}')
         cleaned_output = self._run(docker_cmd)
         timeout = 60 * 10  # 10 minute timeout
         start = time.time()
         while no_exist in cleaned_output or 'docker' not in cleaned_output:
             if time.time() - start > timeout:
-                logger.error(
-                    f'{self.docker_cmd.capitalize()} not installed. Please use '
-                    f'an image with {self.docker_cmd.capitalize()} installed.')
+                logger.error(f'{self._docker_cmd.capitalize()} not installed. '
+                             f'Please use an image with '
+                             f'{self._docker_cmd.capitalize()} installed.')
                 return
             time.sleep(5)
             cleaned_output = self._run(docker_cmd)
+
+        # Check if the user can access docker without sudo. On some cloud
+        # providers (e.g., Nebius), the SSH user may not be in the docker
+        # group yet, or the group membership hasn't taken effect (requires
+        # re-login after usermod -aG docker). In these cases, we use sudo.
+        check_docker_access = f'{self._docker_cmd} info > /dev/null 2>&1'
+        rc, _, _ = self.runner.run(check_docker_access,
+                                   require_outputs=True,
+                                   stream_logs=False,
+                                   log_path=self.log_path)
+        if rc != 0:
+            # User cannot access docker without sudo, enable sudo for docker
+            logger.info('Docker permission denied for current user. '
+                        'Using sudo for docker commands.')
+            self._use_sudo_for_docker = True
+        else:
+            self._use_sudo_for_docker = False
 
     def _check_container_status(self):
         if self.initialized:
