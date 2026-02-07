@@ -95,7 +95,13 @@ def get_subnet_id(region: str, project_id: str) -> str:
         for sub_net in sub_nets.items:
             if sub_net.metadata.id == subnet_id:
                 return subnet_id
-        logger.warning(f'Ingore subnet id from config for region {region}.')
+        logger.warning(
+            f'Subnet ID "{subnet_id}" from config not found for region '
+            f'{region}. Falling back to the first available subnet.')
+
+    if not sub_nets.items:
+        raise ValueError(f'No subnets found for project {project_id} in region '
+                         f'{region}.')
     return sub_nets.items[0].metadata.id
 
 
