@@ -25,6 +25,15 @@ _USE_SKYIGNORE_HINT = (
 def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
     """List files and patterns ignored by the .skyignore file
     in the given source directory.
+
+    Supports negation patterns (lines starting with '!') which re-include
+    previously excluded files, following rsync/gitignore semantics.
+    Order matters: negation patterns only affect files excluded by
+    earlier patterns.
+
+    Example:
+        *.json      # Exclude all JSON files
+        !config.json  # But keep config.json
     """
     excluded_list: Set[str] = set()
     expand_src_dir_path = os.path.expanduser(src_dir_path)
@@ -36,6 +45,11 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#'):
+                    # Check for negation pattern (starts with '!')
+                    is_negation = line.startswith('!')
+                    if is_negation:
+                        line = line[1:]  # Remove '!' prefix
+
                     # Make parsing consistent with rsync.
                     # Rsync uses '/' as current directory.
                     if line.startswith('/'):
@@ -50,7 +64,13 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                     for i in range(len(matching_files)):
                         matching_files[i] = os.path.relpath(
                             matching_files[i], expand_src_dir_path)
-                    excluded_list.update(matching_files)
+
+                    if is_negation:
+                        # Negation: remove matching files from exclusion list
+                        excluded_list.difference_update(matching_files)
+                    else:
+                        # Normal pattern: add matching files to exclusion list
+                        excluded_list.update(matching_files)
     except IOError as e:
         logger.warning(f'Error reading {skyignore_path}: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
