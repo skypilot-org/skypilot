@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 35  # Add local disk
+API_VERSION = 36  # add per-cluster error field for realtime_slurm_gpu_availability.
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

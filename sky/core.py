@@ -1575,11 +1575,12 @@ def realtime_kubernetes_gpu_availability(
 
 
 def realtime_slurm_gpu_availability(
-        slurm_cluster_name: Optional[str] = None,
-        name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        env_vars: Optional[Dict[str, str]] = None,
-        **kwargs) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    slurm_cluster_name: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    env_vars: Optional[Dict[str, str]] = None,
+    **kwargs,
+) -> List[Tuple[str, List[models.RealtimeGpuAvailability], Optional[str]]]:
     """Gets Slurm real-time GPU availability grouped by partition.
 
     This function calls the Slurm backend to fetch GPU info.
@@ -1629,7 +1630,8 @@ def realtime_slurm_gpu_availability(
     #       "Slurm is not enabled. Run 'sky check' to enable it.")
 
     def realtime_slurm_gpu_availability_single(
-            slurm_cluster_name: str) -> List[models.RealtimeGpuAvailability]:
+        slurm_cluster_name: str,
+    ) -> Tuple[List[models.RealtimeGpuAvailability], Optional[str]]:
         try:
             # This function now returns aggregated data per GPU type:
             # Tuple[Dict[str, List[InstanceTypeInfo]], Dict[str, int],
@@ -1647,19 +1649,18 @@ def realtime_slurm_gpu_availability(
                     clouds='slurm',
                     case_sensitive=False,
                 ))
-        except exceptions.NotSupportedError as e:
-            logger.error(f'Failed to query Slurm GPU availability: {e}')
-            raise
         except ValueError as e:
-            # Re-raise ValueError if no GPUs are found matching the filters
-            logger.error(f'Error querying Slurm GPU availability: {e}')
-            raise
-        except Exception as e:
-            logger.error(
-                'Error querying Slurm GPU availability: '
+            # No GPUs found matching the filters for this cluster
+            logger.debug(f'No matching GPUs in Slurm cluster '
+                         f'{slurm_cluster_name!r}: '
+                         f'{common_utils.format_exception(e)}')
+            return [], None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Error querying Slurm cluster {slurm_cluster_name!r}: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-            raise ValueError(
-                f'Error querying Slurm GPU availability: {e}') from e
+            return [], (f'Could not query Slurm cluster for info: '
+                        f'{common_utils.format_exception(e)}')
 
         # --- Format the output ---
         realtime_gpu_availability_list: List[
@@ -1672,18 +1673,17 @@ def realtime_slurm_gpu_availability(
                     total_capacity[gpu_type],
                     total_available[gpu_type],
                 ))
-        return realtime_gpu_availability_list
+        return realtime_gpu_availability_list, None
 
     parallel_queried = subprocess_utils.run_in_parallel(
         realtime_slurm_gpu_availability_single, slurm_cluster_names)
-    availability_lists: List[Tuple[str,
-                                   List[models.RealtimeGpuAvailability]]] = []
-    for slurm_cluster_name, queried in zip(slurm_cluster_names,
-                                           parallel_queried):
-        if len(queried) == 0:
-            logger.debug(f'No gpus found in Slurm cluster {slurm_cluster_name}')
+    availability_lists: List[Tuple[str, List[models.RealtimeGpuAvailability],
+                                   Optional[str]]] = []
+    for name, (queried, error) in zip(slurm_cluster_names, parallel_queried):
+        if len(queried) == 0 and error is None:
+            logger.debug(f'No gpus found in Slurm cluster {name}')
             continue
-        availability_lists.append((slurm_cluster_name, queried))
+        availability_lists.append((name, queried, error))
     return availability_lists
 
 
