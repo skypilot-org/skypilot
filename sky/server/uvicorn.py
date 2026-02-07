@@ -106,7 +106,7 @@ class Server(uvicorn.Server):
         server will be forcefully shutdown.
         """
         if self.exiting and sig == signal.SIGINT:
-            # The server has been siganled to exit and recieved a SIGINT again,
+            # The server has been signaled to exit and received a SIGINT again,
             # do force shutdown.
             logger.info('Force shutdown.')
             self.should_exit = True
