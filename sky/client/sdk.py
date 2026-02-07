@@ -462,6 +462,7 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
+
     def _omit(version: int) -> bool:
         return remote_api_version is None or remote_api_version < version
 
