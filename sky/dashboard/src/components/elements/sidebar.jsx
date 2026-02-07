@@ -487,7 +487,7 @@ export function TopBar() {
   if (!isMobile) {
     const collapsed = isSidebarCollapsed;
     return (
-      <aside className={`fixed top-0 left-0 bottom-0 bg-white border-r border-gray-200 z-30 flex flex-col h-screen transition-all duration-200 ease-in-out ${collapsed ? 'w-14' : 'w-48'}`}>
+      <aside className={`fixed top-0 left-0 bottom-0 bg-white border-r border-gray-200 z-30 flex flex-col h-screen transition-all duration-200 ease-in-out ${collapsed ? 'w-14' : 'w-40'}`}>
         {/* Header: Logo + Collapse toggle */}
         <div className={`h-14 flex items-center shrink-0 ${collapsed ? 'px-2' : 'px-3'}`}>
           <div className={`overflow-hidden transition-all duration-200 shrink-0 ${collapsed ? 'w-0 opacity-0' : 'w-24 opacity-100'}`}>
@@ -522,9 +522,6 @@ export function TopBar() {
             )}
           </button>
         </div>
-
-        {/* Plugin badge slot (e.g. trial countdown) */}
-        {!collapsed && <div id="sidebar-badge-slot" className="px-3 pb-1" />}
 
         {/* Primary nav (scrollable) */}
         <nav className={`flex-1 overflow-y-auto py-2 space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
