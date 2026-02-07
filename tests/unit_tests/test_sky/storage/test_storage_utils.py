@@ -139,6 +139,86 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     assert len(excluded_files) == len(expected_excluded_files)
 
 
+def test_get_excluded_files_from_skyignore_with_negation():
+    """Test that negation patterns (!) correctly re-include files."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test files
+        files = [
+            'config.json',
+            'data.json',
+            'settings.json',
+            'important.txt',
+            'ignore.txt',
+        ]
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('test content')
+
+        # Create .skyignore with negation pattern
+        # This is the exact use case from the bug report
+        skyignore_content = textwrap.dedent("""\
+        # ignore all json
+        *.json
+
+        # but keep this one
+        !config.json
+
+        # ignore all txt
+        *.txt
+
+        # but keep important.txt
+        !important.txt
+        """)
+        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        # Test function
+        excluded_files = storage_utils.get_excluded_files_from_skyignore(
+            temp_dir)
+
+        # config.json and important.txt should NOT be excluded (negation works)
+        assert 'config.json' not in excluded_files
+        assert 'important.txt' not in excluded_files
+
+        # data.json, settings.json, ignore.txt should be excluded
+        assert 'data.json' in excluded_files
+        assert 'settings.json' in excluded_files
+        assert 'ignore.txt' in excluded_files
+
+
+def test_get_excluded_files_from_skyignore_negation_order_matters():
+    """Test that negation patterns must come after the exclude pattern."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test files
+        files = ['a.log', 'b.log', 'important.log']
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('test content')
+
+        # Negation before the exclude pattern - should have no effect
+        skyignore_content = textwrap.dedent("""\
+        # This negation comes before the exclude, so it has no effect
+        !important.log
+
+        # This excludes all .log files including important.log
+        *.log
+        """)
+        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        excluded_files = storage_utils.get_excluded_files_from_skyignore(
+            temp_dir)
+
+        # All .log files should be excluded because negation came first
+        assert 'a.log' in excluded_files
+        assert 'b.log' in excluded_files
+        assert 'important.log' in excluded_files
+
+
 def test_get_excluded_files_from_gitignore(gitignore_dir):
     # Test function
     excluded_files = storage_utils.get_excluded_files_from_gitignore(
@@ -216,18 +296,18 @@ def test_zip_files_and_folders(ignore_dir_name, request):
 
 def test_zip_files_and_folders_excluded_directories():
     """Test that files inside excluded directories are not included in zip file.
-    
+
     File/directory structure:
         temp_dir/ (temporary directory)
         └── main_dir/
             ├── main_file.txt         # contains "main file content"
             ├── .skyignore            # contains "excluded_dir"
             └── excluded_dir/         # this directory should be excluded
-                ├── excluded_file.txt # contains "excluded file content" 
+                ├── excluded_file.txt # contains "excluded file content"
                 └── nested_dir/
                     └── nested_file.txt # contains "nested file content"
 
-    .skyignore content: 
+    .skyignore content:
         excluded_dir
     """
     with tempfile.TemporaryDirectory() as temp_dir:
