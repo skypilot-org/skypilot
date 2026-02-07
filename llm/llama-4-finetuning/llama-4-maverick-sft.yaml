@@ -2,12 +2,16 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
+# HF_TOKEN=xxx sky launch llama-4-maverick-sft.yaml -c maverick --env HF_TOKEN
 #
 # This config requires at least 4 nodes with 8x H200 GPUs each.
 
 envs:
   HF_TOKEN:
+
+# Required if using W&B for experiment tracking
+# secrets:
+#   WANDB_API_KEY:
 
 resources:
   cpus: 100+
@@ -43,8 +47,15 @@ setup: |
 
 run: |
   conda activate training
-
-  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # Configure W&B if API key is set
+  if [ -n "$WANDB_API_KEY" ]; then
+    export WANDB_PROJECT=llama4-finetuning
+    export WANDB_NAME=llama4-maverick-sft-run
+    export WANDB_RUN_ID=$SKYPILOT_TASK_ID
+    echo "W&B tracking enabled"
+    pip install wandb
+  fi
+  export MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"
 
   tune run \

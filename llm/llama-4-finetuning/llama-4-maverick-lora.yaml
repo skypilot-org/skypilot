@@ -2,12 +2,16 @@
 #
 # Usage:
 #
-#  HF_TOKEN=xxx sky launch llama-4-maverick-lora.yaml -c maverick --env HF_TOKEN
+# HF_TOKEN=xxx sky launch llama-4-maverick-lora.yaml -c maverick --env HF_TOKEN
 #
 # This config requires at least 2 nodes with 8x H100 GPUs each.
 
 envs:
   HF_TOKEN:
+
+# Required if `report_to: wandb` in `configs/llama4_lora_sft.yaml`
+# secrets:
+#   WANDB_API_KEY: 
 
 resources:
   infra: k8s
@@ -37,30 +41,36 @@ setup: |
   conda create -n training python=3.10 -y
   conda activate training
 
-  # Download the repository configuration package
+  # Install CUDA toolkit
   wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-
-  # Install the keyring package
   sudo dpkg -i cuda-keyring_1.1-1_all.deb
-
-  # Update package list
   sudo apt-get update
-
-  #sudo apt-get install cuda-minimal-build-12-6 -y
   sudo apt-get install cuda-toolkit-12-6 -y
 
-  git clone -b v0.9.3 --depth 1 https://github.com/hiyouga/LLaMA-Factory.git
+  # Install LLaMA Factory and dependencies
+  git clone https://github.com/hiyouga/LLaMA-Factory.git
   cd LLaMA-Factory
+  git checkout 767b344
   pip install -e ".[torch,metrics,deepspeed]" --no-build-isolation
-  pip install "transformers>=4.51.1"
-
+  pip install "transformers>=4.51.1" "huggingface_hub>=0.34.0,<1.0"
+  hf download meta-llama/Llama-4-Maverick-17B-128E-Instruct
 
 run: |
   conda activate training
-
-  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # Configure W&B if API key is set
+  if [ -n "$WANDB_API_KEY" ]; then
+    export WANDB_PROJECT=llama4-finetuning
+    export WANDB_NAME=llama4-run
+    export WANDB_RUN_ID=$SKYPILOT_TASK_ID
+    echo "W&B tracking enabled"
+    pip install wandb
+  fi
+  export FORCE_TORCHRUN=1
+  export MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  export MASTER_PORT=29500
+  export NNODES=$SKYPILOT_NUM_NODES
+  export NODE_RANK=$SKYPILOT_NODE_RANK
   echo "Starting distributed finetuning, head node: $MASTER_ADDR"
 
   cd LLaMA-Factory
-
-  HF_TOKEN=$HF_TOKEN FORCE_TORCHRUN=1 NNODES=$SKYPILOT_NUM_NODES NODE_RANK=$SKYPILOT_NODE_RANK MASTER_ADDR=$MASTER_ADDR MASTER_PORT=29500 llamafactory-cli train /configs/llama4_lora_sft.yaml
+  llamafactory-cli train /configs/llama4_lora_sft.yaml
