@@ -7,6 +7,217 @@ If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide wi
 
 If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <https://github.com/skypilot-org/skypilot>`_.
 
+.. _kubernetes-cluster-states:
+
+Understanding cluster states
+----------------------------
+
+SkyPilot clusters can be in one of the following states:
+
+- **INIT**: The cluster is initializing, has incomplete setup, or is in an abnormal state (e.g., some pods are not running).
+- **UP**: The cluster is healthy and all pods are running correctly.
+- **STOPPED**: All pods in the cluster have been stopped (not applicable for Kubernetes, as pods cannot be "stopped" - they are either running or terminated).
+
+.. note::
+    On Kubernetes, clusters cannot be "stopped" like VMs on cloud providers. When a cluster is terminated on Kubernetes, it is removed entirely. This means the **STOPPED** state is generally not used for Kubernetes clusters.
+
+.. _kubernetes-pod-failure-states:
+
+Cluster state transitions when pods fail
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When pods experience failures on Kubernetes, SkyPilot detects these failures and transitions the cluster to the appropriate state. Below are the common pod failure scenarios and their expected cluster state behavior.
+
+**Pod OOM Killed**
+
+When a pod is terminated due to Out-of-Memory (OOM) conditions:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - **Cause**
+     - Container exceeds its memory limit or the node runs out of memory
+   * - **Cluster State**
+     - Transitions to **INIT**
+   * - **Pod Status**
+     - ``OOMKilled`` in container termination reason
+   * - **Recovery**
+     - Run ``sky down <cluster>`` to clean up, then ``sky launch`` to recreate. If OOM persists, increase memory in your task YAML.
+
+**Pod Evicted by Kubelet**
+
+When kubelet evicts a pod due to node resource pressure:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - **Cause**
+     - Node is low on resources (CPU, memory, ephemeral storage, or disk pressure)
+   * - **Cluster State**
+     - Transitions to **INIT**
+   * - **Pod Status**
+     - ``Evicted`` with a message indicating the resource pressure (e.g., "The node was low on resource: ephemeral-storage")
+   * - **Recovery**
+     - Run ``sky down <cluster>`` to clean up, then ``sky launch`` to recreate. Consider requesting more storage or using nodes with more resources.
+
+**Node Drained or Deleted**
+
+When a node is drained (e.g., for maintenance) or deleted from the cluster:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - **Cause**
+     - Cluster administrator drains the node, node is deleted, or node becomes unhealthy
+   * - **Cluster State**
+     - Transitions to **INIT** (if some pods are affected) or cluster is removed from ``sky status`` (if all pods are terminated)
+   * - **Pod Status**
+     - Pod events show ``DeletingNode``, ``NodeNotReady``, or ``TaintManagerEviction``
+   * - **Recovery**
+     - If the cluster shows **INIT**, run ``sky down <cluster>`` and then ``sky launch`` to recreate on a healthy node.
+
+**Pod Preempted by Kueue**
+
+When using Kueue for workload scheduling and a pod is preempted:
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - **Cause**
+     - Higher priority workload needs resources, or quota is exceeded
+   * - **Cluster State**
+     - Transitions to **INIT**
+   * - **Pod Status**
+     - Pod condition ``TerminationTarget`` with reason indicating Kueue preemption
+   * - **Recovery**
+     - Run ``sky down <cluster>`` and then ``sky launch``. Consider using :ref:`managed jobs <managed-jobs>` for automatic recovery from preemptions.
+
+**Generic Pod Disruption**
+
+When a pod is disrupted for other reasons (e.g., PodDisruptionBudget, voluntary disruption):
+
+.. list-table::
+   :widths: 30 70
+   :header-rows: 0
+
+   * - **Cause**
+     - Various disruption events (voluntary or involuntary)
+   * - **Cluster State**
+     - Transitions to **INIT**
+   * - **Pod Status**
+     - Pod condition ``DisruptionTarget`` with specific reason and message
+   * - **Recovery**
+     - Run ``sky down <cluster>`` and then ``sky launch`` to recreate.
+
+.. _kubernetes-state-transition-summary:
+
+State transition summary
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+The table below summarizes how SkyPilot maps Kubernetes pod phases to cluster states:
+
+.. list-table::
+   :widths: 30 30 40
+   :header-rows: 1
+
+   * - Pod Phase
+     - Cluster State
+     - Notes
+   * - ``Pending``
+     - **INIT**
+     - Pod is waiting to be scheduled or initialized
+   * - ``Running``
+     - **UP**
+     - Pod is running and healthy
+   * - ``Failed``
+     - **INIT**
+     - Pod has failed (OOM, eviction, etc.)
+   * - ``Succeeded``
+     - Terminated
+     - Pod completed successfully (cluster removed from status)
+   * - ``Unknown``
+     - Terminated
+     - Pod state is unknown (cluster removed from status)
+
+.. tip::
+    Run ``sky status --refresh`` to force a status refresh and see the latest cluster state. This queries the Kubernetes API for the current pod status.
+
+.. _kubernetes-troubleshooting-init-state:
+
+Why is my cluster stuck in INIT state?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A cluster in **INIT** state indicates that something went wrong during provisioning or that the cluster is in an abnormal state. Common causes include:
+
+1. **Pod failed to start**: Check pod events with ``kubectl describe pod <pod-name>``
+2. **Pod was evicted or OOM killed**: Check pod status and events for termination reasons
+3. **Node issues**: The node may be unhealthy or have resource pressure
+4. **Image pull failures**: The container image could not be pulled
+5. **Resource constraints**: Requested resources (GPU, CPU, memory) are not available
+
+**Debugging steps:**
+
+.. code-block:: bash
+
+    # Find the pod name for your cluster
+    $ kubectl get pods -l skypilot-cluster-name=<cluster-name>
+
+    # Get detailed pod information including events
+    $ kubectl describe pod <pod-name>
+
+    # Check pod logs if the container started
+    $ kubectl logs <pod-name>
+
+    # Check node status and events
+    $ kubectl describe node <node-name>
+
+.. _kubernetes-recovery-guidelines:
+
+Recovery guidelines
+^^^^^^^^^^^^^^^^^^^
+
+For most pod failure scenarios, the recommended recovery approach is:
+
+1. **Clean up the failed cluster**:
+
+   .. code-block:: bash
+
+       $ sky down <cluster-name>
+
+2. **Investigate the root cause** (if the failure is unexpected):
+
+   .. code-block:: bash
+
+       # Before running sky down, check pod events
+       $ kubectl get pods -l skypilot-cluster-name=<cluster-name>
+       $ kubectl describe pod <pod-name>
+
+3. **Relaunch with appropriate resources**:
+
+   .. code-block:: bash
+
+       $ sky launch -c <cluster-name> <task.yaml>
+
+   If the failure was due to resource constraints, update your task YAML to request appropriate resources:
+
+   .. code-block:: yaml
+
+       resources:
+         memory: 32+  # Request at least 32GB memory
+         disk_size: 100  # Request 100GB disk
+
+4. **Consider using managed jobs** for fault tolerance:
+
+   For long-running jobs that may be affected by preemptions or node failures, use SkyPilot's :ref:`managed jobs <managed-jobs>` feature which provides automatic recovery:
+
+   .. code-block:: bash
+
+       $ sky jobs launch <task.yaml>
+
 .. _kubernetes-troubleshooting-basic:
 
 Verifying basic setup
