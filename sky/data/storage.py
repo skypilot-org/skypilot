@@ -365,7 +365,7 @@ class MountCachedConfig:
         if self.transfers is not None:
             flags.append(f'--transfers {self.transfers}')
             # Automate checkers: transfers * 2
-            flags.append(f'--checkers {self.transfers * 2}')
+            flags.append(f'--checkers {max(self.transfers * 2, 4)}')
         if self.multi_thread_streams is not None:
             flags.append(f'--multi-thread-streams {self.multi_thread_streams}')
         if self.buffer_size is not None:
