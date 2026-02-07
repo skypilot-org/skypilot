@@ -139,6 +139,69 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     assert len(excluded_files) == len(expected_excluded_files)
 
 
+def test_get_excluded_files_from_skyignore_with_negation():
+    """Test that negation patterns (!) re-include previously excluded files."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test files
+        files = ['config.json', 'data.json', 'other.json', 'keep.txt']
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('test content')
+
+        # Create .skyignore with negation pattern (user's exact use case)
+        skyignore_content = textwrap.dedent("""\
+            # ignore all json
+            *.json
+
+            # but keep this one
+            !config.json
+            """)
+        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        # Test function
+        excluded_files = storage_utils.get_excluded_files_from_skyignore(
+            temp_dir)
+
+        # config.json should NOT be excluded (negation worked)
+        assert 'config.json' not in excluded_files
+        # Other json files should still be excluded
+        assert 'data.json' in excluded_files
+        assert 'other.json' in excluded_files
+        # Non-json files should not be affected
+        assert 'keep.txt' not in excluded_files
+
+
+def test_get_excluded_files_from_skyignore_negation_order_matters():
+    """Test that negation only affects files excluded by earlier patterns."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test files
+        files = ['config.json', 'data.json']
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('test content')
+
+        # Negation BEFORE exclusion should have no effect
+        skyignore_content = textwrap.dedent("""\
+            # This negation comes before the exclusion, so it has no effect
+            !config.json
+            *.json
+            """)
+        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        excluded_files = storage_utils.get_excluded_files_from_skyignore(
+            temp_dir)
+
+        # Both files should be excluded because negation came first
+        assert 'config.json' in excluded_files
+        assert 'data.json' in excluded_files
+
+
 def test_get_excluded_files_from_gitignore(gitignore_dir):
     # Test function
     excluded_files = storage_utils.get_excluded_files_from_gitignore(
@@ -216,18 +279,18 @@ def test_zip_files_and_folders(ignore_dir_name, request):
 
 def test_zip_files_and_folders_excluded_directories():
     """Test that files inside excluded directories are not included in zip file.
-    
+
     File/directory structure:
         temp_dir/ (temporary directory)
         └── main_dir/
             ├── main_file.txt         # contains "main file content"
             ├── .skyignore            # contains "excluded_dir"
             └── excluded_dir/         # this directory should be excluded
-                ├── excluded_file.txt # contains "excluded file content" 
+                ├── excluded_file.txt # contains "excluded file content"
                 └── nested_dir/
                     └── nested_file.txt # contains "nested file content"
 
-    .skyignore content: 
+    .skyignore content:
         excluded_dir
     """
     with tempfile.TemporaryDirectory() as temp_dir:
