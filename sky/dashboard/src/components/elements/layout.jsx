@@ -40,7 +40,7 @@ function LayoutContent({ children, highlighted }) {
       <WelcomeNotification />
 
       {/* Badge slot for collapsed sidebar (e.g. trial countdown) */}
-      <div id="sidebar-badge-slot-alt" className="fixed bottom-4 right-14 z-40" />
+      <div id="sidebar-badge-slot-alt" className="fixed bottom-[0.7rem] right-14 z-40" />
       <TourButton />
     </div>
   );
