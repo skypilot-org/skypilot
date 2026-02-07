@@ -315,6 +315,7 @@ Read the research:
 
    Getting Started <../serving/sky-serve>
    ../serving/user-guides
+   SkyServe v2: K8s-Native LLM Serving <../serving/sky-serve-v2>
 
 .. toctree::
    :hidden:

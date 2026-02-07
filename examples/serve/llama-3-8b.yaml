@@ -1,0 +1,3 @@
+# SkyServe v2 - Llama 3.1 8B Instruct
+# Minimal spec: just a model ID, SkyPilot figures out everything
+model: meta-llama/Llama-3.1-8B-Instruct

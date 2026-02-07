@@ -1,0 +1,14 @@
+# SkyServe v2 - Qwen 2.5 7B Instruct
+# Tier 2 spec: model ID with resource override
+model: Qwen/Qwen2.5-7B-Instruct
+
+resources:
+  accelerators: H100:1
+
+service:
+  replicas: 1
+  max_replicas: 2
+  autoscaling:
+    metrics:
+      - type: queue_depth
+        target: 5
