@@ -33,6 +33,8 @@ _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 # Proctrack type is highly unlikely to change.
 _SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
+# Pyxis plugin availability is unlikely to change frequently.
+_SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -148,6 +150,43 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
                          f'{common_utils.format_exception(e)}')
 
     return proctrack_type
+
+
+def check_pyxis_enabled(cluster: str) -> bool:
+    """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
+
+    Pyxis is required for Docker container support on Slurm. This function
+    caches the result per cluster since the plugin availability is unlikely
+    to change frequently.
+    """
+    cache_key = f'slurm:pyxis_enabled:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm pyxis check found in cache ({cache_key})')
+        return cached == 'true'
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    enabled = client.check_pyxis_enabled()
+
+    try:
+        kv_cache.add_or_update_cache_entry(
+            cache_key, 'true' if enabled else 'false',
+            time.time() + _SLURM_PYXIS_CHECK_CACHE_TTL)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to cache slurm pyxis check for {cluster}: '
+                     f'{common_utils.format_exception(e)}')
+
+    return enabled
 
 
 class SlurmInstanceType:
