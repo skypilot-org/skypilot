@@ -133,8 +133,8 @@ jobs:
           echo "All git tags:"
           echo "$ALL_TAGS"
 
-          # Find the highest version that's less than the current one
-          PREVIOUS_VERSION=$(echo "$ALL_TAGS" | grep -v "^v${VERSION}$" | sort -V | tail -1 | sed 's/^v//' || echo "")
+          # Find the highest version that's less than the current one, excluding rcs
+          PREVIOUS_VERSION=$(echo "$ALL_TAGS" | grep -v "^v${VERSION}$" | grep -vE "rc[0-9]+$" | sort -V | tail -1 | sed 's/^v//' || echo "")
 
           if [ -n "$PREVIOUS_VERSION" ] && [ "$PREVIOUS_VERSION" != "$VERSION" ]; then
             PREVIOUS_TAG="v${PREVIOUS_VERSION}"
