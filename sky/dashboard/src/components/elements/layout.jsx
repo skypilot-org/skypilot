@@ -30,9 +30,10 @@ function LayoutContent({ children, highlighted }) {
 
       {/* Main content */}
       <div
-        className={`transition-all duration-200 ease-in-out min-h-screen ${isMobile ? '' : (isSidebarCollapsed ? 'ml-14' : 'ml-48')}`}
+        className={`transition-all duration-200 ease-in-out min-h-screen ${isMobile ? '' : (isSidebarCollapsed ? 'ml-14' : 'ml-40')}`}
         style={isMobile ? { paddingTop: isUpgrading ? '112px' : '56px' } : {}}
       >
+        <div id="sidebar-badge-slot" className="fixed top-3 right-4 z-40" />
         <main className="p-6">{children}</main>
       </div>
 
