@@ -816,6 +816,10 @@ def test_parse_dotlist():
             [('aws', 'vpc_name')])
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
     """Test override_skypilot_config with disallowed keys."""
+    # set temp dir for warning deduplication files
+    warnings_dir = str(tmp_path / 'config_warnings') + '/'
+    monkeypatch.setattr(skypilot_config, '_CONFIG_WARNINGS_DIR', warnings_dir)
+
     with mock.patch('sky.skypilot_config.logger') as mock_logger:
         mock_logger.getEffectiveLevel.return_value = INFO
         os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
@@ -836,11 +840,23 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
             # Warning should be logged when the override config
             # is different from the original config
             mock_logger.warning.assert_called_once_with(
-                'The following keys (["aws.vpc_name"]) have different '
-                'values in the client SkyPilot config with the server and will '
-                'be ignored. Remove these keys to disable this warning. If you '
-                'want to specify it, please modify it on server side or contact '
-                'your administrator.')
+                'The following keys (["aws.vpc_name"]) '
+                'have different values in the client SkyPilot config with '
+                'the server and will be ignored. Remove these keys to '
+                'disable this warning. If you want to specify it, please '
+                'modify it on server side or contact your administrator.')
+
+
+def test_config_warning_deduplication_helpers(tmp_path, monkeypatch):
+    """Test file-based warning deduplication across processes."""
+    monkeypatch.setattr(skypilot_config, '_CONFIG_WARNINGS_DIR',
+                        str(tmp_path) + '/')
+
+    assert not skypilot_config._has_warned_for_run_id('run-1')
+    skypilot_config._mark_warned_for_run_id('run-1')
+    assert skypilot_config._has_warned_for_run_id('run-1')
+    assert not skypilot_config._has_warned_for_run_id('run-2')
+    assert not skypilot_config._has_warned_for_run_id(None)
 
 
 def test_hierarchical_server_config(monkeypatch, tmp_path):
