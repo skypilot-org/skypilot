@@ -3492,6 +3492,8 @@ def get_clusters(
                                if handle.launched_resources.cloud else None)
             record['region'] = (f'{handle.launched_resources.region}'
                                 if handle.launched_resources.region else None)
+            record['zone'] = (f'{handle.launched_resources.zone}'
+                              if handle.launched_resources.zone else None)
             record['cpus'] = (f'{handle.launched_resources.cpus}'
                               if handle.launched_resources.cpus else None)
             record['memory'] = (f'{handle.launched_resources.memory}'
