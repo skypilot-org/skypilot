@@ -665,3 +665,17 @@ class SlurmClient:
         if match:
             return match.group(1)
         return None
+
+    def check_pyxis_enabled(self) -> bool:
+        """Check if the Pyxis SPANK plugin is installed.
+
+        Pyxis registers --container-* flags tagged with [pyxis] in srun
+        help output. This is a reliable way to detect the plugin without
+        requiring a job allocation.
+
+        Returns:
+            True if Pyxis is installed, False otherwise.
+        """
+        cmd = "srun --help 2>&1 | grep -q '\\[pyxis\\]'"
+        rc, _, _ = self._run_slurm_cmd(cmd)
+        return rc == 0
