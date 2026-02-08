@@ -41,6 +41,8 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     :ref:`force_disable_cloud_bucket <config-yaml-jobs-force-disable-cloud-bucket>`: false
     controller:
+      :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>`: false
+      :ref:`high_availability <config-yaml-jobs-controller-high-availability>`: false
       :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         infra: gcp/us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
@@ -372,6 +374,8 @@ Example:
 
 Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
 
+When consolidation mode is enabled, the controller automatically inherits high availability from the API server - it will auto-recover when the API server restarts. During restarts, there may be brief periods of unreachability, but the SkyPilot client gracefully retries during this period and running workloads are not affected.
+
 Default: ``false``.
 
 Example:
@@ -382,6 +386,30 @@ Example:
     controller:
       consolidation_mode: true
       # any specified resources will be ignored
+
+.. _config-yaml-jobs-controller-high-availability:
+
+``jobs.controller.high_availability``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable :ref:`high availability mode <high-availability-controller>` for the jobs controller when running as a standalone Kubernetes pod. When enabled, the controller runs as a Kubernetes Deployment with automatic restarts and persistent storage, ensuring resilience to pod crashes or node failures.
+
+This requires the controller to run on Kubernetes (set ``jobs.controller.resources.cloud: kubernetes``).
+
+.. note::
+  This field has no effect when :ref:`consolidation mode <config-yaml-jobs-controller-consolidation-mode>` is enabled. In consolidation mode, the controller automatically inherits high availability from the API server.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      resources:
+        cloud: kubernetes  # Required for high availability mode
+      high_availability: true
 
 .. _config-yaml-jobs-controller-resources:
 
