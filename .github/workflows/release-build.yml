@@ -2,7 +2,7 @@ name: Release Build
 
 on:
   schedule:
-    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
+    - cron: '0 0 1 * *'  # Runs at 00:00 on the 1st of each month (UTC)
   workflow_dispatch:
     inputs:
       release_version:
@@ -16,6 +16,11 @@ on:
         default: false
       skip_smoke_tests:
         description: 'Skip smoke tests (recommended when promoting tested RC to stable)'
+        required: false
+        type: boolean
+        default: false
+      promote_rc_to_stable:
+        description: 'Promote latest PyPI RC to stable (e.g., 0.12.0rc2 -> 0.12.0)'
         required: false
         type: boolean
         default: false
@@ -81,22 +86,42 @@ jobs:
       - name: Determine release version
         id: determine_version
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
-            # Manual trigger with input version provided
+          LATEST_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
+          echo "Latest PyPI version: ${LATEST_VERSION}"
+
+          # Check if promoting RC to stable
+          if [ "${{ github.event.inputs.promote_rc_to_stable }}" == "true" ]; then
+            # Latest PyPI version must be an RC
+            if [[ ! "$LATEST_VERSION" =~ rc[0-9]+$ ]]; then
+              echo "Error: promote_rc_to_stable requires latest PyPI version to be an RC"
+              echo "Latest PyPI version: ${LATEST_VERSION}"
+              echo "Expected format: X.Y.ZrcN (e.g., 0.12.0rc2)"
+              exit 1
+            fi
+            # Extract stable version (remove rcN suffix)
+            RELEASE_VERSION=$(echo "$LATEST_VERSION" | sed 's/rc[0-9]*$//')
+            echo "Promoting ${LATEST_VERSION} to stable ${RELEASE_VERSION}"
+
+          elif [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
+            # Manual trigger with explicit version
             RELEASE_VERSION="${{ github.event.inputs.release_version }}"
             echo "Using manually specified version: ${RELEASE_VERSION}"
+
           else
-            # Scheduled trigger or manual trigger without version - extract version from latest release and increment patch
-            LATEST_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
-            # Split version into parts
-            MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
-            MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
-            PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
-            # Always increment patch version
-            NEW_PATCH=$((PATCH + 1))
-            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-            echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
+            # Scheduled trigger - create next minor RC1
+            # Strip any rc/post/dev suffix to get base version
+            BASE_VERSION=$(echo "$LATEST_VERSION" | sed -E 's/(rc|\.post|\.dev|a|b)[0-9]+$//')
+
+            # Parse base version
+            MAJOR=$(echo $BASE_VERSION | cut -d. -f1)
+            MINOR=$(echo $BASE_VERSION | cut -d. -f2)
+
+            # Increment minor, set patch to 0, add rc1
+            NEW_MINOR=$((MINOR + 1))
+            RELEASE_VERSION="${MAJOR}.${NEW_MINOR}.0rc1"
+            echo "Starting new RC cycle: ${RELEASE_VERSION}"
           fi
+
           echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Verify release version > latest PyPI version
@@ -104,29 +129,46 @@ jobs:
         if: ${{ !github.event.inputs.skip_version_checks }}
         run: |
           RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
-          echo "Validated release version: ${RELEASE_VERSION}"
-
-          # Get the latest version from PyPI using JSON API
           LATEST_PYPI_VERSION="${{ steps.find_previous_release_branch.outputs.latest_pypi_version }}"
+
+          echo "Release version: ${RELEASE_VERSION}"
           echo "Latest PyPI version: ${LATEST_PYPI_VERSION}"
 
-          # Parse latest PyPI version
-          PYPI_MAJOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f1)
-          PYPI_MINOR=$(echo $LATEST_PYPI_VERSION | cut -d. -f2)
-          PYPI_PATCH=$(echo $LATEST_PYPI_VERSION | cut -d. -f3)
+          # Install packaging for proper PEP 440 version comparison
+          pip install packaging -q
 
-          # Calculate expected next patch version
-          NEXT_PATCH_VERSION="${PYPI_MAJOR}.${PYPI_MINOR}.$((PYPI_PATCH + 1))"
+          # Use Python for robust version comparison
+          python3 << EOF
+          import sys
+          from packaging.version import Version, InvalidVersion
 
-          echo "Expected next patch version: ${NEXT_PATCH_VERSION}"
+          release_str = "${RELEASE_VERSION}"
+          latest_str = "${LATEST_PYPI_VERSION}"
 
-          # Check if the determined release version is the expected next patch version
-          if [ "${RELEASE_VERSION}" = "${NEXT_PATCH_VERSION}" ]; then
-            echo "Success: Version check passed. Determined version ${RELEASE_VERSION} is the expected next patch version."
-          else
-            echo "Error: Determined release version ${RELEASE_VERSION} must be the next patch version (${NEXT_PATCH_VERSION}) compared to the latest PyPI version ${LATEST_PYPI_VERSION}."
-            exit 1
-          fi
+          try:
+              release_ver = Version(release_str)
+          except InvalidVersion:
+              print(f"Error: Invalid release version format: {release_str}")
+              print("Version must follow PEP 440 (e.g., 0.11.0, 0.11.0rc1, 0.11.0.post1)")
+              sys.exit(1)
+
+          try:
+              latest_ver = Version(latest_str)
+          except InvalidVersion:
+              print(f"Error: Invalid PyPI version format: {latest_str}")
+              sys.exit(1)
+
+          print(f"Comparing: {release_ver} > {latest_ver}")
+
+          if release_ver <= latest_ver:
+              print(f"Error: Release version {release_ver} must be greater than latest PyPI version {latest_ver}")
+              print()
+              print("Version ordering (PEP 440):")
+              print("  0.12.0rc1 > 0.11.0.post1 > 0.11.0 > 0.11.0rc2 > 0.11.0rc1")
+              sys.exit(1)
+
+          print(f"Success: {release_ver} > {latest_ver}")
+          EOF
 
       - name: Create release branch
         id: create_release_branch
@@ -192,7 +234,8 @@ jobs:
     if: |
       always() &&
       needs.release-build.result == 'success' &&
-      github.event.inputs.skip_smoke_tests != 'true'
+      github.event.inputs.skip_smoke_tests != 'true' &&
+      github.event.inputs.promote_rc_to_stable != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -210,7 +253,8 @@ jobs:
     if: |
       always() &&
       needs.release-build.result == 'success' &&
-      github.event.inputs.skip_smoke_tests != 'true'
+      github.event.inputs.skip_smoke_tests != 'true' &&
+      github.event.inputs.promote_rc_to_stable != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -229,7 +273,8 @@ jobs:
     if: |
       always() &&
       needs.release-build.result == 'success' &&
-      github.event.inputs.skip_smoke_tests != 'true'
+      github.event.inputs.skip_smoke_tests != 'true' &&
+      github.event.inputs.promote_rc_to_stable != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -248,7 +293,8 @@ jobs:
     if: |
       always() &&
       needs.release-build.result == 'success' &&
-      github.event.inputs.skip_smoke_tests != 'true'
+      github.event.inputs.skip_smoke_tests != 'true' &&
+      github.event.inputs.promote_rc_to_stable != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -268,7 +314,8 @@ jobs:
     if: |
       always() &&
       needs.release-build.result == 'success' &&
-      github.event.inputs.skip_smoke_tests != 'true'
+      github.event.inputs.skip_smoke_tests != 'true' &&
+      github.event.inputs.promote_rc_to_stable != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -287,7 +334,8 @@ jobs:
     if: |
       always() &&
       needs.release-build.result == 'success' &&
-      github.event.inputs.skip_smoke_tests != 'true'
+      github.event.inputs.skip_smoke_tests != 'true' &&
+      github.event.inputs.promote_rc_to_stable != 'true'
     uses: ./.github/workflows/buildkite-trigger-wait.yml
     with:
       commit: ${{ needs.release-build.outputs.new_commit_sha }}
@@ -316,40 +364,35 @@ jobs:
           RELEASE_BRANCH: ${{ needs.release-build.outputs.release_branch }}
           RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
           SKIP_SMOKE_TESTS: ${{ github.event.inputs.skip_smoke_tests }}
+          PROMOTE_RC: ${{ github.event.inputs.promote_rc_to_stable }}
+          LATEST_PYPI_VERSION: ${{ needs.release-build.outputs.previous_release_branch }}
         run: |
           # Configure git
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
 
-          # Detect if this is an RC promotion
-          SOURCE_BRANCH="${{ github.ref_name }}"
-          IS_RC_PROMOTION="false"
-          if [[ "$SOURCE_BRANCH" =~ ^releases/.*rc[0-9]+$ ]]; then
-            IS_RC_PROMOTION="true"
-            RC_VERSION=$(echo "$SOURCE_BRANCH" | sed 's/releases\///')
-          fi
+          # Extract PyPI version from branch name (releases/X.Y.Z -> X.Y.Z)
+          PYPI_VERSION=$(echo "$LATEST_PYPI_VERSION" | sed 's/releases\///')
 
-          # Build PR body based on whether tests were skipped
-          if [ "$SKIP_SMOKE_TESTS" == "true" ]; then
-            if [ "$IS_RC_PROMOTION" == "true" ]; then
-              PR_BODY="## Promote RC to Stable Release ${RELEASE_VERSION}
+          # Build PR body based on whether this is an RC promotion
+          if [ "$PROMOTE_RC" == "true" ]; then
+            PR_BODY="## Promote RC to Stable Release ${RELEASE_VERSION}
 
-          **Source:** \`$SOURCE_BRANCH\` (RC version: $RC_VERSION)
+          **Source:** PyPI RC version \`${PYPI_VERSION}\`
           **Target:** Stable release \`${RELEASE_VERSION}\`
 
           ⚠️ **Smoke tests were SKIPPED** - This release is being promoted from a tested RC.
 
           ### Pre-release Testing
-          This version was previously tested as release candidate \`$RC_VERSION\` and deemed stable by early adopters.
+          This version was previously tested as release candidate \`${PYPI_VERSION}\` and deemed stable by early adopters.
 
           ### Changes in this PR
-          - Updated \`sky/__init__.py\`: \`$RC_VERSION\` → \`${RELEASE_VERSION}\`
-          - Updated \`charts/skypilot/values.yaml\`: Docker image tag \`$RC_VERSION\` → \`${RELEASE_VERSION}\`"
-            else
-              PR_BODY="Release ${RELEASE_VERSION}
+          - Updated \`sky/__init__.py\`: \`${PYPI_VERSION}\` → \`${RELEASE_VERSION}\`
+          - Updated \`charts/skypilot/values.yaml\`: Docker image tag \`${PYPI_VERSION}\` → \`${RELEASE_VERSION}\`"
+          elif [ "$SKIP_SMOKE_TESTS" == "true" ]; then
+            PR_BODY="Release ${RELEASE_VERSION}
 
           ⚠️ **Smoke tests were SKIPPED** - Please ensure manual testing was performed."
-            fi
           else
             # Normal release with test results
             PR_BODY="Release ${RELEASE_VERSION}
@@ -375,26 +418,27 @@ jobs:
         if: always()
         env:
           SKIP_SMOKE_TESTS: ${{ github.event.inputs.skip_smoke_tests }}
+          PROMOTE_RC: ${{ github.event.inputs.promote_rc_to_stable }}
+          LATEST_PYPI_VERSION: ${{ needs.release-build.outputs.previous_release_branch }}
         run: |
-          if [ "$SKIP_SMOKE_TESTS" == "true" ]; then
-            SOURCE_BRANCH="${{ github.ref_name }}"
-            if [[ "$SOURCE_BRANCH" =~ ^releases/.*rc[0-9]+$ ]]; then
-              RC_VERSION=$(echo "$SOURCE_BRANCH" | sed 's/releases\///')
-              cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          # Extract PyPI version from branch name (releases/X.Y.Z -> X.Y.Z)
+          PYPI_VERSION=$(echo "$LATEST_PYPI_VERSION" | sed 's/releases\///')
+
+          if [ "$PROMOTE_RC" == "true" ]; then
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           # Release ${{ needs.release-build.outputs.release_version }}
 
           ## RC Promotion
-          Promoting from \`$RC_VERSION\` to stable version \`${{ needs.release-build.outputs.release_version }}\`
+          Promoting from \`${PYPI_VERSION}\` to stable version \`${{ needs.release-build.outputs.release_version }}\`
 
           ⚠️ **Smoke tests were SKIPPED** - This release was promoted from a tested RC.
           EOF
-            else
-              cat <<EOF >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$SKIP_SMOKE_TESTS" == "true" ]; then
+            cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           # Release ${{ needs.release-build.outputs.release_version }}
 
           ⚠️ **Smoke tests were SKIPPED** - Please ensure manual testing was performed.
           EOF
-            fi
           else
             cat <<EOF >> "$GITHUB_STEP_SUMMARY"
           # Release ${{ needs.release-build.outputs.release_version }}
