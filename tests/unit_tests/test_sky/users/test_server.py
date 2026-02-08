@@ -15,6 +15,97 @@ from sky.users import server
 from sky.utils import common
 
 
+class TestGetUserType:
+    """Test class for get_user_type function."""
+
+    def test_service_account_user(self):
+        """Test that service account users return 'sa' type."""
+        # Service accounts have IDs starting with "sa-"
+        user = models.User(id='sa-test-token', name='test-service-account')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SA.value
+
+    def test_server_id_system_user(self):
+        """Test that SERVER_ID user returns 'system' type."""
+        user = models.User(id=common.SERVER_ID, name='Server')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SYSTEM.value
+
+    def test_skypilot_system_user(self):
+        """Test that SKYPILOT_SYSTEM_USER_ID user returns 'system' type."""
+        user = models.User(id=constants.SKYPILOT_SYSTEM_USER_ID, name='System')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SYSTEM.value
+
+    def test_basic_auth_user_with_password(self):
+        """Test that users with password return 'basic' type."""
+        user = models.User(id='user123', name='alice', password='hashed_pw')
+        result = server.get_user_type(user)
+        assert result == models.UserType.BASIC.value
+
+    def test_sso_user_with_email(self):
+        """Test that users with email in name return 'sso' type."""
+        user = models.User(id='user456', name='alice@example.com')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SSO.value
+
+    def test_legacy_user_default(self):
+        """Test that users without special attributes return 'legacy' type."""
+        user = models.User(id='user789', name='bob')
+        result = server.get_user_type(user)
+        assert result == models.UserType.LEGACY.value
+
+    def test_legacy_user_with_none_password(self):
+        """Test that users with None password return appropriate type."""
+        user = models.User(id='user789', name='bob', password=None)
+        result = server.get_user_type(user)
+        assert result == models.UserType.LEGACY.value
+
+    def test_priority_service_account_over_system(self):
+        """Test that service account check takes priority."""
+        # Even if ID matches system user pattern, SA prefix should take priority
+        user = models.User(id='sa-system', name='service')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SA.value
+
+    def test_priority_system_over_basic(self):
+        """Test that system user check takes priority over basic auth."""
+        # System user with password should still be system type
+        user = models.User(id=common.SERVER_ID,
+                           name='Server',
+                           password='some_pw')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SYSTEM.value
+
+    def test_priority_basic_over_sso(self):
+        """Test that basic auth check takes priority over SSO."""
+        # User with both password and email should be basic type
+        user = models.User(id='user123',
+                           name='alice@example.com',
+                           password='hashed_pw')
+        result = server.get_user_type(user)
+        assert result == models.UserType.BASIC.value
+
+    def test_priority_sso_over_legacy(self):
+        """Test that SSO check takes priority over legacy."""
+        # User with email but no password should be SSO type
+        user = models.User(id='user123', name='alice@company.org')
+        result = server.get_user_type(user)
+        assert result == models.UserType.SSO.value
+
+    def test_user_with_empty_name(self):
+        """Test user with empty name returns legacy type."""
+        user = models.User(id='user123', name='')
+        result = server.get_user_type(user)
+        assert result == models.UserType.LEGACY.value
+
+    def test_user_with_none_name(self):
+        """Test user with None name returns legacy type."""
+        user = models.User(id='user123', name=None)
+        result = server.get_user_type(user)
+        assert result == models.UserType.LEGACY.value
+
+
 @pytest.fixture
 def mock_users():
     """Create mock users for testing."""
@@ -63,19 +154,22 @@ class TestUsersEndpoints:
             'id': 'user1',
             'name': 'Alice',
             'role': 'admin',
-            'created_at': None
+            'created_at': None,
+            'user_type': 'legacy',
         }
         assert result[1] == {
             'id': 'user2',
             'name': 'Bob',
             'role': 'user',
-            'created_at': None
+            'created_at': None,
+            'user_type': 'legacy',
         }
         assert result[2] == {
             'id': 'user3',
             'name': 'Charlie',
             'role': '',
-            'created_at': None
+            'created_at': None,
+            'user_type': 'legacy',
         }
 
         # Verify function calls
@@ -320,19 +414,22 @@ class TestUsersEndpoints:
             'id': 'user1',
             'name': 'Alice',
             'role': 'admin',
-            'created_at': None
+            'created_at': None,
+            'user_type': 'legacy',
         }
         assert result[1] == {
             'id': 'user2',
             'name': 'Bob',
             'role': 'user',
-            'created_at': None
+            'created_at': None,
+            'user_type': 'legacy',
         }
         assert result[2] == {
             'id': 'user3',
             'name': 'Charlie',
             'role': 'user',
-            'created_at': None
+            'created_at': None,
+            'user_type': 'legacy',
         }
 
     @mock.patch('sky.users.permission.permission_service.get_user_roles')

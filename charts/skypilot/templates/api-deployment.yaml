@@ -93,7 +93,7 @@ spec:
         - name: ENABLE_SERVICE_ACCOUNTS
           value: "true"
         {{- end }}
-        {{- if include "skypilot.ingressBasicAuthEnabled" . | trim | eq "true" }}
+        {{- if or .Values.auth.externalProxy.enabled (eq (include "skypilot.ingressBasicAuthEnabled" . | trim) "true") }}
         - name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
           value: "true"
         {{- end }}
