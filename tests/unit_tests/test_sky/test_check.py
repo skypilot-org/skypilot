@@ -472,3 +472,299 @@ def test_enabled_capabilities_detection():
                     workspace=None,
                 )
                 assert 'AWS' not in capabilities_result['default']
+
+
+# ============ JSON Output Tests ============
+
+
+class TestCheckJsonOutput:
+    """Tests for `sky check -o json` output format."""
+
+    def test_cli_check_json_output_structure(self, monkeypatch):
+        """Test that -o json produces valid JSON with expected structure."""
+        import json
+
+        # Mock check_for_json to return known data
+        mock_json_result = {
+            'clouds': [{
+                'cloud': 'AWS',
+                'enabled': True,
+                'capabilities': ['compute', 'storage'],
+                'reason': None
+            }, {
+                'cloud': 'GCP',
+                'enabled': False,
+                'capabilities': [],
+                'reason': 'GCP credentials not found.'
+            }],
+            'enabled_clouds': ['AWS'],
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_json_result)
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: 'http://localhost:46580')
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        # Output should be valid JSON
+        parsed = json.loads(result.output)
+        assert 'clouds' in parsed
+        assert 'enabled_clouds' in parsed
+
+    def test_cli_check_json_output_with_kubernetes_contexts(self, monkeypatch):
+        """Test that JSON output includes Kubernetes contexts."""
+        import json
+
+        mock_json_result = {
+            'clouds': [{
+                'cloud': 'Kubernetes',
+                'enabled': True,
+                'capabilities': ['compute'],
+                'reason': None,
+                'contexts': [{
+                    'name': 'gke_sky-dev_us-central1-c_skypilot-cluster',
+                    'enabled': True,
+                    'note': 'Cluster has 2 nodes with unlabeled accelerators.'
+                }, {
+                    'name': 'kind-local',
+                    'enabled': True,
+                    'note': None
+                }]
+            }],
+            'enabled_clouds': ['Kubernetes'],
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_json_result)
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: 'http://localhost:46580')
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        k8s_cloud = next(
+            (c for c in parsed['clouds'] if c['cloud'] == 'Kubernetes'), None)
+        assert k8s_cloud is not None
+        assert 'contexts' in k8s_cloud
+        assert len(k8s_cloud['contexts']) == 2
+        assert k8s_cloud['contexts'][0][
+            'name'] == 'gke_sky-dev_us-central1-c_skypilot-cluster'
+
+    def test_cli_check_json_output_with_slurm_clusters(self, monkeypatch):
+        """Test that JSON output includes Slurm clusters with partitions."""
+        import json
+
+        mock_json_result = {
+            'clouds': [{
+                'cloud': 'Slurm',
+                'enabled': True,
+                'capabilities': ['compute'],
+                'reason': None,
+                'clusters': [{
+                    'name': 'hpc-main',
+                    'enabled': True,
+                    'partitions': ['gpu', 'cpu', 'highmem']
+                }, {
+                    'name': 'hpc-dev',
+                    'enabled': True,
+                    'partitions': ['debug']
+                }]
+            }],
+            'enabled_clouds': ['Slurm'],
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_json_result)
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: 'http://localhost:46580')
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        slurm_cloud = next(
+            (c for c in parsed['clouds'] if c['cloud'] == 'Slurm'), None)
+        assert slurm_cloud is not None
+        assert 'clusters' in slurm_cloud
+        assert len(slurm_cloud['clusters']) == 2
+        assert slurm_cloud['clusters'][0]['partitions'] == [
+            'gpu', 'cpu', 'highmem'
+        ]
+
+    def test_cli_check_json_disabled_cloud_shows_reason(self, monkeypatch):
+        """Test that disabled clouds include their reason in JSON output."""
+        import json
+
+        mock_json_result = {
+            'clouds': [{
+                'cloud': 'Azure',
+                'enabled': False,
+                'capabilities': [],
+                'reason': "Azure CLI not installed. Run 'pip install azure-cli'."
+            }],
+            'enabled_clouds': [],
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_json_result)
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: 'http://localhost:46580')
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        azure_cloud = next(
+            (c for c in parsed['clouds'] if c['cloud'] == 'Azure'), None)
+        assert azure_cloud is not None
+        assert azure_cloud['enabled'] is False
+        assert 'Azure CLI not installed' in azure_cloud['reason']
+
+    def test_cli_check_default_output_still_works(self, monkeypatch):
+        """Test that default output (no -o flag) still works as before."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, [])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+    def test_cli_check_table_output_explicit(self, monkeypatch):
+        """Test that -o table produces normal output."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'table'])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+
+class TestCheckForJson:
+    """Tests for the check_for_json function in sky/check.py."""
+
+    def test_check_for_json_returns_dict(self, monkeypatch):
+        """Test that check_for_json returns a properly structured dict."""
+        # Mock workspace core
+        monkeypatch.setattr('sky.workspaces.core.get_workspaces',
+                            lambda: {'default': {}})
+
+        # Mock config
+        monkeypatch.setattr('sky.skypilot_config.get_nested',
+                            lambda keys, default_value=None: ['AWS']
+                            if keys == ('allowed_clouds',) else default_value)
+        monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
+                            lambda *args, **kwargs: {})
+
+        # Mock AWS credentials check
+        monkeypatch.setattr('sky.clouds.aws.AWS._check_compute_credentials',
+                            lambda self: (True, None))
+        monkeypatch.setattr('sky.clouds.aws.AWS._check_storage_credentials',
+                            lambda self: (True, None))
+
+        # Mock user state functions
+        monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                            lambda *args, **kwargs: [])
+        monkeypatch.setattr('sky.global_user_state.set_enabled_clouds',
+                            lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.global_user_state.set_allowed_clouds',
+                            lambda *args, **kwargs: None)
+
+        result = sky_check.check_for_json(clouds=('aws',), workspace='default')
+
+        assert isinstance(result, dict)
+        assert 'clouds' in result
+        assert 'enabled_clouds' in result
+
+    def test_check_for_json_enabled_cloud_structure(self, monkeypatch):
+        """Test the structure of an enabled cloud in JSON output."""
+        # Setup mocks
+        monkeypatch.setattr('sky.workspaces.core.get_workspaces',
+                            lambda: {'default': {}})
+        monkeypatch.setattr('sky.skypilot_config.get_nested',
+                            lambda keys, default_value=None: ['AWS']
+                            if keys == ('allowed_clouds',) else default_value)
+        monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
+                            lambda *args, **kwargs: {})
+        monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                            lambda *args, **kwargs: [])
+        monkeypatch.setattr('sky.global_user_state.set_enabled_clouds',
+                            lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.global_user_state.set_allowed_clouds',
+                            lambda *args, **kwargs: None)
+
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                result = sky_check.check_for_json(clouds=('aws',),
+                                                  workspace='default')
+
+        aws_cloud = next((c for c in result['clouds'] if c['cloud'] == 'AWS'),
+                         None)
+        assert aws_cloud is not None
+        assert aws_cloud['enabled'] is True
+        assert 'compute' in aws_cloud['capabilities']
+        assert 'storage' in aws_cloud['capabilities']
+        assert aws_cloud['reason'] is None
+
+    def test_check_for_json_disabled_cloud_has_reason(self, monkeypatch):
+        """Test that disabled clouds have a reason in JSON output."""
+        monkeypatch.setattr('sky.workspaces.core.get_workspaces',
+                            lambda: {'default': {}})
+        monkeypatch.setattr('sky.skypilot_config.get_nested',
+                            lambda keys, default_value=None: ['AWS']
+                            if keys == ('allowed_clouds',) else default_value)
+        monkeypatch.setattr('sky.skypilot_config.get_workspace_cloud',
+                            lambda *args, **kwargs: {})
+        monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
+                            lambda *args, **kwargs: [])
+        monkeypatch.setattr('sky.global_user_state.set_enabled_clouds',
+                            lambda *args, **kwargs: None)
+        monkeypatch.setattr('sky.global_user_state.set_allowed_clouds',
+                            lambda *args, **kwargs: None)
+
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(False, 'AWS credentials not found.'))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False,
+                                           'AWS credentials not found.'))):
+                result = sky_check.check_for_json(clouds=('aws',),
+                                                  workspace='default')
+
+        aws_cloud = next((c for c in result['clouds'] if c['cloud'] == 'AWS'),
+                         None)
+        assert aws_cloud is not None
+        assert aws_cloud['enabled'] is False
+        assert aws_cloud['capabilities'] == []
+        assert 'credentials not found' in aws_cloud['reason']
