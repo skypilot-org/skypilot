@@ -2,6 +2,7 @@ import React, {
   useState,
   useRef,
   useEffect,
+  useMemo,
   createContext,
   useContext,
 } from 'react';
@@ -48,19 +49,22 @@ import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
 import { PluginSlot } from '@/plugins/PluginSlot';
 
 // --- Shared nav item definitions ---
+// `order` values control sorting when merged with plugin nav links
 const primaryNavItems = [
-  { href: '/clusters', icon: ServerIcon, label: 'Clusters' },
-  { href: '/jobs', icon: BriefcaseIcon, label: 'Jobs' },
+  { href: '/clusters', icon: ServerIcon, label: 'Clusters', order: 10 },
+  { href: '/jobs', icon: BriefcaseIcon, label: 'Jobs', order: 20 },
 ];
 const secondaryNavItems = [
-  { href: '/infra', icon: ChipIcon, label: 'Infra' },
-  { href: '/volumes', icon: VolumeIcon, label: 'Volumes' },
+  { href: '/infra', icon: ChipIcon, label: 'Infra', order: 30 },
+  { href: '/volumes', icon: VolumeIcon, label: 'Volumes', order: 40 },
 ];
 const teamsNavItems = [
-  { href: '/recipes', icon: FileCode, label: 'Recipes' },
-  { href: '/users', icon: UsersIcon, label: 'Users' },
-  { href: '/workspaces', icon: BookDocIcon, label: 'Workspaces' },
+  { href: '/recipes', icon: FileCode, label: 'Recipes', order: 10 },
+  { href: '/users', icon: UsersIcon, label: 'Users', order: 20 },
+  { href: '/workspaces', icon: BookDocIcon, label: 'Workspaces', order: 30 },
 ];
+// Plugin groups that map to built-in sidebar sections
+const INTEGRATED_GROUPS = ['Workloads', 'Manage', 'Teams'];
 const externalLinks = [
   {
     href: 'https://docs.skypilot.co/en/latest/',
@@ -184,6 +188,27 @@ export function TopBar() {
   const [openNavDropdown, setOpenNavDropdown] = useState(null);
   const { ungrouped, groups } = useGroupedNavLinks();
   const pluginRoutes = usePluginRoutes();
+
+  // Merge hardcoded nav items with plugin links that share the same group name.
+  // This lets plugins register into built-in sections (Workloads, Manage, Teams)
+  // instead of appearing in a separate "Plugins" section.
+  const mergedSections = useMemo(() => {
+    const merge = (hardcoded, groupName) => {
+      const pluginLinks = (groups[groupName] || []).map(l => ({ ...l, _plugin: true }));
+      return [
+        ...hardcoded.map(item => ({ ...item, _plugin: false })),
+        ...pluginLinks,
+      ].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    };
+    return {
+      workloads: merge(primaryNavItems, 'Workloads'),
+      manage: merge(secondaryNavItems, 'Manage'),
+      teams: merge(teamsNavItems, 'Teams'),
+      remainingGroups: Object.fromEntries(
+        Object.entries(groups).filter(([name]) => !INTEGRATED_GROUPS.includes(name))
+      ),
+    };
+  }, [groups]);
 
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
@@ -430,6 +455,14 @@ export function TopBar() {
     );
   };
 
+  // Unified renderer for merged sections (dispatches to hardcoded vs plugin renderer)
+  const renderMergedItem = (item, onClick, collapsed = false) => {
+    if (item._plugin) {
+      return renderSidebarPluginNavLink(item, onClick, collapsed);
+    }
+    return renderNavItem(item, onClick, collapsed);
+  };
+
   // User profile dropdown content (shared between desktop and mobile)
   const renderUserDropdownContent = () => {
     let displayName = userEmail;
@@ -524,33 +557,34 @@ export function TopBar() {
         </div>
 
         {/* Plugin badge slot (e.g. trial countdown) — hidden when collapsed */}
-        <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 pb-1'} />
+        <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 pb-1 flex justify-center'} />
 
         {/* Primary nav (scrollable) */}
         <nav className={`flex-1 overflow-y-auto py-2 space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
           <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Workloads</span>
           </div>
-          {primaryNavItems.map((item) => renderNavItem(item, undefined, collapsed))}
+          {mergedSections.workloads.map((item) => renderMergedItem(item, undefined, collapsed))}
 
           <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Manage</span>
           </div>
-          {secondaryNavItems.map((item) => renderNavItem(item, undefined, collapsed))}
+          {mergedSections.manage.map((item) => renderMergedItem(item, undefined, collapsed))}
 
           <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Teams</span>
           </div>
-          {teamsNavItems.map((item) => renderNavItem(item, undefined, collapsed))}
+          {mergedSections.teams.map((item) => renderMergedItem(item, undefined, collapsed))}
 
-          {/* Plugin links */}
+          {/* Ungrouped plugin links */}
           {ungrouped.length > 0 && (
             <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider overflow-hidden whitespace-nowrap flex items-center gap-1.5">
               <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Plugins</span>
             </div>
           )}
           {ungrouped.map((link) => renderSidebarPluginNavLink(link, undefined, collapsed))}
-          {Object.entries(groups).map(([groupName, links]) => (
+          {/* Remaining plugin groups not integrated into built-in sections */}
+          {Object.entries(mergedSections.remainingGroups).map(([groupName, links]) => (
             <React.Fragment key={groupName}>
               <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider overflow-hidden whitespace-nowrap flex items-center gap-1.5">
                 <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>{groupName}</span>
@@ -720,19 +754,19 @@ export function TopBar() {
             <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-400 tracking-wider">
               Workloads
             </div>
-            {primaryNavItems.map((item) => renderNavItem(item, toggleMobileSidebar))}
+            {mergedSections.workloads.map((item) => renderMergedItem(item, toggleMobileSidebar))}
 
             <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider">
               Manage
             </div>
-            {secondaryNavItems.map((item) => renderNavItem(item, toggleMobileSidebar))}
+            {mergedSections.manage.map((item) => renderMergedItem(item, toggleMobileSidebar))}
 
             <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-gray-400 tracking-wider">
               Teams
             </div>
-            {teamsNavItems.map((item) => renderNavItem(item, toggleMobileSidebar))}
+            {mergedSections.teams.map((item) => renderMergedItem(item, toggleMobileSidebar))}
 
-            {/* Plugin links */}
+            {/* Ungrouped plugin links */}
             {ungrouped.length > 0 && (
               <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider flex items-center gap-1.5">
                 Plugins
@@ -741,7 +775,7 @@ export function TopBar() {
             {ungrouped.map((link) =>
               renderSidebarPluginNavLink(link, toggleMobileSidebar)
             )}
-            {Object.entries(groups).map(([groupName, links]) => (
+            {Object.entries(mergedSections.remainingGroups).map(([groupName, links]) => (
               <React.Fragment key={groupName}>
                 <div className="px-3 pt-4 pb-1 text-[11px] font-medium text-blue-600 tracking-wider flex items-center gap-1.5">
                   {groupName}
