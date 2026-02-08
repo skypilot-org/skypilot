@@ -26,15 +26,15 @@ def open_ports(
     context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None), context)
-    ports = list(port_ranges_to_set(ports))
+    parsed_ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
-            ports=ports,
+            ports=parsed_ports,
             provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         _open_ports_using_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
-                                  ports=ports,
+                                  ports=parsed_ports,
                                   provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
         # Do nothing, as PodIP mode does not require opening ports
@@ -145,14 +145,14 @@ def cleanup_ports(
     context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None), context)
-    ports = list(port_ranges_to_set(ports))
+    parsed_ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
             provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         _cleanup_ports_for_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
-                                   ports=ports,
+                                   ports=parsed_ports,
                                    provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
         # Do nothing, as PodIP mode does not require opening ports
@@ -214,25 +214,25 @@ def query_ports(
     context = kubernetes_utils.get_context_from_config(provider_config)
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None), context)
-    ports = list(port_ranges_to_set(ports))
+    parsed_ports = list(port_ranges_to_set(ports))
 
     try:
         if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
             return _query_ports_for_loadbalancer(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                ports=ports,
+                ports=parsed_ports,
                 provider_config=provider_config,
             )
         elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
             return _query_ports_for_ingress(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                ports=ports,
+                ports=parsed_ports,
                 provider_config=provider_config,
             )
         elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
             return _query_ports_for_podip(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                ports=ports,
+                ports=parsed_ports,
                 provider_config=provider_config,
             )
         else:
@@ -297,15 +297,18 @@ def _query_ports_for_ingress(
             port=port,
             namespace=namespace)
 
-        http_port, https_port = external_ports \
-            if external_ports is not None else (None, None)
+        http_port, https_port = (external_ports if external_ports is not None
+                                 else (None, None))
+        chosen_port = http_port if http_port is not None else https_port
+        # Ingress also supports HTTPS endpoint at port 443. But we still only
+        # surface the HTTP endpoint. The upper layer, like `get_endpoints()`,
+        # always take the first of that list. So the adding HTTPSEndpoint to
+        # this list has no effect anyway. Here only returns the HTTP endpoint to
+        # reduce the confusion.
         result[port] = [
-            common.HTTPEndpoint(host=external_ip,
-                                port=http_port,
-                                path=path_prefix.lstrip('/')),
-            common.HTTPSEndpoint(host=external_ip,
-                                 port=https_port,
-                                 path=path_prefix.lstrip('/')),
+            common.SocketEndpoint(host=external_ip,
+                                  port=chosen_port,
+                                  path=path_prefix.lstrip('/')),
         ]
 
     return result

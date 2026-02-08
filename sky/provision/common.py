@@ -2,7 +2,6 @@
 import abc
 import dataclasses
 import functools
-import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -263,9 +262,11 @@ class Endpoint:
 
 @dataclasses.dataclass
 class SocketEndpoint(Endpoint):
-    """Socket endpoint accessible via a host and a port."""
+    """Socket endpoint accessible via a host, optional port, and optional
+    path."""
     port: Optional[int]
     host: str = ''
+    path: str = ''
 
     def url(self, override_ip: Optional[str] = None) -> str:
         host = override_ip if override_ip else self.host
@@ -278,27 +279,10 @@ class SocketEndpoint(Endpoint):
             # 'host.docker.internal' allows the pod to properly communicate
             # with services running on the host machine's localhost.
             host = 'host.docker.internal'
-        return f'{host}{":" + str(self.port) if self.port else ""}'
-
-
-@dataclasses.dataclass
-class HTTPEndpoint(SocketEndpoint):
-    """HTTP endpoint accessible via a url."""
-    path: str = ''
-
-    def url(self, override_ip: Optional[str] = None) -> str:
-        host = override_ip if override_ip else self.host
-        return f'http://{os.path.join(super().url(host), self.path)}'
-
-
-@dataclasses.dataclass
-class HTTPSEndpoint(SocketEndpoint):
-    """HTTPS endpoint accessible via a url."""
-    path: str = ''
-
-    def url(self, override_ip: Optional[str] = None) -> str:
-        host = override_ip if override_ip else self.host
-        return f'https://{os.path.join(super().url(host), self.path)}'
+        base = f'{host}{":" + str(self.port) if self.port else ""}'
+        if self.path:
+            return f'{base}/{self.path.lstrip("/")}'
+        return base
 
 
 def query_ports_passthrough(
@@ -309,11 +293,10 @@ def query_ports_passthrough(
 
     Returns a list of socket endpoint using head_ip and ports."""
     assert head_ip is not None, head_ip
-    ports = list(resources_utils.port_ranges_to_set(ports))
-    result: Dict[int, List[Endpoint]] = {}
-    for port in ports:
-        result[port] = [SocketEndpoint(port=port, host=head_ip)]
-    return result
+    parsed_ports = list(resources_utils.port_ranges_to_set(ports))
+    return {
+        port: [SocketEndpoint(port=port, host=head_ip)] for port in parsed_ports
+    }
 
 
 def log_function_start_end(func):
