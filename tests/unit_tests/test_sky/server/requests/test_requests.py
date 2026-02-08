@@ -184,8 +184,9 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Verify old running request was NOT deleted
     assert requests.get_request('old-running-1') is not None
 
-    # Verify log file unlink was called for the deleted request
-    mock_unlink.assert_called_once()
+    # Verify log file unlink was called for both current and legacy paths
+    # (2 calls per deleted request: current path + legacy path)
+    assert mock_unlink.call_count == 2
 
     # Verify logging
     mock_logger.info.assert_called_once()
@@ -277,7 +278,8 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     assert call_counts[2] == 5  # Third batch (remaining)
 
     # Verify log file unlink was called for each deleted request
-    assert mock_unlink.call_count == 25
+    # (2 calls per request: current path + legacy path)
+    assert mock_unlink.call_count == 50
 
     # Verify logging shows correct total
     mock_logger.info.assert_called_once()
@@ -603,6 +605,127 @@ async def test_requests_gc_daemon_disabled(isolated_database):
                 # Verify sleep was called with max(-1, 3600) = 3600
                 assert mock_sleep.call_count == 2
                 mock_sleep.assert_any_call(3600)
+
+
+def test_get_legacy_log_path():
+    """Test _get_legacy_log_path returns correct legacy path."""
+    # Test that legacy log path uses LEGACY_REQUEST_LOG_PATH_PREFIX
+    request_id = 'test-request-123'
+    legacy_path = requests._get_legacy_log_path(request_id)
+
+    # Verify the path is under the legacy prefix
+    expected_prefix = pathlib.Path(
+        requests.LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+    assert legacy_path.parent == expected_prefix
+    assert legacy_path.name == f'{request_id}.log'
+    assert str(legacy_path).endswith('.log')
+
+    # Verify it's different from the current path
+    current_path_prefix = pathlib.Path(
+        requests.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+    assert legacy_path.parent != current_path_prefix
+
+
+@pytest.mark.asyncio
+async def test_clean_finished_requests_cleans_both_paths(
+        isolated_database, tmp_path):
+    """Test that GC cleans logs from both current and legacy paths."""
+    current_time = time.time()
+    retention_seconds = 60
+
+    # Create an old finished request
+    old_request = requests.Request(request_id='legacy-test-req-1',
+                                   name='test-request',
+                                   entrypoint=dummy,
+                                   request_body=payloads.RequestBody(),
+                                   status=RequestStatus.SUCCEEDED,
+                                   created_at=current_time - 180,
+                                   finished_at=current_time - 120,
+                                   user_id='test-user')
+
+    await requests.create_if_not_exists_async(old_request)
+
+    # Track which paths unlink was called on
+    unlinked_paths = []
+
+    async def track_unlink(self, missing_ok=False):
+        unlinked_paths.append(str(self))
+
+    # Patch both the legacy constant and the unlink method
+    legacy_log_dir = tmp_path / 'legacy_logs'
+    legacy_log_dir.mkdir()
+
+    with mock.patch(
+            'sky.server.requests.requests.LEGACY_REQUEST_LOG_PATH_PREFIX',
+            str(legacy_log_dir)):
+        with mock.patch('anyio.Path.unlink', track_unlink):
+            with mock.patch(
+                    'sky.server.requests.requests.logger') as mock_logger:
+                mock_logger.getEffectiveLevel.return_value = logging.INFO
+                await requests.clean_finished_requests_with_retention(
+                    retention_seconds)
+
+    # Verify that unlink was called for both current and legacy paths
+    assert len(unlinked_paths) == 2
+
+    # One path should be under the current log path prefix (from isolated_database)
+    # One path should be under the legacy log path prefix
+    current_path_count = sum(
+        1 for p in unlinked_paths if 'legacy-test-req-1.log' in p)
+    assert current_path_count == 2  # Both paths should have the request ID
+
+    # Verify the request was deleted
+    assert requests.get_request('legacy-test-req-1') is None
+
+
+@pytest.mark.asyncio
+async def test_cleanup_legacy_directory_if_empty(tmp_path):
+    """Test _cleanup_legacy_directory_if_empty removes empty directory."""
+    # Create a temporary legacy directory
+    legacy_dir = tmp_path / 'legacy_logs'
+    legacy_dir.mkdir()
+
+    # Test with empty directory - should be removed
+    with mock.patch(
+            'sky.server.requests.requests.LEGACY_REQUEST_LOG_PATH_PREFIX',
+            str(legacy_dir)):
+        await requests._cleanup_legacy_directory_if_empty()
+
+    assert not legacy_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_legacy_directory_not_empty(tmp_path):
+    """Test _cleanup_legacy_directory_if_empty preserves non-empty directory."""
+    # Create a temporary legacy directory with a file
+    legacy_dir = tmp_path / 'legacy_logs'
+    legacy_dir.mkdir()
+    (legacy_dir / 'some-request.log').touch()
+
+    # Test with non-empty directory - should be preserved
+    with mock.patch(
+            'sky.server.requests.requests.LEGACY_REQUEST_LOG_PATH_PREFIX',
+            str(legacy_dir)):
+        await requests._cleanup_legacy_directory_if_empty()
+
+    assert legacy_dir.exists()
+    assert (legacy_dir / 'some-request.log').exists()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_legacy_directory_not_exists(tmp_path):
+    """Test _cleanup_legacy_directory_if_empty handles non-existent directory."""
+    # Point to a non-existent directory
+    legacy_dir = tmp_path / 'nonexistent_logs'
+
+    # Should not raise any error
+    with mock.patch(
+            'sky.server.requests.requests.LEGACY_REQUEST_LOG_PATH_PREFIX',
+            str(legacy_dir)):
+        await requests._cleanup_legacy_directory_if_empty()
+
+    # Directory should still not exist
+    assert not legacy_dir.exists()
 
 
 @pytest.mark.asyncio
