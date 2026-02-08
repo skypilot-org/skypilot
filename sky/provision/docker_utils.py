@@ -4,7 +4,7 @@ import dataclasses
 import re
 import shlex
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -97,6 +97,112 @@ DEFAULT_OBJECT_STORE_MAX_MEMORY_BYTES = 200 * 10**9
 DEFAULT_OBJECT_STORE_MEMORY_PROPORTION = 0.3
 
 
+def _normalize_run_options(opts: List[str]) -> List[str]:
+    """Normalize docker run options vs SkyPilot enforced defaults.
+
+    Enforced (appended later once):
+      --network=host, --cap-add=SYS_ADMIN, --device=/dev/fuse,
+      --security-opt=apparmor:unconfined, --entrypoint=/bin/bash
+
+    Redundant user copies are removed; contradictions are warned and overridden.
+    """
+    kv: List[Tuple[str, Optional[str]]] = []
+    i, n = 0, len(opts)
+    while i < n:
+        t = opts[i]
+        if t.startswith('--') and '=' in t:
+            k, val = t.split('=', 1)
+            kv.append((k, val))
+            i += 1
+        elif t.startswith('--') and i + 1 < n and not opts[i +
+                                                           1].startswith('--'):
+            kv.append((t, opts[i + 1]))
+            i += 2
+        else:
+            kv.append((t, None))
+            i += 1
+
+    enforced_single = {
+        ('--network', 'host'),
+        ('--cap-add', 'SYS_ADMIN'),
+        ('--device', '/dev/fuse'),
+        ('--security-opt', 'apparmor:unconfined'),
+        ('--entrypoint', '/bin/bash'),
+    }
+
+    kept: List[Tuple[str, Optional[str]]] = []
+    user_network: str = ''
+    user_network_set: bool = False
+    user_cap_drop: Set[str] = set()
+    user_entrypoint: str = ''
+    user_entrypoint_set: bool = False
+    user_secopts: List[str] = []
+
+    for k, v in kv:
+        if (k, v) in enforced_single:
+            continue
+
+        if k in ('--network', '--net'):
+            if v is not None:
+                user_network = v
+                user_network_set = True
+            continue
+
+        if k == '--cap-drop' and v:
+            user_cap_drop.add(v)
+            continue
+
+        if k == '--cap-add' and v == 'SYS_ADMIN':
+            continue
+
+        if k == '--device':
+            if v == '/dev/fuse':
+                continue
+            kept.append((k, v))
+            continue
+
+        if k == '--security-opt' and v:
+            user_secopts.append(v)
+            if v.startswith('apparmor:'):
+                continue
+            kept.append((k, v))
+            continue
+
+        if k == '--entrypoint':
+            if v is not None:
+                user_entrypoint = v
+                user_entrypoint_set = True
+            continue
+
+        kept.append((k, v))
+
+    if user_network_set and user_network != 'host':
+        logger.warning(
+            'Overriding user network "%s" to host '
+            '(SkyPilot requires host networking during initialization).',
+            user_network)
+
+    if 'SYS_ADMIN' in user_cap_drop:
+        logger.warning('Overriding: user requested "--cap-drop SYS_ADMIN"; '
+                       'SkyPilot requires "--cap-add SYS_ADMIN".')
+
+    if user_entrypoint_set and user_entrypoint != '/bin/bash':
+        logger.warning(
+            'Overriding user entrypoint "%s" to "/bin/bash" '
+            '(required during initialization).', user_entrypoint)
+
+    for s in user_secopts:
+        if s.startswith('apparmor:') and s != 'apparmor:unconfined':
+            logger.warning(
+                'Overriding user AppArmor profile "%s" to '
+                '"apparmor:unconfined" for initialization.', s)
+
+    out: List[str] = []
+    for k, v in kept:
+        out.append(k if v is None else f'{k}={v}')
+    return out
+
+
 def _check_helper(cname, template, docker_cmd):
     return ' '.join([
         docker_cmd, 'inspect', '-f', '"{{' + template + '}}"', cname, '||',
@@ -151,7 +257,8 @@ def docker_start_cmds(
     env_flags = ' '.join(
         ['-e {name}={val}'.format(name=k, val=v) for k, v in env_vars.items()])
 
-    user_options_str = ' '.join(user_options)
+    sanitized_user_options = _normalize_run_options(user_options)
+    # user_options_str = ' '.join(sanitized_user_options)
     docker_run = [
         docker_cmd,
         'run',
@@ -161,7 +268,7 @@ def docker_start_cmds(
         '-d',
         '-it',
         env_flags,
-        user_options_str,
+        *sanitized_user_options,
         '--net=host',
         # SkyPilot: Add following options to enable fuse and resource limits.
         '--cap-add=SYS_ADMIN',
