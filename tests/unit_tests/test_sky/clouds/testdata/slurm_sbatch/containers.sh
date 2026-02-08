@@ -59,10 +59,17 @@ apt-get install -y ca-certificates rsync curl git wget fuse
 echo '"'"'alias sudo=""'"'"' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 touch /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &
+CONTAINER_PID=$!
 while true; do
   num_ready=$(ls -1 /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done 2>/dev/null | wc -l)
   if [ "$num_ready" -ge "1" ]; then
     break
+  fi
+  if ! kill -0 $CONTAINER_PID 2>/dev/null; then
+    echo "[container] ERROR: Container initialization failed."
+    echo "[container] Only $num_ready of 1 node(s) completed initialization."
+    wait $CONTAINER_PID
+    exit $?
   fi
   sleep 1
 done
