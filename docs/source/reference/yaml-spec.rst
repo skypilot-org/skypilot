@@ -1137,6 +1137,25 @@ OR
     conda activate myenv
     pip install torch torchvision
 
+.. tip::
+
+  `uv <https://docs.astral.sh/uv/>`_, the fast Python package installer, is **pre-installed on all SkyPilot clusters**.
+  You can use it in your ``setup`` commands for faster package installation:
+
+  .. code-block:: yaml
+
+    setup: |
+      uv pip install -r requirements.txt
+
+  Or create a virtual environment and install packages:
+
+  .. code-block:: yaml
+
+    setup: |
+      uv venv ~/myenv
+      source ~/myenv/bin/activate
+      uv pip install torch torchvision
+
 .. _yaml-spec-run:
 
 ``run``
