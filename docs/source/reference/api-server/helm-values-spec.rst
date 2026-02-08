@@ -552,7 +552,7 @@ Default: see the yaml below.
 ``apiService.config``
 ^^^^^^^^^^^^^^^^^^^^^
 
-Content of the `SkyPilot config.yaml <https://docs.skypilot.co/en/latest/reference/config.html>`_ to set on the API server. Set to ``null`` to use an empty config. Refer to :ref:`setting the SkyPilot config <sky-api-server-config>` for more details.
+Content of the :ref:`SkyPilot config.yaml <config-yaml>` to set on the API server. Set to ``null`` to use an empty config. Refer to :ref:`setting the SkyPilot config <sky-api-server-config>` for more details.
 
 Default: ``null``
 

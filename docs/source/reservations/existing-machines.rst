@@ -340,7 +340,7 @@ Details: Prerequisites
 **SkyPilot API server host:**
 
 * `kubectl <https://kubernetes.io/docs/tasks/tools/install-kubectl/>`_
-* `SkyPilot <https://docs.skypilot.co/en/latest/getting-started/installation.html>`_
+* :ref:`SkyPilot <installation>`
 
 **Remote machines:**
 

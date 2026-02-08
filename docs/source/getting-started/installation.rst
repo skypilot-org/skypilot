@@ -1329,7 +1329,7 @@ Store the following fields in ``~/.ibm/credentials.yaml``:
 
 .. note::
   Stock images aren't currently providing ML tools out of the box.
-  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in `this documentation <https://github.com/skypilot-org/skypilot/blob/master/docs/source/reference/yaml-spec.rst>`_.
+  Create private images with the necessary tools (e.g. CUDA), by following the IBM segment in :ref:`this documentation <yaml-spec-ibm>`._
 
 To access IBM's Cloud Object Storage (COS), append the following fields to the credentials file:
 
@@ -1560,7 +1560,7 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
 .. note::
 
-  Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+  Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <https://slack.skypilot.co/>`_.
 
 
 Prime Intellect |community-badge|
