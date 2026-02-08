@@ -11,7 +11,8 @@ from typing import Dict, List
 clouds_with_ray = ['ibm', 'docker', 'scp']
 
 install_requires = [
-    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
+    # wheel 0.46.2+ required for CVE-2026-24049
+    'wheel>=0.46.3',
     'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
     'pip',
     'cachetools',
@@ -92,7 +93,8 @@ install_requires = [
     'paramiko',
     'types-paramiko',
     'alembic>=1.8.0',
-    'aiohttp',
+    # aiohttp 3.13.3+ required for CVE-2025-69223
+    'aiohttp>=3.13.3',
     'anyio',
 ]
 
@@ -176,6 +178,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     # timeout of AzureCliCredential.
     'azure': [
         AZURE_CLI,
+        # TODO(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
         'azure-core>=1.31.0',
         'azure-identity>=1.19.0',
         'azure-mgmt-network>=27.0.0',
@@ -229,6 +232,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'primeintellect': [],  # No dependencies needed for primeintellect
+    # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
