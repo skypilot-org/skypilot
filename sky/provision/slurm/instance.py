@@ -374,6 +374,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{
+    saved_exit=$?
     # The Skylet is daemonized, so it is not automatically terminated when
     # the Slurm job is terminated, we need to kill it manually.
     echo "Terminating Skylet..."
@@ -393,9 +394,13 @@ cleanup() {{
     # that created the sky directories.
     srun --nodes={num_nodes} rm -rf {skypilot_runtime_dir}
     rm -rf {sky_cluster_home_dir}
-    exit 0
+    exit $saved_exit
 }}
-trap cleanup TERM
+# Run cleanup on any exit, including container init failures.
+trap cleanup EXIT
+# On SIGTERM (job cancellation via scancel), exit 0 so cleanup treats
+# it as a graceful shutdown rather than propagating an error code.
+trap 'exit 0' TERM
 
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p {sky_cluster_home_dir}/sky_logs {sky_cluster_home_dir}/sky_workdir {sky_cluster_home_dir}/.sky
