@@ -210,7 +210,7 @@ def launch(name: str,
             'chmod 700 ~/.ssh',
             # Add a newline first to ensure keys are on separate lines
             'echo "" >> ~/.ssh/authorized_keys',
-            (f'echo "{shlex.quote(ssh_public_key.strip())}" >> '
+            (f'echo {shlex.quote(ssh_public_key.strip())} >> '
              '~/.ssh/authorized_keys'),
             'chmod 600 ~/.ssh/authorized_keys',
         ])
