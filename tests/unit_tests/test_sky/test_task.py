@@ -1,5 +1,6 @@
 import os
 import tempfile
+from typing import Callable, Generator
 from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -12,6 +13,47 @@ from sky import resources as resources_lib
 from sky import task
 from sky.utils import git
 from sky.utils import registry
+
+# Type alias for the env file factory function
+EnvFileFactory = Callable[[dict[str, str]], str]
+
+
+@pytest.fixture
+def env_file_factory() -> Generator[EnvFileFactory, None, None]:
+    """Factory fixture for creating temporary .env files with automatic cleanup.
+
+    Usage:
+        def test_example(env_file_factory: EnvFileFactory):
+            env_file = env_file_factory({'API_KEY': 'value', 'DEBUG': 'true'})
+            # Use env_file path in test...
+            # No need to manually cleanup - fixture handles it
+    """
+    created_files: list[str] = []
+
+    def _create_env_file(env_vars: dict[str, str]) -> str:
+        """Create a temporary .env file with the given environment variables.
+
+        Args:
+            env_vars: Dictionary of environment variable names to values.
+
+        Returns:
+            Path to the created temporary .env file.
+        """
+        f = tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False)
+        for key, value in env_vars.items():
+            f.write(f'{key}={value}\n')
+        f.close()
+        created_files.append(f.name)
+        return f.name
+
+    yield _create_env_file
+
+    # Cleanup all created files
+    for file_path in created_files:
+        try:
+            os.unlink(file_path)
+        except OSError:
+            pass
 
 
 def test_validate_workdir():
@@ -102,6 +144,125 @@ def test_to_yaml_config_without_envs():
     assert 'envs' not in yaml_config_redacted
     assert 'secrets' not in yaml_config_redacted
     assert yaml_config == yaml_config_redacted
+
+
+def test_from_yaml_config_with_only_env_file(env_file_factory: EnvFileFactory):
+    """Test from_yaml_config() loading envs from env_file only."""
+    env_file_path = env_file_factory({
+        'API_KEY': 'secret-from-file',
+        'DATABASE_URL': 'postgres://localhost/db',
+        'DEBUG': 'true',
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+    }
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Envs should be loaded from the env_file
+    assert task_obj.envs == {
+        'API_KEY': 'secret-from-file',
+        'DATABASE_URL': 'postgres://localhost/db',
+        'DEBUG': 'true',
+    }
+
+
+def test_from_yaml_config_with_env_file_list(env_file_factory: EnvFileFactory):
+    """Test from_yaml_config() loading envs from multiple env_files."""
+    env_file1 = env_file_factory({
+        'VAR1': 'value1',
+        'SHARED': 'from-file1',
+    })
+    env_file2 = env_file_factory({
+        'VAR2': 'value2',
+        'SHARED': 'from-file2',  # Should override file1
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': [env_file1, env_file2],
+    }
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Envs from later files should override earlier ones
+    assert task_obj.envs['VAR1'] == 'value1'
+    assert task_obj.envs['VAR2'] == 'value2'
+    assert task_obj.envs['SHARED'] == 'from-file2'
+
+
+def test_from_yaml_config_with_env_file_and_envs(
+        env_file_factory: EnvFileFactory):
+    """Test from_yaml_config() with both env_file and explicit envs."""
+    env_file_path = env_file_factory({
+        'FROM_FILE': 'file-value',
+        'SHARED': 'from-file',
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+        'envs': {
+            'FROM_YAML': 'yaml-value',
+            'SHARED': 'from-yaml',  # envs takes precedence over env_file
+        },
+    }
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Both sources should be merged
+    assert task_obj.envs['FROM_FILE'] == 'file-value'
+    assert task_obj.envs['FROM_YAML'] == 'yaml-value'
+    # envs takes precedence over env_file (like Docker Compose)
+    assert task_obj.envs['SHARED'] == 'from-yaml'
+
+
+def test_from_yaml_config_with_cli_envs_overriding_env_file(
+        env_file_factory: EnvFileFactory):
+    """Test that CLI env_overrides take precedence over env_file."""
+    env_file_path = env_file_factory({
+        'API_KEY': 'from-file',
+        'OTHER_VAR': 'other-value',
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+    }
+    # CLI overrides should take precedence
+    env_overrides = [('API_KEY', 'from-cli')]
+    task_obj = task.Task.from_yaml_config(config, env_overrides=env_overrides)
+
+    # CLI override should win
+    assert task_obj.envs['API_KEY'] == 'from-cli'
+    # Other env_file values should still be present
+    assert task_obj.envs['OTHER_VAR'] == 'other-value'
+
+
+def test_from_yaml_config_env_file_invalid_type():
+    """Test that invalid env_file type raises ValueError."""
+    config = {
+        'run': 'echo hello',
+        'env_file': {
+            'invalid': 'type'
+        },  # Should be str or list
+    }
+    with pytest.raises(ValueError, match='Invalid `env_file` type'):
+        task.Task.from_yaml_config(config)
+
+
+@pytest.mark.parametrize('env_file_value', [
+    pytest.param('/nonexistent/path/.env', id='single_file'),
+    pytest.param(['/nonexistent/first.env', '/nonexistent/second.env'],
+                 id='list_of_files'),
+])
+def test_from_yaml_config_env_file_not_found(env_file_value):
+    """Test that missing env_file raises ValueError with clear message."""
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_value,
+    }
+    with pytest.raises(ValueError, match='env_file not found'):
+        task.Task.from_yaml_config(config)
 
 
 def test_to_yaml_config_with_envs_no_redaction():
@@ -681,6 +842,104 @@ def test_docker_login_config_no_mixed_envs_secrets():
             resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
 
+def test_docker_login_config_from_env_file(env_file_factory: EnvFileFactory):
+    """Test Docker login credentials loaded entirely from env_file."""
+    env_file_path = env_file_factory({
+        'SKYPILOT_DOCKER_USERNAME': 'docker-user',
+        'SKYPILOT_DOCKER_PASSWORD': 'docker-password',
+        'SKYPILOT_DOCKER_SERVER': 'registry.example.com',
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+    }
+    # Should work - all Docker credentials are from env_file (merged into envs)
+    task_obj = task.Task.from_yaml_config(config)
+
+    # Verify credentials were loaded
+    assert task_obj.envs['SKYPILOT_DOCKER_USERNAME'] == 'docker-user'
+    assert task_obj.envs['SKYPILOT_DOCKER_PASSWORD'] == 'docker-password'
+    assert task_obj.envs['SKYPILOT_DOCKER_SERVER'] == 'registry.example.com'
+
+    # Verify set_resources passes validation (should not raise)
+    task_obj.set_resources(
+        resources_lib.Resources(image_id='docker:nginx:latest'))
+
+
+def test_docker_login_config_from_env_file_and_envs_works(
+        env_file_factory: EnvFileFactory):
+    """Test that partial Docker credentials from env_file and envs works."""
+    env_file_path = env_file_factory({
+        'SKYPILOT_DOCKER_PASSWORD': 'docker-password',
+    })
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+        'envs': {
+            'SKYPILOT_DOCKER_USERNAME': 'docker-user',
+            'SKYPILOT_DOCKER_SERVER': 'registry.example.com',
+        }
+    }
+    # Should work - all Docker credentials end up in envs
+    task.Task.from_yaml_config(config)
+
+
+def test_docker_login_config_env_file_with_envs_override(
+        env_file_factory: EnvFileFactory):
+    """Test Docker credentials from env_file can be overridden by envs."""
+    env_file_path = env_file_factory({
+        'SKYPILOT_DOCKER_USERNAME': 'file-user',
+        'SKYPILOT_DOCKER_PASSWORD': 'file-password',
+        'SKYPILOT_DOCKER_SERVER': 'file-registry.com',
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+        'envs': {
+            # Override password from envs (envs takes precedence)
+            'SKYPILOT_DOCKER_PASSWORD': 'envs-password',
+        },
+    }
+    # Should work - all Docker credentials end up in envs
+    task_obj = task.Task.from_yaml_config(config)
+
+    # env_file values should be present
+    assert task_obj.envs['SKYPILOT_DOCKER_USERNAME'] == 'file-user'
+    assert task_obj.envs['SKYPILOT_DOCKER_SERVER'] == 'file-registry.com'
+    # envs override should take precedence
+    assert task_obj.envs['SKYPILOT_DOCKER_PASSWORD'] == 'envs-password'
+
+    # Verify set_resources passes validation (should not raise)
+    task_obj.set_resources(
+        resources_lib.Resources(image_id='docker:nginx:latest'))
+
+
+def test_docker_login_config_env_file_mixed_with_secrets_fails(
+        env_file_factory: EnvFileFactory):
+    """Test that Docker credentials split between env_file and secrets fails."""
+    env_file_path = env_file_factory({
+        'SKYPILOT_DOCKER_USERNAME': 'file-user',
+        'SKYPILOT_DOCKER_SERVER': 'file-registry.com',
+    })
+
+    config = {
+        'run': 'echo hello',
+        'env_file': env_file_path,
+        'secrets': {
+            'SKYPILOT_DOCKER_PASSWORD': 'secret-password',
+        },
+    }
+    # Should fail because Docker credentials are split between envs and secrets
+    with pytest.raises(
+            ValueError,
+            match='Docker login variables must be specified together'):
+        task_obj = task.Task.from_yaml_config(config)
+        task_obj.set_resources(
+            resources_lib.Resources(image_id='docker:ubuntu:latest'))
+
+
 def make_mock_volume_config(name='vol1',
                             type='pvc',
                             cloud='aws',
@@ -977,6 +1236,57 @@ def test_resolve_volumes_with_envs_dict():
     }
     t = task.Task.from_yaml_config(config)
     assert t._volumes == {'/mnt': {'name': 'vol1_suffix'}}
+
+
+@pytest.mark.parametrize('env_vars,volumes_config,expected_volumes', [
+    pytest.param(
+        {'VOLUME_NAME': 'vol1'},
+        {'/mnt': '${VOLUME_NAME}'},
+        {'/mnt': 'vol1'},
+        id='single_env_var',
+    ),
+    pytest.param(
+        {
+            'VOLUME_NAME': 'vol1',
+            'VOLUME_SUFFIX': 'suffix'
+        },
+        {'/mnt': '${VOLUME_NAME}_${VOLUME_SUFFIX}'},
+        {'/mnt': 'vol1_suffix'},
+        id='multiple_env_vars',
+    ),
+    pytest.param(
+        {'VOLUME_NAME': 'vol1'},
+        {'/mnt': 'static_volume'},
+        {'/mnt': 'static_volume'},
+        id='no_substitution_needed',
+    ),
+    pytest.param(
+        {
+            'VOLUME_NAME': 'vol1',
+            'VOLUME_SUFFIX': 'suffix'
+        },
+        {'/mnt': {
+            'name': '${VOLUME_NAME}_${VOLUME_SUFFIX}'
+        }},
+        {'/mnt': {
+            'name': 'vol1_suffix'
+        }},
+        id='dict_volume_config',
+    ),
+])
+def test_resolve_volumes_with_env_file(env_file_factory: EnvFileFactory,
+                                       env_vars: dict[str, str],
+                                       volumes_config: dict,
+                                       expected_volumes: dict):
+    """Test that volume references can use env vars loaded from env_file."""
+    env_file_path = env_file_factory(env_vars)
+
+    config = {
+        'volumes': volumes_config,
+        'env_file': env_file_path,
+    }
+    t = task.Task.from_yaml_config(config)
+    assert t._volumes == expected_volumes
 
 
 def test_resources_to_config():

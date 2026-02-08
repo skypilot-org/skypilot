@@ -912,6 +912,16 @@ def get_task_schema():
             'run': {
                 'type': 'string',
             },
+            'env_file': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                }],
+            },
             'envs': {
                 'type': 'object',
                 'required': [],
