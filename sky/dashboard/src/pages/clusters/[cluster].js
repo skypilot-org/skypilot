@@ -369,8 +369,8 @@ function ActiveTab({
       {/* Cluster Info Card */}
       <div className="mb-6">
         <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-          <div className="flex items-center justify-between px-4 pt-4">
-            <h3 className="text-lg font-semibold">
+          <div className="flex items-center justify-between px-3 py-2.5">
+            <h3 className="text-[15px] font-semibold tracking-[0.01em]">
               {isHistoricalCluster ? 'Historical Cluster Details' : 'Details'}
             </h3>
           </div>
@@ -671,6 +671,32 @@ function ActiveTab({
             />
           </div>
         )}
+
+      {/* Plugin Slot: Cluster Nodes - for plugins to show nodes in this cluster */}
+      <PluginSlot
+        name="clusters.detail.nodes"
+        context={{
+          cluster: clusterData.cluster,
+          clusterHash: clusterData.cluster_hash,
+          clusterNameOnCloud: clusterData.cluster_name_on_cloud,
+          infra: clusterData.full_infra,
+          numNodes: clusterData.num_nodes,
+        }}
+        wrapperClassName="mb-6"
+      />
+
+      {/* Jobs Table - Only show for active clusters */}
+      {!isHistoricalCluster && (
+        <div className="mb-8">
+          <ClusterJobs
+            clusterName={clusterData.cluster}
+            clusterJobData={clusterJobData}
+            loading={clusterJobsLoading}
+            refreshClusterJobsOnly={refreshClusterJobsOnly}
+            workspace={clusterData.workspace}
+          />
+        </div>
+      )}
 
       {/* Plugin Slot: Cluster Detail Events */}
       <PluginSlot

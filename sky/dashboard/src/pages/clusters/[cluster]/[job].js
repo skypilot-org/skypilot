@@ -194,8 +194,10 @@ export function JobDetailPage() {
             {/* Info Section */}
             <div id="details">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
-                  <h2 className="text-lg font-semibold">Details</h2>
+                <div className="flex items-center justify-between px-3 py-2.5">
+                  <h2 className="text-[15px] font-semibold tracking-[0.01em]">
+                    Details
+                  </h2>
                 </div>
                 <div className="p-4">
                   <div className="grid grid-cols-2 gap-6">
@@ -308,9 +310,11 @@ export function JobDetailPage() {
             {/* Logs Section */}
             <div id="logs" className="mt-6">
               <Card>
-                <div className="flex items-center justify-between px-4 pt-4">
+                <div className="flex items-center justify-between px-3 py-2.5">
                   <div className="flex items-center">
-                    <h2 className="text-lg font-semibold">Logs</h2>
+                    <h2 className="text-[15px] font-semibold tracking-[0.01em]">
+                      Logs
+                    </h2>
                     <span className="ml-2 text-xs text-gray-500">
                       (Logs are not streaming; click refresh to fetch the latest
                       logs.)

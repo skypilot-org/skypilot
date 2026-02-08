@@ -414,8 +414,10 @@ export default function PoolDetailPage() {
           {/* Details */}
           <div className="mb-6">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-              <div className="flex items-center justify-between px-4 pt-4">
-                <h3 className="text-lg font-semibold">Details</h3>
+              <div className="flex items-center justify-between px-3 py-2.5">
+                <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+                  Details
+                </h3>
               </div>
               <div className="p-4">
                 <div className="grid grid-cols-2 gap-6">
@@ -566,8 +568,10 @@ export default function PoolDetailPage() {
           {/* Workers Table */}
           <div className="mb-8">
             <div className="rounded-lg border bg-card text-card-foreground shadow-sm">
-              <div className="flex items-center justify-between p-4">
-                <h3 className="text-lg font-semibold">Pool Workers</h3>
+              <div className="flex items-center justify-between px-3 py-2.5">
+                <h3 className="text-[15px] font-semibold tracking-[0.01em]">
+                  Pool Workers
+                </h3>
 
                 {/* Show Failed Workers Toggle */}
                 <div className="flex items-center space-x-2">
