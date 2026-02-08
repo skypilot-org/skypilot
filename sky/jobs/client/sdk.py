@@ -184,8 +184,15 @@ def queue_v2(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'handle': (CloudVmRayResourceHandle) cluster handle with network info, # pylint: disable=line-too-long
               }
             ]
+
+          The ``handle`` field provides access to network endpoints:
+
+          - ``handle.stable_internal_external_ips``: List of (internal_ip, external_ip) tuples
+          - ``handle.cached_cluster_info.instances[pod].internal_svc``: K8s DNS entries
+
         total (int): Total number of jobs after filter,
         status_counts (Dict[str, int]): Status counts after filter,
         total_no_filter (int): Total number of jobs before filter,
@@ -269,8 +276,14 @@ def queue(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'handle': (CloudVmRayResourceHandle) cluster handle with network info, # pylint: disable=line-too-long
               }
             ]
+
+          The ``handle`` field provides access to network endpoints:
+
+          - ``handle.stable_internal_external_ips``: List of (internal_ip, external_ip) tuples
+          - ``handle.cached_cluster_info.instances[pod].internal_svc``: K8s DNS entries
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or

@@ -100,3 +100,113 @@ class TestEncodeStatus:
         unpickled_handle = pickle.loads(decoded_bytes)
         assert unpickled_handle.cluster_name == "test-cluster"
         assert unpickled_handle.cluster_name_on_cloud == "test-cluster-123"
+
+
+class TestEncodeJobsQueue:
+    """Test the encode_jobs_queue and encode_jobs_queue_v2 functions."""
+
+    def test_encode_jobs_queue_with_handle(self):
+        """Test that encode_jobs_queue serializes handles properly."""
+        from sky.jobs import state as managed_jobs
+
+        # Create a mock job with handle
+        job = {
+            'job_id': 1,
+            'task_id': 0,
+            'job_name': 'test-job',
+            'task_name': 'test-task',
+            'status': managed_jobs.ManagedJobStatus.RUNNING,
+            'handle': {  # Use dict as simple picklable object
+                'cluster_name_on_cloud': 'test-cluster',
+                'stable_internal_external_ips': [('10.0.0.1', '35.1.2.3')],
+            },
+        }
+
+        result = encoders.encode_jobs_queue([job])
+
+        assert len(result) == 1
+        encoded_job = result[0]
+        assert encoded_job[
+            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
+
+        # Handle should be serialized to a string
+        assert isinstance(encoded_job['handle'], str)
+
+        # Verify it can be decoded
+        decoded_handle = pickle.loads(
+            base64.b64decode(encoded_job['handle'].encode('utf-8')))
+        assert decoded_handle['cluster_name_on_cloud'] == 'test-cluster'
+        assert decoded_handle['stable_internal_external_ips'] == [('10.0.0.1',
+                                                                   '35.1.2.3')]
+
+    def test_encode_jobs_queue_with_none_handle(self):
+        """Test that encode_jobs_queue handles None handle."""
+        from sky.jobs import state as managed_jobs
+
+        job = {
+            'job_id': 1,
+            'task_id': 0,
+            'job_name': 'test-job',
+            'task_name': 'test-task',
+            'status': managed_jobs.ManagedJobStatus.PENDING,
+            'handle': None,
+        }
+
+        result = encoders.encode_jobs_queue([job])
+
+        assert len(result) == 1
+        assert result[0]['handle'] is None
+
+    def test_encode_jobs_queue_v2_with_handle(self):
+        """Test that encode_jobs_queue_v2 serializes handles properly."""
+        from sky.jobs import state as managed_jobs
+
+        job = responses.ManagedJobRecord(
+            job_id=1,
+            task_id=0,
+            job_name='test-job',
+            task_name='test-task',
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+            handle={
+                'cluster_name_on_cloud': 'test-cluster-v2',
+                'stable_internal_external_ips': [('10.0.0.2', '35.1.2.4')],
+            },
+        )
+
+        result = encoders.encode_jobs_queue_v2([job])
+
+        assert len(result) == 1
+        encoded_job = result[0]
+        assert encoded_job[
+            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
+
+        # Handle should be serialized to a string
+        assert isinstance(encoded_job['handle'], str)
+
+        # Verify it can be decoded
+        decoded_handle = pickle.loads(
+            base64.b64decode(encoded_job['handle'].encode('utf-8')))
+        assert decoded_handle['cluster_name_on_cloud'] == 'test-cluster-v2'
+
+    def test_encode_jobs_queue_v2_dict_format(self):
+        """Test encode_jobs_queue_v2 with dict return format."""
+        from sky.jobs import state as managed_jobs
+
+        job = responses.ManagedJobRecord(
+            job_id=1,
+            task_id=0,
+            job_name='test-job',
+            task_name='test-task',
+            status=managed_jobs.ManagedJobStatus.RUNNING,
+            handle={
+                'cluster_name_on_cloud': 'test-cluster',
+            },
+        )
+
+        result = encoders.encode_jobs_queue_v2(([job], 1, {'RUNNING': 1}, 1))
+
+        assert isinstance(result, dict)
+        assert result['total'] == 1
+        assert result['status_counts'] == {'RUNNING': 1}
+        assert len(result['jobs']) == 1
+        assert isinstance(result['jobs'][0]['handle'], str)

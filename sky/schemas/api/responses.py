@@ -217,6 +217,12 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # The cluster resource handle for this managed job's cluster.
+    # Contains networking info (IPs, SSH ports) and cluster metadata.
+    # Similar to StatusResponse.handle for regular clusters.
+    # pydantic cannot generate the pydantic-core schema for
+    # backends.ResourceHandle, so we use Any here.
+    handle: Optional[Any] = None
 
 
 class VolumeRecord(ResponseBaseModel):

@@ -5,11 +5,13 @@ jobs.constants.MANAGED_JOBS_VERSION and handle the API change in the
 ManagedJobCodeGen.
 """
 import asyncio
+import base64
 import collections
 from datetime import datetime
 import enum
 import os
 import pathlib
+import pickle
 import re
 import shlex
 import textwrap
@@ -118,6 +120,9 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
+    # The cluster resource handle (contains IPs, SSH ports,
+    # cluster metadata, etc.)
+    'handle',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -1439,6 +1444,17 @@ def stream_logs(job_id: Optional[int],
     return stream_logs_by_id(job_id, follow, tail, task)
 
 
+def _serialize_handle_for_json(handle: Any) -> Optional[str]:
+    """Serialize a handle to a base64-encoded pickle string for JSON transport.
+
+    This is used when sending job queue data from the controller to the client
+    via JSON encoding. The handle will be deserialized on the client side.
+    """
+    if handle is None:
+        return None
+    return base64.b64encode(pickle.dumps(handle)).decode('utf-8')
+
+
 def dump_managed_job_queue(
     skip_finished: bool = False,
     accessible_workspaces: Optional[List[str]] = None,
@@ -1454,11 +1470,16 @@ def dump_managed_job_queue(
     sort_by: Optional[str] = None,
     sort_order: Optional[str] = None,
 ) -> str:
-    return message_utils.encode_payload(
-        get_managed_job_queue(skip_finished, accessible_workspaces, job_ids,
-                              workspace_match, name_match, pool_match, page,
-                              limit, user_hashes, statuses, fields, sort_by,
-                              sort_order))
+    result = get_managed_job_queue(skip_finished, accessible_workspaces,
+                                   job_ids, workspace_match, name_match,
+                                   pool_match, page, limit, user_hashes,
+                                   statuses, fields, sort_by, sort_order)
+    # Serialize handles for JSON transport - they will be deserialized
+    # in load_managed_job_queue
+    for job in result.get('jobs', []):
+        if 'handle' in job and job['handle'] is not None:
+            job['handle'] = _serialize_handle_for_json(job['handle'])
+    return message_utils.encode_payload(result)
 
 
 def _update_fields(fields: List[str],) -> Tuple[List[str], bool]:
@@ -1594,6 +1615,9 @@ def _populate_job_record_from_handle(
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+    # Set the full handle for network endpoint access (IPs, SSH ports, etc.)
+    # Similar to StatusResponse.handle for regular clusters.
+    job['handle'] = handle
 
 
 def get_managed_job_queue(
@@ -1731,6 +1755,7 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
+                job['handle'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
 
@@ -1833,6 +1858,17 @@ def filter_jobs(
     return _handle_page_and_limit(result, page, limit), total, status_counts
 
 
+def _deserialize_handle_from_json(handle_str: Optional[str]) -> Any:
+    """Deserialize a handle from a base64-encoded pickle string.
+
+    This is used when receiving job queue data from the controller that was
+    serialized via _serialize_handle_for_json.
+    """
+    if handle_str is None:
+        return None
+    return pickle.loads(base64.b64decode(handle_str.encode('utf-8')))
+
+
 def load_managed_job_queue(
     payload: str
 ) -> Tuple[List[Dict[str, Any]], int, ManagedJobQueueResultType, int, Dict[
@@ -1860,6 +1896,9 @@ def load_managed_job_queue(
             # Skip jobs that do not have user_hash info.
             # TODO(cooperc): Remove check before 0.12.0.
             job['user_name'] = all_users_map.get(job['user_hash'])
+        # Deserialize handle if present (serialized in dump_managed_job_queue)
+        if 'handle' in job and isinstance(job['handle'], str):
+            job['handle'] = _deserialize_handle_from_json(job['handle'])
     return jobs, total, result_type, total_no_filter, status_counts
 
 
@@ -2333,6 +2372,11 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Deserialize handle from bytes (MessageToDict converts bytes to base64)
+    if job_proto.handle:
+        job_dict['handle'] = pickle.loads(job_proto.handle)
+    else:
+        job_dict['handle'] = None
     return job_dict
 
 
