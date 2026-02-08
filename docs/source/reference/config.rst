@@ -122,7 +122,6 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
       Owner: user-unique-name
-    :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
@@ -686,20 +685,6 @@ Example:
       my-tag: my-value
 
 
-.. _config-yaml-aws-vpc-name:
-
-``aws.vpc_name``
-~~~~~~~~~~~~~~~~
-
-VPC to use in each region (optional).
-
-If this is set, SkyPilot will only provision in regions that contain a VPC
-with this name (provisioner automatically looks for such regions).
-Regions without a VPC with this name will not be used to launch nodes.
-
-Default: ``null`` (use the default VPC in each region).
-
-Deprecated: use ``aws.vpc_names`` instead.
 
 .. _config-yaml-aws-vpc-names:
 
@@ -735,7 +720,7 @@ Private subnets are defined as those satisfying both of these properties:
   2. Subnets that are configured to not assign public IPs by default
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
-This flag is typically set together with ``vpc_name`` above and
+This flag is typically set together with ``vpc_names`` above and
 ``ssh_proxy_command`` or ``use_ssm`` below.
 
 Default: ``false``.
@@ -745,7 +730,7 @@ Default: ``false``.
 ``aws.use_ssm``
 ~~~~~~~~~~~~~~~~
 
-Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_names`` and
 ``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
@@ -759,7 +744,7 @@ SSH proxy command (optional).
 
 Useful for using a jump server to communicate with SkyPilot nodes hosted
 in private VPC/subnets without public IPs. Typically set together with
-``vpc_name`` and ``use_internal_ips`` above.
+``vpc_names`` and ``use_internal_ips`` above.
 
 If set, this is passed as the ``-o ProxyCommand`` option for any SSH
 connections (including rsync) used to communicate between the local client
