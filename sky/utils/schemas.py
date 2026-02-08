@@ -1989,6 +1989,22 @@ def get_config_schema():
                     'sequential_upload': {
                         'type': 'boolean',
                     },
+                    'buffer_size': {
+                        'type': 'string',
+                        'pattern': constants.MEMORY_SIZE_PATTERN,
+                    },
+                    'vfs_read_ahead': {
+                        'type': 'string',
+                        'pattern': constants.MEMORY_SIZE_PATTERN,
+                    },
+                    'vfs_cache_max_size': {
+                        'type': 'string',
+                        'pattern': constants.MEMORY_SIZE_PATTERN,
+                    },
+                    'transfers': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
                 },
             },
         },
