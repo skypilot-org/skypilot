@@ -1,7 +1,9 @@
 {{- if or .Values.auth.oauth.enabled (and .Values.ingress.enabled (index .Values.ingress "oauth2-proxy" "enabled")) }}
 {{- $oauth2 := .Values.auth.oauth -}}
+{{- $redisRegistry := index .Values.auth.oauth "redis-imageRegistry" -}}
 {{- if not .Values.auth.oauth.enabled -}}
 {{- $oauth2 = index .Values.ingress "oauth2-proxy" -}}
+{{- $redisRegistry = index .Values.ingress "oauth2-proxy" "redis-imageRegistry" -}}
 {{- end -}}
 {{- if and (eq (index $oauth2 "session-store-type" | default "redis") "redis") (not (index $oauth2 "redis-url")) (not (index $oauth2 "redis-secret")) -}}
 {{- $fullName := include "skypilot.fullname" . -}}
@@ -30,7 +32,7 @@ spec:
       {{- end }}
       containers:
       - name: redis
-        image: {{ include "common.image" (dict "root" . "image" (default "redis:7-alpine" (index $oauth2 "redis-image"))) }}
+        image: {{ include "common.image" (dict "root" . "image" (default "redis:7-alpine" (index $oauth2 "redis-image")) "componentRegistry" $redisRegistry) }}
         {{- with $.Values.global.extraEnvs }}
         env:
           {{- toYaml . | nindent 10 }}
