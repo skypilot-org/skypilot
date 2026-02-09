@@ -364,8 +364,14 @@ class MountCachedConfig:
         flags = []
         if self.transfers is not None:
             flags.append(f'--transfers {self.transfers}')
-            # Automate checkers: transfers * 2
-            flags.append(f'--checkers {max(self.transfers * 2, 4)}')
+            # Automate checkers. It is recommend practice that checkers are
+            # normally twice as many as transfers. However, research into
+            # different examples reveal that at a very high transfer count
+            # like 100, it is a bit pointless to have 200 checkers, so the
+            # second part of the min provides a plateaued increase for
+            # higher number of transfers.
+            transfers = min(self.transfers * 2, 30 + self.transfers * 1.2)
+            flags.append(f'--checkers {max(transfers, 4)}')
         if self.multi_thread_streams is not None:
             flags.append(f'--multi-thread-streams {self.multi_thread_streams}')
         if self.buffer_size is not None:
