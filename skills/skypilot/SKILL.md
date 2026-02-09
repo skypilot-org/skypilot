@@ -49,7 +49,7 @@ This shows which clouds are configured. If the user's target cloud is not enable
 
 ```bash
 # List available GPUs
-sky show-gpus
+sky gpus list
 
 # Launch a GPU cluster
 sky launch -c mycluster --gpus H100 -- nvidia-smi
@@ -79,10 +79,10 @@ workdir: .
 num_nodes: 1
 
 resources:
-  # Infrastructure: cloud, cloud/region, cloud/region/zone, k8s, ssh/pool
-  infra: aws
-  # GPU/TPU accelerators
+  # GPU/TPU accelerators (SkyPilot auto-selects the cheapest cloud/region)
   accelerators: H100:8
+  # Optional: pin to a specific cloud/region if needed
+  # infra: aws  # or aws/us-east-1, k8s, ssh/my-pool
   # Use spot instances for cost savings
   use_spot: false
   # Disk size in GB
@@ -131,22 +131,21 @@ run: |
 | `sky api start` | Start the SkyPilot API server |
 | `sky dashboard` | Open the SkyPilot web dashboard |
 
-## GPU Configuration and Fallbacks
+## GPU and Cloud Selection
 
-Specify GPUs with `accelerators: <type>:<count>`:
+**IMPORTANT: Let SkyPilot choose the cloud and region.** Do NOT manually pick a cloud/region/instance by parsing `sky gpus list` output. SkyPilot's optimizer automatically selects the cheapest available option across all enabled clouds. Only specify `infra:` when the user explicitly requests a specific cloud or region.
+
+**Default behavior (recommended):** Just specify the GPU type. SkyPilot finds the cheapest cloud/region automatically:
 
 ```yaml
 resources:
-  accelerators: H100:8      # 8x H100
-  accelerators: A100:4      # 4x A100
-  accelerators: A100-80GB:1 # A100 with 80GB VRAM
-  accelerators: L4:1        # Budget GPU
-  accelerators: tpu-v4-8    # TPU (GCP only)
+  accelerators: H100:8  # SkyPilot picks the cheapest cloud/region with H100:8
 ```
 
-Use `any_of` for flexible GPU selection (SkyPilot picks cheapest available):
+If the user doesn't specify a GPU type, ask them what GPU they need (or what model/workload they're running so you can recommend one). Do NOT run `sky gpus list` and pick for them — present options and let the user decide, or use `any_of` to let SkyPilot maximize availability:
 
 ```yaml
+# Let SkyPilot choose from multiple acceptable GPU types (cheapest wins)
 resources:
   any_of:
     - accelerators: H100:8
@@ -154,9 +153,10 @@ resources:
     - accelerators: A100:8
 ```
 
-Use `ordered` for strict priority ordering:
+Use `ordered` only when the user has a strict preference:
 
 ```yaml
+# Try H100 first on AWS, fall back to GCP, then A100
 resources:
   ordered:
     - infra: aws/us-east-1
@@ -165,6 +165,14 @@ resources:
       accelerators: H100:8
     - infra: aws/us-west-2
       accelerators: A100-80GB:8
+```
+
+Only set `infra:` when the user explicitly says something like "use AWS" or "run on GCP us-central1":
+
+```yaml
+resources:
+  infra: aws             # User asked for AWS specifically
+  accelerators: H100:8
 ```
 
 ## Cluster Lifecycle
