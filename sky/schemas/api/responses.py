@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
 
@@ -222,12 +222,12 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
-    # The cluster resource handle for this managed job's cluster.
-    # Contains networking info (IPs, SSH ports) and cluster metadata.
-    # Similar to StatusResponse.handle for regular clusters.
-    # pydantic cannot generate the pydantic-core schema for
-    # backends.ResourceHandle, so we use Any here.
-    handle: Optional[Any] = None
+    # Network endpoint information (extracted from cluster handle)
+    # List of (internal_ip, external_ip) tuples for all nodes
+    internal_external_ips: Optional[List[Tuple[str, str]]] = None
+    # K8s DNS entries mapping Pod name to internal_svc
+    # Only populated for Kubernetes clusters
+    k8s_internal_svcs: Optional[Dict[str, Optional[str]]] = None
 
 
 class VolumeRecord(ResponseBaseModel):

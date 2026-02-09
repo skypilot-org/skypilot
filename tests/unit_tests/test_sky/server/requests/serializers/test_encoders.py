@@ -105,21 +105,19 @@ class TestEncodeStatus:
 class TestEncodeJobsQueue:
     """Test the encode_jobs_queue and encode_jobs_queue_v2 functions."""
 
-    def test_encode_jobs_queue_with_handle(self):
-        """Test that encode_jobs_queue serializes handles properly."""
+    def test_encode_jobs_queue_with_network_fields(self):
+        """Test that encode_jobs_queue encodes jobs with network fields."""
         from sky.jobs import state as managed_jobs
 
-        # Create a mock job with handle
+        # Create a mock job with network fields
         job = {
             'job_id': 1,
             'task_id': 0,
             'job_name': 'test-job',
             'task_name': 'test-task',
             'status': managed_jobs.ManagedJobStatus.RUNNING,
-            'handle': {  # Use dict as simple picklable object
-                'cluster_name_on_cloud': 'test-cluster',
-                'stable_internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-            },
+            'internal_external_ips': [('10.0.0.1', '35.1.2.3')],
+            'k8s_internal_svcs': None,
         }
 
         result = encoders.encode_jobs_queue([job])
@@ -129,36 +127,13 @@ class TestEncodeJobsQueue:
         assert encoded_job[
             'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
 
-        # Handle should be serialized to a string
-        assert isinstance(encoded_job['handle'], str)
+        # Network fields should be preserved as-is (JSON serializable)
+        assert encoded_job['internal_external_ips'] == [('10.0.0.1', '35.1.2.3')
+                                                       ]
+        assert encoded_job['k8s_internal_svcs'] is None
 
-        # Verify it can be decoded
-        decoded_handle = pickle.loads(
-            base64.b64decode(encoded_job['handle'].encode('utf-8')))
-        assert decoded_handle['cluster_name_on_cloud'] == 'test-cluster'
-        assert decoded_handle['stable_internal_external_ips'] == [('10.0.0.1',
-                                                                   '35.1.2.3')]
-
-    def test_encode_jobs_queue_with_none_handle(self):
-        """Test that encode_jobs_queue handles None handle."""
-        from sky.jobs import state as managed_jobs
-
-        job = {
-            'job_id': 1,
-            'task_id': 0,
-            'job_name': 'test-job',
-            'task_name': 'test-task',
-            'status': managed_jobs.ManagedJobStatus.PENDING,
-            'handle': None,
-        }
-
-        result = encoders.encode_jobs_queue([job])
-
-        assert len(result) == 1
-        assert result[0]['handle'] is None
-
-    def test_encode_jobs_queue_v2_with_handle(self):
-        """Test that encode_jobs_queue_v2 serializes handles properly."""
+    def test_encode_jobs_queue_v2_with_network_fields(self):
+        """Test that encode_jobs_queue_v2 encodes jobs with network fields."""
         from sky.jobs import state as managed_jobs
 
         job = responses.ManagedJobRecord(
@@ -167,10 +142,8 @@ class TestEncodeJobsQueue:
             job_name='test-job',
             task_name='test-task',
             status=managed_jobs.ManagedJobStatus.RUNNING,
-            handle={
-                'cluster_name_on_cloud': 'test-cluster-v2',
-                'stable_internal_external_ips': [('10.0.0.2', '35.1.2.4')],
-            },
+            internal_external_ips=[('10.0.0.2', '35.1.2.4')],
+            k8s_internal_svcs={'pod-0': 'pod-0.svc.cluster.local'},
         )
 
         result = encoders.encode_jobs_queue_v2([job])
@@ -180,13 +153,12 @@ class TestEncodeJobsQueue:
         assert encoded_job[
             'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
 
-        # Handle should be serialized to a string
-        assert isinstance(encoded_job['handle'], str)
-
-        # Verify it can be decoded
-        decoded_handle = pickle.loads(
-            base64.b64decode(encoded_job['handle'].encode('utf-8')))
-        assert decoded_handle['cluster_name_on_cloud'] == 'test-cluster-v2'
+        # Network fields should be preserved as-is (JSON serializable)
+        assert encoded_job['internal_external_ips'] == [('10.0.0.2', '35.1.2.4')
+                                                       ]
+        assert encoded_job['k8s_internal_svcs'] == {
+            'pod-0': 'pod-0.svc.cluster.local'
+        }
 
     def test_encode_jobs_queue_v2_dict_format(self):
         """Test encode_jobs_queue_v2 with dict return format."""
@@ -198,9 +170,8 @@ class TestEncodeJobsQueue:
             job_name='test-job',
             task_name='test-task',
             status=managed_jobs.ManagedJobStatus.RUNNING,
-            handle={
-                'cluster_name_on_cloud': 'test-cluster',
-            },
+            internal_external_ips=[('10.0.0.1', '35.1.2.3')],
+            k8s_internal_svcs=None,
         )
 
         result = encoders.encode_jobs_queue_v2(([job], 1, {'RUNNING': 1}, 1))
@@ -209,4 +180,5 @@ class TestEncodeJobsQueue:
         assert result['total'] == 1
         assert result['status_counts'] == {'RUNNING': 1}
         assert len(result['jobs']) == 1
-        assert isinstance(result['jobs'][0]['handle'], str)
+        assert result['jobs'][0]['internal_external_ips'] == [('10.0.0.1',
+                                                               '35.1.2.3')]

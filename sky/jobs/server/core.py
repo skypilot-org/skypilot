@@ -92,9 +92,9 @@ _MANAGED_JOB_FIELDS_FOR_QUEUE_KUBERNETES = [
     'metadata',
     'user_name',
     'user_hash',
-    # The cluster resource handle (contains IPs, SSH ports,
-    # cluster metadata, etc.)
-    'handle',
+    # Network endpoint information (extracted from cluster handle)
+    'internal_external_ips',
+    'k8s_internal_svcs',
 ]
 
 

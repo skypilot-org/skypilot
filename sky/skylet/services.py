@@ -1,7 +1,6 @@
 """gRPC service implementations for skylet."""
 
 import os
-import pickle
 from typing import List, Optional
 
 import grpc
@@ -525,9 +524,13 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     zone=job.get('zone'),
                     labels=job.get('labels'),
                     cluster_name_on_cloud=job.get('cluster_name_on_cloud'),
-                    # Serialize handle if present
-                    handle=pickle.dumps(job.get('handle'))
-                    if job.get('handle') is not None else None)
+                    # Network endpoint information
+                    internal_external_ips=[
+                        managed_jobsv1_pb2.IpPair(internal_ip=ip_pair[0],
+                                                  external_ip=ip_pair[1])
+                        for ip_pair in (job.get('internal_external_ips') or [])
+                    ],
+                    k8s_internal_svcs=job.get('k8s_internal_svcs') or {})
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
