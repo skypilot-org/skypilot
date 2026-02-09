@@ -26,7 +26,7 @@ import {
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity } from 'lucide-react';
+import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity, Network } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -56,7 +56,7 @@ const primaryNavItems = [
   { href: '/jobs', icon: BriefcaseIcon, label: 'Jobs', order: 20 },
 ];
 const secondaryNavItems = [
-  { href: '/infra', icon: ChipIcon, label: 'Infra', order: 30 },
+  { href: '/infra', icon: Network, label: 'Infra', order: 30 },
   { href: '/volumes', icon: VolumeIcon, label: 'Volumes', order: 40 },
 ];
 const teamsNavItems = [
@@ -346,7 +346,7 @@ export function TopBar() {
       </>
     );
 
-    const linkClasses = `group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+    const linkClasses = `group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${sidebarCollapsed ? 'overflow-visible' : 'overflow-hidden'} ${
       isActive
         ? 'bg-blue-50 text-blue-600 font-medium'
         : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
@@ -442,7 +442,7 @@ export function TopBar() {
       <Link
         key={item.href}
         href={item.href}
-        className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+        className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
           isActive
             ? 'bg-blue-50 text-blue-600 font-medium'
             : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
@@ -572,7 +572,7 @@ export function TopBar() {
         <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 pb-1 flex justify-center'} />
 
         {/* Primary nav (scrollable) */}
-        <nav className={`flex-1 overflow-y-auto py-2 space-y-1 ${collapsed ? 'px-2' : 'px-3'}`}>
+        <nav className={`flex-1 py-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
           <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Workloads</span>
           </div>
@@ -615,7 +615,7 @@ export function TopBar() {
               href={link.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="group relative flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-all duration-200 overflow-hidden"
+              className={`group relative flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'}`}
             >
               <link.icon className="w-4 h-4 shrink-0 text-gray-400" />
               <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
@@ -632,7 +632,7 @@ export function TopBar() {
           {/* Settings */}
           <Link
             href="/config"
-            className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+            className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
               isActivePath('/config')
                 ? 'bg-blue-50 text-blue-600 font-medium'
                 : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
