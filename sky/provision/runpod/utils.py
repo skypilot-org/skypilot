@@ -307,6 +307,13 @@ def launch(
 
     # TODO(zhwu): keep this align with setups in
     # `provision.kuberunetes.instance.py`
+    # SSH server configuration to improve connection stability:
+    # - ClientAliveInterval: Send keepalive every 30s to detect dead connections
+    # - ClientAliveCountMax: Allow 3 missed keepalives before disconnecting
+    # - MaxStartups: Allow more concurrent unauthenticated connections (default
+    #   is 10:30:100) to prevent "Connection timed out during banner exchange"
+    #   errors when multiple SSH connections are initiated simultaneously
+    # - LoginGraceTime: Increase grace time for slower networks
     setup_cmd = (
         'prefix_cmd() '
         '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; }; '
@@ -320,6 +327,12 @@ def launch(
         '$(prefix_cmd) sed '
         '"s@session\\s*required\\s*pam_loginuid.so@session optional '
         'pam_loginuid.so@g" -i /etc/pam.d/sshd; '
+        # Add SSH server keepalive and connection settings
+        '$(prefix_cmd) bash -c \''
+        'echo "ClientAliveInterval 30" >> /etc/ssh/sshd_config; '
+        'echo "ClientAliveCountMax 3" >> /etc/ssh/sshd_config; '
+        'echo "MaxStartups 50:30:100" >> /etc/ssh/sshd_config; '
+        'echo "LoginGraceTime 120" >> /etc/ssh/sshd_config\'; '
         'cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A; '
         '$(prefix_cmd) mkdir -p ~/.ssh; '
         '$(prefix_cmd) chown -R $(whoami) ~/.ssh;'
