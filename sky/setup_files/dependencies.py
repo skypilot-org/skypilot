@@ -195,7 +195,9 @@ cloud_dependencies: Dict[str, List[str]] = {
         'pyopenssl >= 23.2.0, <24.3.0',
     ],
     'ibm': [
-        'ibm-cloud-sdk-core',
+        # Require >=3.20.6 for pre-built wheels to avoid pkg_resources build
+        # issue with setuptools 70+ in isolated builds.
+        'ibm-cloud-sdk-core>=3.20.6',
         'ibm-vpc',
         'ibm-platform-services>=0.48.0',
         'ibm-cos-sdk',
