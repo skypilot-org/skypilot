@@ -191,7 +191,6 @@ def queue_v2(
                 'k8s_internal_svcs': (Dict[str, str]) K8s DNS entries mapping Pod name to internal_svc (only for K8s), # pylint: disable=line-too-long
               }
             ]
-
         total (int): Total number of jobs after filter,
         status_counts (Dict[str, int]): Status counts after filter,
         total_no_filter (int): Total number of jobs before filter,
