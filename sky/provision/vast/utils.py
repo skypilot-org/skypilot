@@ -19,6 +19,23 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     instances = vast.vast().show_instances()
 
+    # Validate response - the Vast SDK may return unexpected types on error
+    if instances is None:
+        logger.warning('Vast API returned None for show_instances')
+        return {}
+    if isinstance(instances, str):
+        # API returned an error string
+        logger.warning(f'Vast API error in show_instances: {instances}')
+        return {}
+    if isinstance(instances, dict) and 'error' in instances:
+        error_msg = instances.get('msg', instances.get('error', 'Unknown'))
+        logger.warning(f'Vast API error in show_instances: {error_msg}')
+        return {}
+    if not isinstance(instances, list):
+        logger.warning(f'Vast API returned unexpected type for show_instances: '
+                       f'{type(instances)}')
+        return {}
+
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
         instance['id'] = str(instance['id'])
@@ -127,8 +144,18 @@ def launch(name: str,
 
     instance_list = vast.vast().search_offers(query=query_str)
 
-    if isinstance(instance_list, int) or len(instance_list) == 0:
-        raise RuntimeError('Failed to create instances, could not find an '
+    # Validate search_offers response - handle various error cases
+    if instance_list is None or isinstance(instance_list, int):
+        raise RuntimeError('Failed to find Vast offers: API returned no data. '
+                           f'Query: "{query_str}".')
+    if isinstance(instance_list, str):
+        raise RuntimeError(f'Failed to find Vast offers: {instance_list}')
+    if isinstance(instance_list, dict) and 'error' in instance_list:
+        error_msg = instance_list.get('msg',
+                                      instance_list.get('error', 'Unknown'))
+        raise RuntimeError(f'Failed to find Vast offers: {error_msg}')
+    if not isinstance(instance_list, list) or len(instance_list) == 0:
+        raise RuntimeError('Failed to find Vast offers: could not find an '
                            'offer that satisfies the requirements '
                            f'"{query_str}".')
 
@@ -233,8 +260,48 @@ def launch(name: str,
 
     new_instance_contract = vast.vast().create_instance(**launch_params)
 
+    # Validate create_instance response - the Vast SDK may return an empty
+    # string or error dict when API calls fail (e.g., insufficient credit,
+    # invalid parameters). We need to check for these cases and provide a
+    # helpful error message instead of a confusing TypeError.
+    if not new_instance_contract:
+        raise RuntimeError(
+            'Failed to create Vast instance: API returned empty response. '
+            'This may indicate insufficient account credit, invalid '
+            'parameters, or an API error. Please check your Vast.ai '
+            'account balance and API key.')
+    if isinstance(new_instance_contract, str):
+        raise RuntimeError(
+            f'Failed to create Vast instance: {new_instance_contract}')
+    if isinstance(new_instance_contract, dict):
+        if 'error' in new_instance_contract:
+            error_msg = new_instance_contract.get(
+                'msg', new_instance_contract.get('error', 'Unknown error'))
+            raise RuntimeError(f'Failed to create Vast instance: {error_msg}')
+        if 'new_contract' not in new_instance_contract:
+            raise RuntimeError(
+                f'Failed to create Vast instance: unexpected API response '
+                f'(missing "new_contract" field): {new_instance_contract}')
+
     new_instance = vast.vast().show_instance(
         id=new_instance_contract['new_contract'])
+
+    # Validate show_instance response
+    if not new_instance:
+        raise RuntimeError(
+            f'Failed to get Vast instance details: API returned empty '
+            f'response for contract {new_instance_contract["new_contract"]}')
+    if isinstance(new_instance, str):
+        raise RuntimeError(
+            f'Failed to get Vast instance details: {new_instance}')
+    if isinstance(new_instance, dict) and 'error' in new_instance:
+        error_msg = new_instance.get('msg',
+                                     new_instance.get('error', 'Unknown error'))
+        raise RuntimeError(f'Failed to get Vast instance details: {error_msg}')
+    if 'id' not in new_instance:
+        raise RuntimeError(
+            f'Failed to get Vast instance details: unexpected API response '
+            f'(missing "id" field): {new_instance}')
 
     return new_instance['id']
 
