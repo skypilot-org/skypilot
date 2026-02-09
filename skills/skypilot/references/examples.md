@@ -40,6 +40,9 @@ resources:
   # Request 1x A100 GPU
   accelerators: A100:1
 
+setup: |
+  pip install torch
+
 run: |
   nvidia-smi
   python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}')"
