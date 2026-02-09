@@ -25,14 +25,31 @@ SkyPilot is a unified framework to run AI workloads on any cloud or Kubernetes. 
 **Don't use SkyPilot for:**
 - Local-only workloads (use Docker/conda directly)
 
+## Before You Start (Agent Bootstrap)
+
+Before running any SkyPilot command, verify the environment:
+
+**Step 1: Check if SkyPilot is installed**
+```bash
+sky --version
+```
+If `sky` is not found, install it first:
+```bash
+pip install "skypilot[aws,gcp,kubernetes]"  # Pick clouds the user needs
+```
+Ask the user which clouds they need if unclear.
+
+**Step 2: Check cloud credentials**
+```bash
+sky check
+```
+This shows which clouds are configured. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
+
 ## Quick Start
 
 ```bash
-# Install
-pip install "skypilot[aws,gcp,kubernetes]"  # Pick your clouds
-
-# Check credentials
-sky check
+# List available GPUs
+sky show-gpus
 
 # Launch a GPU cluster
 sky launch -c mycluster --gpus H100 -- nvidia-smi
