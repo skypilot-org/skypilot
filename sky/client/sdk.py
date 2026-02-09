@@ -2586,9 +2586,20 @@ def _clear_api_server_config() -> None:
 
 
 def _validate_endpoint(endpoint: Optional[str]) -> str:
-    """Validate and normalize the endpoint URL."""
+    """Validate and normalize the endpoint URL.
+
+    If endpoint is None, prompts the user for the endpoint. If a config
+    endpoint exists, it will be used as the default value for the prompt.
+    """
     if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
+        # Get the config endpoint as the default value for prompt
+        config_endpoint = skypilot_config.get_nested(('api_server', 'endpoint'),
+                                                     None)
+        if config_endpoint:
+            endpoint = click.prompt('Enter your SkyPilot API server endpoint',
+                                    default=config_endpoint)
+        else:
+            endpoint = click.prompt('Enter your SkyPilot API server endpoint')
     # Check endpoint is a valid URL
     if (endpoint is not None and not endpoint.startswith('http://') and
             not endpoint.startswith('https://')):
@@ -2743,10 +2754,32 @@ def api_login(endpoint: Optional[str] = None,
     Returns:
         None
     """
-    _check_endpoint_in_env_var(is_login=True)
+    env_endpoint = os.environ.get(constants.SKY_API_SERVER_URL_ENV_VAR)
+    from_env = False
 
-    # Validate and normalize endpoint
-    endpoint = _validate_endpoint(endpoint)
+    if endpoint is not None and env_endpoint:
+        # -e flag + env var = ambiguous, two explicit endpoints
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Both -e {endpoint} and {constants.SKY_API_SERVER_URL_ENV_VAR}'
+                f'={env_endpoint} are set. Use one or the other.')
+
+    if endpoint is None and env_endpoint:
+        # No -e flag, env var set: use env var endpoint, warn user
+        click.secho(
+            f'Warning: Using endpoint from '
+            f'{constants.SKY_API_SERVER_URL_ENV_VAR}={env_endpoint}',
+            fg='yellow')
+        endpoint = env_endpoint
+        from_env = True
+        # Validate the env var endpoint format
+        if (not endpoint.startswith('http://') and
+                not endpoint.startswith('https://')):
+            raise click.BadParameter('Endpoint must be a valid URL.')
+        endpoint = endpoint.rstrip('/')
+    else:
+        # No env var (or -e flag provided): use normal validation/prompting
+        endpoint = _validate_endpoint(endpoint)
 
     def _show_logged_in_message(
             endpoint: str, dashboard_url: str, user: Optional[Dict[str, Any]],
@@ -2787,9 +2820,12 @@ def api_login(endpoint: Optional[str] = None,
             raise ValueError('Invalid service account token format. '
                              'Token must start with "sky_"')
 
-        # Save both endpoint and token to config in a single operation
-        _save_config_updates(endpoint=endpoint,
-                             service_account_token=service_account_token)
+        # Save token to config. Skip endpoint if it came from env var.
+        if from_env:
+            _save_config_updates(service_account_token=service_account_token)
+        else:
+            _save_config_updates(endpoint=endpoint,
+                                 service_account_token=service_account_token)
 
         # Test the authentication by checking server health
         try:
@@ -2928,8 +2964,10 @@ def api_login(endpoint: Optional[str] = None,
         if api_server_info.user is not None:
             _set_user_hash(api_server_info.user.get('id'))
 
-    # Set the endpoint in the config file
-    _save_config_updates(endpoint=endpoint)
+    # Set the endpoint in the config file, unless it came from env var.
+    # When using env var, only save cookies, not the endpoint.
+    if not from_env:
+        _save_config_updates(endpoint=endpoint)
     dashboard_url = server_common.get_dashboard_url(endpoint)
 
     # see https://github.com/python/mypy/issues/5107 on why

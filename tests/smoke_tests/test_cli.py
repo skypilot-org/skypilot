@@ -119,11 +119,16 @@ def test_sky_logout_wih_env_endpoint(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server
-def test_sky_login_wih_env_endpoint(generic_cloud: str):
-    """Test that sky api login with env endpoint fails."""
+def test_sky_login_with_e_flag_and_env_endpoint(generic_cloud: str):
+    """Test that sky api login with -e flag AND env endpoint fails.
+
+    When both -e flag and env var are set, it's ambiguous which endpoint to use,
+    so we error. But when only env var is set (no -e flag), login should proceed
+    using the env var endpoint.
+    """
     test = smoke_tests_utils.Test(
-        'sky_login_wih_env_endpoint', [
-            f's=$(SKYPILOT_DEBUG=0 sky api login -e https://SUPERFAKE_ENDPOINT.unreachable 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Cannot login to API server when the endpoint is set via the environment variable. Run unset"',
+        'sky_login_with_e_flag_and_env_endpoint', [
+            f's=$(SKYPILOT_DEBUG=0 sky api login -e https://OTHER_ENDPOINT.unreachable 2>&1 | tee /dev/stderr) && echo "\n===Validating endpoint output===" && echo "$s" | grep "Both -e .* and {constants.SKY_API_SERVER_URL_ENV_VAR}=.* are set. Use one or the other."',
         ],
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
         env={
