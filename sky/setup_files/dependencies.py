@@ -195,9 +195,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         'pyopenssl >= 23.2.0, <24.3.0',
     ],
     'ibm': [
-        # Require >=3.20.6 for pre-built wheels to avoid pkg_resources build
-        # issue with setuptools 70+ in isolated builds.
-        'ibm-cloud-sdk-core>=3.20.6',
+        'ibm-cloud-sdk-core',
         'ibm-vpc',
         'ibm-platform-services>=0.48.0',
         'ibm-cos-sdk',
@@ -263,6 +261,9 @@ if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    # latest ibm-cloud-sdk-core installation fails on Python 3.9,
+    # so we remove it from the [all] installation.
+    clouds_for_all.remove('ibm')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds
