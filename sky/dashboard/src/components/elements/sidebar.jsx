@@ -26,7 +26,7 @@ import {
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -41,6 +41,7 @@ const ICON_MAP = {
   repeat: RepeatIcon,
   piechart: PieChartIcon,
   filecode: FileCode,
+  activity: Activity,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { useMobile } from '@/hooks/useMobile';
@@ -344,10 +345,15 @@ export function TopBar() {
             </span>
           )}
         </span>
+        {sidebarCollapsed && (
+          <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+            {link.label}
+          </span>
+        )}
       </>
     );
 
-    const linkClasses = `flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+    const linkClasses = `group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
       isActive
         ? 'bg-blue-50 text-blue-600 font-medium'
         : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
@@ -362,7 +368,6 @@ export function TopBar() {
           rel={link.rel}
           className={linkClasses}
           onClick={onClick}
-          title={sidebarCollapsed ? link.label : undefined}
         >
           {content}
         </a>
@@ -376,7 +381,6 @@ export function TopBar() {
         className={linkClasses}
         onClick={onClick}
         prefetch={false}
-        title={sidebarCollapsed ? link.label : undefined}
       >
         {content}
       </Link>
@@ -445,19 +449,23 @@ export function TopBar() {
       <Link
         key={item.href}
         href={item.href}
-        className={`flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+        className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
           isActive
             ? 'bg-blue-50 text-blue-600 font-medium'
             : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
         }`}
         onClick={onClick}
         prefetch={false}
-        title={collapsed ? item.label : undefined}
       >
         <item.icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-blue-600' : 'text-gray-400'}`} />
         <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
           {item.label}
         </span>
+        {collapsed && (
+          <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+            {item.label}
+          </span>
+        )}
       </Link>
     );
   };
@@ -550,15 +558,19 @@ export function TopBar() {
           </div>
           <button
             onClick={toggleSidebar}
-            className={`text-gray-400 hover:text-gray-600 rounded-md transition-colors cursor-pointer shrink-0 ${
+            className={`group relative text-gray-400 hover:text-gray-600 rounded-md transition-colors cursor-pointer shrink-0 ${
               collapsed ? 'px-3 py-2' : 'p-1 ml-auto'
             }`}
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {collapsed ? (
               <PanelLeftOpen className="w-4 h-4" />
             ) : (
               <PanelLeftClose className="w-4 h-4" />
+            )}
+            {collapsed && (
+              <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                Expand sidebar
+              </span>
             )}
           </button>
         </div>
@@ -610,31 +622,39 @@ export function TopBar() {
               href={link.href}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-all duration-200 overflow-hidden"
-              title={collapsed ? link.label : undefined}
+              className="group relative flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-all duration-200 overflow-hidden"
             >
               <link.icon className="w-4 h-4 shrink-0 text-gray-400" />
               <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
                 {link.label}
               </span>
+              {collapsed && (
+                <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                  {link.label}
+                </span>
+              )}
             </a>
           ))}
 
           {/* Settings */}
           <Link
             href="/config"
-            className={`flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
+            className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 overflow-hidden ${
               isActivePath('/config')
                 ? 'bg-blue-50 text-blue-600 font-medium'
                 : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
             }`}
             prefetch={false}
-            title={collapsed ? 'Settings' : undefined}
           >
             <Settings className={`w-4 h-4 shrink-0 ${isActivePath('/config') ? 'text-blue-600' : 'text-gray-400'}`} />
             <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
               Settings
             </span>
+            {collapsed && (
+              <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                Settings
+              </span>
+            )}
           </Link>
 
           {/* Upgrade hint */}
@@ -645,8 +665,7 @@ export function TopBar() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 transition-colors duration-200 cursor-pointer overflow-hidden"
-                title={collapsed ? (userEmail.includes('@') ? userEmail.split('@')[0] : userEmail) : undefined}
+                className="group relative flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 transition-colors duration-200 cursor-pointer overflow-hidden"
               >
                 <div className="w-4 h-4 bg-blue-600 text-white rounded-full flex items-center justify-center text-[11px] font-medium shrink-0 leading-none">
                   {getUserInitial(userEmail)}
@@ -654,6 +673,11 @@ export function TopBar() {
                 <span className={`ml-3 whitespace-nowrap text-gray-700 truncate transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
                   Profile
                 </span>
+                {collapsed && (
+                  <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                    Profile
+                  </span>
+                )}
               </button>
 
               {isDropdownOpen && (

@@ -10,6 +10,7 @@ import React, {
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 
 const PluginContext = createContext({
@@ -603,6 +604,7 @@ function createPluginApi(dispatch) {
         basePath: BASE_PATH,
         apiEndpoint: ENDPOINT,
         dashboardCache: dashboardCache,
+        cachePreloader: cachePreloader,
         grafanaUtils: {
           checkGrafanaAvailability,
           getGrafanaUrl,
