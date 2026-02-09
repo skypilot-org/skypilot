@@ -251,9 +251,9 @@ def _extract_user_from_header(
 
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    ingress_basic_auth_enabled = os.environ.get(
-        constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED, 'false').lower()
-    if ingress_basic_auth_enabled == 'true':
+    external_proxy_auth_enabled = os.environ.get(
+        constants.SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED, 'false').lower()
+    if external_proxy_auth_enabled == 'true':
         return models.User(id=user_hash,
                            name=user_name,
                            user_type=models.UserType.LEGACY.value)
@@ -2192,6 +2192,10 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         # Whether basic auth on ingress is enabled
         ingress_basic_auth_enabled=os.environ.get(
             constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
+            'false').lower() == 'true',
+        # Whether external proxy auth is enabled
+        external_proxy_auth_enabled=os.environ.get(
+            constants.SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED,
             'false').lower() == 'true',
         # Latest version info (if available and newer than current)
         latest_version=latest_version,

@@ -861,17 +861,34 @@ tests:
           content:
             name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
 
-  # Test cases for SKYPILOT_INGRESS_BASIC_AUTH_ENABLED environment variable
-  - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when auth.externalProxy.enabled is true
+  # Test cases for SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED environment variable
+  - it: should set SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED when auth.externalProxy.enabled is true
     set:
       auth.externalProxy.enabled: true
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
-            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            name: SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED
             value: "true"
 
+  - it: should not set SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED
+
+  - it: should not set SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED when auth.externalProxy.enabled is false
+    set:
+      auth.externalProxy.enabled: false
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED
+
+  # Test cases for SKYPILOT_INGRESS_BASIC_AUTH_ENABLED environment variable
   - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authSecret
     set:
       ingress.enabled: true
@@ -894,12 +911,17 @@ tests:
             name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
             value: "true"
 
-  - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when both externalProxy and ingress basic auth are enabled
+  - it: should set both auth env vars when externalProxy and ingress basic auth are enabled
     set:
       auth.externalProxy.enabled: true
       ingress.enabled: true
       ingress.authSecret: my-auth-secret
     asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_EXTERNAL_PROXY_AUTH_ENABLED
+            value: "true"
       - contains:
           path: spec.template.spec.containers[0].env
           content:

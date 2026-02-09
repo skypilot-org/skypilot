@@ -260,6 +260,8 @@ export function Users() {
     useState(undefined);
   const [ingressBasicAuthEnabled, setIngressBasicAuthEnabled] =
     useState(undefined);
+  const [externalProxyAuthEnabled, setExternalProxyAuthEnabled] =
+    useState(undefined);
   const [healthCheckLoading, setHealthCheckLoading] = useState(true);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -378,15 +380,18 @@ export function Users() {
           setBasicAuthEnabled(!!data.basic_auth_enabled);
           setServiceAccountTokenEnabled(!!data.service_account_token_enabled);
           setIngressBasicAuthEnabled(!!data.ingress_basic_auth_enabled);
+          setExternalProxyAuthEnabled(!!data.external_proxy_auth_enabled);
         } else {
           setBasicAuthEnabled(false);
           setServiceAccountTokenEnabled(false);
           setIngressBasicAuthEnabled(false);
+          setExternalProxyAuthEnabled(false);
         }
       } catch {
         setBasicAuthEnabled(false);
         setServiceAccountTokenEnabled(false);
         setIngressBasicAuthEnabled(false);
+        setExternalProxyAuthEnabled(false);
       } finally {
         setHealthCheckLoading(false);
       }
@@ -899,6 +904,7 @@ export function Users() {
           onDeleteUser={handleDeleteUserClick}
           basicAuthEnabled={basicAuthEnabled}
           ingressBasicAuthEnabled={ingressBasicAuthEnabled}
+          externalProxyAuthEnabled={externalProxyAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
           filters={filters}
@@ -1324,6 +1330,7 @@ function UsersTable({
   onDeleteUser,
   basicAuthEnabled,
   ingressBasicAuthEnabled,
+  externalProxyAuthEnabled,
   currentUserRole,
   currentUserId,
   filters,
@@ -2070,14 +2077,16 @@ function UsersTable({
                   Role{getSortDirection('role')}
                 </TableHead>
               )}
-              {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                <TableHead
-                  onClick={() => requestSort('userType')}
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-                >
-                  Type{getSortDirection('userType')}
-                </TableHead>
-              )}
+              {!deduplicateUsers &&
+                !ingressBasicAuthEnabled &&
+                !externalProxyAuthEnabled && (
+                  <TableHead
+                    onClick={() => requestSort('userType')}
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  >
+                    Type{getSortDirection('userType')}
+                  </TableHead>
+                )}
               <TableHead
                 onClick={() => requestSort('created_at')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -2190,13 +2199,15 @@ function UsersTable({
                       </div>
                     </TableCell>
                   )}
-                  {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                    <TableCell className="truncate" title={user.userType}>
-                      <span className="capitalize">
-                        {user.userType === 'sso' ? 'SSO' : user.userType}
-                      </span>
-                    </TableCell>
-                  )}
+                  {!deduplicateUsers &&
+                    !ingressBasicAuthEnabled &&
+                    !externalProxyAuthEnabled && (
+                      <TableCell className="truncate" title={user.userType}>
+                        <span className="capitalize">
+                          {user.userType === 'sso' ? 'SSO' : user.userType}
+                        </span>
+                      </TableCell>
+                    )}
                   <TableCell className="truncate">
                     {user.created_at ? (
                       <TimestampWithTooltip
@@ -2342,6 +2353,7 @@ UsersTable.propTypes = {
   onDeleteUser: PropTypes.func.isRequired,
   basicAuthEnabled: PropTypes.bool,
   ingressBasicAuthEnabled: PropTypes.bool,
+  externalProxyAuthEnabled: PropTypes.bool,
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
   setLastFetchedTime: PropTypes.func,
