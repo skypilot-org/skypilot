@@ -19,6 +19,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+
 from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.usage import usage_lib
@@ -216,7 +217,21 @@ def _execute(
             if task.storage_mounts is not None:
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
-                    storage.construct()
+                    # pylint: disable=protected-access
+                    store_type, region = task._get_preferred_store()
+                    # If the store type inferred from the task's resources
+                    # matches the storage's store type, we pass the region to
+                    # the storage constructor.
+                    # We need to guard this because the task's preferred store
+                    # type might not handle the storage's store type (e.g., if
+                    # the storage is S3 and the task is on Azure).
+                    # TODO(romilb): We should improve this logic to be more
+                    # generic.
+                    if task_lib.Task.should_construct_storage_with_region(
+                            storage, store_type):
+                        storage.construct(region=region)
+                    else:
+                        storage.construct()
         return _execute_dag(
             dag,
             dryrun=dryrun,
