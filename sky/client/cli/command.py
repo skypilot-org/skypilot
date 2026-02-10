@@ -4215,7 +4215,22 @@ def _show_gpus_impl(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
-    def _format_slurm_partition_info(slurm_cluster_names: List[str]) -> str:
+    def _format_slurm_partition_info(slurm_cluster_names: List[str],
+                                     show_all: bool = False) -> str:
+        """Format Slurm per-partition GPU availability information.
+
+        Args:
+            slurm_cluster_names: List of Slurm cluster names to query.
+            show_all: If True, show all partitions. If False, limit to top 10
+                partitions (sorted by cluster, partition, gpu_type) and show a
+                hint to use --all to see more.
+
+        Returns:
+            Formatted string with partition table.
+        """
+        # Default limit for number of partition rows to display.
+        default_partition_limit = 10
+
         partition_table = log_utils.create_table([
             'CLUSTER',
             'PARTITION',
@@ -4253,7 +4268,16 @@ def _show_gpus_impl(
                     gpu_counts[key][0] += total
                     gpu_counts[key][1] += free
 
-        for key in sorted(gpu_counts):
+        sorted_keys = sorted(gpu_counts)
+        total_partitions = len(sorted_keys)
+        truncated = False
+
+        # Limit output if not showing all and there are many partitions.
+        if not show_all and total_partitions > default_partition_limit:
+            sorted_keys = sorted_keys[:default_partition_limit]
+            truncated = True
+
+        for key in sorted_keys:
             cluster_name, partition, gpu_type = key
             total, free = gpu_counts[key]
             partition_table.add_row([
@@ -4269,10 +4293,18 @@ def _show_gpus_impl(
             slurm_per_partition_msg += (f' (skipped unreachable clusters: '
                                         f'{", ".join(failed_clusters)})')
 
-        return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
-                f'{slurm_per_partition_msg}'
-                f'{colorama.Style.RESET_ALL}\n'
-                f'{partition_table.get_string()}')
+        result = (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
+                  f'{slurm_per_partition_msg}'
+                  f'{colorama.Style.RESET_ALL}\n'
+                  f'{partition_table.get_string()}')
+
+        if truncated:
+            hidden_count = total_partitions - default_partition_limit
+            result += (f'\n... and {hidden_count} more partitions. '
+                       f'Use -a/--all to show all {total_partitions} '
+                       f'partitions.')
+
+        return result
 
     def _get_labeled_zero_gpu_hint(
             all_nodes_info: List[Tuple[str,
@@ -4442,8 +4474,11 @@ def _show_gpus_impl(
         return False, print_section_titles
 
     def _format_slurm_realtime_gpu(
-            total_table, slurm_realtime_infos, failed_infos,
-            show_node_info: bool) -> Generator[str, None, None]:
+            total_table,
+            slurm_realtime_infos,
+            failed_infos,
+            show_node_info: bool,
+            show_all_partitions: bool = False) -> Generator[str, None, None]:
         # print total table
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
                'Slurm GPUs'
@@ -4471,7 +4506,8 @@ def _show_gpus_impl(
 
         if show_node_info and slurm_realtime_infos:
             cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
-            yield _format_slurm_partition_info(cluster_names)
+            yield _format_slurm_partition_info(cluster_names,
+                                               show_all=show_all_partitions)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -4540,7 +4576,8 @@ def _show_gpus_impl(
                         total_table,
                         slurm_realtime_infos,
                         failed_infos,
-                        show_node_info=verbose)
+                        show_node_info=verbose,
+                        show_all_partitions=show_all)
 
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
@@ -4661,10 +4698,12 @@ def _show_gpus_impl(
                                                    quantity_filter=quantity,
                                                    slurm_cluster_name=region))
 
-                yield from _format_slurm_realtime_gpu(total_table,
-                                                      slurm_realtime_infos,
-                                                      failed_infos,
-                                                      show_node_info=False)
+                yield from _format_slurm_realtime_gpu(
+                    total_table,
+                    slurm_realtime_infos,
+                    failed_infos,
+                    show_node_info=False,
+                    show_all_partitions=show_all)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
                 # immediately (e.g., "Resources A10G not found ...")

@@ -577,6 +577,62 @@ class TestGpusList:
         # Per-partition details should be shown with -v
         assert 'per-partition' in result.output
 
+    def test_gpus_list_slurm_verbose_truncates_many_partitions(self):
+        """Test partition table is truncated when there are many entries."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 240, 120)]),
+        ]
+        # Create 15 partitions worth of node info to exceed the default limit
+        node_info = [{
+            'node_name': f'node{i}',
+            'partition': f'partition{i}',
+            'node_state': 'idle',
+            'gpu_type': 'A100',
+            'total_gpus': 8,
+            'free_gpus': 4,
+        } for i in range(15)]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert 'A100' in result.output
+        # Per-partition details should be shown with -v
+        assert 'per-partition' in result.output
+        # Should show truncation hint since we have more than 10 partitions
+        assert '... and 5 more partitions' in result.output
+        assert 'Use -a/--all to show all 15 partitions' in result.output
+
+    def test_gpus_list_slurm_verbose_all_shows_all_partitions(self):
+        """Test that -v -a shows all partitions without truncation."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 240, 120)]),
+        ]
+        # Create 15 partitions worth of node info
+        node_info = [{
+            'node_name': f'node{i}',
+            'partition': f'partition{i}',
+            'node_state': 'idle',
+            'gpu_type': 'A100',
+            'total_gpus': 8,
+            'free_gpus': 4,
+        } for i in range(15)]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v', '-a'])
+
+        assert result.exit_code == 0
+        assert 'A100' in result.output
+        # Per-partition details should be shown with -v
+        assert 'per-partition' in result.output
+        # Should NOT show truncation hint when -a is used
+        assert '... and' not in result.output
+        assert 'Use -a/--all' not in result.output
+        # All partitions should be shown
+        assert 'partition14' in result.output
+
     def test_gpus_list_ssh_disabled_shows_message(self):
         """Test that disabled SSH shows appropriate message when requested."""
         mock_ssh = clouds.SSH()
