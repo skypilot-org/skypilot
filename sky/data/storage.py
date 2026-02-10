@@ -688,6 +688,10 @@ class Storage(object):
         - (optional) Storage mode.
         - (optional) Set of stores managed by sky added to the Storage object
         """
+        # If any fields changed, increment the version. For backwards
+        # compatibility, modify the __setstate__ method to handle the old
+        # version.
+        _VERSION = 0
 
         def __init__(
             self,
@@ -699,6 +703,8 @@ class Storage(object):
                                       AbstractStore.StoreMetadata]] = None,
             mount_cached_config: Optional[MountCachedConfig] = None,
         ):
+            self._version = self._VERSION
+
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
@@ -712,9 +718,15 @@ class Storage(object):
                 assert self.mode == StorageMode.MOUNT_CACHED
 
         def __setstate__(self, state):
-            # TODO (kyuds): `__setstate__` is for backcompat. Remove in v0.13.0
-            if 'mount_cached_config' not in state:
-                state['mount_cached_config'] = None
+            self._version = self._VERSION
+
+            version = state.pop('_version', None)
+            # Handle old version(s) here.
+            if version is None:
+                version = -1
+            if version < 0:
+                self.mount_cached_config = None
+
             self.__dict__.update(state)
 
         def __repr__(self):
@@ -894,7 +906,8 @@ class Storage(object):
                     msg = ' and uploading from source'
                 logger.info(f'Verifying bucket{msg} for storage {self.name}')
                 self.sync_all_stores()
-
+            # Update MOUNT_CACHED configuration to the new one.
+            self.handle.mount_cached_config = self.mount_cached_config
         else:
             # Storage does not exist in global_user_state, create new stores
             # Sky optimizer either adds a storage object instance or selects
