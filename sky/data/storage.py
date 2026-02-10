@@ -349,9 +349,6 @@ class MountCachedConfig:
     # When set, disables the default exponential chunk-size growth.
     # rclone flag: --vfs-read-chunk-streams
     vfs_read_chunk_streams: Optional[int] = None
-    # Use recursive list operations. Good for many small files.
-    # rclone flag: --fast-list
-    fast_list: Optional[bool] = None
     # Delay before writing back to remote (e.g. "5s").
     # rclone flag: --vfs-write-back
     vfs_write_back: Optional[str] = None
@@ -391,8 +388,6 @@ class MountCachedConfig:
         if self.vfs_read_chunk_streams is not None:
             flags.append(
                 f'--vfs-read-chunk-streams {self.vfs_read_chunk_streams}')
-        if self.fast_list:
-            flags.append('--fast-list')
         flags.append(f'--vfs-write-back {self.vfs_write_back or "1s"}')
         if self.read_only:
             flags.append('--read-only')
@@ -701,7 +696,9 @@ class Storage(object):
             source: Optional[SourceType],
             mode: Optional[StorageMode] = None,
             sky_stores: Optional[Dict[StoreType,
-                                      AbstractStore.StoreMetadata]] = None):
+                                      AbstractStore.StoreMetadata]] = None,
+            mount_cached_config: Optional[MountCachedConfig] = None,
+        ):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
@@ -709,6 +706,16 @@ class Storage(object):
             # Only stores managed by sky are stored here in the
             # global_user_state
             self.sky_stores = {} if sky_stores is None else sky_stores
+
+            self.mount_cached_config = mount_cached_config
+            if self.mount_cached_config is not None:
+                assert self.mode == StorageMode.MOUNT_CACHED
+
+        def __setstate__(self, state):
+            # TODO (kyuds): `__setstate__` is for backcompat. Remove in v0.13.0
+            if 'mount_cached_config' not in state:
+                state['mount_cached_config'] = None
+            self.__dict__.update(state)
 
         def __repr__(self):
             return (f'StorageMetadata('
@@ -894,9 +901,11 @@ class Storage(object):
             # from existing ones
             input_stores = self.stores
             self.stores = {}
-            self.handle = self.StorageMetadata(storage_name=self.name,
-                                               source=self.source,
-                                               mode=self.mode)
+            self.handle = self.StorageMetadata(
+                storage_name=self.name,
+                source=self.source,
+                mode=self.mode,
+                mount_cached_config=self.mount_cached_config)
 
             for store_type in input_stores:
                 self.add_store(store_type)
@@ -1247,6 +1256,9 @@ class Storage(object):
         if hasattr(metadata, 'mode'):
             if metadata.mode:
                 storage_obj.mode = override_args.get('mode', metadata.mode)
+
+        if metadata.mount_cached_config is not None:
+            storage_obj.mount_cached_config = metadata.mount_cached_config
 
         return storage_obj
 
