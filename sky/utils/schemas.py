@@ -526,6 +526,17 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
+    # Refer to https://rclone.org/docs/#options for more information
+    # on rclone-specific nomenclature.
+    rclone_memory_units = ('B', 'K', 'M', 'G', 'T', 'P')
+    rclone_memory_pattern = (
+        '^[0-9]+('
+        f'{"|".join([unit.lower() for unit in rclone_memory_units])}|'
+        f'{"|".join([unit.upper() for unit in rclone_memory_units])})?$')
+    rclone_duration_pattern = (
+        '^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
+        '(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -595,18 +606,23 @@ def get_storage_schema():
                             },
                             'buffer_size': {
                                 'type': 'string',
+                                'pattern': rclone_memory_pattern,
                             },
                             'vfs_cache_max_size': {
                                 'type': 'string',
+                                'pattern': rclone_memory_pattern,
                             },
                             'vfs_cache_max_age': {
                                 'type': 'string',
+                                'pattern': rclone_duration_pattern,
                             },
                             'vfs_read_ahead': {
                                 'type': 'string',
+                                'pattern': rclone_memory_pattern,
                             },
                             'vfs_read_chunk_size': {
                                 'type': 'string',
+                                'pattern': rclone_memory_pattern,
                             },
                             'vfs_read_chunk_streams': {
                                 'type': 'integer',
@@ -617,6 +633,7 @@ def get_storage_schema():
                             },
                             'vfs_write_back': {
                                 'type': 'string',
+                                'pattern': rclone_duration_pattern,
                             },
                             'read_only': {
                                 'type': 'boolean',

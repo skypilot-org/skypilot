@@ -332,6 +332,116 @@ class TestStorageFromYamlWithMountCachedConfig:
         assert storage_obj.mount_cached_config.transfers == 4
 
 
+class TestMountCachedSchemaValidation:
+    """Tests for schema pattern validation of mount_cached config fields."""
+
+    def _make_yaml_config(self, mount_cached_overrides):
+        return {
+            'name': 'test-bucket',
+            'store': 's3',
+            'mode': 'MOUNT_CACHED',
+            'config': {
+                'mount_cached': mount_cached_overrides,
+            },
+        }
+
+    # --- rclone memory pattern: ^[0-9]+(b|k|m|g|t|p|B|K|M|G|T|P)?$ ---
+
+    @pytest.mark.parametrize('field', [
+        'buffer_size',
+        'vfs_cache_max_size',
+        'vfs_read_ahead',
+        'vfs_read_chunk_size',
+    ])
+    @pytest.mark.parametrize('value', [
+        '128M', '64K', '1G', '10T', '256B', '0', '100',
+        '128m', '64k', '1g', '10t', '256b',
+        '1024P', '1024p',
+    ])
+    def test_memory_fields_accept_valid(self, field, value):
+        config = self._make_yaml_config({field: value})
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        assert storage_obj.mount_cached_config is not None
+
+    @pytest.mark.parametrize('field', [
+        'buffer_size',
+        'vfs_cache_max_size',
+        'vfs_read_ahead',
+        'vfs_read_chunk_size',
+    ])
+    @pytest.mark.parametrize('value', [
+        '128MB',
+        '64 K',
+        '10GiB',
+        '1.5G',
+        'off',
+        '',
+        '10gb',
+        '-1M',
+    ])
+    def test_memory_fields_reject_invalid(self, field, value):
+        config = self._make_yaml_config({field: value})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
+
+    # --- rclone duration pattern ---
+
+    @pytest.mark.parametrize('field', [
+        'vfs_cache_max_age',
+        'vfs_write_back',
+    ])
+    @pytest.mark.parametrize('value', [
+        '1s', '5m', '1h', '2d', '1w', '1M', '1y',
+        '100ms', '1h30m', '2d12h', '1.5s',
+        '0', '42', '3.14',
+    ])
+    def test_duration_fields_accept_valid(self, field, value):
+        config = self._make_yaml_config({field: value})
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        assert storage_obj.mount_cached_config is not None
+
+    @pytest.mark.parametrize('field', [
+        'vfs_cache_max_age',
+        'vfs_write_back',
+    ])
+    @pytest.mark.parametrize('value', [
+        '1 hour',
+        'off',
+        '',
+        '5sec',
+        '1min',
+        '10x',
+    ])
+    def test_duration_fields_reject_invalid(self, field, value):
+        config = self._make_yaml_config({field: value})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
+
+    # --- integer constraints ---
+
+    def test_transfers_minimum(self):
+        config = self._make_yaml_config({'transfers': 0})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
+
+    def test_multi_thread_streams_minimum(self):
+        config = self._make_yaml_config({'multi_thread_streams': 0})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
+
+    def test_vfs_read_chunk_streams_allows_zero(self):
+        config = self._make_yaml_config({'vfs_read_chunk_streams': 0})
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        assert storage_obj.mount_cached_config.vfs_read_chunk_streams == 0
+
+    # --- additionalProperties: false ---
+
+    def test_unknown_field_rejected(self):
+        config = self._make_yaml_config({'bogus_flag': 'value'})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
+
+
 class TestGetMountCachedCmdWithConfig:
     """Tests for mounting_utils.get_mount_cached_cmd with MountCachedConfig."""
 
