@@ -756,5 +756,6 @@ def test_helm_deploy_eks(request):
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',
-    ])
+    ],
+                                  timeout=30 * 60)
     smoke_tests_utils.run_one_test(test)

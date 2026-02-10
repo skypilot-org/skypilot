@@ -166,7 +166,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to query Slurm jobs.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         job_ids = stdout.strip().splitlines()
         return job_ids
@@ -193,7 +194,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            f'Failed to cancel job {job_name}.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
     def info(self) -> str:
@@ -211,7 +213,8 @@ class SlurmClient:
             rc,
             cmd,
             'Failed to get Slurm cluster information.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
         return stdout
 
     def info_nodes(self) -> List[NodeInfo]:
@@ -227,7 +230,8 @@ class SlurmClient:
             rc,
             cmd,
             'Failed to get Slurm node information.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         nodes = []
         for line in stdout.splitlines():
@@ -277,7 +281,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get detailed node information for {node_name}.',
-            stderr=f'{node_details}\n{stderr}')
+            stderr=f'{node_details}\n{stderr}',
+            stream_logs=False)
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
 
@@ -294,7 +299,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get jobs for node {node_name}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
         return stdout.splitlines()
 
     def get_all_jobs_gres(self) -> Dict[str, List[str]]:
@@ -309,7 +315,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to get all jobs GRES.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         nodes_to_gres: Dict[str, List[str]] = {}
         for line in stdout.splitlines():
@@ -347,7 +354,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get job state for job {job_id}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         state = stdout.strip()
         return state if state else None
@@ -361,7 +369,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get job state for job {job_name}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         states = stdout.splitlines()
         return states
@@ -380,7 +389,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get job reason for job {job_id}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         output = stdout.strip()
         if not output:
@@ -446,7 +456,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get nodes for job {job_id}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
 
         node_info = {}
@@ -482,7 +493,8 @@ class SlurmClient:
                 rc,
                 resolve_ip_cmd,
                 f'Failed to resolve hostnames for: {hostnames}',
-                stderr=f'{resolve_stdout}\n{stderr}')
+                stderr=f'{resolve_stdout}\n{stderr}',
+                stream_logs=False)
 
             hostname_to_ip = {}
             unresolved = []
@@ -538,7 +550,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to submit Slurm job.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         # Parse job ID from sbatch output (format: "Submitted batch job 12345")
         job_id_match = re.search(r'Submitted batch job (\d+)', stdout)
@@ -563,7 +576,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to get Slurm partitions.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         partitions = []
         for line in stdout.strip().splitlines():

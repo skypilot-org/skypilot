@@ -337,6 +337,246 @@ class TestGpusList:
 
         assert 'Slurm is not enabled' in result.output
 
+    def _invoke_slurm_gpus_list(self,
+                                gpu_availability,
+                                node_info,
+                                extra_args=None):
+        """Helper to invoke gpus_list with Slurm mocks.
+
+        Sets up the Slurm cloud mock, configures stream_and_get to return
+        gpu_availability then node_info, and invokes the CLI command.
+
+        Args:
+            extra_args: Additional CLI arguments (e.g. ['-v']).
+        """
+        self.cloud_registry_mock.return_value = clouds.Slurm()
+        self.sdk_get_mock.return_value = ['slurm']
+        self.stream_and_get_mock.side_effect = [gpu_availability, node_info]
+
+        cli_args = ['--cloud', 'slurm']
+        if extra_args:
+            cli_args.extend(extra_args)
+
+        with mock.patch.object(sdk,
+                               'realtime_slurm_gpu_availability',
+                               return_value=mock.MagicMock()), \
+             mock.patch.object(sdk,
+                               'slurm_node_info',
+                               return_value=mock.MagicMock()):
+            return self.runner.invoke(command.gpus_list, cli_args)
+
+    def test_gpus_list_slurm_basic_partition_aggregation(self):
+        """Test that multiple nodes in the same partition are aggregated."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 24, 12)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'node1',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+            {
+                'node_name': 'node2',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+            {
+                'node_name': 'node3',
+                'partition': 'gpu',
+                'node_state': 'mixed',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert 'per-partition' in result.output
+        # 4+4+4=12 free, 8+8+8=24 total
+        assert '12 of 24 free' in result.output
+        assert 'gpu' in result.output
+        # Individual node names should NOT appear (aggregated by partition)
+        assert 'node1' not in result.output
+        assert 'node2' not in result.output
+        assert 'node3' not in result.output
+
+    def test_gpus_list_slurm_multiple_partitions_gpu_types(self):
+        """Test that each (partition, gpu_type) combo gets its own row."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 12, 5),
+                          ('V100', [1, 2, 4], 6, 3)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'nodeA',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+            {
+                'node_name': 'nodeB',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'V100',
+                'total_gpus': 4,
+                'free_gpus': 2,
+            },
+            {
+                'node_name': 'nodeC',
+                'partition': 'debug',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 4,
+                'free_gpus': 1,
+            },
+            {
+                'node_name': 'nodeD',
+                'partition': 'debug',
+                'node_state': 'idle',
+                'gpu_type': 'V100',
+                'total_gpus': 2,
+                'free_gpus': 1,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert 'gpu' in result.output
+        assert 'debug' in result.output
+        assert 'A100' in result.output
+        assert 'V100' in result.output
+        assert '4 of 8 free' in result.output  # gpu partition A100
+        assert '2 of 4 free' in result.output  # gpu partition V100
+        assert '1 of 4 free' in result.output  # debug partition A100
+        assert '1 of 2 free' in result.output  # debug partition V100
+
+    def test_gpus_list_slurm_multi_partition_node(self):
+        """Test that a node in comma-separated partitions contributes to each."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 8, 4)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'nodeA',
+                'partition': 'gpu,debug',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert 'gpu' in result.output
+        assert 'debug' in result.output
+        # Both partition rows should show the same GPU counts
+        lines = result.output.split('\n')
+        partition_rows = [
+            line for line in lines
+            if '4 of 8 free' in line and 'cluster1' in line
+        ]
+        assert len(partition_rows) == 2
+
+    def test_gpus_list_slurm_empty_gpu_nodes(self):
+        """Test graceful handling of nodes with no GPU type or 0 GPUs."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4], 4, 2)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'cpu-node',
+                'partition': 'cpu',
+                'node_state': 'idle',
+                'gpu_type': None,
+                'total_gpus': 0,
+                'free_gpus': 0,
+            },
+            {
+                'node_name': 'empty-gpu-node',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': '',
+                'total_gpus': 0,
+                'free_gpus': 0,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert '0 of 0 free' in result.output
+
+    def test_gpus_list_slurm_no_verbose_hides_partition_table(self):
+        """Test that partition table is NOT shown without -v."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 24, 12)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'node1',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability, node_info)
+
+        assert result.exit_code == 0
+        # The summary table should still be shown
+        assert 'A100' in result.output
+        # But per-partition details should NOT be shown
+        assert 'per-partition' not in result.output
+
+    def test_gpus_list_slurm_verbose_shows_partition_table(self):
+        """Test that partition table IS shown with -v."""
+        gpu_availability = [
+            ('cluster1', [('A100', [1, 2, 4, 8], 24, 12)]),
+        ]
+        node_info = [
+            {
+                'node_name': 'node1',
+                'partition': 'gpu',
+                'node_state': 'idle',
+                'gpu_type': 'A100',
+                'total_gpus': 8,
+                'free_gpus': 4,
+            },
+        ]
+
+        result = self._invoke_slurm_gpus_list(gpu_availability,
+                                              node_info,
+                                              extra_args=['-v'])
+
+        assert result.exit_code == 0
+        assert 'A100' in result.output
+        # Per-partition details should be shown with -v
+        assert 'per-partition' in result.output
+
     def test_gpus_list_ssh_disabled_shows_message(self):
         """Test that disabled SSH shows appropriate message when requested."""
         mock_ssh = clouds.SSH()

@@ -118,3 +118,216 @@ def test_aws_instance_type_shown():
     simple, _ = resources_utils.format_resource(resource, simplified_only=False)
 
     assert 'm5.large' in simple
+
+
+class TestNormalizeLocalDisk:
+    """Tests for normalize_local_disk function."""
+
+    # Valid inputs - full format (mode:size[+])
+    def test_full_format_nvme_with_plus(self):
+        assert resources_utils.normalize_local_disk(
+            'nvme:1000+') == 'nvme:1000+'
+
+    def test_full_format_nvme_exact(self):
+        assert resources_utils.normalize_local_disk('nvme:500') == 'nvme:500'
+
+    def test_full_format_ssd_with_plus(self):
+        assert resources_utils.normalize_local_disk('ssd:1000+') == 'ssd:1000+'
+
+    def test_full_format_ssd_exact(self):
+        assert resources_utils.normalize_local_disk('ssd:500') == 'ssd:500'
+
+    def test_full_format_float_size(self):
+        assert resources_utils.normalize_local_disk(
+            'nvme:1000.5+') == 'nvme:1000.5+'
+
+    # Valid inputs - mode only (defaults to 100+)
+    def test_mode_only_nvme(self):
+        assert resources_utils.normalize_local_disk('nvme') == 'nvme:100+'
+
+    def test_mode_only_ssd(self):
+        assert resources_utils.normalize_local_disk('ssd') == 'ssd:100+'
+
+    def test_mode_with_plus_nvme_invalid(self):
+        # nvme+ is invalid - ambiguous syntax
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('nvme+')
+
+    def test_mode_with_plus_ssd_invalid(self):
+        # ssd+ is invalid - ambiguous syntax
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('ssd+')
+
+    # Valid inputs - size only (defaults to nvme)
+    def test_size_only_with_plus(self):
+        assert resources_utils.normalize_local_disk('1000+') == 'nvme:1000+'
+
+    def test_size_only_exact(self):
+        assert resources_utils.normalize_local_disk('500') == 'nvme:500'
+
+    def test_size_only_float(self):
+        assert resources_utils.normalize_local_disk('1000.5') == 'nvme:1000.5'
+
+    # Case insensitivity
+    def test_uppercase_mode(self):
+        assert resources_utils.normalize_local_disk(
+            'NVME:1000+') == 'nvme:1000+'
+
+    def test_mixed_case(self):
+        assert resources_utils.normalize_local_disk('NvMe:500') == 'nvme:500'
+
+    # Whitespace handling
+    def test_leading_trailing_whitespace(self):
+        assert resources_utils.normalize_local_disk(
+            '  nvme:1000+  ') == 'nvme:1000+'
+
+    # Invalid inputs - bad mode
+    def test_invalid_mode(self):
+        with pytest.raises(ValueError, match='Invalid local_disk mode'):
+            resources_utils.normalize_local_disk('hdd:1000+')
+
+    def test_invalid_mode_typo(self):
+        with pytest.raises(ValueError, match='Invalid local_disk mode'):
+            resources_utils.normalize_local_disk('nmve:1000+')
+
+    # Invalid inputs - bad size
+    def test_negative_size(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('nvme:-100')
+
+    def test_zero_size(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('nvme:0')
+
+    def test_non_numeric_size(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('nvme:abc')
+
+    def test_empty_size(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('nvme:')
+
+    # Invalid inputs - bad format
+    def test_too_many_colons(self):
+        with pytest.raises(ValueError, match='Invalid local_disk format'):
+            resources_utils.normalize_local_disk('nvme:1000:extra')
+
+    def test_empty_string(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('')
+
+    def test_just_colon(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk(':')
+
+    def test_weird_device_name(self):
+        with pytest.raises(ValueError, match='Invalid local_disk'):
+            resources_utils.normalize_local_disk('fakessd')
+
+
+class TestParseLocalDiskStr:
+    """Tests for parse_local_disk_str function."""
+
+    def test_nvme_with_plus(self):
+        mode, size, at_least = resources_utils.parse_local_disk_str(
+            'nvme:1000+')
+        assert mode == 'nvme'
+        assert size == 1000.0
+        assert at_least is True
+
+    def test_nvme_exact(self):
+        mode, size, at_least = resources_utils.parse_local_disk_str('nvme:500')
+        assert mode == 'nvme'
+        assert size == 500.0
+        assert at_least is False
+
+    def test_ssd_with_plus(self):
+        mode, size, at_least = resources_utils.parse_local_disk_str('ssd:2000+')
+        assert mode == 'ssd'
+        assert size == 2000.0
+        assert at_least is True
+
+    def test_ssd_exact(self):
+        mode, size, at_least = resources_utils.parse_local_disk_str('ssd:750')
+        assert mode == 'ssd'
+        assert size == 750.0
+        assert at_least is False
+
+    def test_float_size(self):
+        mode, size, at_least = resources_utils.parse_local_disk_str(
+            'nvme:1000.5+')
+        assert mode == 'nvme'
+        assert size == 1000.5
+        assert at_least is True
+
+
+class TestLocalDiskSatisfied:
+    """Tests for local_disk_satisfied function."""
+
+    # None handling
+    def test_requested_none(self):
+        assert resources_utils.local_disk_satisfied(None, 'nvme:1000') is True
+
+    def test_launched_none_requested_set(self):
+        assert resources_utils.local_disk_satisfied('nvme:500+', None) is False
+
+    def test_both_none(self):
+        assert resources_utils.local_disk_satisfied(None, None) is True
+
+    # Mode compatibility - nvme requested
+    def test_nvme_requested_nvme_launched(self):
+        assert resources_utils.local_disk_satisfied('nvme:500+',
+                                                    'nvme:1000') is True
+
+    def test_nvme_requested_ssd_launched(self):
+        # nvme requested but only ssd available - should fail
+        assert resources_utils.local_disk_satisfied('nvme:500+',
+                                                    'ssd:1000') is False
+
+    # Mode compatibility - ssd requested
+    def test_ssd_requested_ssd_launched(self):
+        assert resources_utils.local_disk_satisfied('ssd:500+',
+                                                    'ssd:1000') is True
+
+    def test_ssd_requested_nvme_launched(self):
+        # ssd requested, nvme available - nvme satisfies ssd
+        assert resources_utils.local_disk_satisfied('ssd:500+',
+                                                    'nvme:1000') is True
+
+    # Size - at_least matching
+    def test_at_least_sufficient(self):
+        assert resources_utils.local_disk_satisfied('nvme:500+',
+                                                    'nvme:1000') is True
+
+    def test_at_least_exact(self):
+        assert resources_utils.local_disk_satisfied('nvme:500+',
+                                                    'nvme:500') is True
+
+    def test_at_least_insufficient(self):
+        assert resources_utils.local_disk_satisfied('nvme:1000+',
+                                                    'nvme:500') is False
+
+    # Size - exact matching
+    def test_exact_match(self):
+        assert resources_utils.local_disk_satisfied('nvme:500',
+                                                    'nvme:500') is True
+
+    def test_exact_close_enough(self):
+        # Within 1.0 GB tolerance
+        assert resources_utils.local_disk_satisfied('nvme:500',
+                                                    'nvme:500.5') is True
+
+    def test_exact_too_different(self):
+        # More than 1.0 GB difference
+        assert resources_utils.local_disk_satisfied('nvme:500',
+                                                    'nvme:502') is False
+
+    def test_exact_larger_launched(self):
+        # Exact match requested, but launched is larger - should fail
+        assert resources_utils.local_disk_satisfied('nvme:500',
+                                                    'nvme:1000') is False
+
+    def test_exact_smaller_launched(self):
+        # Exact match requested, but launched is smaller - should fail
+        assert resources_utils.local_disk_satisfied('nvme:1000',
+                                                    'nvme:500') is False

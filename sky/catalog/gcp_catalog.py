@@ -283,8 +283,10 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
+    del local_disk  # unused
     if cpus is None and memory is None:
         cpus = f'{_DEFAULT_NUM_VCPUS}+'
     if memory is None:
@@ -332,6 +334,7 @@ def get_instance_type_for_accelerator(
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         use_spot: bool = False,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
@@ -340,6 +343,7 @@ def get_instance_type_for_accelerator(
     with fuzzy search (should be empty as it must have already been generated in
     caller).
     """
+    del local_disk  # unused
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
          _df, acc_name, acc_count, cpus, memory, use_spot, region, zone)

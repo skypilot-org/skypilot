@@ -261,6 +261,9 @@ if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    # latest ibm-cloud-sdk-core installation fails on Python 3.9,
+    # so we remove it from the [all] installation.
+    clouds_for_all.remove('ibm')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds

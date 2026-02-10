@@ -27,10 +27,11 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
     # Delete unused parameters.
-    del disk_tier, region, zone
+    del disk_tier, region, zone, local_disk
 
     # Slurm provisions resources via --cpus-per-task and --mem.
     instance_cpus = float(

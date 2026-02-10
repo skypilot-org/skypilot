@@ -1761,6 +1761,12 @@ def _fill_in_launchable_resources(
                                     'or add "+" to the end of the memory size '
                                     'to allow for larger instances.'
                                     f'{colorama.Style.RESET_ALL}')
+                    if resources.local_disk is not None:
+                        logger.info(
+                            f'{colorama.Fore.LIGHTBLACK_EX}'
+                            '- Try using "+" suffix for at-least matching '
+                            '(e.g., "nvme:500+"), or reduce the size '
+                            f'requirement. {colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
                                 f'{repr(cloud)}: {hint}'
