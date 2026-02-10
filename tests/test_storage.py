@@ -139,7 +139,6 @@ class TestMountCachedConfig:
             vfs_read_ahead='128M',
             vfs_read_chunk_size='32M',
             vfs_read_chunk_streams=4,
-            fast_list=True,
             vfs_write_back='5s',
             read_only=True,
         )
@@ -153,7 +152,6 @@ class TestMountCachedConfig:
         assert '--vfs-read-ahead 128M' in flags
         assert '--vfs-read-chunk-size 32M' in flags
         assert '--vfs-read-chunk-streams 4' in flags
-        assert '--fast-list' in flags
         assert '--vfs-write-back 5s' in flags
         assert '--read-only' in flags
 
@@ -177,10 +175,6 @@ class TestMountCachedConfig:
         assert '--vfs-write-back 5s' in flags
         assert '--vfs-write-back 1s' not in flags
 
-    def test_fast_list_false_not_emitted(self):
-        config = storage_lib.MountCachedConfig(fast_list=False)
-        assert '--fast-list' not in config.to_rclone_flags()
-
     def test_read_only_false_not_emitted(self):
         config = storage_lib.MountCachedConfig(read_only=False)
         assert '--read-only' not in config.to_rclone_flags()
@@ -203,7 +197,6 @@ class TestMountCachedConfig:
             vfs_read_ahead='128M',
             vfs_read_chunk_size='32M',
             vfs_read_chunk_streams=4,
-            fast_list=True,
             vfs_write_back='5s',
             read_only=True,
         )
@@ -508,16 +501,6 @@ class TestGetMountCachedCmdWithConfig:
             mount_cached_config=config)
         assert '--read-only' in cmd
 
-    def test_fast_list(self):
-        config = storage_lib.MountCachedConfig(fast_list=True)
-        cmd = mounting_utils.get_mount_cached_cmd(
-            rclone_config='[test]\ntype = s3',
-            rclone_profile_name='test',
-            bucket_name='my-bucket',
-            mount_path='/mnt/data',
-            mount_cached_config=config)
-        assert '--fast-list' in cmd
-
     def test_all_flags_in_command(self):
         config = storage_lib.MountCachedConfig(
             transfers=8,
@@ -528,7 +511,6 @@ class TestGetMountCachedCmdWithConfig:
             vfs_read_ahead='128M',
             vfs_read_chunk_size='32M',
             vfs_read_chunk_streams=4,
-            fast_list=True,
             vfs_write_back='5s',
             read_only=True,
         )
@@ -552,7 +534,6 @@ class TestGetMountCachedCmdWithConfig:
         assert '--vfs-read-ahead 128M' in cmd
         assert '--vfs-read-chunk-size 32M' in cmd
         assert '--vfs-read-chunk-streams 4' in cmd
-        assert '--fast-list' in cmd
         assert '--vfs-write-back 5s' in cmd
         assert '--read-only' in cmd
 

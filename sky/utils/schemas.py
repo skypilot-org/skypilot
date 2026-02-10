@@ -628,9 +628,6 @@ def get_storage_schema():
                                 'type': 'integer',
                                 'minimum': 0,
                             },
-                            'fast_list': {
-                                'type': 'boolean',
-                            },
                             'vfs_write_back': {
                                 'type': 'string',
                                 'pattern': rclone_duration_pattern,
