@@ -15,6 +15,8 @@ import {
   RotateCwIcon,
   PlusIcon,
   PinIcon,
+  PinOffIcon,
+  Trash2Icon,
   AlertTriangleIcon,
   FileCode,
 } from 'lucide-react';
@@ -56,7 +58,12 @@ import {
 } from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
-import { getRecipes, createRecipe } from '@/data/connectors/recipes';
+import {
+  getRecipes,
+  createRecipe,
+  deleteRecipe,
+  togglePinRecipe,
+} from '@/data/connectors/recipes';
 import {
   RecipeType,
   ALL_RECIPE_TYPES,
@@ -205,7 +212,8 @@ function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
 }
 
 // All Recipes Section with Sortable Table and Filter Bar (same as clusters page)
-function AllRecipesSection({ recipes }) {
+function AllRecipesSection({ recipes, onPin, onDelete }) {
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [filters, setFilters] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     key: 'updated_at',
@@ -340,13 +348,16 @@ function AllRecipesSection({ recipes }) {
                 >
                   Updated{getSortDirection('updated_at')}
                 </TableHead>
+                <TableHead className="whitespace-nowrap w-[100px]">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedAndFilteredTemplates.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center py-6 text-gray-500"
                   >
                     {recipes.length === 0
@@ -419,6 +430,60 @@ function AllRecipesSection({ recipes }) {
                           }
                         />
                       </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (recipe.is_pinnable !== false) {
+                                onPin(recipe.name, !recipe.pinned);
+                              }
+                            }}
+                            disabled={recipe.is_pinnable === false}
+                            className={`p-1 rounded transition-colors ${
+                              recipe.is_pinnable === false
+                                ? 'text-gray-300 cursor-not-allowed'
+                                : recipe.pinned
+                                  ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-100'
+                                  : 'text-amber-400 hover:text-amber-600 hover:bg-amber-100'
+                            }`}
+                            title={
+                              recipe.is_pinnable === false
+                                ? 'Default recipes cannot be pinned/unpinned'
+                                : recipe.pinned
+                                  ? 'Unpin recipe'
+                                  : 'Pin recipe'
+                            }
+                          >
+                            {recipe.pinned ? (
+                              <PinOffIcon className="h-4 w-4" />
+                            ) : (
+                              <PinIcon className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (recipe.is_editable !== false) {
+                                setDeleteTarget(recipe);
+                              }
+                            }}
+                            disabled={recipe.is_editable === false}
+                            className={`p-1 rounded transition-colors ${
+                              recipe.is_editable === false
+                                ? 'text-gray-300 cursor-not-allowed'
+                                : 'text-red-400 hover:text-red-700 hover:bg-red-100'
+                            }`}
+                            title={
+                              recipe.is_editable === false
+                                ? 'Default recipes cannot be deleted'
+                                : 'Delete recipe'
+                            }
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })
@@ -427,7 +492,71 @@ function AllRecipesSection({ recipes }) {
           </Table>
         </div>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        recipe={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onDelete={onDelete}
+      />
     </div>
+  );
+}
+
+// Inline delete confirmation dialog for the All Recipes table
+function DeleteConfirmDialog({ recipe, onClose, onDelete }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await onDelete(recipe.name);
+      onClose();
+    } catch (error) {
+      showToast(`Delete failed: ${error.message}`, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  if (!recipe) return null;
+
+  return (
+    <Dialog open={!!recipe} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl text-red-600">
+            Delete Recipe
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete &quot;{recipe.name}&quot;? This
+            action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={onClose} disabled={isDeleting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {isDeleting ? (
+              <>
+                <CircularProgress size={16} className="mr-2" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2Icon className="w-4 h-4 mr-2" />
+                Delete
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1028,6 +1157,28 @@ export function RecipeHub() {
     setInitialCreateData(null);
   };
 
+  const handlePin = async (recipeName, pinned) => {
+    try {
+      const updated = await togglePinRecipe(recipeName, pinned);
+      if (updated) {
+        showToast(pinned ? 'Recipe pinned!' : 'Recipe unpinned!', 'success');
+        await fetchData();
+      }
+    } catch (error) {
+      showToast(`Pin operation failed: ${error.message}`, 'error');
+    }
+  };
+
+  const handleDelete = async (recipeName) => {
+    const deleted = await deleteRecipe(recipeName);
+    if (deleted) {
+      showToast('Recipe deleted successfully!', 'success');
+      await fetchData();
+    } else {
+      throw new Error('Failed to delete recipe');
+    }
+  };
+
   // Empty state
   const EmptyState = () => (
     <div className="text-center py-12">
@@ -1118,7 +1269,11 @@ export function RecipeHub() {
           )}
 
           {/* All Recipes - Searchable List */}
-          <AllRecipesSection recipes={otherRecipes} />
+          <AllRecipesSection
+            recipes={otherRecipes}
+            onPin={handlePin}
+            onDelete={handleDelete}
+          />
         </div>
       )}
 
