@@ -534,8 +534,8 @@ def get_storage_schema():
         f'{"|".join([unit.lower() for unit in rclone_memory_units])}|'
         f'{"|".join([unit.upper() for unit in rclone_memory_units])})?$')
     rclone_duration_pattern = (
-        '^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
-        '(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
+        r'^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
+        r'(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
 
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',

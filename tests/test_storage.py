@@ -354,9 +354,20 @@ class TestMountCachedSchemaValidation:
         'vfs_read_chunk_size',
     ])
     @pytest.mark.parametrize('value', [
-        '128M', '64K', '1G', '10T', '256B', '0', '100',
-        '128m', '64k', '1g', '10t', '256b',
-        '1024P', '1024p',
+        '128M',
+        '64K',
+        '1G',
+        '10T',
+        '256B',
+        '0',
+        '100',
+        '128m',
+        '64k',
+        '1g',
+        '10t',
+        '256b',
+        '1024P',
+        '1024p',
     ])
     def test_memory_fields_accept_valid(self, field, value):
         config = self._make_yaml_config({field: value})
@@ -391,9 +402,20 @@ class TestMountCachedSchemaValidation:
         'vfs_write_back',
     ])
     @pytest.mark.parametrize('value', [
-        '1s', '5m', '1h', '2d', '1w', '1M', '1y',
-        '100ms', '1h30m', '2d12h', '1.5s',
-        '0', '42', '3.14',
+        '1s',
+        '5m',
+        '1h',
+        '2d',
+        '1w',
+        '1M',
+        '1y',
+        '100ms',
+        '1h30m',
+        '2d12h',
+        '1.5s',
+        '0',
+        '42',
+        '3.14',
     ])
     def test_duration_fields_accept_valid(self, field, value):
         config = self._make_yaml_config({field: value})

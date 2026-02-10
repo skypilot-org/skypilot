@@ -376,13 +376,18 @@ class MountCachedConfig:
             flags.append(f'--multi-thread-streams {self.multi_thread_streams}')
         if self.buffer_size is not None:
             flags.append(f'--buffer-size {self.buffer_size.upper()}')
-        flags.append(f'--vfs-cache-max-size {self.vfs_cache_max_size.upper() or "10G"}')
+        if self.vfs_cache_max_size is not None:
+            flags.append(
+                f'--vfs-cache-max-size {self.vfs_cache_max_size.upper()}')
+        else:
+            flags.append('--vfs-cache-max-size 10G')
         if self.vfs_cache_max_age is not None:
             flags.append(f'--vfs-cache-max-age {self.vfs_cache_max_age}')
         if self.vfs_read_ahead is not None:
             flags.append(f'--vfs-read-ahead {self.vfs_read_ahead.upper()}')
         if self.vfs_read_chunk_size is not None:
-            flags.append(f'--vfs-read-chunk-size {self.vfs_read_chunk_size.upper()}')
+            flags.append(
+                f'--vfs-read-chunk-size {self.vfs_read_chunk_size.upper()}')
         if self.vfs_read_chunk_streams is not None:
             flags.append(
                 f'--vfs-read-chunk-streams {self.vfs_read_chunk_streams}')
