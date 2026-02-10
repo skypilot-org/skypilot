@@ -155,7 +155,8 @@ function RecipeCard({ recipe, onPin }) {
 
               {/* Authored by */}
               <div className="text-sm text-gray-500 truncate">
-                Authored by <UserName name={recipe.user_name || recipe.user_id} />
+                Authored by{' '}
+                <UserName name={recipe.user_name || recipe.user_id} />
               </div>
 
               {/* Last updated info - only show for editable recipes */}
@@ -194,7 +195,14 @@ function RecipeCard({ recipe, onPin }) {
 }
 
 // Template Row Component (for Pinned and My Recipes)
-function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor, onPin }) {
+function TemplateRow({
+  title,
+  icon: Icon,
+  recipes,
+  emptyMessage,
+  iconColor,
+  onPin,
+}) {
   if (recipes.length === 0) {
     return (
       <div className="mb-6">
@@ -974,7 +982,10 @@ function CreateRecipeModal({
               <Input
                 id="name"
                 value={name}
-                onChange={(e) => { setName(e.target.value); setFormError(null); }}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setFormError(null);
+                }}
                 placeholder="my-gpu-training"
                 className="placeholder:text-gray-400"
                 required
@@ -1037,7 +1048,10 @@ function CreateRecipeModal({
             <Label htmlFor="content">YAML Content *</Label>
             <YamlEditor
               value={content}
-              onChange={(val) => { setContent(val); setFormError(null); }}
+              onChange={(val) => {
+                setContent(val);
+                setFormError(null);
+              }}
               maxHeight="400px"
             />
           </div>

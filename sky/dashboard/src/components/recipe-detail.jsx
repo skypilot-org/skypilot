@@ -134,7 +134,10 @@ function EditModal({ isOpen, onClose, template, onSave }) {
             <Label htmlFor="content">YAML Content *</Label>
             <YamlEditor
               value={content}
-              onChange={(val) => { setContent(val); setFormError(null); }}
+              onChange={(val) => {
+                setContent(val);
+                setFormError(null);
+              }}
               maxHeight="400px"
             />
           </div>
