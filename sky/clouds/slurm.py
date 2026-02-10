@@ -383,7 +383,7 @@ class Slurm(clouds.Cloud):
                 # long for the Slurm scheduler to allocate the resources. We
                 # have seen Slurm taking minutes to schedule a job, when there
                 # are a lot of pending jobs to be processed.
-                provision_timeout = 5 * 60  # 5 minutes
+                provision_timeout = 2 * 60  # 2 minutes
 
         deploy_vars = {
             'instance_type': resources.instance_type,

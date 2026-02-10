@@ -441,7 +441,7 @@ class TestSlurmProvisionTimeout:
         return deploy_vars, mock_config
 
     @pytest.mark.parametrize('zone,config_return,expected_timeout', [
-        (None, None, 300),
+        (None, None, 120),
         ('gpu', None, 86400),
         (None, 1800, 1800),
         ('gpu', 30, 30),
@@ -465,12 +465,13 @@ class TestProvisionTimeoutPassthrough:
     @patch('sky.provision.slurm.instance.slurm_utils.get_partition_info')
     @patch('sky.provision.slurm.instance.slurm.SlurmClient')
     @patch('sky.provision.slurm.instance.command_runner.SSHCommandRunner')
-    def test_default_timeout_when_not_in_config(self, mock_ssh_runner,
-                                                mock_slurm_client,
-                                                mock_get_partition_info,
-                                                mock_get_proctrack_type,
-                                                mock_wait_for_job_nodes):
-        """When provider_config omits provision_timeout, _wait_for_job_nodes receives None."""
+    def test_default_timeout_passthrough(self, mock_ssh_runner,
+                                         mock_slurm_client,
+                                         mock_get_partition_info,
+                                         mock_get_proctrack_type,
+                                         mock_wait_for_job_nodes):
+        """When provider_config has provision_timeout (default 120s),
+        _wait_for_job_nodes receives that value."""
         from sky.adaptors.slurm import SlurmPartition
         from sky.provision import common
 
@@ -502,6 +503,7 @@ class TestProvisionTimeoutPassthrough:
                 },
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
+                'provision_timeout': 120,
             },
             authentication_config={},
             docker_config={},
@@ -522,13 +524,8 @@ class TestProvisionTimeoutPassthrough:
             config=config,
         )
 
-        # provision_timeout is None (not in provider_config), so
-        # _wait_for_job_nodes should be called with timeout=None
-        mock_wait_for_job_nodes.assert_called_once_with(mock_client,
-                                                        mock.ANY,
-                                                        timeout=None,
-                                                        partition='gpu',
-                                                        on_pending=mock.ANY)
+        mock_wait_for_job_nodes.assert_called_once_with(mock_client, mock.ANY,
+                                                        120, 'gpu', mock.ANY)
         # get_job_nodes should be called without wait params
         mock_client.get_job_nodes.assert_called_once_with(mock.ANY)
 
@@ -596,11 +593,8 @@ class TestProvisionTimeoutPassthrough:
         )
 
         # provision_timeout=120 should be passed to _wait_for_job_nodes
-        mock_wait_for_job_nodes.assert_called_once_with(mock_client,
-                                                        mock.ANY,
-                                                        timeout=120,
-                                                        partition='gpu',
-                                                        on_pending=mock.ANY)
+        mock_wait_for_job_nodes.assert_called_once_with(mock_client, mock.ANY,
+                                                        120, 'gpu', mock.ANY)
         # get_job_nodes should be called without wait params
         mock_client.get_job_nodes.assert_called_once_with(mock.ANY)
 
@@ -678,6 +672,7 @@ class TestCreateVirtualInstance:
                 },
                 'cluster': 'test-slurm',
                 'partition': 'gpu',
+                'provision_timeout': 300,
             },
             authentication_config={},
             docker_config={},
@@ -724,6 +719,7 @@ class TestCreateVirtualInstance:
                 },
                 'cluster': 'test-slurm',
                 'partition': 'cpus',
+                'provision_timeout': 300,
             },
             authentication_config={},
             docker_config={},

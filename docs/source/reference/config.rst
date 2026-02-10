@@ -118,6 +118,12 @@ Below is the configuration syntax and some example values. See detailed explanat
       - node-pool-1
       - node-pool-2
 
+  :ref:`slurm <config-yaml-slurm>`:
+    :ref:`allowed_clusters <config-yaml-slurm-allowed-clusters>`:
+      - mycluster1
+      - mycluster2
+    :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
+
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
@@ -1602,6 +1608,60 @@ List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
 
+.. _config-yaml-slurm:
+
+``slurm``
+~~~~~~~~~
+
+Advanced Slurm configuration (optional).
+
+.. _config-yaml-slurm-allowed-clusters:
+
+``slurm.allowed_clusters``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed Slurm clusters (optional).
+
+List of cluster names that SkyPilot is allowed to use.
+
+If you want all available clusters to be allowed, set it to ``all`` like this:
+
+.. code-block:: yaml
+
+  slurm:
+    allowed_clusters: all
+
+.. _config-yaml-slurm-provision-timeout:
+
+``slurm.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout for Slurm job allocation (optional).
+
+Timeout in seconds for waiting on Slurm to allocate nodes for a launched job.
+If the timeout is reached, SkyPilot will fail over to other Slurm
+partitions or clusters.
+
+.. note::
+
+  If your Slurm cluster has long queueing delays, consider increasing
+  ``slurm.provision_timeout``. This helps avoid premature failover while Slurm
+  is still working to allocate resources.
+
+Default:
+
+- ``120`` seconds (2 minutes) when a partition is not specified
+- ``86400`` seconds (24 hours) when a specific partition is specified
+
+Set to a negative value (e.g., ``-1``) to wait indefinitely.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    provision_timeout: 1200
+
 .. _config-yaml-oci:
 
 ``oci``
@@ -1950,6 +2010,10 @@ even if ``db`` is specified.
   (available on nightly version 20250626 and later)
 
   ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+
+  This is optional. For larger deployments (for example, many nodes/clusters
+  and many pending jobs), consider configuring a PostgreSQL backend via
+  ``db`` or ``SKYPILOT_DB_CONNECTION_URI``.
 
 .. note::
 
