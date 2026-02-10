@@ -19,7 +19,7 @@ logger = sky_logging.init_logger(__name__)
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '013'  # add cloud/region/zone columns to clusters
+GLOBAL_USER_STATE_VERSION = '014'  # add type column to users table
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'

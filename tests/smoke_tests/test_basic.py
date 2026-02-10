@@ -1535,10 +1535,11 @@ def test_kubernetes_get_nodes():
 def test_kubernetes_slurm_show_gpus(generic_cloud: str):
     assert generic_cloud in ('kubernetes', 'slurm')
 
-    test = smoke_tests_utils.Test(
-        'kubernetes_show_gpus',
-        [(
-            f's=$(SKYPILOT_DEBUG=0 sky gpus list --infra {generic_cloud}) && '
+    def _gpu_check(verbose: bool) -> str:
+        verbose_flag = ' -v' if verbose else ''
+        # NOTE: For now, -v is a NOP for Kubernetes.
+        return (
+            f's=$(SKYPILOT_DEBUG=0 sky gpus list --infra {generic_cloud}{verbose_flag}) && '
             'echo "$s" && '
             # Verify either:
             # 1. We have at least one GPU entry with utilization info
@@ -1549,7 +1550,12 @@ def test_kubernetes_slurm_show_gpus(generic_cloud: str):
             '(echo "$s" | grep -A 1 "REQUESTABLE_QTY_PER_NODE" | '
             'grep -E "^[A-Z0-9]+[[:space:]]+[0-9, ]+[[:space:]]+[0-9]+ of [0-9]+ free" || '
             f'echo "$s" | grep "No GPUs found in any {generic_cloud.capitalize()} clusters")'
-        )],
+        )
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_show_gpus',
+        [_gpu_check(verbose=False),
+         _gpu_check(verbose=True)],
     )
     smoke_tests_utils.run_one_test(test)
 

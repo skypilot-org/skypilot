@@ -470,7 +470,7 @@ def validate(
     omit_user_specified_yaml = _omit(15)
     # TODO (kyuds): remove this in v0.13.0
     omit_local_disk = _omit(35)
-    omit_mount_cached_config = _omit(36)
+    omit_mount_cached_config = _omit(37)
     if omit_local_disk:
         logger.debug('`local_disk` is ignored because the server does '
                      'not support it yet.')

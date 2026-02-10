@@ -3715,6 +3715,7 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
+@flags.verbose_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
@@ -3723,7 +3724,8 @@ def show_gpus(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     NOTE: This command is deprecated. Use ``sky gpus list`` instead.
@@ -3753,7 +3755,8 @@ def show_gpus(
 
     If ``--cloud slurm`` is specified, it will show the maximum quantities of
     the GPU available on a single node and the real-time availability of the
-    GPU across all nodes in the Slurm cluster.
+    GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
+    accelerator details.
 
     Definitions of certain fields:
 
@@ -3769,7 +3772,13 @@ def show_gpus(
       in the Kubernetes cluster.
     """
     # Call the shared implementation
-    _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
+    _show_gpus_impl(accelerator_str,
+                    all,
+                    infra,
+                    cloud,
+                    region,
+                    all_regions,
+                    verbose=verbose)
 
 
 def _show_gpus_impl(
@@ -3778,7 +3787,8 @@ def _show_gpus_impl(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool = False):
     """Shared implementation for show_gpus and gpus_list commands."""
     cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
                                                                cloud,
@@ -4006,7 +4016,7 @@ def _show_gpus_impl(
         quantity_filter: Optional[int] = None,
         slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
-               Optional['prettytable.PrettyTable']]:
+               Optional['prettytable.PrettyTable'], List[Tuple[str, str]]]:
         """Get Slurm GPU availability tables.
 
         Args:
@@ -4041,11 +4051,24 @@ def _show_gpus_impl(
             raise ValueError(err_msg + debug_msg)
 
         realtime_gpu_infos = []
+        failed_infos: List[Tuple[str, str]] = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
 
-        for (slurm_cluster,
-             availability_list) in realtime_gpu_availability_lists:
+        for entry in realtime_gpu_availability_lists:
+            # Handle both 2-element (old server) and 3-element (new server)
+            # tuples for backward compatibility.
+            # TODO(kevin): remove this in v0.13.0
+            if len(entry) == 3:
+                slurm_cluster, availability_list, error = entry
+            else:
+                slurm_cluster, availability_list = entry
+                error = None
+
+            if error is not None:
+                failed_infos.append((slurm_cluster, error))
+                continue
+
             realtime_gpu_table = log_utils.create_table(
                 ['GPU', qty_header, 'UTILIZATION'])
             for realtime_gpu_availability in sorted(availability_list):
@@ -4079,7 +4102,7 @@ def _show_gpus_impl(
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table
+        return realtime_gpu_infos, total_realtime_gpu_table, failed_infos
 
     def _format_kubernetes_node_info_combined(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
@@ -4192,41 +4215,64 @@ def _show_gpus_impl(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
-    def _format_slurm_node_info(slurm_cluster_names: List[str]) -> str:
-        node_table = log_utils.create_table([
+    def _format_slurm_partition_info(slurm_cluster_names: List[str]) -> str:
+        partition_table = log_utils.create_table([
             'CLUSTER',
-            'NODE',
             'PARTITION',
-            'STATE',
             'GPU',
             'UTILIZATION',
         ])
 
+        # TODO(kevin): Create a new endpoint that returns per-partition info.
         request_ids = [(cluster_name,
                         sdk.slurm_node_info(slurm_cluster_name=cluster_name))
                        for cluster_name in slurm_cluster_names]
 
+        failed_clusters = []
+        # Aggregate GPU counts by (cluster, partition, gpu_type).
+        # Each value is [total_gpus, free_gpus].
+        gpu_counts: Dict[Tuple[str, str, str],
+                         List[int]] = collections.defaultdict(lambda: [0, 0])
         for cluster_name, request_id in request_ids:
-            nodes_info = sdk.stream_and_get(request_id)
+            try:
+                nodes_info = sdk.stream_and_get(request_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to get partition info for '
+                               f'Slurm cluster {cluster_name!r}: '
+                               f'{common_utils.format_exception(e)}')
+                failed_clusters.append(cluster_name)
+                continue
 
             for node_info in nodes_info:
-                node_table.add_row([
-                    cluster_name,
-                    node_info.get('node_name'),
-                    node_info.get('partition', '-'),
-                    node_info.get('node_state'),
-                    node_info.get('gpu_type') or '',
-                    (f'{node_info.get("free_gpus", 0)} of '
-                     f'{node_info.get("total_gpus", 0)} free'),
-                ])
+                gpu_type = node_info.get('gpu_type') or ''
+                total = node_info.get('total_gpus', 0)
+                free = node_info.get('free_gpus', 0)
+                partitions = node_info.get('partition', '').split(',')
+                for partition in partitions:
+                    key = (cluster_name, partition.strip(), gpu_type)
+                    gpu_counts[key][0] += total
+                    gpu_counts[key][1] += free
 
-        slurm_per_node_msg = 'Slurm per node accelerator availability'
-        # Optional: Add hint message if needed, similar to k8s
+        for key in sorted(gpu_counts):
+            cluster_name, partition, gpu_type = key
+            total, free = gpu_counts[key]
+            partition_table.add_row([
+                cluster_name,
+                partition,
+                gpu_type,
+                f'{free} of {total} free',
+            ])
+
+        slurm_per_partition_msg = (
+            'Slurm per-partition accelerator availability')
+        if failed_clusters:
+            slurm_per_partition_msg += (f' (skipped unreachable clusters: '
+                                        f'{", ".join(failed_clusters)})')
 
         return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
-                f'{slurm_per_node_msg}'
+                f'{slurm_per_partition_msg}'
                 f'{colorama.Style.RESET_ALL}\n'
-                f'{node_table.get_string()}')
+                f'{partition_table.get_string()}')
 
     def _get_labeled_zero_gpu_hint(
             all_nodes_info: List[Tuple[str,
@@ -4396,7 +4442,7 @@ def _show_gpus_impl(
         return False, print_section_titles
 
     def _format_slurm_realtime_gpu(
-            total_table, slurm_realtime_infos,
+            total_table, slurm_realtime_infos, failed_infos,
             show_node_info: bool) -> Generator[str, None, None]:
         # print total table
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
@@ -4414,9 +4460,18 @@ def _show_gpus_impl(
                    f'{colorama.Style.RESET_ALL}\n')
             yield from slurm_realtime_table.get_string()
             yield '\n'
-        if show_node_info:
+
+        for (cluster_name, error_msg) in failed_infos:
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Slurm Cluster: {cluster_name}'
+                   f'{colorama.Style.RESET_ALL}\n')
+            yield (f'{colorama.Fore.YELLOW}'
+                   f'Error: {error_msg}'
+                   f'{colorama.Style.RESET_ALL}\n')
+
+        if show_node_info and slurm_realtime_infos:
             cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
-            yield _format_slurm_node_info(cluster_names)
+            yield _format_slurm_partition_info(cluster_names)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -4468,7 +4523,7 @@ def _show_gpus_impl(
                     # If --cloud slurm is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    slurm_realtime_infos, total_table = (
+                    slurm_realtime_infos, total_table, failed_infos = (
                         _get_slurm_realtime_gpu_tables(
                             slurm_cluster_name=region))
                 except ValueError as e:
@@ -4481,9 +4536,11 @@ def _show_gpus_impl(
                     if k8s_printed:
                         yield '\n'
 
-                    yield from _format_slurm_realtime_gpu(total_table,
-                                                          slurm_realtime_infos,
-                                                          show_node_info=True)
+                    yield from _format_slurm_realtime_gpu(
+                        total_table,
+                        slurm_realtime_infos,
+                        failed_infos,
+                        show_node_info=verbose)
 
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
@@ -4599,13 +4656,14 @@ def _show_gpus_impl(
             # accelerator is requested
             print_section_titles = True
             try:
-                slurm_realtime_infos, total_table = (
+                slurm_realtime_infos, total_table, failed_infos = (
                     _get_slurm_realtime_gpu_tables(name_filter=name,
                                                    quantity_filter=quantity,
                                                    slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
+                                                      failed_infos,
                                                       show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
@@ -4766,6 +4824,7 @@ def gpus_cli():
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
+@flags.verbose_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def gpus_list(
@@ -4774,7 +4833,8 @@ def gpus_list(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -4802,7 +4862,8 @@ def gpus_list(
 
     If ``--cloud slurm`` is specified, it will show the maximum quantities of
     the GPU available on a single node and the real-time availability of the
-    GPU across all nodes in the Slurm cluster.
+    GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
+    accelerator details.
 
     Definitions of certain fields:
 
@@ -4818,7 +4879,13 @@ def gpus_list(
       in the Kubernetes cluster.
     """
     # Call the shared implementation
-    _show_gpus_impl(accelerator_str, all, infra, cloud, region, all_regions)
+    _show_gpus_impl(accelerator_str,
+                    all,
+                    infra,
+                    cloud,
+                    region,
+                    all_regions,
+                    verbose=verbose)
 
 
 @gpus_cli.command('label', cls=_DocumentedCodeCommand)
