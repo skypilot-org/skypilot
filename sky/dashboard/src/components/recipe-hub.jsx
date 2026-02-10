@@ -887,6 +887,7 @@ function CreateRecipeModal({
   const [recipeType, setRecipeType] = useState(RecipeType.CLUSTER);
   const [ownerName, setOwnerName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -902,6 +903,7 @@ function CreateRecipeModal({
         setContent(getExampleRecipe(RecipeType.CLUSTER));
       }
       setOwnerName('');
+      setFormError(null);
     }
   }, [initialData, isOpen]);
 
@@ -918,12 +920,13 @@ function CreateRecipeModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setFormError(null);
 
     // Validate YAML syntax
     try {
       yaml.load(content);
     } catch (yamlError) {
-      showToast(`Invalid YAML: ${yamlError.message}`, 'error');
+      setFormError(`Invalid YAML: ${yamlError.message}`);
       setIsSubmitting(false);
       return;
     }
@@ -938,7 +941,7 @@ function CreateRecipeModal({
       });
       onClose();
     } catch (error) {
-      showToast(`Error: ${error.message}`, 'error');
+      setFormError(error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -971,7 +974,7 @@ function CreateRecipeModal({
               <Input
                 id="name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => { setName(e.target.value); setFormError(null); }}
                 placeholder="my-gpu-training"
                 className="placeholder:text-gray-400"
                 required
@@ -1034,10 +1037,17 @@ function CreateRecipeModal({
             <Label htmlFor="content">YAML Content *</Label>
             <YamlEditor
               value={content}
-              onChange={setContent}
+              onChange={(val) => { setContent(val); setFormError(null); }}
               maxHeight="400px"
             />
           </div>
+
+          {formError && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-800">{formError}</p>
+            </div>
+          )}
 
           <DialogFooter>
             <Button
