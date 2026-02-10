@@ -912,6 +912,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     """
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
 
+    versions.check_recipe_client_version(task)
+
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 
     # We should not use int(time.time()) as there can be multiple requests at

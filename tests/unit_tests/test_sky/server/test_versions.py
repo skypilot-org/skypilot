@@ -461,3 +461,30 @@ def test_client_sends_version_headers_with_requests():
     expected_version = versions.get_local_readable_version()
     assert headers[constants.VERSION_HEADER] == expected_version, \
         f'Version header mismatch: expected {expected_version}, got {headers[constants.VERSION_HEADER]}'
+
+
+def test_check_recipe_client_version_old_client_rejected():
+    """Test that recipe launches from old clients are rejected.
+
+    An old client treats 'recipes:name' as a literal run command, producing
+    task YAML with 'run: recipes:name'. The server should detect this and
+    reject it when the client API version is too old.
+    """
+    task_yaml = 'name: sky-cmd\nrun: recipes:my-recipe\n'
+    old_version = constants.MIN_RECIPE_LAUNCH_API_VERSION - 1
+
+    with mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=old_version):
+        with pytest.raises(RuntimeError, match='newer SkyPilot client'):
+            versions.check_recipe_client_version(task_yaml)
+
+
+def test_check_recipe_client_version_new_client_allowed():
+    """Test that recipe launches from sufficiently new clients succeed."""
+    task_yaml = 'name: sky-cmd\nrun: recipes:my-recipe\n'
+    new_version = constants.MIN_RECIPE_LAUNCH_API_VERSION
+
+    with mock.patch('sky.server.versions.get_remote_api_version',
+                    return_value=new_version):
+        # Should not raise
+        versions.check_recipe_client_version(task_yaml)

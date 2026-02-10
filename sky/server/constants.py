@@ -30,6 +30,9 @@ API_VERSION_HEADER = 'X-SkyPilot-API-Version'
 # The HTTP header name for the SkyPilot version of the sender.
 VERSION_HEADER = 'X-SkyPilot-Version'
 
+# Minimum client API version required to launch recipes.
+MIN_RECIPE_LAUNCH_API_VERSION = 33
+
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
