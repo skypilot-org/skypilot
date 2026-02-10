@@ -13,6 +13,7 @@
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {
+    saved_exit=$?
     # The Skylet is daemonized, so it is not automatically terminated when
     # the Slurm job is terminated, we need to kill it manually.
     echo "Terminating Skylet..."
@@ -32,9 +33,13 @@ cleanup() {
     # that created the sky directories.
     srun --nodes=1 rm -rf /tmp/test-cluster
     rm -rf /home/testuser/.sky_clusters/test-cluster
-    exit 0
+    exit $saved_exit
 }
-trap cleanup TERM
+# Run cleanup on any exit, including container init failures.
+trap cleanup EXIT
+# On SIGTERM (job cancellation via scancel), exit 0 so cleanup treats
+# it as a graceful shutdown rather than propagating an error code.
+trap 'exit 0' TERM
 
 # Create sky home directory and subdirectories for the cluster.
 mkdir -p /home/testuser/.sky_clusters/test-cluster/sky_logs /home/testuser/.sky_clusters/test-cluster/sky_workdir /home/testuser/.sky_clusters/test-cluster/.sky
@@ -59,10 +64,17 @@ apt-get install -y ca-certificates rsync curl git wget fuse
 echo '"'"'alias sudo=""'"'"' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 touch /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done/$SLURM_PROCID && sleep infinity' &
+CONTAINER_PID=$!
 while true; do
   num_ready=$(ls -1 /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done 2>/dev/null | wc -l)
   if [ "$num_ready" -ge "1" ]; then
     break
+  fi
+  if ! kill -0 $CONTAINER_PID 2>/dev/null; then
+    echo "[container] ERROR: Container initialization failed."
+    echo "[container] Only $num_ready of 1 node(s) completed initialization."
+    wait $CONTAINER_PID
+    exit $?
   fi
   sleep 1
 done

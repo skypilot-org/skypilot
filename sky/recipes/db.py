@@ -155,7 +155,7 @@ def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
                     created_at=now,
                     updated_at=now,
                     is_editable=0,
-                    is_pinnable=0,
+                    is_pinnable=1,
                 ))
             session.commit()
 
