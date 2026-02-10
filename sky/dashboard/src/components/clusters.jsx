@@ -1391,7 +1391,7 @@ const FilterDropdown = ({
 
   const [isOpen, setIsOpen] = useState(false);
   const [value, setValue] = useState('');
-  const [propertyValue, setPropertValue] = useState('status');
+  const [propertyValue, setPropertValue] = useState('cluster');
   const [valueOptions, setValueOptions] = useState([]);
 
   // Handle clicks outside the dropdown
