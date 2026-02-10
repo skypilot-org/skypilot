@@ -350,7 +350,7 @@ function AllRecipesSection({ recipes }) {
                     className="text-center py-6 text-gray-500"
                   >
                     {recipes.length === 0
-                      ? 'No recipes from other users.'
+                      ? 'No recipes available.'
                       : 'No recipes match your filter criteria.'}
                   </TableCell>
                 </TableRow>
@@ -1000,14 +1000,12 @@ export function RecipeHub() {
   // Separate templates into categories
   const pinnedRecipes = allRecipes.filter((r) => r.pinned);
 
-  // When not authenticated, show all non-pinned recipes in "All Recipes"
-  // When authenticated, separate into "My Recipes" and "All Recipes"
+  // When authenticated, separate user's non-pinned recipes into "My Recipes"
+  // "All Recipes" always shows every recipe regardless of pinned/ownership status
   const myRecipes = isAuthenticated
     ? allRecipes.filter((r) => !r.pinned && r.user_id === currentUserId)
     : [];
-  const otherRecipes = isAuthenticated
-    ? allRecipes.filter((r) => !r.pinned && r.user_id !== currentUserId)
-    : allRecipes.filter((r) => !r.pinned);
+  const otherRecipes = allRecipes;
 
   // Handlers
   const handleCreate = async (data) => {
