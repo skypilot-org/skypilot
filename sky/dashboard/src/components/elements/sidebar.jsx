@@ -26,7 +26,7 @@ import {
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity, Network } from 'lucide-react';
+import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity, Network, MoreHorizontal } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -214,6 +214,10 @@ export function TopBar() {
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
   const navDropdownRef = useRef(null);
+  const navRef = useRef(null);
+  const moreMenuRef = useRef(null);
+  const [isNavOverflowing, setIsNavOverflowing] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -235,12 +239,36 @@ export function TopBar() {
       ) {
         setOpenNavDropdown(null);
       }
+      if (
+        moreMenuRef.current &&
+        !moreMenuRef.current.contains(event.target)
+      ) {
+        setIsMoreMenuOpen(false);
+      }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [dropdownRef, isMobileSidebarOpen, toggleMobileSidebar]);
+
+  // Detect when the nav area overflows (needs scrolling)
+  useEffect(() => {
+    const navEl = navRef.current;
+    if (!navEl) return;
+    const checkOverflow = () => {
+      setIsNavOverflowing(navEl.scrollHeight > navEl.clientHeight);
+    };
+    const observer = new ResizeObserver(checkOverflow);
+    observer.observe(navEl);
+    checkOverflow();
+    return () => observer.disconnect();
+  }, []);
+
+  // Close "More" menu when sidebar collapse state changes
+  useEffect(() => {
+    setIsMoreMenuOpen(false);
+  }, [isSidebarCollapsed]);
 
   // Function to get user initial
   const getUserInitial = (email) => {
@@ -267,8 +295,8 @@ export function TopBar() {
     const isActive = !forceInactive && isActivePath(path);
     return `flex items-center px-3 py-2 text-sm rounded-md transition-colors ${
       isActive
-        ? 'bg-blue-50 text-blue-600 font-medium'
-        : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
+        ? 'bg-blue-50/50 text-blue-600 font-medium hover:bg-gray-50/50'
+        : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
     }`;
   };
 
@@ -346,7 +374,7 @@ export function TopBar() {
           )}
         </span>
         {sidebarCollapsed && (
-          <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+          <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
             {link.label}
           </span>
         )}
@@ -355,8 +383,8 @@ export function TopBar() {
 
     const linkClasses = `group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${sidebarCollapsed ? 'overflow-visible' : 'overflow-hidden'} ${
       isActive
-        ? 'bg-blue-50 text-blue-600 font-medium'
-        : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
+        ? 'bg-blue-50/50 text-blue-600 font-medium hover:bg-gray-50/50'
+        : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
     }`;
 
     if (link.external) {
@@ -398,7 +426,7 @@ export function TopBar() {
           className={`flex items-center justify-between w-full px-3 py-2 text-sm rounded-md transition-colors ${
             isOpen
               ? 'text-blue-600 bg-gray-50'
-              : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
+              : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
           }`}
         >
           <span>{groupName}</span>
@@ -421,7 +449,7 @@ export function TopBar() {
               <Link
                 key={link.id}
                 href={resolvePluginHref(link.href)}
-                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-colors"
+                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50/50 hover:text-blue-600 rounded-md transition-colors"
                 onClick={() => {
                   setOpenNavDropdown(null);
                   if (onClick) onClick();
@@ -451,8 +479,8 @@ export function TopBar() {
         href={item.href}
         className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
           isActive
-            ? 'bg-blue-50 text-blue-600 font-medium'
-            : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
+            ? 'bg-blue-50/50 text-blue-600 font-medium hover:bg-gray-50/50'
+            : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
         }`}
         onClick={onClick}
         prefetch={false}
@@ -462,7 +490,7 @@ export function TopBar() {
           {item.label}
         </span>
         {collapsed && (
-          <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+          <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
             {item.label}
           </span>
         )}
@@ -527,6 +555,30 @@ export function TopBar() {
             closeDropdown: () => setIsDropdownOpen(false),
           }}
         />
+        {/* Settings & external links collapsed into profile menu */}
+        <div className="border-t border-gray-200 mx-1 my-1"></div>
+        <Link
+          href="/config"
+          className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+          onClick={() => setIsDropdownOpen(false)}
+          prefetch={false}
+        >
+          <Settings className="w-4 h-4 mr-2 text-gray-400" />
+          Settings
+        </Link>
+        {externalLinks.map((link) => (
+          <a
+            key={link.href}
+            href={link.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+            onClick={() => setIsDropdownOpen(false)}
+          >
+            <link.icon className="w-4 h-4 mr-2 text-gray-400" />
+            {link.label}
+          </a>
+        ))}
       </>
     );
   };
@@ -568,7 +620,7 @@ export function TopBar() {
               <PanelLeftClose className="w-4 h-4" />
             )}
             {collapsed && (
-              <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+              <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
                 Expand sidebar
               </span>
             )}
@@ -579,7 +631,7 @@ export function TopBar() {
         <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 pb-1 flex justify-center'} />
 
         {/* Primary nav (scrollable) */}
-        <nav className={`flex-1 py-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
+        <nav ref={navRef} className={`flex-1 py-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
           <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Workloads</span>
           </div>
@@ -615,47 +667,98 @@ export function TopBar() {
 
         {/* Footer: pinned at bottom */}
         <div className={`mt-auto border-t border-gray-200 py-3 space-y-1 shrink-0 ${collapsed ? 'px-2' : 'px-3'}`}>
-          {/* External links */}
-          {externalLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`group relative flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'}`}
-            >
-              <link.icon className="w-4 h-4 shrink-0 text-gray-400" />
-              <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
-                {link.label}
-              </span>
-              {collapsed && (
-                <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                  {link.label}
+          {/* External links + Settings: show normally when no SSO and not overflowing */}
+          {!userEmail && !isNavOverflowing && (
+            <>
+              {externalLinks.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`group relative flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50/50 hover:text-blue-600 rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'}`}
+                >
+                  <link.icon className="w-4 h-4 shrink-0 text-gray-400" />
+                  <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+                    {link.label}
+                  </span>
+                  {collapsed && (
+                    <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                      {link.label}
+                    </span>
+                  )}
+                </a>
+              ))}
+              <Link
+                href="/config"
+                className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
+                  isActivePath('/config')
+                    ? 'bg-blue-50/50 text-blue-600 font-medium hover:bg-gray-50/50'
+                    : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
+                }`}
+                prefetch={false}
+              >
+                <Settings className={`w-4 h-4 shrink-0 ${isActivePath('/config') ? 'text-blue-600' : 'text-gray-400'}`} />
+                <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+                  Settings
                 </span>
-              )}
-            </a>
-          ))}
+                {collapsed && (
+                  <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                    Settings
+                  </span>
+                )}
+              </Link>
+            </>
+          )}
 
-          {/* Settings */}
-          <Link
-            href="/config"
-            className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
-              isActivePath('/config')
-                ? 'bg-blue-50 text-blue-600 font-medium'
-                : 'text-gray-600 hover:bg-gray-50 hover:text-blue-600'
-            }`}
-            prefetch={false}
-          >
-            <Settings className={`w-4 h-4 shrink-0 ${isActivePath('/config') ? 'text-blue-600' : 'text-gray-400'}`} />
-            <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
-              Settings
-            </span>
-            {collapsed && (
-              <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                Settings
-              </span>
-            )}
-          </Link>
+          {/* "More" button when no SSO but sidebar is overflowing */}
+          {!userEmail && isNavOverflowing && (
+            <div className="relative" ref={moreMenuRef}>
+              <button
+                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                className={`group relative flex items-center w-full px-3 py-2 text-sm text-gray-600 hover:bg-gray-50/50 hover:text-blue-600 rounded-md transition-all duration-200 cursor-pointer ${collapsed ? 'overflow-visible' : 'overflow-hidden'}`}
+              >
+                <MoreHorizontal className="w-4 h-4 shrink-0 text-gray-400" />
+                <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+                  More
+                </span>
+                {collapsed && (
+                  <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                    More
+                  </span>
+                )}
+              </button>
+              {isMoreMenuOpen && (
+                <div className={`absolute bottom-full mb-1 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200 py-1 ${collapsed ? 'left-full ml-1' : 'left-0'}`}>
+                  {externalLinks.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                      onClick={() => setIsMoreMenuOpen(false)}
+                    >
+                      <link.icon className="w-4 h-4 mr-2 text-gray-400" />
+                      {link.label}
+                    </a>
+                  ))}
+                  <div className="border-t border-gray-200 mx-1 my-1"></div>
+                  <Link
+                    href="/config"
+                    className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
+                    onClick={() => setIsMoreMenuOpen(false)}
+                    prefetch={false}
+                  >
+                    <Settings className="w-4 h-4 mr-2 text-gray-400" />
+                    Settings
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* When SSO: links are in the profile dropdown, not shown here */}
 
           {/* Upgrade hint */}
           {!collapsed && <UpgradeHint />}
@@ -665,7 +768,7 @@ export function TopBar() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className="group relative flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 transition-colors duration-200 cursor-pointer overflow-hidden"
+                className="group relative flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-50/50 transition-colors duration-200 cursor-pointer overflow-hidden"
               >
                 <div className="w-4 h-4 bg-blue-600 text-white rounded-full flex items-center justify-center text-[11px] font-medium shrink-0 leading-none">
                   {getUserInitial(userEmail)}
@@ -674,7 +777,7 @@ export function TopBar() {
                   Profile
                 </span>
                 {collapsed && (
-                  <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                  <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
                     Profile
                   </span>
                 )}
@@ -824,7 +927,7 @@ export function TopBar() {
                 href={link.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 hover:text-blue-600 rounded-md transition-colors"
+                className="flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50/50 hover:text-blue-600 rounded-md transition-colors"
                 onClick={toggleMobileSidebar}
               >
                 <link.icon className="w-5 h-5 mr-3 text-gray-400" />
