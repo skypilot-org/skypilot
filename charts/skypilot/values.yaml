@@ -514,10 +514,10 @@ kubernetesCredentials:
 
 awsCredentials:
   enabled: false
-  # Name of the secret containing the aws credentials. Only used if enabled is true.
+  # Name of the secret containing the aws config and credentials. Only used if enabled is true.
   awsSecretName: aws-credentials
 
-  # Set to true to mount a complete AWS credentials file with multiple profiles.
+  # Set to true to mount a complete AWS config directory, including the config and the credentials file with multiple profiles.
   # This is required for using different AWS profiles with different workspaces.
   useCredentialsFile: false
 
