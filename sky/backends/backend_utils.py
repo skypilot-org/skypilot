@@ -777,18 +777,14 @@ def write_cluster_config(
             # interim, SSH Node Pools' get_credential_file_mounts can filter
             # contexts starting with ssh- and create a temp kubeconfig
             # to upload.
-            if allowed_contexts is None:
+            # When allowed_contexts is not set, or when it is set for a
+            # non-controller cluster, we exclude kubeconfig upload. Controller
+            # clusters need kubeconfig to manage other K8s clusters.
+            is_controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False) is not None
+            if allowed_contexts is None or not is_controller:
                 excluded_clouds.add(clouds.Kubernetes())
                 excluded_clouds.add(clouds.SSH())
-            else:
-                # When allowed_contexts is configured, only upload kubeconfig
-                # for controller clusters (they need it to manage other K8s
-                # clusters). For regular clusters, exclude kubeconfig upload.
-                is_controller = controller_utils.Controllers.from_name(
-                    cluster_name, expect_exact_match=False) is not None
-                if not is_controller:
-                    excluded_clouds.add(clouds.Kubernetes())
-                    excluded_clouds.add(clouds.SSH())
         else:
             excluded_clouds.add(cloud)
 
