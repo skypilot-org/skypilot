@@ -106,80 +106,95 @@ function UserName({ name, className = '' }) {
 }
 
 // Recipe Card Component (for Pinned and My Recipes)
-function RecipeCard({ recipe }) {
+function RecipeCard({ recipe, onPin }) {
   const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
   const TypeIcon = typeInfo.icon;
   const slug = generateRecipeSlug(recipe.name);
 
   return (
-    <Link href={`/recipes/${slug}`} className="block">
-      <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
-        <CardContent className="p-3">
-          {/* Header with icon and name */}
-          <div className="flex items-start gap-2 mb-1.5">
-            <TypeIcon
-              className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
-                typeInfo.color === 'sky'
-                  ? 'text-sky-600'
-                  : typeInfo.color === 'purple'
-                    ? 'text-purple-600'
-                    : typeInfo.color === 'green'
-                      ? 'text-green-600'
-                      : typeInfo.color === 'orange'
-                        ? 'text-orange-600'
-                        : 'text-gray-600'
-              }`}
-            />
-            <div className="flex-1 min-w-0">
-              <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
-                {recipe.name}
-              </h3>
-            </div>
-          </div>
-
-          {/* Bottom info section with even spacing */}
-          <div className="space-y-1.5">
-            {/* Type */}
-            <div className="text-sm text-gray-500">{typeInfo.label}</div>
-
-            {/* Description */}
-            {recipe.description && (
-              <p
-                className="text-sm text-gray-600 truncate"
-                title={recipe.description}
-              >
-                {recipe.description}
-              </p>
-            )}
-
-            {/* Authored by */}
-            <div className="text-sm text-gray-500 truncate">
-              Authored by <UserName name={recipe.user_name || recipe.user_id} />
-            </div>
-
-            {/* Last updated info - only show for editable recipes */}
-            {recipe.is_editable && recipe.user_name !== 'local' && (
-              <div className="text-sm text-gray-500 truncate">
-                Updated by{' '}
-                <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
-                <TimestampWithTooltip
-                  date={
-                    recipe.updated_at
-                      ? new Date(recipe.updated_at * 1000)
-                      : null
-                  }
-                />
+    <div className="relative">
+      <Link href={`/recipes/${slug}`} className="block">
+        <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
+          <CardContent className="p-3">
+            {/* Header with icon and name */}
+            <div className="flex items-start gap-2 mb-1.5">
+              <TypeIcon
+                className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                  typeInfo.color === 'sky'
+                    ? 'text-sky-600'
+                    : typeInfo.color === 'purple'
+                      ? 'text-purple-600'
+                      : typeInfo.color === 'green'
+                        ? 'text-green-600'
+                        : typeInfo.color === 'orange'
+                          ? 'text-orange-600'
+                          : 'text-gray-600'
+                }`}
+              />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
+                  {recipe.name}
+                </h3>
               </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
+            </div>
+
+            {/* Bottom info section with even spacing */}
+            <div className="space-y-1.5">
+              {/* Type */}
+              <div className="text-sm text-gray-500">{typeInfo.label}</div>
+
+              {/* Description */}
+              {recipe.description && (
+                <p
+                  className="text-sm text-gray-600 truncate"
+                  title={recipe.description}
+                >
+                  {recipe.description}
+                </p>
+              )}
+
+              {/* Authored by */}
+              <div className="text-sm text-gray-500 truncate">
+                Authored by <UserName name={recipe.user_name || recipe.user_id} />
+              </div>
+
+              {/* Last updated info - only show for editable recipes */}
+              {recipe.is_editable && recipe.user_name !== 'local' && (
+                <div className="text-sm text-gray-500 truncate">
+                  Updated by{' '}
+                  <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
+                  <TimestampWithTooltip
+                    date={
+                      recipe.updated_at
+                        ? new Date(recipe.updated_at * 1000)
+                        : null
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+      {onPin && recipe.pinned && recipe.is_pinnable !== false && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onPin(recipe.name, false);
+          }}
+          className="absolute top-2 right-2 p-1 rounded transition-colors text-amber-500 hover:text-amber-700 hover:bg-amber-100"
+          title="Unpin recipe"
+        >
+          <PinOffIcon className="h-4 w-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
 // Template Row Component (for Pinned and My Recipes)
-function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
+function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor, onPin }) {
   if (recipes.length === 0) {
     return (
       <div className="mb-6">
@@ -204,7 +219,7 @@ function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
         {recipes.map((recipe) => (
-          <RecipeCard key={recipe.name} recipe={recipe} />
+          <RecipeCard key={recipe.name} recipe={recipe} onPin={onPin} />
         ))}
       </div>
     </div>
@@ -1255,6 +1270,7 @@ export function RecipeHub() {
             iconColor="text-amber-500"
             recipes={pinnedRecipes}
             emptyMessage="No pinned recipes. Pin important recipes for quick access."
+            onPin={handlePin}
           />
 
           {/* My Recipes - only shown when authenticated */}
