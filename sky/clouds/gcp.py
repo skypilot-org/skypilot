@@ -211,7 +211,9 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources.Resources'
+        cls,
+        resources: 'resources.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = {}
         if gcp_utils.is_tpu_vm_pod(resources):
@@ -246,6 +248,8 @@ class GCP(clouds.Cloud):
             HIGH_AVAILABILITY_CONTROLLERS] = (
                 f'High availability controllers are not supported on {cls._REPR}.'
             )
+        unsupported[clouds.CloudImplementationFeatures.
+                    LOCAL_DISK] = f'Local disk is not supported on {cls._REPR}'
 
         return unsupported
 
@@ -255,10 +259,15 @@ class GCP(clouds.Cloud):
 
     #### Regions/Zones ####
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources.Resources'] = None,
+    ) -> List[clouds.Region]:
         if accelerators is None:
             regions = catalog.get_region_zones_for_instance_type(instance_type,
                                                                  use_spot,
@@ -441,11 +450,13 @@ class GCP(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='gcp')
@@ -535,6 +546,8 @@ class GCP(clouds.Cloud):
                     'runtime_version']
                 resources_vars['tpu_node_name'] = r.accelerator_args.get(
                     'tpu_name')
+                resources_vars['gcp_queued_resource'] = r.accelerator_args.get(
+                    'gcp_queued_resource')
                 # TPU VMs require privileged mode for docker containers to
                 # access TPU devices.
                 resources_vars['docker_run_options'] = ['--privileged']
@@ -685,6 +698,7 @@ class GCP(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if host_vm_type is None:
@@ -718,6 +732,7 @@ class GCP(clouds.Cloud):
              cpus=resources.cpus if not use_tpu_vm else None,
              memory=resources.memory if not use_tpu_vm else None,
              use_spot=resources.use_spot,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='gcp')
@@ -1179,8 +1194,8 @@ class GCP(clouds.Cloud):
             # These series don't support pd-standard, use pd-balanced for LOW.
             _propagate_disk_type(
                 lowest=tier2name[resources_utils.DiskTier.MEDIUM])
-        if instance_type.startswith('a3-ultragpu') or series == 'n4':
-            # a3-ultragpu instances only support hyperdisk-balanced.
+        if instance_type.startswith('a3-ultragpu') or series in ('n4', 'a4'):
+            # a3-ultragpu, n4, and a4 instances only support hyperdisk-balanced.
             _propagate_disk_type(all='hyperdisk-balanced')
 
         # Series specific handling

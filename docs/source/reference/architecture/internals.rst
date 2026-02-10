@@ -16,7 +16,7 @@ All SkyPilot internal data is stored in the ``~/.sky/`` directory of the API ser
 
 .. note::
   **External database, if configured**
-  
+
   Users can optionally configure SkyPilot to use a PostgreSQL database to persists its state.
   See :ref:`API server database configuration <config-yaml-db>` for more details on how to configure an external database.
 
@@ -50,17 +50,17 @@ Internal Ray usage
 ------------------
 
 .. note::
-  
+
   SkyPilot uses Ray internally for cluster management. Understanding this architecture
   helps avoid conflicts when running Ray workloads on SkyPilot clusters.
 
-SkyPilot leverages Ray for distributed cluster orchestration and management. 
+SkyPilot leverages Ray for distributed cluster orchestration and management.
 The internal Ray cluster is isolated from user workloads through port separation:
 
 **Port allocation:**
 
 - ``6380``: SkyPilot's internal Ray cluster (avoiding Ray's default 6379)
-- ``8266``: SkyPilot's Ray dashboard (avoiding Ray's default 8265)  
+- ``8266``: SkyPilot's Ray dashboard (avoiding Ray's default 8265)
 - ``/tmp/ray_skypilot``: Temporary directory for SkyPilot's Ray processes
 
 **Configuration files:**
@@ -87,7 +87,7 @@ SkyPilot starts its Ray cluster when provisioning nodes:
 
   .. code-block:: bash
 
-     # Kill specific Ray head process started on port 6379 (user's Ray cluster)
-     pkill -f "ray start --head --port 6379"
+     # Kill all Ray processes on port 6379 (user's Ray cluster)
+     pkill -f "ray.*[=:]6379"
 
 For running Ray workloads on SkyPilot, refer to the :ref:`distributed jobs documentation <dist-jobs>`.

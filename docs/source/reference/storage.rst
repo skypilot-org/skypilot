@@ -3,7 +3,7 @@
 Cloud Buckets
 ==============
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, OCI Object Storage or IBM COS.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, CoreWeave Object Storage, OCI Object Storage or IBM COS.
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -28,7 +28,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           # Mount an existing S3 bucket
           file_mounts:
             /my_data:
-              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>, oci://<bucket_name>
+              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cw://, cos://<region>/<bucket>, oci://<bucket_name>
               mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
@@ -45,7 +45,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, ibm, oci
+              store: gcs  # Optional: either of s3, gcs, azure, r2, coreweave, ibm, oci
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
@@ -68,7 +68,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
             /my_data:
               name: my-sky-bucket
               source: ~/dataset  # Optional: path to local data to upload to the bucket
-              store: s3  # Optional: either of s3, gcs, azure, r2, ibm, oci
+              store: s3  # Optional: either of s3, gcs, azure, r2, coreweave, ibm, oci
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         SkyPilot will create a S3 bucket called ``my-sky-bucket`` and upload the
@@ -160,12 +160,6 @@ its performance requirements and size of the data.
     For local ``file_mounts`` that are directly rsynced to the VM,
     the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
-
-.. note::
-    **Architecture compatibility**: S3 storage mounting (including S3-compatible services like 
-    Cloudflare R2 and Nebius) works on all architectures including ARM64 (e.g., Apple Silicon, 
-    AWS Graviton). SkyPilot automatically uses the optimal mounting tool for each architecture: 
-    goofys for x86_64 and rclone for ARM64.
 
 .. _mount_cached_mode_in_detail:
 
@@ -322,6 +316,37 @@ To manage buckets created by SkyPilot, the sky CLI provides two commands:
     by SkyPilot. Externally created buckets or public buckets are not listed
     in :code:`sky storage ls` and cannot be managed through SkyPilot.
 
+
+FAQ
+---
+
+* **Are AWS SSO credentials supported?**
+
+  AWS SSO credentials are only supported when accessing S3 from EC2 or EKS clusters with ``mode: MOUNT_CACHED``.
+  ``mode: MOUNT`` is not supported when using AWS SSO credentials.
+  
+  On EKS clusters, you must set up IAM roles (via Pod Identity or IRSA) to 
+  allow SkyPilot pods to access S3 buckets without static AWS credentials. 
+  See :ref:`aws-eks-iam-roles` for setup instructions. 
+
+  When accessing S3 buckets outside of EC2 or EKS, static AWS credentials
+  (e.g., ``~/.aws/credentials``) are required.
+
+* **Which architectures are supported?**
+
+  S3 storage mounting (including S3-compatible services like Cloudflare R2,
+  CoreWeave Object Storage, and Nebius) works on all architectures including
+  ARM64 (e.g., Apple Silicon, AWS Graviton). SkyPilot automatically uses the
+  optimal mounting tool for each architecture: goofys for x86_64 and rclone for
+  ARM64.
+
+* **I am unable to create buckets on CoreWeave CAIOS.**
+
+  CoreWeave buckets may take a long time to become accessible after creation.
+  Therefore, SkyPilot does not automatically create them. Please manually create
+  your CoreWeave bucket and verify its accessibility before using it with SkyPilot.
+
+
 Storage YAML reference
 ----------------------
 
@@ -344,14 +369,15 @@ Storage YAML reference
             - gs://<bucket_name>
             - https://<azure_storage_account>.blob.core.windows.net/<container_name>
             - r2://<bucket_name>
+            - cw://<bucket_name>
             - cos://<region_name>/<bucket_name>
             - oci://<bucket_name>@<region>
 
           If the source is local, data is uploaded to the cloud to an appropriate
-          bucket (s3, gcs, azure, r2, oci, or ibm). If source is bucket URI,
+          bucket (s3, gcs, azure, r2, coreweave, oci, or ibm). If source is bucket URI,
           the data is copied or mounted directly (see mode flag below).
 
-        store: str; either of 's3', 'gcs', 'azure', 'r2', 'ibm', 'oci'
+        store: str; either of 's3', 'gcs', 'azure', 'r2', 'coreweave','ibm', 'oci'
           If you wish to force sky.Storage to be backed by a specific cloud object
           storage, you can specify it here. If not specified, SkyPilot chooses the
           appropriate object storage based on the source path and task's cloud provider.

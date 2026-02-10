@@ -35,13 +35,22 @@ def main():
         for name in cluster_names:
             print(f"  - {name}")
 
-        # Delete them
+        # Delete from cluster_yaml table first
         placeholders = ', '.join(['?' for _ in cluster_names])
+        cursor.execute(
+            f"DELETE FROM cluster_yaml WHERE cluster_name IN ({placeholders})",
+            cluster_names)
+        yaml_deleted = cursor.rowcount
+
+        # Delete from clusters table
         cursor.execute(f"DELETE FROM clusters WHERE name IN ({placeholders})",
                        cluster_names)
+        clusters_deleted = cursor.rowcount
+
         conn.commit()
 
-        print(f"\nSuccessfully deleted {len(cluster_names)} test clusters!")
+        print(f"\nSuccessfully deleted {clusters_deleted} test clusters!")
+        print(f"Successfully deleted {yaml_deleted} cluster_yaml entries!")
 
         cursor.close()
         conn.close()

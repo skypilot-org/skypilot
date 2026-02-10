@@ -19,6 +19,11 @@ else:
     managed_jobsv1_pb2 = adaptors_common.LazyImport(
         'sky.schemas.generated.managed_jobsv1_pb2')
 
+_MANAGED_JOB_FIELDS_TO_GET = [
+    'job_id', 'task_id', 'workspace', 'job_name', 'task_name', 'resources',
+    'submitted_at', 'end_at', 'job_duration', 'recovery_count', 'status', 'pool'
+]
+
 
 def check_version_mismatch_and_non_terminal_jobs() -> None:
     """Check if controller has version mismatch and non-terminal jobs exist.
@@ -50,7 +55,11 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
                     )).get_managed_job_controller_version(version_request))
             controller_version = version_response.controller_version
 
-            job_table_request = managed_jobsv1_pb2.GetJobTableRequest()
+            job_table_request = managed_jobsv1_pb2.GetJobTableRequest(
+                skip_finished=True,
+                fields=managed_jobsv1_pb2.Fields(
+                    fields=_MANAGED_JOB_FIELDS_TO_GET),
+            )
             job_table_response = backend_utils.invoke_skylet_with_retries(
                 lambda: cloud_vm_ray_backend.SkyletClient(
                     handle.get_grpc_channel()).get_managed_job_table(
@@ -62,7 +71,7 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
 
     if use_legacy:
         # Get controller version and raw job table
-        code = managed_job_utils.ManagedJobCodeGen.get_version_and_job_table()
+        code = managed_job_utils.ManagedJobCodeGen.get_version()
 
         returncode, output, stderr = backend.run_on_head(handle,
                                                          code,
@@ -72,7 +81,7 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
 
         if returncode != 0:
             logger.error(output + stderr)
-            raise ValueError('Failed to check controller version and jobs with '
+            raise ValueError('Failed to check controller version with '
                              f'returncode: {returncode}.\n{output + stderr}')
 
         # Parse the output to extract controller version (split only on first
@@ -80,19 +89,28 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
         output_parts = output.strip().split('\n', 1)
 
         # Extract controller version from first line
-        if len(output_parts) < 2 or not output_parts[0].startswith(
-                'controller_version:'):
+        if not output_parts[0].startswith('controller_version:'):
             raise ValueError(
                 f'Expected controller version in first line, got: {output}')
 
         controller_version = output_parts[0].split(':', 1)[1]
 
-        # Rest is job table payload (preserving any newlines within it)
-        job_table_payload = output_parts[1]
+        code = managed_job_utils.ManagedJobCodeGen.get_job_table(
+            skip_finished=True, fields=_MANAGED_JOB_FIELDS_TO_GET)
+        returncode, job_table_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
 
-        # Load and filter jobs locally using existing method
-        jobs, _, _, _, _ = managed_job_utils.load_managed_job_queue(
-            job_table_payload)
+        if returncode != 0:
+            logger.error(job_table_payload + stderr)
+            raise ValueError('Failed to fetch managed jobs with returncode: '
+                             f'{returncode}.\n{job_table_payload + stderr}')
+
+        jobs, _, _, _, _ = (
+            managed_job_utils.load_managed_job_queue(job_table_payload))
 
     # Process locally: check version match and filter non-terminal jobs
     version_matches = (controller_version == local_version or
@@ -103,7 +121,10 @@ def check_version_mismatch_and_non_terminal_jobs() -> None:
     if not version_matches and has_non_terminal_jobs:
         # Format job table locally using the same method as queue()
         formatted_job_table = managed_job_utils.format_job_table(
-            non_terminal_jobs, show_all=False, show_user=False)
+            non_terminal_jobs,
+            pool_status=None,
+            show_all=False,
+            show_user=False)
 
         error_msg = (
             f'Controller SKYLET_VERSION ({controller_version}) does not match '

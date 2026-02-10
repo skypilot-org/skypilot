@@ -1,0 +1,8 @@
+{
+  "setup-worktree": [
+    "uv venv --seed --python 3.11",
+    "uv pip install -e \".[all]\" --prerelease=allow",
+    "uv pip install -r requirements-dev.txt",
+    "npm --prefix sky/dashboard install && npm --prefix sky/dashboard run build"
+  ]
+}

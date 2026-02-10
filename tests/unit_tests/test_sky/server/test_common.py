@@ -267,11 +267,12 @@ def test_get_dashboard_url():
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(
         server_url='https://user:pass@example.com:8080'
-    ) == 'https://example.com:8080/dashboard'
+    ) == 'https://user:pass@example.com:8080/dashboard'
     """Test get_dashboard_url with URL containing username."""
     common.get_server_url.cache_clear()
-    assert common.get_dashboard_url(server_url='https://user@example.com:8080'
-                                   ) == 'https://example.com:8080/dashboard'
+    assert common.get_dashboard_url(
+        server_url='https://user@example.com:8080'
+    ) == 'https://user@example.com:8080/dashboard'
     """Test get_dashboard_url with host parameter."""
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(server_url='http://custom-host:8080'
@@ -280,7 +281,7 @@ def test_get_dashboard_url():
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(
         server_url='https://user:pass@example.com:8080/api/v1'
-    ) == 'https://example.com:8080/api/v1/dashboard'
+    ) == 'https://user:pass@example.com:8080/api/v1/dashboard'
     """Test get_dashboard_url without port."""
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(

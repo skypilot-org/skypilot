@@ -34,7 +34,11 @@ enum ManagedJobStatus {
 
 enum ManagedJobScheduleState {
   MANAGED_JOB_SCHEDULE_STATE_UNSPECIFIED = 0;
-  MANAGED_JOB_SCHEDULE_STATE_INVALID = 1;
+  // Old servers mapped `None` to INVALID, instead of omitting the field. Keep
+  // the enum value so we can deserialize the response properly. On the client,
+  // this should be mapped to `None` / missing field. See #8105.
+  // TODO(cooperc): Remove in 0.13.0
+  DEPRECATED_MANAGED_JOB_SCHEDULE_STATE_INVALID = 1 [deprecated = true];
   MANAGED_JOB_SCHEDULE_STATE_INACTIVE = 2;
   MANAGED_JOB_SCHEDULE_STATE_WAITING = 3;
   MANAGED_JOB_SCHEDULE_STATE_ALIVE_WAITING = 4;
@@ -56,6 +60,14 @@ message Statuses {
   repeated string statuses = 1;
 }
 
+message Fields {
+  repeated string fields = 1;
+}
+
+message Workspaces {
+  repeated string workspaces = 1;
+}
+
 message GetVersionRequest {}
 
 message GetVersionResponse {
@@ -64,7 +76,7 @@ message GetVersionResponse {
 
 message GetJobTableRequest {
   bool skip_finished = 1;
-  repeated string accessible_workspaces = 2;
+  optional Workspaces accessible_workspaces = 2;
   optional JobIds job_ids = 3;
   optional string workspace_match = 4;
   optional string name_match = 5;
@@ -74,6 +86,10 @@ message GetJobTableRequest {
   optional UserHashes user_hashes = 9;
   optional Statuses statuses = 10;
   bool show_jobs_without_user_hash = 11;
+  optional Fields fields = 12;
+  // Sorting parameters, added in ManagedJobsService v14.
+  optional string sort_by = 13;
+  optional string sort_order = 14;
 }
 
 message ManagedJobInfo {
@@ -105,6 +121,21 @@ message ManagedJobInfo {
   map<string, string> metadata = 26;
   optional string pool = 27;
   optional string pool_hash = 28;
+  // The `spot.job_id`, which can be used to identify different tasks
+  // for the same job
+  optional int64 _job_id = 29;
+  // Links (e.g., instance console URLs) as key-value pairs
+  map<string, string> links = 30;
+  // Whether this task is a primary task (true) or auxiliary task (false)
+  // within a job group. Auxiliary tasks are terminated when all primary tasks
+  // complete. NULL for non-job-group jobs (single jobs and pipelines).
+  optional bool is_primary_in_job_group = 31;
+  // Zone where the cluster is running (populated from cluster handle)
+  optional string zone = 32;
+  // Labels from the cluster resources (populated from cluster handle)
+  map<string, string> labels = 33;
+  // Name of the cluster on the cloud provider (populated from cluster handle)
+  optional string cluster_name_on_cloud = 34;
 }
 
 message GetJobTableResponse {

@@ -2,6 +2,7 @@
 
 """
 
+import os
 from unittest.mock import patch
 
 from google.auth import exceptions as google_exceptions

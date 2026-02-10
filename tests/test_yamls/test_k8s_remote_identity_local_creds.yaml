@@ -1,0 +1,13 @@
+config:
+  kubernetes:
+    remote_identity: LOCAL_CREDENTIALS
+
+run: |
+  echo "Testing remote_identity override with LOCAL_CREDENTIALS"
+  # Check if kubeconfig was uploaded
+  if [ -f ~/.kube/config ]; then
+    echo "SUCCESS: ~/.kube/config exists as expected with LOCAL_CREDENTIALS"
+  else
+    echo "ERROR: ~/.kube/config should exist with LOCAL_CREDENTIALS"
+    exit 1
+  fi

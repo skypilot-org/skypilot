@@ -6,7 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import global_user_state
-from sky.skylet import constants
+from sky.skylet import runtime_utils
 from sky.utils import locks
 from sky.utils.db import db_utils
 
@@ -60,16 +60,16 @@ class TestFileLock:
     def setUp(self):
         """Setup test environment."""
         # Ensure locks directory exists
-        os.makedirs(constants.SKY_LOCKS_DIR, exist_ok=True)
+        os.makedirs(locks.SKY_LOCKS_DIR, exist_ok=True)
 
     def tearDown(self):
         """Clean up after tests."""
         # Clean up any test lock files
-        if os.path.exists(constants.SKY_LOCKS_DIR):
-            for file in os.listdir(constants.SKY_LOCKS_DIR):
+        if os.path.exists(locks.SKY_LOCKS_DIR):
+            for file in os.listdir(locks.SKY_LOCKS_DIR):
                 if file.startswith('.test_') and file.endswith('.lock'):
                     try:
-                        os.remove(os.path.join(constants.SKY_LOCKS_DIR, file))
+                        os.remove(os.path.join(locks.SKY_LOCKS_DIR, file))
                     except OSError:
                         pass
 
@@ -80,7 +80,7 @@ class TestFileLock:
         assert lock.lock_id == 'test_lock'
         assert lock.timeout is None  # Base class stores original None
         assert lock.poll_interval == 0.1
-        assert lock.lock_path == os.path.join(constants.SKY_LOCKS_DIR,
+        assert lock.lock_path == os.path.join(locks.SKY_LOCKS_DIR,
                                               '.test_lock.lock')
         # Internal filelock should have -1 for None timeout
         assert lock._filelock.timeout == -1
@@ -157,25 +157,26 @@ class TestFileLock:
             lock.force_unlock()
             assert not os.path.exists(lock.lock_path)
 
-    def test_file_lock_directories_created(self):
+    def test_file_lock_directories_created(self, tmp_path, monkeypatch):
         """Test that lock directories are created."""
-        # Use a temporary directory for this test to avoid conflicts
-        import tempfile
-        with tempfile.TemporaryDirectory() as temp_dir:
-            original_locks_dir = constants.SKY_LOCKS_DIR
-            try:
-                # Temporarily override the locks directory
-                constants.SKY_LOCKS_DIR = os.path.join(temp_dir, 'test_locks')
 
-                # Ensure directory doesn't exist initially
-                assert not os.path.exists(constants.SKY_LOCKS_DIR)
+        # SKY_RUNTIME_DIR is evaluated at import time, so we need to reload the module to get the new value.
+        # But we can't reload the module here as it affects other tests, so just manually
+        # test that runtime_utils.get_runtime_dir_path() respects SKY_RUNTIME_DIR.
+        monkeypatch.setenv('SKY_RUNTIME_DIR', str(tmp_path))
+        expected_locks_dir = str(tmp_path / '.sky/locks')
+        assert runtime_utils.get_runtime_dir_path(
+            '.sky/locks') == expected_locks_dir
 
-                # Creating a lock should create the directory
-                lock = locks.FileLock('test_dir_creation')
-                assert os.path.exists(constants.SKY_LOCKS_DIR)
-            finally:
-                # Restore original directory
-                constants.SKY_LOCKS_DIR = original_locks_dir
+        # Test that creating a lock creates the directory.
+        original_locks_dir = locks.SKY_LOCKS_DIR
+        try:
+            locks.SKY_LOCKS_DIR = expected_locks_dir
+            assert not os.path.exists(locks.SKY_LOCKS_DIR)
+            lock = locks.FileLock('test_dir_creation')
+            assert os.path.exists(locks.SKY_LOCKS_DIR)
+        finally:
+            locks.SKY_LOCKS_DIR = original_locks_dir
 
 
 class TestPostgresLock:
@@ -205,6 +206,7 @@ class TestPostgresLock:
         assert lock.poll_interval == 1
         assert not lock._acquired
         assert lock._connection is None
+        assert not lock._shared_lock
 
     def test_postgres_lock_string_to_lock_key(self):
         """Test string to lock key conversion is deterministic across processes."""
@@ -252,7 +254,8 @@ class TestPostgresLock:
         assert isinstance(proxy, locks.AcquireReturnProxy)
         assert lock._acquired
         assert lock._connection is connection
-        cursor.execute.assert_called_once()
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_try_advisory_lock(%s)', (mock.ANY,))
 
     @mock.patch.object(locks.PostgresLock, '_get_connection')
     def test_postgres_lock_acquire_already_acquired(self, mock_get_connection,
@@ -380,10 +383,9 @@ class TestPostgresLock:
 
         # First unlock call fails (returns False)
         # Second call finds a PID to terminate
-        cursor.fetchone.side_effect = [
-            [False],  # pg_advisory_unlock fails
-            [12345]  # pg_locks query returns PID
-        ]
+        cursor.fetchone.return_value = [False]  # pg_advisory_unlock fails
+        cursor.fetchall.return_value = [[12345], [67890]
+                                       ]  # pg_locks query returns multiple PIDs
 
         lock = locks.PostgresLock('test_lock')
         lock.force_unlock()
@@ -394,7 +396,8 @@ class TestPostgresLock:
             mock.call(('SELECT pid FROM pg_locks WHERE locktype = \'advisory\' '
                        'AND ((classid::bigint << 32) | objid::bigint) = %s'),
                       (mock.ANY,)),
-            mock.call('SELECT pg_terminate_backend(%s)', (12345,))
+            mock.call('SELECT pg_terminate_backend(%s)', (12345,)),
+            mock.call('SELECT pg_terminate_backend(%s)', (67890,))
         ]
         cursor.execute.assert_has_calls(expected_calls)
         connection.commit.assert_called_once()
@@ -409,10 +412,8 @@ class TestPostgresLock:
 
         # First unlock call fails (returns False)
         # Second call finds no lock in pg_locks
-        cursor.fetchone.side_effect = [
-            [False],  # pg_advisory_unlock fails
-            None  # pg_locks query returns no results
-        ]
+        cursor.fetchone.return_value = [False]  # pg_advisory_unlock fails
+        cursor.fetchall.return_value = []  # pg_locks query returns no results
 
         lock = locks.PostgresLock('test_lock')
         lock.force_unlock()
@@ -458,6 +459,96 @@ class TestPostgresLock:
 
         assert "PostgresLock requires PostgreSQL database" in str(
             exc_info.value)
+
+    def test_postgres_lock_initialization_shared_mode(self):
+        """Test PostgresLock initialization with shared mode."""
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+
+        assert lock._shared_lock
+        assert lock.lock_id == 'test_lock'
+        assert not lock._acquired
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_acquire_shared_success(self, mock_get_connection,
+                                                  mock_connection):
+        """Test successful shared lock acquisition."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [True]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+        proxy = lock.acquire()
+
+        assert isinstance(proxy, locks.AcquireReturnProxy)
+        assert lock._acquired
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_try_advisory_lock_shared(%s)', (mock.ANY,))
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_release_shared(self, mock_get_connection,
+                                          mock_connection):
+        """Test shared lock release."""
+        connection, cursor = mock_connection
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+        lock._acquired = True
+        lock._connection = connection
+
+        lock.release()
+
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_advisory_unlock_shared(%s)', (mock.ANY,))
+        connection.commit.assert_called_once()
+        connection.close.assert_called_once()
+        assert not lock._acquired
+        assert lock._connection is None
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_force_unlock_shared(self, mock_get_connection,
+                                               mock_connection):
+        """Test force unlock for shared locks."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [True]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+        lock.force_unlock()
+
+        cursor.execute.assert_called_once_with(
+            'SELECT pg_advisory_unlock_shared(%s)', (mock.ANY,))
+        connection.commit.assert_called_once()
+        connection.close.assert_called_once()
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_shared_timeout(self, mock_get_connection,
+                                          mock_connection):
+        """Test shared lock acquisition timeout."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [False]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True, timeout=0.1)
+
+        with pytest.raises(locks.LockTimeout) as exc_info:
+            lock.acquire()
+
+        assert 'shared' in str(exc_info.value).lower()
+
+    @mock.patch.object(locks.PostgresLock, '_get_connection')
+    def test_postgres_lock_shared_non_blocking(self, mock_get_connection,
+                                               mock_connection):
+        """Test shared lock non-blocking acquisition fails immediately."""
+        connection, cursor = mock_connection
+        mock_get_connection.return_value = connection
+        cursor.fetchone.return_value = [False]
+
+        lock = locks.PostgresLock('test_lock', shared_lock=True)
+
+        with pytest.raises(locks.LockTimeout) as exc_info:
+            lock.acquire(blocking=False)
+
+        error_msg = str(exc_info.value).lower()
+        assert 'immediately' in error_msg
+        assert 'shared' in error_msg
 
 
 class TestGetLock:
@@ -516,6 +607,23 @@ class TestGetLock:
             locks.get_lock('test_lock', lock_type='invalid')
 
         assert "Unknown lock type: invalid" in str(exc_info.value)
+
+    def test_get_lock_postgres_with_shared_mode(self):
+        """Test get_lock factory with shared mode for postgres."""
+        lock = locks.get_lock('test_lock',
+                              lock_type='postgres',
+                              shared_lock=True)
+
+        assert isinstance(lock, locks.PostgresLock)
+        assert lock._shared_lock
+
+    def test_get_lock_filelock_with_shared_mode(self):
+        """Test FileLock with shared mode (no effect)."""
+        lock = locks.get_lock('test_lock',
+                              lock_type='filelock',
+                              shared_lock=True)
+
+        assert isinstance(lock, locks.FileLock)
 
 
 class TestDetectLockType:

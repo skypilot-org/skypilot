@@ -31,6 +31,7 @@ GCP_MAX_RETRIES = 12
 GCP_CREATE_MAX_RETRIES = 5
 GCP_RETRY_INTERVAL_SECONDS = 5
 GCP_TIMEOUT = 300
+GCP_QUEUED_RESOURCE_TIMEOUT = 6000
 
 logger = sky_logging.init_logger(__name__)
 
@@ -839,6 +840,27 @@ class GCPComputeInstance(GCPInstance):
         return True
 
     @classmethod
+    def _handle_http_error(cls, e, zone):
+        # NOTE: Error example:
+        # {
+        #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
+        #   'domain': 'usageLimits',
+        #   'reason': 'quotaExceeded'
+        # }
+        error_details = getattr(e, 'error_details', [])
+        errors = []
+        for detail in error_details:
+            # To be consistent with error messages returned by operation wait.
+            errors.append({
+                'code': detail.get('reason'),
+                'domain': detail.get('domain'),
+                'message': detail.get('message', str(e)),
+            })
+        logger.debug(f'create_instances: googleapiclient.errors.HttpError: {e}')
+        _format_and_log_message_from_errors(errors, e, zone)
+        return errors
+
+    @classmethod
     def _create_instances(
         cls,
         names: List[str],
@@ -847,27 +869,6 @@ class GCPComputeInstance(GCPInstance):
         config: dict,
         head_tag_needed: List[bool],
     ) -> Optional[List]:
-
-        def _handle_http_error(e):
-            # NOTE: Error example:
-            # {
-            #   'message': "Quota '...' exceeded. Limit: ... in region xx-xxxx.", # pylint: disable=line-too-long
-            #   'domain': 'usageLimits',
-            #   'reason': 'quotaExceeded'
-            # }
-            error_details = getattr(e, 'error_details', [])
-            errors = []
-            for detail in error_details:
-                # To be consistent with error messages returned by operation wait.
-                errors.append({
-                    'code': detail.get('reason'),
-                    'domain': detail.get('domain'),
-                    'message': detail.get('message', str(e)),
-                })
-            logger.debug(
-                f'create_instances: googleapiclient.errors.HttpError: {e}')
-            _format_and_log_message_from_errors(errors, e, zone)
-            return errors
 
         # Allow Google Compute Engine instance templates.
         #
@@ -889,7 +890,7 @@ class GCPComputeInstance(GCPInstance):
             else:
                 operations = cls._insert(names, project_id, zone, config)
         except gcp.http_error_exception() as e:
-            return _handle_http_error(e)
+            return cls._handle_http_error(e, zone)
 
         for operation in operations:
             errors = operation.get('error', {}).get('errors', [])
@@ -906,7 +907,7 @@ class GCPComputeInstance(GCPInstance):
         except common.ProvisionerError as e:
             return e.errors
         except gcp.http_error_exception() as e:
-            return _handle_http_error(e)
+            return cls._handle_http_error(e, zone)
 
         # assign labels for head node
         with pool.ThreadPool() as p:
@@ -1435,6 +1436,68 @@ class GCPTPUVMInstance(GCPInstance):
         cls.wait_for_operation(operation, project_id, availability_zone)
 
     @classmethod
+    def wait_for_queued_resource(cls, project_id: str, zone: str,
+                                 queued_resource_id: str) -> None:
+        """Wait for queued resource to be ready."""
+        logger.debug(
+            f'Waiting for queued resource {queued_resource_id} to be ready '
+            f'(timeout={GCP_QUEUED_RESOURCE_TIMEOUT}s)...')
+
+        @_retry_on_gcp_http_exception()
+        def get_queued_resource():
+            return cls.load_resource().projects().locations().queuedResources(
+            ).get(
+                name=f'projects/{project_id}/locations/{zone}/queuedResources/'
+                f'{queued_resource_id}').execute()
+
+        wait_start = time.time()
+        while time.time() - wait_start < GCP_QUEUED_RESOURCE_TIMEOUT:
+            try:
+                qr = get_queued_resource()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to get queued resource status: {e}. Retrying...')
+                time.sleep(constants.POLL_INTERVAL)
+                continue
+
+            state = qr.get('state', {}).get('state')
+
+            # Values: STATE_UNSPECIFIED, CREATING, ACCEPTED, PROVISIONING,
+            # FAILED, DELETING, ACTIVE, SUSPENDING, SUSPENDED,
+            # WAITING_FOR_RESOURCES
+            if state == 'ACTIVE':
+                logger.debug(f'Queued resource {queued_resource_id} is active.')
+                return
+
+            if state == 'FAILED':
+                error_details = qr.get('status', {})
+                provisioner_error = common.ProvisionerError(
+                    f'Queued resource {queued_resource_id} failed with state '
+                    f'{state}. Error: {error_details}')
+                provisioner_error.errors = [{
+                    'code': error_details.get('code', 'UNKNOWN'),
+                    'message': error_details.get('message', str(error_details)),
+                    'domain': 'queued_resource',
+                }]
+                raise provisioner_error
+
+            logger.debug(
+                f'Queued resource {queued_resource_id} state: {state}. '
+                'Waiting...')
+            time.sleep(constants.POLL_INTERVAL)
+
+        provisioner_error = common.ProvisionerError(
+            f'Timed out waiting for queued resource {queued_resource_id} to be '
+            'ready.')
+        provisioner_error.errors = [{
+            'code': 'TIMEOUT',
+            'message': (f'Timed out waiting for queued resource '
+                        f'{queued_resource_id} to be ready.'),
+            'domain': 'queued_resource',
+        }]
+        raise provisioner_error
+
+    @classmethod
     def create_instances(
         cls,
         cluster_name: str,
@@ -1475,20 +1538,113 @@ class GCPTPUVMInstance(GCPInstance):
             raise NotImplementedError(
                 'TPU VMs do not support reservations yet.')
 
-        # Allow Google Compute Engine instance templates.
-        #
-        # Config example:
-        #
-        #     ...
-        #     node_config:
-        #         sourceInstanceTemplate: global/instanceTemplates/worker-16
-        #         machineType: e2-standard-16
-        #     ...
-        #
-        # node_config parameters override matching template parameters, if any.
-        #
-        # https://cloud.google.com/compute/docs/instance-templates
-        # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
+        if config.get('gcp_queued_resource'):
+            return cls._create_queued_resource_instances(
+                names, project_id, zone, config)
+        else:
+            return cls._create_standard_instances(names, project_id, zone,
+                                                  config)
+
+    @classmethod
+    def _create_queued_resource_instances(
+        cls,
+        names: List[str],
+        project_id: str,
+        zone: str,
+        config: dict,
+    ) -> Tuple[Optional[List], List[str]]:
+        operations = []
+        queued_resource_ids = []
+
+        for i, name in enumerate(names):
+            node_config = config.copy()
+            if i == 0:
+                node_config['labels'].update(provision_constants.HEAD_NODE_TAGS)
+            else:
+                node_config['labels'].update(
+                    provision_constants.WORKER_NODE_TAGS)
+            node_config.pop('gcp_queued_resource')
+
+            qr_id = f'{name}-q'  # TODO: should this be configurable?
+            parent = f'projects/{project_id}/locations/{zone}'
+
+            qr_body = {
+                'tpu': {
+                    'nodeSpec': {
+                        'parent': parent,
+                        'nodeId': name,
+                        'node': node_config,
+                    }
+                }
+            }
+
+            if config.get('schedulingConfig', {}).get('preemptible'):
+                qr_body['spot'] = {}
+            node_config.pop('schedulingConfig', None)
+
+            logger.debug(
+                f'Creating Queued Resource {qr_id} with body: {qr_body}')
+            try:
+                request = cls.load_resource().projects().locations(
+                ).queuedResources().create(parent=parent,
+                                           queuedResourceId=qr_id,
+                                           body=qr_body)
+                operation = request.execute(num_retries=GCP_CREATE_MAX_RETRIES)
+                operations.append(operation)
+                queued_resource_ids.append(qr_id)
+
+            except gcp.http_error_exception() as e:
+                error_details = getattr(e, 'error_details', [])
+                logger.debug(
+                    f'create_instances: googleapiclient.errors.HttpError: {e}')
+                errors = []
+                if isinstance(error_details, str):
+                    errors.append({
+                        'code': 'CREATION_FAILED',
+                        'domain': 'create_instances',
+                        'message': error_details,
+                    })
+                    _format_and_log_message_from_errors(errors, e, zone)
+                    return errors, names
+                for detail in error_details:
+                    # To be consistent with error messages returned by operation
+                    # wait.
+                    violations = detail.get('violations', [])
+                    if not violations:
+                        errors.append({
+                            'code': detail.get('reason'),
+                            'domain': detail.get('domain'),
+                            'message': detail.get('message', str(e)),
+                        })
+                    else:
+                        for violation in violations:
+                            errors.append({
+                                'code': detail.get('@type'),
+                                'domain': violation.get('subject'),
+                                'message': violation.get('description'),
+                            })
+                _format_and_log_message_from_errors(errors, e, zone)
+                return errors, names
+
+        logger.debug('Waiting GCP instances to be ready (Queued Resources) ...')
+
+        # 1. Wait for creation operations
+        for operation in operations:
+            cls.wait_for_operation(operation, project_id, zone=zone)
+
+        # 2. Wait for Queued Resources to be ACTIVE
+        for qr_id in queued_resource_ids:
+            cls.wait_for_queued_resource(project_id, zone, qr_id)
+        return None, names
+
+    @classmethod
+    def _create_standard_instances(
+        cls,
+        names: List[str],
+        project_id: str,
+        zone: str,
+        config: dict,
+    ) -> Tuple[Optional[List], List[str]]:
         operations = []
         for i, name in enumerate(names):
             node_config = config.copy()

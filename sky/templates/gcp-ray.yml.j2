@@ -137,6 +137,9 @@ available_node_types:
       schedulingConfig:
         preemptible: true
   {%- endif %}
+  {%- if gcp_queued_resource %}
+      gcp_queued_resource: {{gcp_queued_resource}}
+  {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
     {%- if machine_image is not none %}
@@ -267,6 +270,7 @@ setup_commands:
     sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
+    {{ uv_installation_commands }}
     source ~/.bashrc;
   {%- if tpu_vm %}
     test -f ~/miniconda3/etc/profile.d/conda.sh && source ~/miniconda3/etc/profile.d/conda.sh && conda activate base || true;
@@ -276,6 +280,7 @@ setup_commands:
     grep "export TPU_NAME=" ~/.bashrc && echo "TPU_NAME already set" || echo "export TPU_NAME={{tpu_node_name}}" >> ~/.bashrc;
   {%- endif %}
     {{ ray_skypilot_installation_commands }}
+    {{ copy_skypilot_templates_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     {%- if docker_image is none %}
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;

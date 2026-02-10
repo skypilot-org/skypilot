@@ -1,0 +1,22 @@
+# Example: Launch marimo and auto-expose its port to Internet.
+#
+# Usage:
+#     # First, launch the compute node
+#     $ sky launch -c marimo-example marimo.yaml
+#     # Next, get the endpoint to connect to over the browser
+#     $ sky status marimo-example --endpoints
+#     # This is an alternative to port forwarding.
+
+resources:
+  ports:
+    - 29324
+
+workdir: .
+
+secrets:
+  MARIMO_TOKEN_PASSWORD: secretpassword
+
+setup: pip install uv
+
+# Check the docs for more options: https://docs.marimo.io/cli/#marimo-edit
+run: uvx marimo edit --port 29324 --headless --host=0.0.0.0 --token-password=$MARIMO_TOKEN_PASSWORD

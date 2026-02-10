@@ -24,8 +24,10 @@ logger = sky_logging.init_logger(__name__)
 metrics_app = fastapi.FastAPI()
 
 
+# Serve /metrics in dedicated thread to avoid blocking the event loop
+# of metrics server.
 @metrics_app.get('/metrics')
-async def metrics() -> fastapi.Response:
+def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
@@ -46,10 +48,12 @@ async def gpu_metrics() -> fastapi.Response:
     all_metrics: List[str] = []
     successful_contexts = 0
 
+    remote_contexts = [
+        context for context in contexts if context != 'in-cluster'
+    ]
     tasks = [
         asyncio.create_task(metrics_utils.get_metrics_for_context(context))
-        for context in contexts
-        if context != 'in-cluster'
+        for context in remote_contexts
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -57,7 +61,8 @@ async def gpu_metrics() -> fastapi.Response:
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             logger.error(
-                f'Failed to get metrics for context {contexts[i]}: {result}')
+                f'Failed to get metrics for context {remote_contexts[i]}: '
+                f'{result}')
         elif isinstance(result, BaseException):
             # Avoid changing behavior for non-Exception BaseExceptions
             # like KeyboardInterrupt/SystemExit: re-raise them.

@@ -456,7 +456,9 @@ def test_image_no_conda():
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autodown
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
+@pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
+@pytest.mark.no_slurm  # Slurm does not support stopping instances yet
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
@@ -610,6 +612,8 @@ def private_docker_registry_setup(request):
 
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
+@pytest.mark.no_shadeform
+@pytest.mark.no_slurm  # Slurm does not support private docker registries yet
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
@@ -676,6 +680,38 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
+def test_docker_nonroot_user(generic_cloud: str):
+    """Test Docker image with non-root default user and ENV HOME override.
+
+    Tests that SkyPilot correctly handles Docker images where:
+    1. The default USER is non-root
+    2. ENV HOME is explicitly set to the non-root user's home directory
+
+    SkyPilot should:
+    - Detect the container's default user (not root)
+    - Place SSH keys in the correct home directory
+    - SSH as the default user successfully
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'docker_nonroot_user',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} --image-id docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-nonroot-home:latest tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            # Verify we're running as the non-root user
+            f'sky exec {name} "whoami | grep testuser"',
+            f'sky logs {name} 2 --status',
+            # Verify HOME is set correctly
+            f'sky exec {name} "echo \\$HOME | grep /home/testuser"',
+            f'sky logs {name} 3 --status',
+            # Test SSH works
+            f'ssh {name} -- "echo hello"',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_helm_deploy_gke(request):
     if not request.config.getoption('--helm-package'):
@@ -710,14 +746,16 @@ def test_helm_deploy_eks(request):
             f'bash tests/kubernetes/scripts/helm_upgrade.sh {package_name} {helm_version} aws',
         ],
         # EKS termination requires longer timeout.
-        timeout=50 * 60)
+        timeout=90 * 60)
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.kubernetes
 @pytest.mark.no_remote_server
+@pytest.mark.no_dependency  # This test is not related to dependency
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',
-    ])
+    ],
+                                  timeout=30 * 60)
     smoke_tests_utils.run_one_test(test)

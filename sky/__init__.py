@@ -122,6 +122,7 @@ from sky.data import StoreType
 from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.resources import Resources
+from sky.server.requests.request_names import AdminPolicyRequestName
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
 from sky.utils.common import OptimizeTarget
@@ -139,8 +140,10 @@ Cudo = clouds.Cudo
 GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
+Slurm = clouds.Slurm
 Kubernetes = clouds.Kubernetes
 K8s = Kubernetes
+SSH = clouds.SSH
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 PrimeIntellect = clouds.PrimeIntellect
@@ -150,7 +153,9 @@ Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
 Hyperbolic = clouds.Hyperbolic
+Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
+Yotta = clouds.Yotta
 
 __all__ = [
     '__version__',
@@ -161,6 +166,7 @@ __all__ = [
     'IBM',
     'Kubernetes',
     'K8s',
+    'SSH',
     'Lambda',
     'OCI',
     'Paperspace',
@@ -168,11 +174,14 @@ __all__ = [
     'RunPod',
     'Vast',
     'SCP',
+    'Slurm',
     'Vsphere',
     'Fluidstack',
     'Nebius',
     'Hyperbolic',
+    'Shadeform',
     'Seeweb',
+    'Yotta',
     'Optimizer',
     'OptimizeTarget',
     'backends',
@@ -226,6 +235,7 @@ __all__ = [
     'MutatedUserRequest',
     'AdminPolicy',
     'Config',
+    'AdminPolicyRequestName',
     # Registry
     'CLOUD_REGISTRY',
     'JOBS_RECOVERY_STRATEGY_REGISTRY',

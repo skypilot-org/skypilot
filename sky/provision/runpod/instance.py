@@ -1,5 +1,6 @@
 """RunPod instance provisioning."""
 import time
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
@@ -116,7 +117,8 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 volume_mount_path=volume_mount_path,
             )
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'run_instances error: {e}')
+            logger.warning(f'run_instances error: {e}\n'
+                           f'Full traceback:\n{traceback.format_exc()}')
             raise
         logger.info(f'Launched instance {instance_id}.')
         created_instance_ids.append(instance_id)
@@ -222,9 +224,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 

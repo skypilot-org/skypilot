@@ -57,6 +57,8 @@ class Hyperbolic(clouds.Cloud):
             ('Auto-down not supported.'),
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             ('Customized multiple network interfaces not supported.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
 
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
@@ -65,7 +67,9 @@ class Hyperbolic(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         del resources
         return cls._CLOUD_UNSUPPORTED_FEATURES
@@ -78,10 +82,15 @@ class Hyperbolic(clouds.Cloud):
         return catalog.instance_type_exists(instance_type, 'hyperbolic')
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         assert zone is None, 'Hyperbolic does not support zones.'
         del accelerators, zone  # unused
 
@@ -113,11 +122,13 @@ class Hyperbolic(clouds.Cloud):
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='hyperbolic')
@@ -174,6 +185,7 @@ class Hyperbolic(clouds.Cloud):
                  use_spot=resources.use_spot,
                  cpus=resources.cpus,
                  memory=resources.memory,
+                 local_disk=resources.local_disk,
                  region=resources.region,
                  zone=resources.zone,
                  clouds='hyperbolic')
@@ -203,6 +215,7 @@ class Hyperbolic(clouds.Cloud):
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier,
+            local_disk=resources.local_disk,
             region=resources.region,
             zone=resources.zone)
         if default_instance_type is None:

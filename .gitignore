@@ -17,3 +17,4 @@ sky/clouds/service_catalog/data_fetchers/*.csv
 *.swp
 .buildkite/*.yaml
 .coverage
+.env

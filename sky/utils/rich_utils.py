@@ -193,7 +193,8 @@ class _RevertibleStatus:
                     self.get_status_fn().__exit__(exc_type, exc_val, exc_tb)
                     self.set_status_fn(None)
             else:
-                self.get_status_fn().update(self.previous_message)
+                if self.previous_message is not None:
+                    self.get_status_fn().update(self.previous_message)
 
     def update(self, *args, **kwargs):
         self.get_status_fn().update(*args, **kwargs)
@@ -263,19 +264,27 @@ def safe_logger():
         client_status_obj = _get_client_status()
 
         client_status_live = (client_status_obj is not None and
+                              hasattr(client_status_obj, '_live') and
                               client_status_obj._live.is_started)  # pylint: disable=protected-access
-        if client_status_live:
+        if client_status_live and client_status_obj is not None:
             client_status_obj.stop()
         yield
-        if client_status_live:
+        if client_status_live and client_status_obj is not None:
             client_status_obj.start()
 
 
 class RichSafeStreamHandler(logging.StreamHandler):
+    """A logging handler that safely handles Rich status spinners."""
 
     def emit(self, record: logging.LogRecord) -> None:
         with safe_logger():
-            return super().emit(record)
+            try:
+                return super().emit(record)
+            except ValueError as e:
+                # Ignore "I/O operation on closed file" errors that occur
+                # when pytest-xdist workers close stdout during parallel tests
+                if str(e) != 'I/O operation on closed file':
+                    raise
 
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
@@ -360,13 +369,13 @@ def decode_rich_status(
                     # Replace `\r\n` with `\n`, as printing a line ends with
                     # `\r\n` in linux will cause the line to be empty.
                     line = line[:-2] + '\n'
-                is_payload, line = message_utils.decode_payload(
+                is_payload, decoded_line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
-                control = None
-                if is_payload:
-                    control, encoded_status = Control.decode(line)
-                if control is None:
+                if not is_payload:
                     yield line
+                    continue
+                control, encoded_status = Control.decode(decoded_line)
+                if control is None:
                     continue
 
                 if control == Control.RETRY:
@@ -479,15 +488,13 @@ async def decode_rich_status_async(
                     # Replace `\r\n` with `\n`, as printing a line ends with
                     # `\r\n` in linux will cause the line to be empty.
                     line = line[:-2] + '\n'
-                is_payload, line = message_utils.decode_payload(
+                is_payload, decoded_line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
-                if line is None:
-                    continue
-                control = None
-                if is_payload:
-                    control, encoded_status = Control.decode(line)
-                if control is None:
+                if not is_payload:
                     yield line
+                    continue
+                control, encoded_status = Control.decode(decoded_line)
+                if control is None:
                     continue
 
                 if control == Control.RETRY:

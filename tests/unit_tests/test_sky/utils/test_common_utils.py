@@ -1,10 +1,14 @@
+import asyncio
+import contextvars
 import os
 from unittest import mock
 
 import pytest
 
 from sky import exceptions
+from sky import models
 from sky.utils import common_utils
+from sky.utils import context
 
 MOCKED_USER_HASH = 'ab12cd34'
 
@@ -457,3 +461,25 @@ class TestRedactSecretsValues:
         # Should return original argv when error occurs
         expected = ['sky', 'launch', '--secret', 'KEY=value']
         assert result == expected
+
+
+@pytest.mark.asyncio
+async def test_set_request_context_coroutine_is_context_safe():
+    original_user = common_utils.get_current_user()
+
+    async def run_in_coroutine():
+        context.initialize()
+        common_utils.set_request_context(client_entrypoint='entry',
+                                         client_command='cmd',
+                                         using_remote_api_server=True,
+                                         user=models.User(id='request-user',
+                                                          name='request-user'),
+                                         request_id='dummy')
+        return common_utils.get_current_user()
+
+    user = await asyncio.create_task(run_in_coroutine())
+    assert user.id == 'request-user'
+    assert user.name == 'request-user'
+    # Process-scope var should not be unchanged
+    assert common_utils.get_current_user().name == original_user.name
+    assert common_utils.get_current_user().id == original_user.id

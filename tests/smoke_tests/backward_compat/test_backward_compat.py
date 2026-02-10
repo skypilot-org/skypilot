@@ -211,15 +211,20 @@ class TestBackwardCompatibility:
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
 
-    def run_compatibility_test(self, test_name: str, commands: list,
-                               teardown: str):
+    def run_compatibility_test(self,
+                               test_name: str,
+                               commands: list,
+                               teardown: str,
+                               use_low_resource_config: bool = True):
         """Helper method to create and run tests with proper cleanup"""
+        env = (smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV
+               if use_low_resource_config else None)
         test = smoke_tests_utils.Test(
             test_name,
             commands,
             teardown=teardown,
             timeout=self.TEST_TIMEOUT,
-            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            env=env,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -367,6 +372,19 @@ class TestBackwardCompatibility:
 
     def test_managed_jobs(self, generic_cloud: str):
         """Test managed jobs functionality across versions"""
+        # Check skylet version compatibility
+        # PR 8324 introduced a breaking change in skylet version 28 that adds
+        # user-specific exit codes. If one version is >= 28 and the other is
+        # not, the test should be skipped as they are incompatible.
+        base_skylet_version = int(self._get_base_skylet_version())
+        current_skylet_version = int(skylet_constants.SKYLET_VERSION)
+        if (base_skylet_version >= 28) != (current_skylet_version >= 28):
+            pytest.skip(
+                f'Skipping test due to incompatible skylet versions: '
+                f'base={base_skylet_version}, current={current_skylet_version}. '
+                f'Skylet version 28 introduced breaking changes for '
+                f'user-specific exit codes.')
+
         managed_job_name = smoke_tests_utils.get_cluster_name()
 
         def launch_job(job_name: str, command: str):
@@ -379,7 +397,7 @@ class TestBackwardCompatibility:
             return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_name,
                 job_status=status,
-                timeout=600 if generic_cloud == 'kubernetes' else 300)
+                timeout=1200 if generic_cloud == 'kubernetes' else 300)
 
         blocking_seconds_for_cancel_job = 2000 if generic_cloud == 'kubernetes' else 1000
 
@@ -475,6 +493,20 @@ class TestBackwardCompatibility:
         # Combine all commands
         current_commands = common_initial_commands + version_specific_commands
 
+        # Check that for a 4GB memory jobs controller, there is only one controller process spawned.
+        # This is a regression test for https://github.com/skypilot-org/skypilot/pull/7278
+        # and https://github.com/skypilot-org/skypilot/pull/7494
+        check_controller_process_count = (
+            's=$(sky status -u) && echo "$s" && '
+            'jobs_controller=$(echo "$s" | grep -oE \'sky-jobs-controller-[0-9a-f]+\' | head -n1) && '
+            'if [ -z "$jobs_controller" ]; then echo "ERROR: jobs controller not found in sky status"; exit 1; fi && '
+            'echo "Jobs controller: $jobs_controller" && '
+            'num_controllers=$(ssh $jobs_controller "pgrep -f msky\\.jobs\\.controller | wc -l") && '
+            'if [ -z "$num_controllers" ]; then echo "ERROR: failed to get controller process count"; exit 1; fi && '
+            'echo "Controller process count: $num_controllers" && '
+            'if [ "$num_controllers" -ne 1 ]; then echo "ERROR: num_controllers is $num_controllers, expected 1"; exit 1; fi'
+        )
+
         commands = [
             *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
@@ -500,6 +532,7 @@ class TestBackwardCompatibility:
                                 [sky.ManagedJobStatus.RUNNING]),
             ),
             *self._switch_to_current(*current_commands),
+            check_controller_process_count,
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
@@ -524,7 +557,12 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}-1 -y',
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
-        self.run_compatibility_test(serve_name, commands, teardown)
+        # NOTE(dev): This test assumes 2 services running at the same time,
+        # which is not enough for low resource config. We disable it for now.
+        self.run_compatibility_test(serve_name,
+                                    commands,
+                                    teardown,
+                                    use_low_resource_config=False)
 
     def test_client_server_compatibility_old_server(self, generic_cloud: str):
         """Test client server compatibility across versions
@@ -563,7 +601,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky jobs launch -d --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
-            f'{self.ACTIVATE_CURRENT} && sky api status',
+            f'{self.ACTIVATE_CURRENT} && sky api status -l none',
             f'{self.ACTIVATE_CURRENT} && sky api info',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep RUNNING',
@@ -571,9 +609,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
             # cluster launch/exec test
-            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} &&'
-            f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_CURRENT} && sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
@@ -655,9 +693,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_BASE} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
             # cluster launch/exec test
-            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} &&'
-            f'sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART}',
             # No restart on switch to base, cli in base, server in current
+            f'{self.ACTIVATE_BASE} && sky launch --infra {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
             f'{self.ACTIVATE_BASE} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
@@ -728,6 +766,19 @@ class TestBackwardCompatibility:
 
     def test_server_downgrade_upgrade_compatibility(self, generic_cloud: str):
         """Test server compatibility between downgrade and upgrade."""
+        # Check skylet version compatibility
+        # PR 8324 introduced a breaking change in skylet version 28 that adds
+        # user-specific exit codes. If one version is >= 28 and the other is
+        # not, the test should be skipped as they are incompatible.
+        base_skylet_version = int(self._get_base_skylet_version())
+        current_skylet_version = int(skylet_constants.SKYLET_VERSION)
+        if (base_skylet_version >= 28) != (current_skylet_version >= 28):
+            pytest.skip(
+                f'Skipping test due to incompatible skylet versions: '
+                f'base={base_skylet_version}, current={current_skylet_version}. '
+                f'Skylet version 28 introduced breaking changes for '
+                f'user-specific exit codes.')
+
         cluster_name = smoke_tests_utils.get_cluster_name()
 
         commands = [

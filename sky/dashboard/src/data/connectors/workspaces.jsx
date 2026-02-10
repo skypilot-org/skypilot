@@ -691,3 +691,21 @@ export async function updateConfig(config) {
     throw error;
   }
 }
+
+// Run sky check to refresh cloud credentials
+// This is useful when refreshing the infra page to detect new clouds
+export async function runSkyCheck() {
+  try {
+    console.log('Running sky check to refresh cloud credentials');
+    const response = await apiClient.fetch('/check', {}, 'POST');
+    if (!response.ok) {
+      throw new Error(
+        `Sky check failed: ${response.statusText} (status ${response.status})`
+      );
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to run sky check:', error);
+    throw error;
+  }
+}

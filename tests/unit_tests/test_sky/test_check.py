@@ -1,5 +1,6 @@
 """Unit tests for `sky check` output formatting from sky/check.py."""
 import re
+from unittest import mock
 
 from click import testing as cli_testing
 import pytest
@@ -7,7 +8,9 @@ import pytest
 from sky import clouds as sky_clouds
 import sky.check as sky_check
 from sky.client.cli import command
+from sky.clouds import cloud as sky_cloud
 from sky.clouds.cloud import CloudCapability
+from sky.utils import config_utils
 
 
 def strip_ansi(s: str) -> str:
@@ -345,3 +348,127 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
     assert 'ctx-b' not in ws1_section
+
+
+def test_workspace_cloud_capabilities():
+    """Test getting the capabilities for a cloud in a workspace."""
+    test_config = config_utils.Config({
+        'aws': {
+            'capabilities': [CloudCapability.COMPUTE]
+        },
+        'workspaces': {
+            'workspace1': {
+                'aws': {
+                    'capabilities': [CloudCapability.STORAGE]
+                }
+            },
+            'workspace2': {
+                'gcp': {
+                    'capabilities': [CloudCapability.COMPUTE]
+                }
+            },
+        }
+    })
+    with mock.patch('sky.skypilot_config._get_loaded_config',
+                    return_value=test_config):
+        # use global config
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'default', 'aws')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+        # use workspace config, overridden not merged.
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace1', 'aws')
+        assert capabilities == [CloudCapability.STORAGE]
+
+        # use global config since workspace config is not specified
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace2', 'aws')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+        # use global config since workspace config is not specified
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace3', 'aws')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+        # no config specified for this cloud in default workspace
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'default', 'gcp')
+        assert capabilities == None
+
+        # no config specified for this cloud in workspace nor global config
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace1', 'gcp')
+        assert capabilities == None
+
+        # use workspace config
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace2', 'gcp')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+
+def test_enabled_capabilities_detection():
+    """Test detecting enabled capabilities from cloud credentials
+    in check_capabilities."""
+    with mock.patch('sky.skypilot_config._get_loaded_config',
+                    return_value=config_utils.Config()):
+        # test all capabilities enabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default'][
+                    'AWS'] == sky_cloud.ALL_CAPABILITIES
+
+        # test compute capability enabled, storage capability disabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default']['AWS'] == [
+                    CloudCapability.COMPUTE
+                ]
+
+        # test compute capability disabled, storage capability enabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(False, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default']['AWS'] == [
+                    CloudCapability.STORAGE
+                ]
+
+        # test both capabilities disabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(False, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert 'AWS' not in capabilities_result['default']
