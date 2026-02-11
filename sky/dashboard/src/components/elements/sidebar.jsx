@@ -26,7 +26,7 @@ import {
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity, Network, MoreHorizontal } from 'lucide-react';
+import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity, Network, MoreHorizontal, ChevronsUpDown } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -781,6 +781,7 @@ export function TopBar() {
                 <span className={`ml-3 whitespace-nowrap text-gray-700 truncate transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
                   Profile
                 </span>
+                <ChevronsUpDown className={`w-3.5 h-3.5 ml-auto text-gray-400 shrink-0 transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`} />
                 {collapsed && (
                   <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
                     Profile
