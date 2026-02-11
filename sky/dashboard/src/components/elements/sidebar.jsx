@@ -628,7 +628,7 @@ export function TopBar() {
         </div>
 
         {/* Plugin badge slot (e.g. trial countdown) — hidden when collapsed */}
-        <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 pb-1 flex justify-center'} />
+        <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 flex justify-center'} />
 
         {/* Primary nav (scrollable) */}
         <nav ref={navRef} className={`flex-1 py-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
