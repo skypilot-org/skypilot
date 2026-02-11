@@ -307,6 +307,9 @@ def _get_single_resources_schema():
             'network_tier': {
                 'type': 'string',
             },
+            'local_disk': {
+                'type': 'string',
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -523,6 +526,17 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
+    # Refer to https://rclone.org/docs/#options for more information
+    # on rclone-specific nomenclature.
+    rclone_memory_units = ('B', 'K', 'M', 'G', 'T', 'P')
+    rclone_memory_pattern = (
+        '^[0-9]+('
+        f'{"|".join([unit.lower() for unit in rclone_memory_units])}|'
+        f'{"|".join([unit.upper() for unit in rclone_memory_units])})?$')
+    rclone_duration_pattern = (
+        r'^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
+        r'(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -577,6 +591,47 @@ def get_storage_schema():
                     },
                     'attach_mode': {
                         'type': 'string',
+                    },
+                    'mount_cached': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'transfers': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'buffer_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_age': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'vfs_read_ahead': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_streams': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'vfs_write_back': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
                     },
                 },
             },
@@ -1973,6 +2028,7 @@ def get_config_schema():
         else:
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
 
+    # TODO (kyuds): deprecated; remove v0.13.0
     data_schema = {
         'type': 'object',
         'required': [],

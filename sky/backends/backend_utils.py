@@ -765,19 +765,24 @@ def write_cluster_config(
                     region=None,
                     keys=('allowed_contexts',),
                     default_value=None)
-            if allowed_contexts is None:
-                # Exclude both Kubernetes and SSH explicitly since:
-                # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
-                #    inherits from Kubernetes)
-                # 2. Both share the same get_credential_file_mounts() which
-                #    returns the kubeconfig. So if we don't exclude both, the
-                #    unexcluded one will upload the kubeconfig.
-                # TODO(romilb): This is a workaround. The right long-term fix
-                # is to have SSH Node Pools use its own kubeconfig instead of
-                # sharing the global kubeconfig at ~/.kube/config. In the
-                # interim, SSH Node Pools' get_credential_file_mounts can filter
-                # contexts starting with ssh- and create a temp kubeconfig
-                # to upload.
+            # Exclude both Kubernetes and SSH explicitly since:
+            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
+            #    inherits from Kubernetes)
+            # 2. Both share the same get_credential_file_mounts() which
+            #    returns the kubeconfig. So if we don't exclude both, the
+            #    unexcluded one will upload the kubeconfig.
+            # TODO(romilb): This is a workaround. The right long-term fix
+            # is to have SSH Node Pools use its own kubeconfig instead of
+            # sharing the global kubeconfig at ~/.kube/config. In the
+            # interim, SSH Node Pools' get_credential_file_mounts can filter
+            # contexts starting with ssh- and create a temp kubeconfig
+            # to upload.
+            # When allowed_contexts is not set, or when it is set for a
+            # non-controller cluster, we exclude kubeconfig upload. Controller
+            # clusters need kubeconfig to manage other K8s clusters.
+            is_controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False) is not None
+            if allowed_contexts is None or not is_controller:
                 excluded_clouds.add(clouds.Kubernetes())
                 excluded_clouds.add(clouds.SSH())
         else:

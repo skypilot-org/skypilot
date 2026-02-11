@@ -115,12 +115,12 @@ SkyPilot requires permissions equivalent to the following roles to be able to ma
 
 These roles must apply to both the user account configured in the kubeconfig file and the service account used by SkyPilot (if configured).
 
-If you need to view real-time GPU availability with ``sky show-gpus``, your tasks use object store mounting or your tasks require access to ingress resources, you will need to grant additional permissions as described below.
+If you need to view real-time GPU availability with ``sky gpus list``, your tasks use object store mounting or your tasks require access to ingress resources, you will need to grant additional permissions as described below.
 
-Permissions for ``sky show-gpus``
+Permissions for ``sky gpus list``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``sky show-gpus`` needs to list all pods across all namespaces to calculate GPU availability. To do this, SkyPilot needs the ``get`` and ``list`` permissions for pods in a ``ClusterRole``:
+``sky gpus list`` needs to list all pods across all namespaces to calculate GPU availability. To do this, SkyPilot needs the ``get`` and ``list`` permissions for pods in a ``ClusterRole``:
 
 .. code-block:: yaml
 
@@ -136,7 +136,7 @@ Permissions for ``sky show-gpus``
 
 .. tip::
 
-    If this role is not granted to the service account, ``sky show-gpus`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
+    If this role is not granted to the service account, ``sky gpus list`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
 
 
 Permissions for object store mounting
@@ -278,7 +278,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
       - apiGroups: ["networking.k8s.io"]   # Required for exposing services through ingresses
         resources: ["ingressclasses"]
         verbs: ["get", "list", "watch"]
-      - apiGroups: [""]                 # Required for `sky show-gpus` command
+      - apiGroups: [""]                 # Required for `sky gpus list` command
         resources: ["pods"]
         verbs: ["get", "list"]
       - apiGroups: ["storage.k8s.io"]   # Required for using volumes

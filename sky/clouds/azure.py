@@ -102,6 +102,8 @@ class Azure(clouds.Cloud):
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
                 f'Customized multiple network interfaces are not supported on {cls._REPR}.'
             ),
+            clouds.CloudImplementationFeatures.LOCAL_DISK:
+                (f'Local disk is not supported on {cls._REPR}')
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -164,11 +166,13 @@ class Azure(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='azure')
@@ -513,6 +517,7 @@ class Azure(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -530,6 +535,7 @@ class Azure(clouds.Cloud):
              cpus=resources.cpus,
              memory=resources.memory,
              use_spot=resources.use_spot,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='azure')

@@ -198,6 +198,13 @@ class EnabledCloudsBody(RequestBody):
     expand: bool = False
 
 
+class KubernetesLabelGpusBody(RequestBody):
+    """The request body for the GPU labeling endpoint."""
+    context: Optional[str] = None
+    cleanup_only: bool = False
+    wait_for_completion: bool = True
+
+
 class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str

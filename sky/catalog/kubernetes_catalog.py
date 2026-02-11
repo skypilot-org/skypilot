@@ -325,7 +325,7 @@ def _list_accelerators(
     df['GpuInfo'] = True
 
     # Use common.list_accelerators_impl to get InstanceTypeInfo objects used
-    # by sky show-gpus when cloud is not specified.
+    # by sky gpus list when cloud is not specified.
     qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
                                              name_filter, region_filter,
                                              quantity_filter, case_sensitive)

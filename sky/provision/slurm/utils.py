@@ -71,6 +71,15 @@ def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
     return None
 
 
+def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
+    """Check if IdentitiesOnly is set to yes in SSH config.
+
+    Returns True if IdentitiesOnly is explicitly set to 'yes', False otherwise.
+    """
+    identities_only = ssh_config_dict.get('identitiesonly', '')
+    return identities_only.lower() == 'yes'
+
+
 @annotations.lru_cache(scope='request')
 def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
     cache_key = f'slurm:nodes_info:{cluster}'
@@ -88,6 +97,7 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
     nodes_info = client.info_nodes()
 
@@ -124,6 +134,7 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
         get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
     proctrack_type = client.get_proctrack_type()
 
@@ -324,6 +335,7 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
 
     return client.get_default_partition()
@@ -505,6 +517,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
             get_identity_file(ssh_config_dict),
             ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
             ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(ssh_config_dict),
         )
 
         nodes = client.info_nodes()
@@ -553,6 +566,7 @@ def _get_slurm_node_info_list(
         get_identity_file(slurm_config_dict),
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(slurm_config_dict),
     )
     node_infos = slurm_client.info_nodes()
 
@@ -701,6 +715,7 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             get_identity_file(slurm_config_dict),
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(slurm_config_dict),
         )
 
         partitions_info = client.get_partitions_info()

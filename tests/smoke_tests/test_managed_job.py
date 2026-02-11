@@ -1230,6 +1230,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
 
 
 # ---------- Testing spot TPU ----------
+@pytest.mark.skip(reason='We are having trouble getting TPUs in GCP.')
 @pytest.mark.gcp
 @pytest.mark.managed_jobs
 @pytest.mark.tpu

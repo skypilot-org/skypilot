@@ -352,6 +352,40 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(34)
+@annotations.client_api
+def kubernetes_label_gpus(
+    context: Optional[str] = None,
+    cleanup_only: bool = False,
+    wait_for_completion: bool = True,
+) -> server_common.RequestId[Dict[str, Any]]:
+    """Labels GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    Note: Currently only supports NVIDIA GPUs. AMD GPUs must be labeled
+    manually.
+
+    Args:
+        context: Kubernetes context to use. If None, uses current context.
+        cleanup_only: If True, only cleanup existing labeling resources.
+        wait_for_completion: If True, wait for labeling jobs to complete.
+
+    Returns:
+        RequestId for the labeling operation.
+    """
+    body = payloads.KubernetesLabelGpusBody(
+        context=context,
+        cleanup_only=cleanup_only,
+        wait_for_completion=wait_for_completion,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/kubernetes_label_gpus',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def optimize(
     dag: 'sky.Dag',
@@ -428,9 +462,21 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
+
+    def _omit(version: int) -> bool:
+        return remote_api_version is None or remote_api_version < version
+
     # TODO(kevin): remove this in v0.13.0
-    omit_user_specified_yaml = (remote_api_version is None or
-                                remote_api_version < 15)
+    omit_user_specified_yaml = _omit(15)
+    # TODO (kyuds): remove this in v0.13.0
+    omit_local_disk = _omit(35)
+    omit_mount_cached_config = _omit(37)
+    if omit_local_disk:
+        logger.debug('`local_disk` is ignored because the server does '
+                     'not support it yet.')
+    if omit_mount_cached_config:
+        logger.debug('`mount_cached_config` is ignored because the server '
+                     'does not support it yet.')
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -438,6 +484,14 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
+        if omit_local_disk:
+            for resource in task.resources:
+                # pylint: disable=protected-access
+                resource._set_local_disk(None)
+        if omit_mount_cached_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_cached_config = None
+
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
