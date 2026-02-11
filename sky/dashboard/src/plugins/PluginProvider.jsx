@@ -753,7 +753,17 @@ export function usePluginRoute(pathname) {
     if (!pathname) {
       return null;
     }
-    return routes.find((route) => route.path === pathname) || null;
+    // Use prefix matching so plugin sub-routes (e.g. /plugins/my-plugin/details)
+    // are handled by the plugin that registered the base path (/plugins/my-plugin).
+    // Sort by path length descending so the most specific match wins.
+    return (
+      [...routes]
+        .sort((a, b) => b.path.length - a.path.length)
+        .find(
+          (route) =>
+            pathname === route.path || pathname.startsWith(route.path + '/')
+        ) || null
+    );
   }, [pathname, routes]);
 }
 
