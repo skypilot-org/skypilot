@@ -797,7 +797,7 @@ export function TopBar() {
               </button>
 
               {isDropdownOpen && (
-                <div className={`absolute bottom-full mb-1 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200 ${collapsed ? 'left-full ml-1' : 'left-0'}`}>
+                <div className={`absolute bottom-full mb-1 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200 ${collapsed ? 'left-full ml-1' : 'left-1/2 -translate-x-1/2'}`}>
                   {renderUserDropdownContent()}
                 </div>
               )}
