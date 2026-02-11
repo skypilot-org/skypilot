@@ -746,6 +746,7 @@ grafana:
     # Enable datasources discovery in grafana sidecar.
     datasources:
       enabled: true
+      initDatasources: true
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true
