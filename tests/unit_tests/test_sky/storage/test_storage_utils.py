@@ -174,6 +174,42 @@ def test_get_excluded_files_from_skyignore_with_negation():
         assert 'keep.txt' not in excluded_files
 
 
+def test_get_excluded_files_from_skyignore_empty_negation_pattern():
+    """Test that a line with just '!' is ignored (matches gitignore behavior).
+
+    A lone '!' should not accidentally re-include all files. This aligns with
+    gitignore semantics where empty patterns match nothing.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create test files
+        files = ['config.json', 'data.json', 'keep.txt']
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write('test content')
+
+        # Create .skyignore with a lone '!' which should be ignored
+        skyignore_content = textwrap.dedent("""\
+            # Exclude all json files
+            *.json
+            # A lone '!' should be ignored, not re-include everything
+            !
+            """)
+        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        # Test function
+        excluded_files = storage_utils.get_excluded_files_from_skyignore(
+            temp_dir)
+
+        # All json files should still be excluded (the lone '!' had no effect)
+        assert 'config.json' in excluded_files
+        assert 'data.json' in excluded_files
+        # Non-json files should not be affected
+        assert 'keep.txt' not in excluded_files
+
+
 def test_get_excluded_files_from_skyignore_negation_order_matters():
     """Test that negation only affects files excluded by earlier patterns."""
     with tempfile.TemporaryDirectory() as temp_dir:

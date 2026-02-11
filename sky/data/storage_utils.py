@@ -49,6 +49,11 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                     is_negation = line.startswith('!')
                     if is_negation:
                         line = line[1:]  # Remove '!' prefix
+                    # Skip empty patterns (e.g., a line with just '!')
+                    # This aligns with gitignore behavior where empty patterns
+                    # match nothing.
+                    if not line:
+                        continue
 
                     # Make parsing consistent with rsync.
                     # Rsync uses '/' as current directory.
