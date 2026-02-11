@@ -327,9 +327,6 @@ class MountCachedConfig:
     # Number of file transfers to run in parallel.
     # rclone flag: --transfers
     transfers: Optional[int] = None
-    # Number of threads for multi-part upload of a single file.
-    # rclone flag: --multi-thread-streams
-    multi_thread_streams: Optional[int] = None
     # In-memory buffer size per transfer (e.g. "64M").
     # rclone flag: --buffer-size
     buffer_size: Optional[str] = None
@@ -369,8 +366,6 @@ class MountCachedConfig:
             # higher number of transfers.
             checkers = min(self.transfers * 2, 30 + self.transfers * 1.2)
             flags.append(f'--checkers {max(checkers, 4)}')
-        if self.multi_thread_streams is not None:
-            flags.append(f'--multi-thread-streams {self.multi_thread_streams}')
         if self.buffer_size is not None:
             flags.append(f'--buffer-size {self.buffer_size.upper()}')
         if self.vfs_cache_max_size is not None:
