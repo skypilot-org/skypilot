@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 34  # add graceful flag for managed jobs
+API_VERSION = 38  # add graceful flag for managed jobs
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -29,6 +29,9 @@ API_VERSION_HEADER = 'X-SkyPilot-API-Version'
 
 # The HTTP header name for the SkyPilot version of the sender.
 VERSION_HEADER = 'X-SkyPilot-Version'
+
+# Minimum client API version required to launch recipes.
+MIN_RECIPE_LAUNCH_API_VERSION = 33
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

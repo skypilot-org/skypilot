@@ -1391,7 +1391,7 @@ const FilterDropdown = ({
 
   const [isOpen, setIsOpen] = useState(false);
   const [value, setValue] = useState('');
-  const [propertyValue, setPropertValue] = useState('status');
+  const [propertyValue, setPropertyValue] = useState('cluster');
   const [valueOptions, setValueOptions] = useState([]);
 
   // Handle clicks outside the dropdown
@@ -1548,7 +1548,7 @@ const FilterDropdown = ({
   return (
     <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
       <div className="border-r border-gray-300 flex-shrink-0">
-        <Select onValueChange={setPropertValue} value={propertyValue}>
+        <Select onValueChange={setPropertyValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
             className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm"

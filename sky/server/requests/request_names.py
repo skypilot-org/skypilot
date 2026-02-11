@@ -13,6 +13,7 @@ class RequestName(str, enum.Enum):
     REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
     SLURM_NODE_INFO = 'slurm_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
+    KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'
     LIST_ACCELERATORS = 'list_accelerators'
     LIST_ACCELERATOR_COUNTS = 'list_accelerator_counts'
     OPTIMIZE = 'optimize'

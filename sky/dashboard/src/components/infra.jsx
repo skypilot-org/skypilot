@@ -89,6 +89,7 @@ import {
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
@@ -267,10 +268,10 @@ export function InfrastructureSection({
               <div
                 className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                   isTableRefreshing ? 'infra-table-refreshing' : ''
-                }`}
+                } ${safeContexts.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
               >
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                         Name
@@ -302,9 +303,7 @@ export function InfrastructureSection({
                       </th>
                     </tr>
                   </thead>
-                  <tbody
-                    className={`bg-white divide-y divide-gray-200 ${safeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                  >
+                  <tbody className="bg-white divide-y divide-gray-200">
                     {safeContexts.map((context) => {
                       const gpus = groupedPerContextGPUs[context] || [];
                       const nodes = groupedPerNodeGPUs[context] || [];
@@ -491,10 +490,10 @@ export function InfrastructureSection({
                 <div
                   className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                     isTableRefreshing ? 'infra-table-refreshing' : ''
-                  }`}
+                  } ${gpus.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
                 >
                   <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
                           GPU
@@ -515,9 +514,7 @@ export function InfrastructureSection({
                         </th>
                       </tr>
                     </thead>
-                    <tbody
-                      className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                    >
+                    <tbody className="bg-white divide-y divide-gray-200">
                       {gpus.map((gpu) => {
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs

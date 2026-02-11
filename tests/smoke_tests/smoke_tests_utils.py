@@ -527,7 +527,7 @@ def override_sky_config(
         original_config = skypilot_config.parse_and_validate_config_file(
             env_dict[skypilot_config.ENV_VAR_GLOBAL_CONFIG])
     else:
-        original_config = skypilot_config.config_utils.Config()
+        original_config = skypilot_config.get_user_config()
     overlay_config = skypilot_config.overlay_skypilot_config(
         original_config, override_sky_config_dict)
     temp_config_file.write(yaml_utils.dump_yaml_str(dict(overlay_config)))
@@ -1240,7 +1240,7 @@ def get_available_gpus(default_gpu: str = 'T4',
         env_file = pytest_config_file_override()
         if env_file is not None:
             prefix = f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}={env_file}'
-        command = f'{prefix} sky show-gpus --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
+        command = f'{prefix} sky gpus list --infra {infra} | grep -A1 "^GPU" | grep " {count}" | tail -1 | awk "{{print \$1}}"'
         Test.echo_without_prefix(command)
         result = subprocess_utils.run(command,
                                       shell=True,

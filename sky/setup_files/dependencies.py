@@ -76,7 +76,8 @@ install_requires = [
     'psycopg2-binary',
     'aiosqlite',
     'asyncpg',
-    # Required by sqlalchemy.ext.asyncio which is used in sky/utils/db/db_utils.py
+    # Required by sqlalchemy.ext.asyncio which is used in
+    # sky/utils/db/db_utils.py
     'greenlet',
     # TODO(hailong): These three dependencies should be removed after we make
     # the client-side actually not importing them.
@@ -250,6 +251,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
+    'yotta': [],  # No dependencies needed for Yotta
 }
 
 # Calculate which clouds should be included in the [all] installation.
@@ -259,6 +261,9 @@ if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    # latest ibm-cloud-sdk-core installation fails on Python 3.9,
+    # so we remove it from the [all] installation.
+    clouds_for_all.remove('ibm')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds

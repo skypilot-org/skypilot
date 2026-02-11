@@ -860,3 +860,52 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+
+  # Test cases for SKYPILOT_INGRESS_BASIC_AUTH_ENABLED environment variable
+  - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authSecret
+    set:
+      ingress.enabled: true
+      ingress.authSecret: my-auth-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            value: "true"
+
+  - it: should set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress basic auth is enabled via authCredentials
+    set:
+      ingress.enabled: true
+      ingress.authCredentials: "user:password"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+            value: "true"
+
+  - it: should not set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress is enabled but no auth configured
+    set:
+      ingress.enabled: true
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+
+  - it: should not set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED when ingress is disabled even with authSecret
+    set:
+      ingress.enabled: false
+      ingress.authSecret: my-auth-secret
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+
+  - it: should not set SKYPILOT_INGRESS_BASIC_AUTH_ENABLED by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED

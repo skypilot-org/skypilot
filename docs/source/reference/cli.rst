@@ -185,13 +185,36 @@ Admin CLI
    :nested: full
 
 
-Utils: ``show-gpus``/``check``/``cost-report``
--------------------------------------------------
+GPUs CLI
+--------
+
+.. _sky-gpus:
+.. click:: sky.client.cli.command:gpus_cli
+   :prog: sky gpus
+   :nested: full
+
+.. _sky-gpus-list:
+.. click:: sky.client.cli.command:gpus_list
+   :prog: sky gpus list
+   :nested: full
+
+.. _sky-gpus-label:
+.. click:: sky.client.cli.command:gpus_label
+   :prog: sky gpus label
+   :nested: full
+
+
+Utils: ``check``/``cost-report``/``show-gpus``
+----------------------------------------------
 
 .. _sky-show-gpus:
 .. click:: sky.client.cli.command:show_gpus
    :prog: sky show-gpus
    :nested: full
+
+.. note::
+
+   ``sky show-gpus`` is deprecated. Use ``sky gpus list`` instead.
 
 .. _sky-check:
 .. click:: sky.client.cli.command:check

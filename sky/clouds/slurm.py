@@ -1,7 +1,7 @@
 """Slurm."""
 
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
@@ -47,6 +47,8 @@ class Slurm(clouds.Cloud):
             'controllers is not '
             'well tested with '
             'Slurm.',
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -285,12 +287,14 @@ class Slurm(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for Slurm."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='slurm')
@@ -317,7 +321,7 @@ class Slurm(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del cluster_name, dryrun, volume_mounts  # Unused.
         if region is not None:
             cluster = region.name
@@ -378,6 +382,8 @@ class Slurm(clouds.Cloud):
             'ssh_user': ssh_config_dict['user'],
             'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
             'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
+            'slurm_identities_only':
+                slurm_utils.get_identities_only(ssh_config_dict),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': slurm_utils.get_identity_file(ssh_config_dict),
@@ -430,6 +436,7 @@ class Slurm(clouds.Cloud):
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier,
+            local_disk=resources.local_disk,
             region=resources.region,
             zone=resources.zone)
         if default_instance_type is None:
@@ -509,7 +516,10 @@ class Slurm(clouds.Cloud):
                     ssh_config_dict['user'],
                     slurm_utils.get_identity_file(ssh_config_dict),
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
+                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+                    identities_only=slurm_utils.get_identities_only(
+                        ssh_config_dict),
+                )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
                 ctx2text[cluster] = 'enabled'

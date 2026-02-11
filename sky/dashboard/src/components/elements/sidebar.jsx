@@ -46,6 +46,7 @@ import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { UpgradeHint } from '@/components/elements/version-display';
 import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -722,6 +723,13 @@ export function TopBar() {
                     >
                       See all users
                     </Link>
+                    <PluginSlot
+                      name="user-menu"
+                      wrapperClassName="contents"
+                      context={{
+                        closeDropdown: () => setIsDropdownOpen(false),
+                      }}
+                    />
                   </div>
                 )}
               </div>
