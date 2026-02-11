@@ -1645,6 +1645,11 @@ class ControllerManager:
         # launch).
         self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
+        # Store graceful cancel info per job, keyed by job_id.
+        # Populated by cancel_job() and consumed by run_job().
+        self._cancel_info: Dict[int, Tuple[bool, Optional[int]]] = {}
+        self._cancel_info_lock = asyncio.Lock()
+
         self._pid = os.getpid()
         self._pid_started_at = psutil.Process(self._pid).create_time()
 
@@ -1823,8 +1828,7 @@ class ControllerManager:
                     '%s', job_id, e)
 
         cancelling = False
-        graceful = False
-        graceful_timeout = None
+        graceful, graceful_timeout = False, None
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
@@ -1841,21 +1845,15 @@ class ControllerManager:
                 task = asyncio.create_task(controller.run())
                 self.job_tasks[job_id] = task
             await task
-        except asyncio.CancelledError as e:
+        except asyncio.CancelledError:
             logger.info(f'Job {job_id} was cancelled')
 
-            if e.args:
-                contents = e.args[0]
-                if contents and contents.startswith('graceful'):
-                    graceful = True
-                    if ':' in contents:
-                        try:
-                            graceful_timeout = int(contents.split(':')[1])
-                        except (ValueError, IndexError):
-                            graceful_timeout = None
-                    logger.info(
-                        f'Job {job_id} graceful cancel: '
-                        f'graceful={graceful}, timeout={graceful_timeout}')
+            async with self._cancel_info_lock:
+                cancel_info = self._cancel_info.pop(job_id, None)
+            if cancel_info is not None:
+                graceful, graceful_timeout = cancel_info
+                logger.info(f'Job {job_id} graceful cancel: '
+                            f'graceful={graceful}, timeout={graceful_timeout}')
 
             dag = _get_dag(job_id)
             task_id, _ = await (
@@ -1980,9 +1978,20 @@ class ControllerManager:
                         except Exception:  # pylint: disable=broad-except
                             content = ''
 
-                        # Run the cancellation in the background, so we can
-                        # return immediately.
-                        task.cancel(msg=content)
+                        # Parse and store graceful cancel info before
+                        # cancelling the task.
+                        if content and content.startswith('graceful'):
+                            graceful_timeout = None
+                            if ':' in content:
+                                try:
+                                    graceful_timeout = int(
+                                        content.split(':')[1])
+                                except (ValueError, IndexError):
+                                    pass
+                            async with self._cancel_info_lock:
+                                self._cancel_info[job_id] = (True,
+                                                             graceful_timeout)
+                        task.cancel()
                         logger.info(f'Job {job_id} cancelled successfully')
 
                         os.remove(signal_path)
