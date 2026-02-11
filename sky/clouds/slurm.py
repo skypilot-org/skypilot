@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -75,8 +76,11 @@ class Slurm(clouds.Cloud):
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
         # Docker image support requires the Pyxis SPANK plugin.
-        # Start by marking it unsupported, then remove if any cluster
-        # has Pyxis installed.
+        # When region is None, we check all clusters and mark Docker as
+        # supported if ANY cluster has Pyxis. This is intentionally
+        # permissive -- per-cluster filtering happens in
+        # regions_with_offering(), which calls check_features_are_supported()
+        # with a specific region to filter out non-Pyxis clusters.
         unsupported[clouds.CloudImplementationFeatures.DOCKER_IMAGE] = (
             'Docker image is not supported on this Slurm cluster because '
             'the Pyxis plugin is not installed. Please ask your cluster '
@@ -220,7 +224,7 @@ class Slurm(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None
     ) -> List[clouds.Region]:
-        del accelerators, use_spot, resources  # unused
+        del accelerators, use_spot  # unused
         existing_clusters = cls.existing_allowed_clusters()
 
         regions: List[clouds.Region] = []
@@ -244,6 +248,23 @@ class Slurm(clouds.Cloud):
             if zones:
                 r.set_zones(zones)
             regions.append(r)
+
+        # Filter out clusters that do not support the requested features
+        # (e.g., Docker image requires Pyxis).
+        if resources is not None:
+            resources_required_features = (
+                resources.get_required_cloud_features())
+            filtered_regions = []
+            for r in regions:
+                try:
+                    cls.check_features_are_supported(
+                        resources, resources_required_features, r.name)
+                    filtered_regions.append(r)
+                except exceptions.NotSupportedError as e:
+                    logger.info(f'Excluding Slurm cluster '
+                                f'{r.name!r}: {e}')
+                    continue
+            regions = filtered_regions
 
         # Check if requested instance type will fit in the cluster.
         if instance_type is None:
