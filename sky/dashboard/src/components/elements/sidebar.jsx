@@ -555,17 +555,8 @@ export function TopBar() {
             closeDropdown: () => setIsDropdownOpen(false),
           }}
         />
-        {/* Settings & external links collapsed into profile menu */}
+        {/* External links in profile menu */}
         <div className="border-t border-gray-200 mx-1 my-1"></div>
-        <Link
-          href="/config"
-          className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
-          onClick={() => setIsDropdownOpen(false)}
-          prefetch={false}
-        >
-          <Settings className="w-4 h-4 mr-2 text-gray-400" />
-          Settings
-        </Link>
         {externalLinks.map((link) => (
           <a
             key={link.href}
@@ -758,7 +749,28 @@ export function TopBar() {
             </div>
           )}
 
-          {/* When SSO: links are in the profile dropdown, not shown here */}
+          {/* SSO: Settings in sidebar footer (external links stay in profile dropdown) */}
+          {userEmail && (
+            <Link
+              href="/config"
+              className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
+                isActivePath('/config')
+                  ? 'bg-blue-50/50 text-blue-600 font-medium hover:bg-gray-50/50'
+                  : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
+              }`}
+              prefetch={false}
+            >
+              <Settings className={`w-4 h-4 shrink-0 ${isActivePath('/config') ? 'text-blue-600' : 'text-gray-400'}`} />
+              <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
+                Settings
+              </span>
+              {collapsed && (
+                <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
+                  Settings
+                </span>
+              )}
+            </Link>
+          )}
 
           {/* Upgrade hint */}
           {!collapsed && <UpgradeHint />}
