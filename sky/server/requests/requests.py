@@ -1158,6 +1158,7 @@ async def _delete_requests(request_ids: List[str]):
             logger.debug(f'End deleting requests {request_ids}')
 
 
+# TODO Remove this function on or after v0.15.0
 def _get_legacy_log_path(request_id: str) -> pathlib.Path:
     """Get the legacy log path for a request (for backward compatibility).
 
@@ -1169,6 +1170,7 @@ def _get_legacy_log_path(request_id: str) -> pathlib.Path:
     return (legacy_path_prefix / request_id).with_suffix('.log')
 
 
+# TODO Remove this function on or after v0.15.0
 async def _cleanup_legacy_directory_if_empty():
     """Remove legacy request log directory if empty.
 
@@ -1227,6 +1229,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
                     anyio.Path(
                         req.log_path.absolute()).unlink(missing_ok=True)))
             # Also delete from legacy path for backward compatibility
+            # TODO Remove this on or after v0.15.0
             legacy_log_path = _get_legacy_log_path(req.request_id)
             futs.append(
                 asyncio.create_task(
@@ -1239,6 +1242,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             break
 
     # Try to clean up the legacy directory if it's empty
+    # TODO Remove this on or after v0.15.0
     await _cleanup_legacy_directory_if_empty()
 
     # To avoid leakage of the log file, logs must be deleted before the
