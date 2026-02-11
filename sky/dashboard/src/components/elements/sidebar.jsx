@@ -509,14 +509,9 @@ export function TopBar() {
     }
     return (
       <>
-        <div className="px-4 pt-2 pb-1 text-sm font-medium text-gray-900">
-          {displayName}
+        <div className="px-4 pt-2 pb-1 text-xs text-gray-500">
+          {emailToDisplay || displayName}
         </div>
-        {emailToDisplay && (
-          <div className="px-4 pt-0 pb-1 text-xs text-gray-500">
-            {emailToDisplay}
-          </div>
-        )}
         {userRole && (
           <div className="px-4 pt-0 pb-2 text-xs">
             {userRole === 'admin' ? (
