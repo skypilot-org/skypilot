@@ -1320,7 +1320,7 @@ To enable debug logging for all requests on server side, set
       --set-string 'apiService.extraEnvs[0].value=true'
 
 
-Debug level logs for each request are saved to ``~/.sky/logs/request_debug/<request_id>.log`` on the API server.
+Debug level logs for each request are saved to ``~/sky_logs/request_debug/<request_id>.log`` on the API server.
 Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server
