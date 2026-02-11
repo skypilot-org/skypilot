@@ -676,6 +676,6 @@ class SlurmClient:
         Returns:
             True if Pyxis is installed, False otherwise.
         """
-        cmd = "srun --help 2>&1 | grep -q '\\[pyxis\\]'"
+        cmd = 'srun --help 2>&1 | grep -q \'\\[pyxis\\]\''
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
