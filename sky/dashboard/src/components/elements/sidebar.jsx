@@ -786,12 +786,12 @@ export function TopBar() {
                   {getUserInitial(userEmail)}
                 </div>
                 <span className={`ml-3 whitespace-nowrap text-gray-700 truncate transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
-                  Profile
+                  {userEmail && userEmail.includes('@') ? userEmail.split('@')[0] : (userEmail || 'Profile')}
                 </span>
                 <ChevronsUpDown className={`w-3.5 h-3.5 ml-auto text-gray-400 shrink-0 transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`} />
                 {collapsed && (
                   <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                    Profile
+                    {userEmail && userEmail.includes('@') ? userEmail.split('@')[0] : (userEmail || 'Profile')}
                   </span>
                 )}
               </button>
