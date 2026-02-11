@@ -1,5 +1,5 @@
 # Stage 1: Install Google Cloud SDK using APT
-FROM python:3.10.18-slim AS gcloud-apt-install
+FROM python:3.10.19-slim AS gcloud-apt-install
 
 RUN apt-get update && \
     apt-get install -y curl gnupg lsb-release && \
@@ -13,7 +13,7 @@ RUN apt-get update && \
     /var/lib/apt/lists/*
 
 # Stage 2: Main image
-FROM python:3.10.18-slim
+FROM python:3.10.19-slim
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
