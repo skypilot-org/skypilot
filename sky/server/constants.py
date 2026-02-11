@@ -87,3 +87,13 @@ EMPTY_PICKLED_VALUE = 'gAROLg=='
 # confusing to users.
 OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
+
+# The websockets library (used by uvicorn for WebSocket upgrades) defaults to
+# MAX_LINE_LENGTH=8192 bytes per header line. Enterprise SSO cookies from
+# oauth2proxy (Azure AD, Okta, etc.) commonly exceed 8KB, causing WebSocket
+# upgrade requests to be rejected with HTTP 400. Regular HTTP requests (parsed
+# by h11 with a 16KB default) are unaffected. These constants raise the limit
+# so that WebSocket upgrades succeed with large auth cookies.
+# The env vars are read by websockets at import time.
+WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
+WEBSOCKETS_MAX_NUM_HEADERS = '256'

@@ -2788,6 +2788,15 @@ def _init_or_restore_server_user_hash():
 
 
 if __name__ == '__main__':
+    # Raise the websockets library header limits before importing uvicorn.
+    # The env vars are read by websockets.http11 and websockets.legacy.http
+    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
+    os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
+                          server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
+    os.environ.setdefault('WEBSOCKETS_MAX_NUM_HEADERS',
+                          server_constants.WEBSOCKETS_MAX_NUM_HEADERS)
+
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
