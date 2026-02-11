@@ -25,6 +25,7 @@ import {
   RepeatIcon,
   KeyIcon,
   ShieldIcon,
+  CodeSquareIcon,
 } from '@/components/elements/icons';
 import { Settings, User, FileCode, PanelLeftClose, PanelLeftOpen, Activity, Network, MoreHorizontal, ChevronsUpDown } from 'lucide-react';
 
@@ -42,6 +43,7 @@ const ICON_MAP = {
   piechart: PieChartIcon,
   filecode: FileCode,
   activity: Activity,
+  code: CodeSquareIcon,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { useMobile } from '@/hooks/useMobile';
