@@ -1,7 +1,7 @@
 """Add node_names column to clusters and cluster_history tables.
 
-Revision ID: 014
-Revises: 013
+Revision ID: 015
+Revises: 014
 Create Date: 2026-02-04
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '014'
-down_revision: Union[str, Sequence[str], None] = '013'
+revision: str = '015'
+down_revision: Union[str, Sequence[str], None] = '014'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
