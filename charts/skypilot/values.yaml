@@ -518,6 +518,7 @@ awsCredentials:
   awsSecretName: aws-credentials
 
   # Set to true to mount a complete AWS config directory, including the config and the credentials file with multiple profiles.
+  # Credentials should be defined in the `credentials` file. If a non-default profile is used, the profile must be additionally be declared in the `config` file.
   # This is required for using different AWS profiles with different workspaces.
   useCredentialsFile: false
 

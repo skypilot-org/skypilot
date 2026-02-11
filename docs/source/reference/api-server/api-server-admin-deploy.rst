@@ -349,7 +349,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             kubectl create secret generic aws-credentials \
               --namespace $NAMESPACE \
-              --from-file=credentials=$HOME/.aws/credentials
+              --from-file=credentials=$HOME/.aws
 
         Enable it by setting ``awsCredentials.enabled=true`` and ``awsCredentials.useCredentialsFile=true`` in the Helm values file.
 
@@ -373,7 +373,7 @@ Following tabs describe how to configure credentials for different clouds on the
                   kubectl delete secret aws-credentials
                   kubectl create secret generic aws-credentials \
                     --namespace $NAMESPACE \
-                    --from-file=credentials=$HOME/.aws/credentials
+                    --from-file=credentials=$HOME/.aws
 
            2. Then it will take tens of seconds to take effect on the API server. You can verify the updated credentials in the API server pod:
 
@@ -381,7 +381,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
                   # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
                   API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
-                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.aws/credentials
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.aws/*
 
         .. dropdown:: Use existing AWS credentials
 
