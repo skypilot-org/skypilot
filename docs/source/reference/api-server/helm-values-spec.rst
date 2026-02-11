@@ -2550,6 +2550,7 @@ By default, Grafana is configured to work with the ingress controller and auth p
     sidecar:
       datasources:
         enabled: true
+        initDatasources: true
       dashboards:
         enabled: true
     dashboardProviders:
