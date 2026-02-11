@@ -28,15 +28,6 @@ Pools is great for large-scale data processing tasks, that require launching man
 
 Example: :doc:`Batch Text Classification with Pools </examples/applications/pools_batch_inference>` demonstrates using pools to run parallel text classification on movie reviews with vLLM.
 
-.. warning::
-
-  Pools is a beta feature. Some features are not yet supported, but are on the roadmap:
-
-  - Heterogeneous clusters (e.g., mixed H100 and H200 workers)
-  - Fractional GPUs (e.g. a job requesting 0.5 GPUs)
-  - Multiple jobs running concurrently on the same worker
-
-
 Creating a pool
 ---------------
 
@@ -123,7 +114,7 @@ To submit jobs to the pool, create a job YAML file:
   # job.yaml
   name: simple-workload
 
-  # Always specify the resources requirements for the job. Without this 
+  # Always specify the resources requirements for the job. Without this
   # specification this job will not be able to use a GPU.
   resources:
     accelerators: {H100:1, H200:1}
@@ -178,7 +169,7 @@ The job will be launched on one of the available workers in the pool.
 
 .. note::
 
-  Currently, each worker is **exclusively occupied** by a single job at a time, so the :code:`resources` specified in the job YAML should match those used in the pool YAML. Support for running multiple jobs concurrently on the same worker will be added in the future.
+  By default, jobs are scheduled using **resource-aware bin-packing**: multiple jobs can run concurrently on the same worker as long as the worker has sufficient free resources (CPUs, memory, GPUs). The :code:`resources` specified in the job YAML determines how much of the worker's capacity each job consumes. See :ref:`multi-job-per-worker` for details.
 
 Scale out with multiple jobs
 ----------------------------
@@ -226,8 +217,7 @@ Use the following command to submit them to the pool:
   ├── To stream controller logs:          sky jobs logs --controller <job-id>
   └── To cancel all jobs on the pool:     sky jobs cancel --pool gpu-pool
 
-Note that the maximum concurrency is limited by the number of workers in the pool.
-To enable more jobs to run simultaneously, increase the number of workers when creating the pool.
+Note that concurrency is limited by both the number of workers and the resources available on each worker. To enable more jobs to run simultaneously, increase the number of workers or specify smaller per-job resource requirements. See :ref:`multi-job-per-worker` for details on bin-packing multiple jobs onto a single worker.
 
 There are several things to note when submitting jobs to a pool:
 
@@ -246,9 +236,9 @@ You can use the job page in the dashboard to monitor the job status.
 In this example, we submit 10 jobs with IDs from 3 to 12.
 Only one worker is currently ready due to a resource availability issue, but the pool continues to request additional workers in the background.
 
-Since each job requires **the entire worker cluster**, the number of concurrent jobs is limited to the number of workers. Additional jobs will remain in the **PENDING** state until a worker becomes available.
+If jobs specify resource requirements, multiple jobs can run concurrently on the same worker (see :ref:`multi-job-per-worker`). Otherwise, each job occupies an entire worker. Additional jobs will remain in the **PENDING** state until a worker has sufficient free resources.
 
-As a result, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
+In this example, except for the 5 completed jobs, 1 job is running on the available worker, while the remaining 4 are in the PENDING state, waiting for the previous job to finish.
 
 Clicking on the pool name will show detailed information about the pool, including its resource specification, status of each worker node, and any job currently running on it:
 
@@ -323,11 +313,76 @@ After usage, the pool can be terminated with :code:`sky jobs pool down`:
 
 The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
 
-.. admonition:: Coming Soon
+.. _pool-autoscaling:
 
-  Some improved features are under development and will be available soon:
+Autoscaling
+-----------
 
-  - **Autoscaling**: Automatically scale down to 0 workers when idle, and scale up when new jobs are submitted.
-  - **Multi-job per worker**: Support for running multiple jobs concurrently on the same worker.
-  - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
+Pools support autoscaling workers based on the number of pending jobs in the queue. When new jobs are submitted, the pool automatically scales up; when the queue drains, it scales back down (optionally to zero).
 
+To enable autoscaling, specify :code:`min_workers` and :code:`max_workers` in the pool configuration:
+
+.. code-block:: yaml
+
+  # autoscaling-pool.yaml
+  pool:
+    workers: 1                    # Initial number of workers
+    min_workers: 0                # Scale down to 0 when idle
+    max_workers: 10               # Scale up to 10 workers max
+    queue_length_threshold: 1     # Scale up when pending jobs > threshold
+    upscale_delay_seconds: 20     # Wait before scaling up (prevents flapping)
+    downscale_delay_seconds: 60   # Wait before scaling down
+
+  resources:
+    accelerators: H100
+
+The autoscaler checks the pending job queue and adjusts the worker count:
+
+- **Scale up**: When the number of pending jobs exceeds :code:`queue_length_threshold`, one additional worker is provisioned.
+- **Scale down**: When the number of pending jobs falls below the threshold, one worker is removed (only idle workers with no active jobs are removed).
+- **Scale to zero**: When there are no pending jobs and :code:`min_workers` is 0, the pool scales down to zero workers.
+
+Hysteresis delays (:code:`upscale_delay_seconds` and :code:`downscale_delay_seconds`) prevent rapid oscillation when the queue size is fluctuating.
+
+.. _multi-job-per-worker:
+
+Multiple jobs per worker
+------------------------
+
+Pools support running multiple jobs concurrently on the same worker using resource-aware scheduling. When a job specifies its resource requirements (CPUs, memory, GPUs), the scheduler tracks resource usage per worker and bin-packs jobs onto workers with sufficient free capacity.
+
+For example, to run 8 single-GPU jobs on an 8-GPU worker:
+
+.. code-block:: yaml
+
+  # pool.yaml - Each worker has 8 GPUs
+  pool:
+    workers: 2
+  resources:
+    accelerators: A100:8
+
+.. code-block:: yaml
+
+  # job.yaml - Each job uses 1 GPU
+  name: single-gpu-job
+  resources:
+    accelerators: A100:1
+  run: |
+    python inference.py
+
+The pool scheduler will bin-pack up to 8 jobs onto each 8-GPU worker. The maximum concurrency per worker depends on the ratio of worker resources to job resource requirements.
+
+Fractional GPU requests are also supported. For example, jobs can request :code:`L4:0.5` to share a single GPU between two jobs:
+
+.. code-block:: yaml
+
+  # job.yaml - Each job uses half a GPU
+  name: lightweight-job
+  resources:
+    accelerators: L4:0.5
+  run: |
+    python lightweight_inference.py
+
+.. note::
+
+  Jobs **must** specify :code:`resources` for resource-aware scheduling to work. If no resources are specified, the scheduler falls back to running one job per worker.
