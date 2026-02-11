@@ -132,7 +132,6 @@ class TestMountCachedConfig:
     def test_all_flags(self):
         config = storage_lib.MountCachedConfig(
             transfers=8,
-            multi_thread_streams=4,
             buffer_size='64M',
             vfs_cache_max_size='20G',
             vfs_cache_max_age='1h',
@@ -145,7 +144,6 @@ class TestMountCachedConfig:
         flags = config.to_rclone_flags()
         assert '--transfers 8' in flags
         assert '--checkers 16' in flags
-        assert '--multi-thread-streams 4' in flags
         assert '--buffer-size 64M' in flags
         assert '--vfs-cache-max-size 20G' in flags
         assert '--vfs-cache-max-age 1h' in flags
@@ -190,7 +188,6 @@ class TestMountCachedConfig:
     def test_round_trip_yaml_all_fields(self):
         config = storage_lib.MountCachedConfig(
             transfers=8,
-            multi_thread_streams=4,
             buffer_size='64M',
             vfs_cache_max_size='20G',
             vfs_cache_max_age='1h',
@@ -439,11 +436,6 @@ class TestMountCachedSchemaValidation:
         with pytest.raises(ValueError):
             storage_lib.Storage.from_yaml_config(config)
 
-    def test_multi_thread_streams_minimum(self):
-        config = self._make_yaml_config({'multi_thread_streams': 0})
-        with pytest.raises(ValueError):
-            storage_lib.Storage.from_yaml_config(config)
-
     def test_vfs_read_chunk_streams_allows_zero(self):
         config = self._make_yaml_config({'vfs_read_chunk_streams': 0})
         storage_obj = storage_lib.Storage.from_yaml_config(config)
@@ -504,7 +496,6 @@ class TestGetMountCachedCmdWithConfig:
     def test_all_flags_in_command(self):
         config = storage_lib.MountCachedConfig(
             transfers=8,
-            multi_thread_streams=4,
             buffer_size='64M',
             vfs_cache_max_size='20G',
             vfs_cache_max_age='1h',
@@ -527,7 +518,6 @@ class TestGetMountCachedCmdWithConfig:
         # Per-bucket overrides
         assert '--transfers 8' in cmd
         assert '--checkers 16' in cmd
-        assert '--multi-thread-streams 4' in cmd
         assert '--buffer-size 64M' in cmd
         assert '--vfs-cache-max-size 20G' in cmd
         assert '--vfs-cache-max-age 1h' in cmd

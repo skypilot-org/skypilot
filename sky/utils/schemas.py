@@ -600,10 +600,6 @@ def get_storage_schema():
                                 'type': 'integer',
                                 'minimum': 1,
                             },
-                            'multi_thread_streams': {
-                                'type': 'integer',
-                                'minimum': 1,
-                            },
                             'buffer_size': {
                                 'type': 'string',
                                 'pattern': rclone_memory_pattern,
