@@ -343,7 +343,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         **Option 2: Multiple profiles (for multiple workspaces)**
 
-        Use this if you need different AWS profiles for different workspaces. Create a Kubernetes secret from your AWS credentials file:
+        Use this if you need different AWS profiles for different workspaces. Create a Kubernetes secret from your AWS credentials and config files:
 
         .. code-block:: bash
 
@@ -352,6 +352,9 @@ Following tabs describe how to configure credentials for different clouds on the
               --from-file=credentials=$HOME/.aws
 
         Enable it by setting ``awsCredentials.enabled=true`` and ``awsCredentials.useCredentialsFile=true`` in the Helm values file.
+
+        Please note that any non-default profiles that are referenced in the AWS credentials file must additionally be declared in the config file.
+        More information about the format of these files can be found in the `AWS documentation <https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-files.html#cli-configure-files-format>`_ .
 
         .. code-block:: bash
 
