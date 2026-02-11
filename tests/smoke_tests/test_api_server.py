@@ -10,9 +10,9 @@ from typing import Dict, Generator, List, Optional, Tuple, TypeVar
 
 import pytest
 import requests
-import websockets
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
+import websockets
 
 import sky
 from sky import jobs
