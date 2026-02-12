@@ -11,7 +11,7 @@ Recipes is a feature in the SkyPilot dashboard for storing and sharing best-prac
 - **Share templates across your organization**: Customize your YAMLs once, then share institutional setup across your team
 
 .. tip::
-   Recipes requires the SkyPilot API server and dashboard. See :ref:`API Server Setup <api-server>` to get started.
+   Recipes requires the SkyPilot API server and dashboard. See :ref:`API Server Setup <sky-api-server>` to get started.
 
 Getting Started
 ---------------
