@@ -613,11 +613,8 @@ export function TopBar() {
           </button>
         </div>
 
-        {/* Plugin badge slot (e.g. trial countdown) — hidden when collapsed */}
-        <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 flex justify-center'} />
-
         {/* Primary nav (scrollable) */}
-        <nav ref={navRef} className={`flex-1 py-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
+        <nav ref={navRef} className={`flex-1 pt-1 pb-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
           <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Workloads</span>
           </div>
@@ -650,6 +647,10 @@ export function TopBar() {
             </React.Fragment>
           ))}
         </nav>
+
+        {/* Plugin badge slot (e.g. trial countdown) — between nav and footer so
+            toggling collapse doesn't shift nav icons (nav is flex-1, items anchored to top) */}
+        <div id="sidebar-badge-slot" className={collapsed ? 'hidden' : 'px-3 pb-2 flex justify-center shrink-0'} />
 
         {/* Footer: pinned at bottom */}
         <div className={`mt-auto border-t border-gray-200 py-3 space-y-1 shrink-0 ${collapsed ? 'px-2' : 'px-3'}`}>
