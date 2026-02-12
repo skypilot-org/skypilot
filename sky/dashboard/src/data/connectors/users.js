@@ -1,4 +1,5 @@
 import { apiClient } from '@/data/connectors/client';
+import { applyEnhancements } from '@/plugins/dataEnhancement';
 
 export async function getServiceAccountTokens() {
   try {
@@ -26,7 +27,7 @@ export async function getUsers() {
     // Data from API is: [{ id: 'user_hash', name: 'username' }, ...]
     // Transform to: [{ userId: 'user_hash', username: 'username' }, ...]
     // Filter out the dashboard users
-    return (data || [])
+    const transformedUsers = (data || [])
       .filter(
         (user) =>
           !(
@@ -41,6 +42,10 @@ export async function getUsers() {
         created_at: user.created_at,
         userType: user.user_type,
       }));
+    const enhancedUsers = await applyEnhancements(transformedUsers, 'users', {
+      rawData: data,
+    });
+    return enhancedUsers;
   } catch (error) {
     console.error('Failed to fetch users:', error);
     throw error;
