@@ -613,6 +613,9 @@ class RequestStatusBody(pydantic.BaseModel):
     all_status: bool = False
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
+    # Server-side filters similar to Slurm's squeue
+    user_filter: Optional[str] = None
+    request_name_filter: Optional[str] = None
 
 
 class ServeUpBody(RequestBody):
