@@ -1,0 +1,72 @@
+# Fairseq2: Instruction Fine-tuning LLMs on SkyPilot
+#
+# Fairseq2 is Meta FAIR's next-gen sequence modeling toolkit that supports
+# instruction fine-tuning and preference optimization with multi-GPU, multi-node
+# training using DDP, FSDP, and tensor parallelism.
+#
+# Usage:
+#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN
+#
+# Scale to multiple GPUs:
+#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8
+#
+# Use a different model:
+#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --env MODEL=llama3_1_8b
+
+envs:
+  MODEL: llama3_2_1b
+  MAX_NUM_STEPS: 1000
+  MAX_NUM_TOKENS: 4096
+  # Change this to your own checkpoint bucket
+  CHECKPOINT_BUCKET_NAME: sky-fairseq2-checkpoints
+
+secrets:
+  HF_TOKEN: null  # Pass with `--secret HF_TOKEN` in CLI
+
+resources:
+  accelerators: A100:1
+  disk_size: 200
+  disk_tier: best
+
+file_mounts:
+  /output:
+    name: $CHECKPOINT_BUCKET_NAME
+    mode: MOUNT
+
+setup: |
+  # Install system dependencies
+  sudo apt-get update
+  sudo apt-get install -y libsndfile1
+
+  # Create and activate virtual environment
+  if [ ! -d ~/fairseq2_env ]; then
+    python3 -m venv ~/fairseq2_env
+  fi
+  source ~/fairseq2_env/bin/activate
+
+  # Install PyTorch and fairseq2
+  pip install --upgrade pip
+  pip install torch torchvision torchaudio
+  pip install fairseq2
+
+  # Login to HuggingFace for model access
+  pip install huggingface_hub
+  huggingface-cli login --token $HF_TOKEN
+
+run: |
+  set -e
+  source ~/fairseq2_env/bin/activate
+
+  OUTPUT_DIR=/output/${MODEL}-sft-$(date +%Y%m%d-%H%M%S)
+  mkdir -p $OUTPUT_DIR
+
+  # Run instruction fine-tuning
+  # Uses GSM8K dataset for math reasoning as an example
+  fairseq2 lm instruction_finetune $OUTPUT_DIR --config \
+    model=$MODEL \
+    max_num_tokens=$MAX_NUM_TOKENS \
+    max_num_steps=$MAX_NUM_STEPS \
+    checkpoint_every_n_steps=500 \
+    dtype=bfloat16
+
+  echo "Training completed! Checkpoints saved to: $OUTPUT_DIR"
