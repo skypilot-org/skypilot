@@ -266,6 +266,9 @@ def test_fairseq2(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     # Modify to run a minimal training for smoke test
     modified_content = re.sub(r'MAX_NUM_STEPS:\s*\d+', 'MAX_NUM_STEPS: 10',
                               content)
+    # Use a smaller, non-gated model (Qwen 3 0.6B) instead of LLaMA
+    modified_content = re.sub(r'MODEL:\s*\S+', 'MODEL: qwen3_0.6b',
+                              modified_content)
     # Remove the file_mounts section to avoid needing a bucket
     modified_content = re.sub(
         r'file_mounts:.*?(?=\nsetup:)', '', modified_content, flags=re.DOTALL)
