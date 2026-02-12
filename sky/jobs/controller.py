@@ -743,6 +743,7 @@ class JobController:
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
+            cluster_event_reason = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -753,6 +754,35 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
+
+                # Fetch and log cluster events to provide context on why the
+                # cluster entered INIT/non-UP state.
+                try:
+                    events = await asyncio.to_thread(
+                        global_user_state.get_cluster_events,
+                        cluster_name=cluster_name,
+                        cluster_hash=None,
+                        event_type=global_user_state.ClusterEventType.
+                        STATUS_CHANGE,
+                        include_timestamps=True,
+                        limit=5)
+                    if events:
+                        event_strs = []
+                        for event in events:
+                            # Need cast due to dictionary semantics
+                            transitioned_at = int(event['transitioned_at'])
+                            timestamp = time.strftime(
+                                '%Y-%m-%d %H:%M:%S',
+                                time.localtime(transitioned_at))
+                            event_strs.append(
+                                f'  {timestamp}: {event["reason"]}')
+                        events_str = '\n'.join(event_strs)
+                        logger.info(f'Recent cluster events:\n{events_str}')
+                        cluster_event_reason = events[-1]['reason']
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to fetch cluster events: '
+                                 f'{common_utils.format_exception(e)}')
+
                 if ExternalFailureSource.is_registered():
                     cluster_failures = await asyncio.to_thread(
                         ExternalFailureSource.get, cluster_name=cluster_name)
@@ -935,6 +965,7 @@ class JobController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func,
                 external_failures=external_failures,
+                cluster_event_reason=cluster_event_reason,
             )
 
             recovered_time = await executor.recover()

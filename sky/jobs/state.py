@@ -2410,14 +2410,22 @@ async def set_recovering_async(
     force_transit_to_recovering: bool,
     callback_func: AsyncCallbackType,
     external_failures: Optional[List[ExternalClusterFailure]] = None,
+    cluster_event_reason: Optional[str] = None,
 ):
     """Set the task to recovering state, and update the job duration."""
     # Build code and reason from external failures for the event log
+    reason, code = cluster_event_reason, None
     if external_failures:
         code = '; '.join(f.code for f in external_failures)
-        reason = '; '.join(f.reason for f in external_failures)
-    else:
-        code = None
+        external_failure_reason = '; '.join(f.reason for f in external_failures)
+        if reason is not None:
+            reason += f': {external_failure_reason}'
+        else:
+            reason = external_failure_reason
+    if reason is None:
+        # Code is only updated when external failures exist, and then reason
+        # is guaranteed to be non-None
+        assert code is None
         reason = 'Cluster preempted or failed, recovering'
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
                               reason, code)
