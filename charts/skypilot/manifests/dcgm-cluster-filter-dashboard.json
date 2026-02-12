@@ -591,6 +591,7 @@
   "templating": {
     "list": [
       {
+        "allValue": ".*",
         "current": {
           "text": "All",
           "value": "$__all"
@@ -610,6 +611,7 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
         "current": {
           "text": "All",
           "value": "$__all"
@@ -629,6 +631,7 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
         "current": {
           "text": "All",
           "value": "$__all"
