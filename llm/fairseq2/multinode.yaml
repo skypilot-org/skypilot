@@ -44,9 +44,11 @@ setup: |
   uv pip install torch torchvision torchaudio
   uv pip install fairseq2
 
-  # Login to HuggingFace for model access
+  # Login to HuggingFace for model access (if token provided)
   uv pip install huggingface_hub
-  huggingface-cli login --token $HF_TOKEN
+  if [ -n "$HF_TOKEN" ]; then
+    huggingface-cli login --token $HF_TOKEN
+  fi
 
 run: |
   set -e
