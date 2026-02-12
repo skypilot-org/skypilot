@@ -36,24 +36,16 @@ setup: |
   sudo apt-get update
   sudo apt-get install -y libsndfile1
 
-  # Create and activate virtual environment
-  if [ ! -d ~/fairseq2_env ]; then
-    python3 -m venv ~/fairseq2_env
-  fi
-  source ~/fairseq2_env/bin/activate
-
   # Install PyTorch and fairseq2
-  pip install --upgrade pip
-  pip install torch torchvision torchaudio
-  pip install fairseq2
+  uv pip install torch torchvision torchaudio
+  uv pip install fairseq2
 
   # Login to HuggingFace for model access
-  pip install huggingface_hub
+  uv pip install huggingface_hub
   huggingface-cli login --token $HF_TOKEN
 
 run: |
   set -e
-  source ~/fairseq2_env/bin/activate
 
   OUTPUT_DIR=/output/${MODEL}-${PO_METHOD}-$(date +%Y%m%d-%H%M%S)
   mkdir -p $OUTPUT_DIR

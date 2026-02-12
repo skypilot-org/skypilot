@@ -78,7 +78,8 @@ Fairseq2 supports multiple model families for language modeling tasks:
 | **LLaMA** | `llama3_2_1b`, `llama3_2_3b`, `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA models |
 | **LLaMA 4** | `llama4_*` | Latest LLaMA 4 variants |
 | **Mistral** | `mistral_7b` | Mistral AI's models |
-| **Qwen** | `qwen_*` | Alibaba's Qwen models |
+| **Qwen 2.5** | `qwen25_1_5b`, `qwen25_3b`, `qwen25_7b`, `qwen25_14b`, `qwen25_32b` | Alibaba's Qwen 2.5 models |
+| **Qwen 3** | `qwen3_0.6b`, `qwen3_1.7b`, `qwen3_4b`, `qwen3_8b`, `qwen3_14b`, `qwen3_32b` | Alibaba's Qwen 3 models (non-gated) |
 
 Fairseq2 also supports speech and vision models (Wav2Vec2, Conformer, ViT, NLLB) for multimodal tasks.
 
@@ -116,7 +117,7 @@ export HF_TOKEN="your_token_here"
 ### 4. Install SkyPilot
 
 ```bash
-pip install skypilot-nightly[aws,gcp,kubernetes]
+uv pip install "skypilot-nightly[aws,gcp,kubernetes]"
 # See: https://docs.skypilot.co/en/latest/getting-started/installation.html
 ```
 
