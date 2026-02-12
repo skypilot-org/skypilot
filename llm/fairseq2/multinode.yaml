@@ -13,6 +13,7 @@ envs:
   MODEL: llama3_1_8b
   MAX_NUM_STEPS: 2000
   MAX_NUM_TOKENS: 4096
+  DATASET_PATH: /datasets/facebook/fairseq2-lm-gsm8k
   # Change this to your own checkpoint bucket
   CHECKPOINT_BUCKET_NAME: sky-fairseq2-checkpoints
 
@@ -44,11 +45,24 @@ setup: |
   uv pip install torch torchvision torchaudio
   uv pip install fairseq2
 
-  # Login to HuggingFace for model access (if token provided)
+  # Install HuggingFace tools
   uv pip install huggingface_hub
+
+  # Login to HuggingFace for model access (if token provided)
   if [ -n "$HF_TOKEN" ]; then
     huggingface-cli login --token $HF_TOKEN
   fi
+
+  # Download the GSM8K dataset formatted for fairseq2
+  echo "Downloading fairseq2-lm-gsm8k dataset..."
+  sudo mkdir -p $DATASET_PATH
+  sudo chown $(whoami) $DATASET_PATH
+
+  # Download all dataset files
+  huggingface-cli download facebook/fairseq2-lm-gsm8k \
+    --local-dir $DATASET_PATH --local-dir-use-symlinks False
+
+  echo "Dataset download completed."
 
 run: |
   set -e
@@ -76,6 +90,7 @@ run: |
     -m fairseq2.recipes.lm.instruction_finetune \
     $OUTPUT_DIR \
     --config \
+    dataset=$DATASET_PATH/sft_train \
     model=$MODEL \
     max_num_tokens=$MAX_NUM_TOKENS \
     max_num_steps=$MAX_NUM_STEPS \

@@ -275,10 +275,10 @@ def test_fairseq2(generic_cloud: str, accelerator: Dict[str, str]) -> None:
     # Update OUTPUT_DIR to use local path instead of mounted bucket
     modified_content = modified_content.replace(
         'OUTPUT_DIR=/output/', 'OUTPUT_DIR=/tmp/fairseq2-output/')
-    # Remove the validation step for faster smoke test
+    # Remove the validation step for faster smoke test (everything after "Training completed")
     modified_content = re.sub(
-        r'# Validate the fine-tuned model.*?Results saved to:.*?\n',
-        '',
+        r'echo "Training completed.*',
+        'echo "Training completed! Checkpoints saved to: $OUTPUT_DIR"',
         modified_content,
         flags=re.DOTALL)
 

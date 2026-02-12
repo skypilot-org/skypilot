@@ -31,7 +31,7 @@ sky logs fairseq2
 
 ### Instruction Fine-tuning (SFT)
 
-Fine-tune a LLaMA model on instruction-following data:
+Fine-tune a LLaMA model on the GSM8K math reasoning dataset:
 
 ```bash
 sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN
@@ -49,7 +49,7 @@ sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --env MODEL=l
 
 ### Preference Optimization (DPO)
 
-Run Direct Preference Optimization training:
+Run Direct Preference Optimization training on the GSM8K preference dataset:
 
 ```bash
 sky launch -c fairseq2-dpo llm/fairseq2/dpo.yaml --secret HF_TOKEN
@@ -75,13 +75,26 @@ Fairseq2 supports multiple model families for language modeling tasks:
 
 | Model Family | Example Configs | Description |
 |--------------|-----------------|-------------|
-| **LLaMA** | `llama3_2_1b`, `llama3_2_3b`, `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA models |
-| **LLaMA 4** | `llama4_*` | Latest LLaMA 4 variants |
+| **LLaMA** | `llama3_2_1b`, `llama3_2_3b`, `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA models (gated) |
+| **LLaMA 4** | `llama4_*` | Latest LLaMA 4 variants (gated) |
 | **Mistral** | `mistral_7b` | Mistral AI's models |
 | **Qwen 2.5** | `qwen25_1_5b`, `qwen25_3b`, `qwen25_7b`, `qwen25_14b`, `qwen25_32b` | Alibaba's Qwen 2.5 models |
 | **Qwen 3** | `qwen3_0.6b`, `qwen3_1.7b`, `qwen3_4b`, `qwen3_8b`, `qwen3_14b`, `qwen3_32b` | Alibaba's Qwen 3 models (non-gated) |
 
 Fairseq2 also supports speech and vision models (Wav2Vec2, Conformer, ViT, NLLB) for multimodal tasks.
+
+### Dataset
+
+These examples use the [facebook/fairseq2-lm-gsm8k](https://huggingface.co/datasets/facebook/fairseq2-lm-gsm8k) dataset, which contains:
+
+| Split | Description |
+|-------|-------------|
+| `sft_train/` | SFT training data (instruction-response pairs) |
+| `sft_test/` | SFT test data for evaluation |
+| `dpo_train/` | DPO preference pairs (chosen vs rejected) |
+| `dpo_test/` | DPO test data |
+
+The dataset is automatically downloaded during setup.
 
 ### Training Parameters
 
@@ -100,7 +113,7 @@ sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN \
 
 Some models require access approval:
 - Request access to [LLaMA models on Hugging Face](https://huggingface.co/meta-llama)
-- Follow the model-specific requirements
+- Qwen models are non-gated and don't require approval
 
 ### 2. Get Your Hugging Face Token
 
