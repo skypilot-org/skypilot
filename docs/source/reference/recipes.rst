@@ -153,6 +153,7 @@ One of the key benefits of Recipes is enabling teams to share standardized confi
      pip install transformers datasets wandb
 
    run: |
+     conda activate train
      nvidia-smi
      python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 
