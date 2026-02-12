@@ -83,10 +83,12 @@ _set_http_proxy_env_vars()
 # Keep this order to avoid cyclic imports
 # pylint: disable=wrong-import-position
 from sky import backends
+from sky import batch  # noqa: F401 # pylint: disable=unused-import
 from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
+from sky.batch import dataset
 from sky.catalog import list_accelerators
 from sky.client.sdk import api_cancel
 from sky.client.sdk import api_info
@@ -239,4 +241,7 @@ __all__ = [
     # Registry
     'CLOUD_REGISTRY',
     'JOBS_RECOVERY_STRATEGY_REGISTRY',
+    # Batch processing
+    'batch',
+    'dataset',
 ]

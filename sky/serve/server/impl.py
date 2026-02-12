@@ -20,6 +20,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
+from sky.batch import constants as batch_constants
 from sky.catalog import common as service_catalog_common
 from sky.data import storage as storage_lib
 from sky.serve import constants as serve_constants
@@ -260,6 +261,11 @@ def up(
                 r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
                 for r in controller_resources
             }
+        else:
+            controller_resources = {
+                r.copy(ports=[batch_constants.BATCH_CONTROLLER_PORT_RANGE])
+                for r in controller_resources
+            }
         controller_task.set_resources(controller_resources)
 
         # # Set service_name so the backend will know to modify default ray
@@ -396,7 +402,7 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
-            if not serve_utils.is_consolidation_mode(pool) and not pool:
+            if not serve_utils.is_consolidation_mode(pool):
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
@@ -836,13 +842,18 @@ def status(
     # Get the endpoint for each service
     for service_record in service_records:
         service_record['endpoint'] = None
-        # Pool doesn't have an endpoint.
-        if pool:
-            continue
         if service_record['load_balancer_port'] is not None:
             try:
                 lb_port = service_record['load_balancer_port']
-                if not serve_utils.is_consolidation_mode(pool):
+                if pool:
+                    # For pools the LB port stores the batch controller port.
+                    # Resolve its public endpoint on the jobs controller.
+                    controller_type = controller_utils.get_controller_for_pool(
+                        pool=True)
+                    endpoint = backend_utils.get_endpoints(
+                        cluster=controller_type.value.cluster_name,
+                        port=lb_port).get(lb_port, None)
+                elif not serve_utils.is_consolidation_mode(pool):
                     endpoint = backend_utils.get_endpoints(
                         cluster=common.SKY_SERVE_CONTROLLER_NAME,
                         port=lb_port).get(lb_port, None)
@@ -851,8 +862,10 @@ def status(
             except exceptions.ClusterNotUpError:
                 pass
             else:
-                protocol = ('https'
-                            if service_record['tls_encrypted'] else 'http')
+                protocol = 'http'
+                if not pool:
+                    protocol = ('https'
+                                if service_record['tls_encrypted'] else 'http')
                 if endpoint is not None:
                     endpoint = endpoint.replace('https://',
                                                 '').replace('http://', '')
