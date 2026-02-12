@@ -12,6 +12,7 @@ Training
    Finetuning Llama 4 <llama-4-finetuning.md>
    Finetuning Llama 3 <llama-3_1-finetuning.md>
    Finetuning Llama 2 <llama-2-finetuning.md>
+   Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
    nanochat <nanochat.md>
    NeMo <nemo.md>
    NeMo RL <nemorl.md>
