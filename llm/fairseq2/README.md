@@ -71,11 +71,16 @@ sky launch -c fairseq2-multi llm/fairseq2/multinode.yaml --secret HF_TOKEN --num
 
 ### Supported Models
 
-Fairseq2 supports various LLaMA model configurations:
-- `llama3_2_1b` - LLaMA 3.2 1B parameter model
-- `llama3_2_3b` - LLaMA 3.2 3B parameter model
-- `llama3_1_8b` - LLaMA 3.1 8B parameter model
-- `llama3_1_70b` - LLaMA 3.1 70B parameter model
+Fairseq2 supports multiple model families for language modeling tasks:
+
+| Model Family | Example Configs | Description |
+|--------------|-----------------|-------------|
+| **LLaMA** | `llama3_2_1b`, `llama3_2_3b`, `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA models |
+| **LLaMA 4** | `llama4_*` | Latest LLaMA 4 variants |
+| **Mistral** | `mistral_7b` | Mistral AI's models |
+| **Qwen** | `qwen_*` | Alibaba's Qwen models |
+
+Fairseq2 also supports speech and vision models (Wav2Vec2, Conformer, ViT, NLLB) for multimodal tasks.
 
 ### Training Parameters
 
