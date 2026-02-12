@@ -2414,19 +2414,20 @@ async def set_recovering_async(
 ):
     """Set the task to recovering state, and update the job duration."""
     # Build code and reason from external failures for the event log
-    reason, code = cluster_event_reason, None
+    code = None
+    reason_parts = []
+    if cluster_event_reason:
+        reason_parts.append(cluster_event_reason)
     if external_failures:
         code = '; '.join(f.code for f in external_failures)
         external_failure_reason = '; '.join(f.reason for f in external_failures)
-        if reason is not None:
-            reason += f': {external_failure_reason}'
-        else:
-            reason = external_failure_reason
-    if reason is None:
-        # Code is only updated when external failures exist, and then reason
-        # is guaranteed to be non-None
-        assert code is None
+        reason_parts.append(external_failure_reason)
+    if reason_parts:
+        reason = ': '.join(reason_parts)
+    else:
+        assert code is None, 'Code should be None if there are no reasons.'
         reason = 'Cluster preempted or failed, recovering'
+
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
                               reason, code)
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
