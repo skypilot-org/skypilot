@@ -36,6 +36,10 @@ setup: |
   sudo apt-get update
   sudo apt-get install -y libsndfile1
 
+  # Create virtual environment
+  uv venv --python 3.11 --seed
+  source .venv/bin/activate
+
   # Install PyTorch and fairseq2
   uv pip install torch torchvision torchaudio
   uv pip install fairseq2
@@ -46,6 +50,7 @@ setup: |
 
 run: |
   set -e
+  source .venv/bin/activate
 
   OUTPUT_DIR=/output/${MODEL}-${PO_METHOD}-$(date +%Y%m%d-%H%M%S)
   mkdir -p $OUTPUT_DIR
