@@ -70,3 +70,12 @@ run: |
     dtype=bfloat16
 
   echo "Training completed! Checkpoints saved to: $OUTPUT_DIR"
+
+  # Validate the fine-tuned model by generating on test samples
+  echo "Running validation generation..."
+  CKPT_DIR="$OUTPUT_DIR/checkpoints"
+  fairseq2 lm generate $OUTPUT_DIR/eval --no-sweep-dir --config \
+    checkpoint_dir=$CKPT_DIR \
+    generator_config.temperature=0.1
+
+  echo "Validation complete! Results saved to: $OUTPUT_DIR/eval"
