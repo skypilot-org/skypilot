@@ -18,10 +18,6 @@ Exported tarball structure::
     │   ├── serve_db.json
     │   ├── sky_config_db.json
     │   └── recipes_db.json
-    ├── config/
-    │   ├── config.yaml
-    │   ├── .server.yaml
-    │   └── ssh_node_pools.yaml
     ├── ssh_keys/
     └── ssh_node_pools_info/
 """
@@ -354,8 +350,7 @@ def export_state(output_path: str) -> str:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         migration_dir = os.path.join(tmpdir, _TARBALL_DIR)
-        for subdir in ('databases', 'config', 'ssh_keys',
-                       'ssh_node_pools_info'):
+        for subdir in ('databases', 'ssh_keys', 'ssh_node_pools_info'):
             os.makedirs(os.path.join(migration_dir, subdir))
 
         alembic_versions: Dict[str, Optional[str]] = {}
@@ -413,20 +408,8 @@ def export_state(output_path: str) -> str:
             tables_exported[cfg.db_name] = (table_count, row_count)
             print(f'    Exported {table_count} tables, {row_count} rows')
 
-        # ---- config files ----
-        sky_dir = os.path.expanduser('~/.sky')
-        config_files = {
-            'config.yaml': os.path.join(sky_dir, 'config.yaml'),
-            '.server.yaml': os.path.join(sky_dir, '.server.yaml'),
-            'ssh_node_pools.yaml': os.path.join(sky_dir, 'ssh_node_pools.yaml'),
-        }
-        for dest_name, src_path in config_files.items():
-            if os.path.exists(src_path):
-                shutil.copy2(src_path,
-                             os.path.join(migration_dir, 'config', dest_name))
-                print(f'  Copied config: {dest_name}')
-
         # ---- SSH keys ----
+        sky_dir = os.path.expanduser('~/.sky')
         ssh_keys_dir = os.path.join(sky_dir, 'ssh_keys')
         if os.path.isdir(ssh_keys_dir):
             for item in os.listdir(ssh_keys_dir):
@@ -603,28 +586,8 @@ def import_state(tarball_path: str, force: bool = False) -> None:
                 total_rows += len(rows)
                 print(f'    Imported {table_name}: {len(rows)} rows')
 
-        # ---- config files ----
-        config_dir = os.path.join(migration_dir, 'config')
-        sky_dir = os.path.expanduser('~/.sky')
-        os.makedirs(sky_dir, exist_ok=True)
-
-        config_files = {
-            'config.yaml': os.path.join(sky_dir, 'config.yaml'),
-            '.server.yaml': os.path.join(sky_dir, '.server.yaml'),
-            'ssh_node_pools.yaml': os.path.join(sky_dir, 'ssh_node_pools.yaml'),
-        }
-        for src_name, dst_path in config_files.items():
-            src_path = os.path.join(config_dir, src_name)
-            if os.path.exists(src_path):
-                if os.path.exists(dst_path):
-                    ts = int(datetime.datetime.now().timestamp())
-                    backup = f'{dst_path}.bak.{ts}'
-                    shutil.copy2(dst_path, backup)
-                    print(f'    Backed up existing {src_name} to {backup}')
-                shutil.copy2(src_path, dst_path)
-                print(f'    Restored config: {src_name}')
-
         # ---- SSH keys ----
+        sky_dir = os.path.expanduser('~/.sky')
         ssh_keys_src = os.path.join(migration_dir, 'ssh_keys')
         ssh_keys_dst = os.path.join(sky_dir, 'ssh_keys')
         if os.path.isdir(ssh_keys_src) and os.listdir(ssh_keys_src):
