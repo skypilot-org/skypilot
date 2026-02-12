@@ -13,7 +13,7 @@ Recipes is a feature in the SkyPilot dashboard for storing and sharing best-prac
 .. tip::
    Recipes requires the SkyPilot API server and dashboard. See :ref:`API Server Setup <sky-api-server>` to get started.
 
-Getting Started
+Getting started
 ---------------
 
 Recipes are managed through the SkyPilot dashboard. To access Recipes:
@@ -28,7 +28,7 @@ Recipes are managed through the SkyPilot dashboard. To access Recipes:
 
 Recipes support these SkyPilot resource types: **Clusters**, **Managed Jobs**, **Pools**, and **Volumes**.
 
-Creating a Recipe
+Creating a recipe
 -----------------
 
 To create a new recipe in the dashboard:
@@ -63,7 +63,7 @@ To create a recipe based on an existing one:
 
 This is useful for creating variations of a recipe (e.g., different GPU types or environment versions).
 
-Managing Recipes
+Managing recipes
 ----------------
 
 All recipes are listed in the **Recipes** page of the dashboard. Click on any recipe to view its details:
@@ -80,7 +80,7 @@ To **edit** a recipe, open it and click **Edit**, then update the YAML, name, or
 
 To **delete** a recipe, open it and click **Delete**, then confirm. Note that deleting a recipe is permanent and cannot be undone. Existing clusters or jobs launched from the recipe will continue running.
 
-Launching from Recipes
+Launching from recipes
 ----------------------
 
 The most convenient way to use recipes is through the CLI with the ``recipes:`` prefix:
@@ -107,7 +107,7 @@ No YAML file needed - the configuration is fetched directly from the dashboard!
 
 You can also launch directly from the dashboard by clicking **Launch Recipe**, customizing parameters if needed, and clicking **Launch**.
 
-Sharing Recipes Across Your Team
+Sharing recipes across your team
 ---------------------------------
 
 One of the key benefits of Recipes is enabling teams to share standardized configurations. Here are common patterns with concrete examples:
@@ -215,7 +215,7 @@ One of the key benefits of Recipes is enabling teams to share standardized confi
 - Version your infrastructure with naming conventions
 
 
-Best Practices
+Best practices
 --------------
 
 **Naming:** Use clear, descriptive names like ``dev-cluster-python311``, ``training-a100-8gpu-pytorch``, or ``inference-server-vllm``. Avoid generic names like ``test`` or ``recipe1``. Include environment or version information when relevant (``prod-inference-v2``, ``staging-training``).
