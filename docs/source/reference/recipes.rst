@@ -16,8 +16,7 @@ Getting started
 
 Recipes are managed through the SkyPilot dashboard. To access Recipes:
 
-1. Start the API server: ``sky api start``
-2. Open the dashboard at ``http://localhost:46580`` (or your configured URL)
+1. Run `sky dashboard`
 3. Navigate to the **Recipes** section in the navbar
 
 .. image:: /images/recipes-page.png
