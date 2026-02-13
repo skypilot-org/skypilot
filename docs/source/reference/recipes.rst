@@ -121,7 +121,7 @@ To **delete** a recipe, open it and click **Delete**, then confirm. Note that de
 Sharing recipes across your team
 ---------------------------------
 
-A key benefit of Recipes is enabling teams to share standardized configurations. Here are common patterns with concrete examples:
+A key benefit of Recipes is enabling teams to share standardized configurations. Here are some common patterns:
 
 .. tab-set::
 
