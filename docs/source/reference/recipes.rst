@@ -48,7 +48,13 @@ To create a new recipe in the dashboard:
 
    Recipes do not support local file uploads. For code and data:
 
-   - **Code**: Use Git repositories with ``workdir`` (e.g., ``workdir: https://github.com/org/repo``)
+   - **Code**: Use Git repositories with ``workdir`` dictionary format:
+
+     .. code-block:: yaml
+
+        workdir:
+          url: https://github.com/org/repo
+
    - **Data**: Use cloud storage buckets with ``file_mounts`` (e.g., ``s3://bucket``, ``gs://bucket``)
    - Local paths (``workdir: .``, ``file_mounts: ~/local-dir``) are not supported
 
@@ -234,7 +240,13 @@ Best practices
   Then customize at launch: ``sky launch recipes:training --env DATA_PATH=s3://my-data``
 
 - Separate ``setup`` (one-time installation) from ``run`` (actual workload) for reusability
-- Use ``workdir`` with Git repositories for code syncing (e.g., ``workdir: https://github.com/org/repo``)
+- Use ``workdir`` with Git repositories for code syncing:
+
+  .. code-block:: yaml
+
+     workdir:
+       url: https://github.com/org/repo
+
 - Use cloud storage buckets (S3, GCS) for ``file_mounts`` - local file uploads are not supported
 - Be specific about resource requirements (``cpus: 8+``, ``memory: 32+``, ``disk_size: 100``)
 - Consider cost optimization with ``use_spot: true`` and ``any_of`` for GPU fallbacks
