@@ -164,6 +164,7 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
+    :ref:`remote_identity <config-yaml-azure-remote-identity>`: LOCAL_CREDENTIALS
 
   :ref:`oci <config-yaml-oci>`:
     region_configs:
@@ -1277,6 +1278,60 @@ Example:
   azure:
     resource_group_vm: user-resource-group-name
     storage_account: user-storage-account-name
+
+.. _config-yaml-azure-remote-identity:
+
+``azure.remote_identity``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Identity to use for Azure instances (optional).
+
+Supported values:
+
+1. **LOCAL_CREDENTIALS**:
+   The user's local Azure credential files will be uploaded to instances created by SkyPilot.
+
+2. **SERVICE_ACCOUNT**:
+   SkyPilot will use the auto-created User-Assigned Managed Identity (MSI) on the VM.
+   Local Azure credentials will not be uploaded. Requires
+   ``Microsoft.Authorization/roleAssignments/write`` permission to create the MSI and
+   its role assignment.
+
+3. **NO_UPLOAD**:
+   Do not upload any Azure credentials. The VM will still have the auto-created MSI attached.
+   Requires ``Microsoft.Authorization/roleAssignments/write`` permission (same as
+   SERVICE_ACCOUNT).
+
+4. **Custom managed identity name or resource ID**:
+   Specify the name of an existing User-Assigned Managed Identity to use instead of the
+   auto-created one. If a simple name is provided, SkyPilot will look for the identity in
+   the same resource group and subscription. A full Azure resource ID can also be specified.
+   This option does **not** require ``Microsoft.Authorization/roleAssignments/write``
+   permission, since SkyPilot skips MSI and role assignment creation in the ARM template.
+
+   Like AWS, you can use cluster-name pattern matching:
+
+   .. code-block:: yaml
+
+     azure:
+       remote_identity:
+         - my-cluster-*: my-managed-identity-1
+         - sky-serve-controller-*: controller-identity
+         - "*": default-identity
+
+Default: ``LOCAL_CREDENTIALS``.
+
+.. code-block:: yaml
+
+  azure:
+    # Format 1: Use auto-created MSI
+    remote_identity: SERVICE_ACCOUNT
+
+    # Format 2: Specify a custom managed identity by name
+    remote_identity: my-managed-identity
+
+    # Format 3: Specify a full resource ID
+    remote_identity: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<name>
 
 .. _config-yaml-kubernetes:
 

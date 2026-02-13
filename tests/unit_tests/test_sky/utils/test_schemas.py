@@ -627,5 +627,50 @@ class TestSSHSchema(unittest.TestCase):
             self.assertEqual(default_identity, 'LOCAL_CREDENTIALS')
 
 
+class TestAzureRemoteIdentitySchema(unittest.TestCase):
+    """Tests for the Azure remote_identity schema."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.azure_schema = self.config_schema['properties']['azure']
+
+    def test_azure_remote_identity_enum_values(self):
+        """Test that Azure accepts enum values for remote_identity."""
+        for value in ['LOCAL_CREDENTIALS', 'SERVICE_ACCOUNT', 'NO_UPLOAD']:
+            config = {'remote_identity': value}
+            jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_remote_identity_custom_msi_name(self):
+        """Test that Azure accepts custom MSI name for remote_identity."""
+        config = {'remote_identity': 'my-managed-identity'}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_remote_identity_cluster_pattern_list(self):
+        """Test that Azure accepts cluster-name pattern matching."""
+        config = {
+            'remote_identity': [
+                {
+                    'sky-serve-controller-*': 'controller-msi'
+                },
+                {
+                    'my-cluster-*': 'my-custom-msi'
+                },
+                {
+                    '*': 'default-msi'
+                },
+            ]
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_remote_identity_full_resource_id(self):
+        """Test that Azure accepts full resource ID for remote_identity."""
+        config = {
+            'remote_identity': '/subscriptions/sub-id/resourceGroups/rg/'
+                               'providers/Microsoft.ManagedIdentity/'
+                               'userAssignedIdentities/my-msi'
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+
 if __name__ == "__main__":
     unittest.main()
