@@ -3,7 +3,7 @@
 SkyPilot Recipes
 ================
 
-Recipes is a feature in the SkyPilot dashboard for storing and sharing best-practice patterns for working with SkyPilot. With Recipes, you can:
+Recipes allow storing, sharing and reusing SkyPilot YAMLs across users. With Recipes, you can:
 
 - **Reuse patterns across workflows**: Create recipes for clusters, managed jobs, pools, and volumes
 - **Launch quickly**: Start from a copyable CLI command (e.g., ``sky launch recipes:dev-cluster``) - no YAML file required
