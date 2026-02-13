@@ -436,3 +436,53 @@ class TestAPICompatibility:
             pytest.fail(
                 f"Models removed from current version: {missing_models}. "
                 f"{API_VERSION_HINT}")
+
+
+class TestRequestStatusBodyBackwardCompatibility:
+    """Tests for RequestStatusBody backward compatibility with older servers."""
+
+    def test_cluster_name_not_sent_when_none(self) -> None:
+        """Test that cluster_name is not included in params when None (default).
+
+        This ensures that a new client with cluster_name=None can work with
+        an old server that doesn't recognize the cluster_name parameter.
+        """
+        from sky.server import common as server_common
+
+        body = current_payloads.RequestStatusBody(
+            request_ids=['test-id'],
+            all_status=False,
+            limit=10,
+            fields=['status'],
+            cluster_name=None,  # Default value
+        )
+
+        params = server_common.request_body_to_params(body)
+
+        # cluster_name should NOT be in params when it's None
+        assert 'cluster_name' not in params, (
+            "cluster_name should not be sent when None to ensure "
+            "backward compatibility with older API servers")
+        # Other non-None fields should be present
+        assert 'request_ids' in params
+        assert 'all_status' in params
+        assert 'limit' in params
+        assert 'fields' in params
+
+    def test_cluster_name_sent_when_specified(self) -> None:
+        """Test that cluster_name is included in params when specified."""
+        from sky.server import common as server_common
+
+        body = current_payloads.RequestStatusBody(
+            request_ids=['test-id'],
+            all_status=False,
+            limit=10,
+            fields=['status'],
+            cluster_name='my-cluster',
+        )
+
+        params = server_common.request_body_to_params(body)
+
+        # cluster_name should be in params when specified
+        assert 'cluster_name' in params
+        assert params['cluster_name'] == 'my-cluster'
