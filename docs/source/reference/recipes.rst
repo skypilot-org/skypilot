@@ -96,9 +96,13 @@ You can override the recipe fields with CLI args:
    sky launch recipes:gpu-cluster --cpus 16 --gpus H100:4 --env DATA_PATH=s3://my-data --secret HF_TOKEN
 
 
-.. image:: /images/recipes-launch-command.png
-   :alt: Copy launch command from recipe detail page
-   :align: center
+.. tip::
+
+   You can find the launch command for your recipe in the dashboard:
+
+   .. image:: /images/recipes-launch-command.png
+      :alt: Copy launch command from recipe detail page
+      :align: center
 
 
 Managing recipes
