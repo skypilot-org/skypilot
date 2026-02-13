@@ -2072,7 +2072,7 @@ def get_config_schema():
     }
 
     for cloud, config in cloud_configs.items():
-        if cloud == 'aws':
+        if cloud in ('aws', 'azure'):
             config['properties'].update(
                 {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
