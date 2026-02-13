@@ -16,7 +16,7 @@ Getting started
 
 Recipes are managed through the SkyPilot dashboard. To access Recipes:
 
-1. Run `sky dashboard`
+1. Run ``sky dashboard``
 2. Navigate to the **Recipes** section in the navbar
 
 .. image:: /images/recipes-page.png
