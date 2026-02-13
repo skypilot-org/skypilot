@@ -86,10 +86,15 @@ The most convenient way to use recipes is through the CLI with the ``recipes:`` 
    # Launch a managed job from a recipe
    sky jobs launch recipes:training-job
 
-   # Launch with overrides
-   sky launch recipes:gpu-cluster --cpus 16 --gpus H100:4
-
 No YAML file needed - the configuration is fetched directly from the SkyPilot API server!
+
+You can override the recipe fields with CLI args:
+
+.. code-block:: bash
+
+   # Launch with overrides
+   sky launch recipes:gpu-cluster --cpus 16 --gpus H100:4 --env DATA_PATH=s3://my-data --secret HF_TOKEN
+
 
 .. image:: /images/recipes-launch-command.png
    :alt: Copy launch command from recipe detail page
