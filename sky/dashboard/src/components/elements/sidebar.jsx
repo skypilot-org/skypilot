@@ -271,7 +271,7 @@ export function TopBar() {
     // Handle React elements directly (allows plugins to provide their own icons)
     if (React.isValidElement(icon)) {
       return React.cloneElement(icon, {
-        className: `${icon.props?.className || ''} ${className}`.trim(),
+        className: [icon.props?.className, className].filter(Boolean).join(' '),
       });
     }
     // Handle string names via ICON_MAP (backward compatible)
