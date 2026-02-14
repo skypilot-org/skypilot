@@ -255,7 +255,10 @@ function normalizeNavLink(link) {
       link.external ??
       (/^(https?:)?\/\//.test(String(link.href)) || link.target === '_blank'),
     badge: typeof link.badge === 'string' ? link.badge : null,
-    icon: typeof link.icon === 'string' ? link.icon : null,
+    icon:
+      typeof link.icon === 'string' || React.isValidElement(link.icon)
+        ? link.icon
+        : null,
     description:
       typeof link.description === 'string' ? link.description : undefined,
   };
