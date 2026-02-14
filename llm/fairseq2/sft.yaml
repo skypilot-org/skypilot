@@ -5,13 +5,13 @@
 # FSDP, and tensor parallelism.
 #
 # Usage:
-#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN
+#   sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN
 #
 # Scale to multiple GPUs:
-#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8
+#   sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8
 #
 # Use a larger model (8B needs more GPUs):
-#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8 --env MODEL=llama3_1_8b
+#   sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8 --env MODEL=llama3_1_8b
 
 envs:
   MODEL: llama3_2_1b

@@ -19,12 +19,12 @@ export HF_TOKEN=your_hf_token_here
 
 Launch instruction fine-tuning on a single GPU:
 ```bash
-sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN
+sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN
 ```
 
 Monitor training progress:
 ```bash
-sky logs fairseq2
+sky logs fairseq2-sft
 ```
 
 ## Examples
@@ -88,7 +88,7 @@ The dataset is automatically downloaded during setup.
 Customize training by setting environment variables:
 
 ```bash
-sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN \
+sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN \
   --gpus A100:8 \
   --env MODEL=llama3_1_8b \
   --env MAX_NUM_STEPS=2000
