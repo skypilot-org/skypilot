@@ -611,6 +611,71 @@ function createPluginApi(dispatch) {
         normalizeUrl: normalizeUrlForHistory,
       };
     },
+    getComponents() {
+      // Lazy import to avoid circular dependencies
+      const ui = require('@/components/ui');
+      return {
+        // Table
+        Table: ui.Table,
+        TableHeader: ui.TableHeader,
+        TableBody: ui.TableBody,
+        TableFooter: ui.TableFooter,
+        TableHead: ui.TableHead,
+        TableRow: ui.TableRow,
+        TableCell: ui.TableCell,
+        TableCaption: ui.TableCaption,
+        // Select (Radix compound components)
+        Select: ui.Select,
+        SelectTrigger: ui.SelectTrigger,
+        SelectValue: ui.SelectValue,
+        SelectContent: ui.SelectContent,
+        SelectItem: ui.SelectItem,
+        SelectGroup: ui.SelectGroup,
+        SelectLabel: ui.SelectLabel,
+        SelectSeparator: ui.SelectSeparator,
+        SelectScrollUpButton: ui.SelectScrollUpButton,
+        SelectScrollDownButton: ui.SelectScrollDownButton,
+        // Form
+        Button: ui.Button,
+        Input: ui.Input,
+        Label: ui.Label,
+        Textarea: ui.Textarea,
+        // Layout
+        Card: ui.Card,
+        CardHeader: ui.CardHeader,
+        CardTitle: ui.CardTitle,
+        CardDescription: ui.CardDescription,
+        CardContent: ui.CardContent,
+        CardFooter: ui.CardFooter,
+        // Dialog
+        Dialog: ui.Dialog,
+        DialogPortal: ui.DialogPortal,
+        DialogOverlay: ui.DialogOverlay,
+        DialogTrigger: ui.DialogTrigger,
+        DialogClose: ui.DialogClose,
+        DialogContent: ui.DialogContent,
+        DialogHeader: ui.DialogHeader,
+        DialogFooter: ui.DialogFooter,
+        DialogTitle: ui.DialogTitle,
+        DialogDescription: ui.DialogDescription,
+        // Avatar
+        Avatar: ui.Avatar,
+        AvatarImage: ui.AvatarImage,
+        AvatarFallback: ui.AvatarFallback,
+        // Feedback
+        Alert: ui.Alert,
+        AlertTitle: ui.AlertTitle,
+        AlertDescription: ui.AlertDescription,
+        // Tabs
+        Tabs: ui.Tabs,
+        TabsList: ui.TabsList,
+        TabsTrigger: ui.TabsTrigger,
+        TabsContent: ui.TabsContent,
+        // Other
+        FlipCard: ui.FlipCard,
+        YamlEditor: ui.YamlEditor,
+      };
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
