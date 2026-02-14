@@ -147,9 +147,9 @@ const fetchClustersAndJobs = async () => {
   ]);
 
   const clustersData =
-    clustersResult.status === 'fulfilled' ? clustersResult.value : [];
-  const jobsResponse =
-    jobsResult.status === 'fulfilled' ? jobsResult.value : { jobs: [] };
+    (clustersResult.status === 'fulfilled' && clustersResult.value) || [];
+  const jobsResponse = (jobsResult.status === 'fulfilled' &&
+    jobsResult.value) || { jobs: [] };
 
   if (clustersResult.status === 'rejected') {
     console.error('Error fetching clusters:', clustersResult.reason);
@@ -158,7 +158,7 @@ const fetchClustersAndJobs = async () => {
     console.error('Error fetching managed jobs:', jobsResult.reason);
   }
 
-  return { clustersData: clustersData || [], jobsResponse };
+  return { clustersData, jobsResponse };
 };
 
 // Helper functions for username parsing
