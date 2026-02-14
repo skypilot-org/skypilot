@@ -73,12 +73,12 @@ setup: |
 
   # Download the GSM8K dataset formatted for fairseq2
   echo "Downloading fairseq2-lm-gsm8k dataset..."
-  sudo mkdir -p /datasets/facebook/fairseq2-lm-gsm8k
-  sudo chown -R $(whoami) /datasets/facebook
+  sudo mkdir -p ~/datasets/facebook/fairseq2-lm-gsm8k
+  sudo chown -R $(whoami) ~/datasets/facebook
 
   # Download all dataset files
   hf download facebook/fairseq2-lm-gsm8k \
-    --repo-type dataset --local-dir /datasets/facebook/fairseq2-lm-gsm8k
+    --repo-type dataset --local-dir ~/datasets/facebook/fairseq2-lm-gsm8k
 
   echo "Dataset download completed."
 
