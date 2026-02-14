@@ -15,6 +15,7 @@ Training
    nanochat <nanochat.md>
    NeMo <nemo.md>
    NeMo RL <nemorl.md>
+   PyTorch Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
    Ray <ray.md>
    TorchTitan <torchtitan.md>
    Training on TPUs <tpu.md>

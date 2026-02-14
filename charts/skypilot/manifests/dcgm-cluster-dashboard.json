@@ -1381,6 +1381,7 @@
         "type": "datasource"
       },
       {
+        "allValue": ".*",
         "current": {
           "text": [
             "All"
@@ -1405,6 +1406,7 @@
         "type": "query"
       },
       {
+        "allValue": ".*",
         "current": {
           "text": [
             "All"

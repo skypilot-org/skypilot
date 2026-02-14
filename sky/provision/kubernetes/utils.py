@@ -765,13 +765,52 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
 
 
+class NebiusLabelFormatter(GPULabelFormatter):
+    """Custom label formatter for Nebius
+
+    Uses nebius.com/gpu-name as the key, and the uppercase SkyPilot
+    accelerator str as the value.
+    """
+
+    LABEL_KEY = 'nebius.com/gpu-name'
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY]
+
+    @classmethod
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        # For Nebius formatter, we use the uppercase accelerator str.
+        return [accelerator.upper()]
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Values must be all uppercase for the Nebius formatter."""
+        is_valid = value == value.upper()
+        return is_valid, (f'Label value {value!r} must be uppercase if using '
+                          f'the {cls.get_label_key()} label.'
+                          if not is_valid else '')
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
-    GFDLabelFormatter, CoreWeaveLabelFormatter
+    GFDLabelFormatter, CoreWeaveLabelFormatter, NebiusLabelFormatter
 ]
 
 
@@ -1213,6 +1252,14 @@ class CoreweaveAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class NebiusAutoscaler(Autoscaler):
+    """Nebius autoscaler
+    """
+
+    label_formatter: Any = NebiusLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1226,6 +1273,7 @@ AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.NEBIUS: NebiusAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
