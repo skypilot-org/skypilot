@@ -34,9 +34,9 @@ file_mounts:
   # for multi-node checkpoint saving — each rank writes its own shard).
   # NOTE: If you're on a Slurm cluster with NFS, you may remove this mount and
   # point the checkpoints symlink to a shared NFS path instead.
-  # /output:
-  #   name: $CHECKPOINT_BUCKET_NAME
-  #   mode: MOUNT
+  /output:
+    name: $CHECKPOINT_BUCKET_NAME
+    mode: MOUNT
   # Register Llama asset cards so fairseq2 can download gated models from HF.
   # See https://facebookresearch.github.io/fairseq2/stable/basics/assets.html
   ~/.config/fairseq2/assets/llama_hf.yaml: llama_hf_assets.yaml
@@ -103,7 +103,7 @@ run: |
   # NOTE: On Slurm with NFS, you may skip the symlink and use the NFS path directly.
   OUTPUT_DIR=~/output/${MODEL}-multinode
   mkdir -p $OUTPUT_DIR
-  # ln -sfn /output $OUTPUT_DIR/checkpoints
+  ln -sfn /output $OUTPUT_DIR/checkpoints
 
   # Run distributed training with torchrun
   torchrun \
