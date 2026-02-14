@@ -365,6 +365,31 @@ class Slurm(clouds.Cloud):
         if acc_type:
             acc_type = slurm_utils.get_gres_gpu_type(cluster, acc_type)
 
+        # Override with proportional CPU/memory when the user didn't
+        # explicitly set them. This computes CPU and memory as a fraction
+        # of the node's total resources based on the GPU or CPU fraction
+        # requested, enabling efficient resource packing on large nodes.
+        if acc_count > 0 and acc_type is not None:
+            # GPU job: proportional CPU and memory based on GPU fraction.
+            proportional = slurm_utils.get_proportional_resources(
+                cluster,
+                partition=partition,
+                acc_type=acc_type,
+                acc_count=acc_count)
+            if proportional is not None:
+                prop_cpus, prop_mem = proportional
+                if resources._cpus is None:  # pylint: disable=protected-access
+                    cpus = prop_cpus
+                if resources._memory is None:  # pylint: disable=protected-access
+                    mem = prop_mem
+        elif resources._memory is None:  # pylint: disable=protected-access
+            # CPU-only job: proportional memory based on CPU fraction.
+            proportional = slurm_utils.get_proportional_resources(
+                cluster, partition=partition, cpus=cpus)
+            if proportional is not None:
+                _, prop_mem = proportional
+                mem = prop_mem
+
         image_id = resources.extract_docker_image()
 
         provision_timeout = skypilot_config.get_effective_region_config(

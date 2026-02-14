@@ -150,6 +150,124 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
     return proctrack_type
 
 
+def _filter_nodes_by_partition(
+    nodes: List[slurm.NodeInfo],
+    partition: str,
+    default_partition: Optional[str],
+) -> List[slurm.NodeInfo]:
+    """Filter nodes to only those in the specified partition.
+
+    Handles Slurm's convention of appending '*' to the default partition
+    name in sinfo output.
+    """
+    filtered = []
+    for node_info in nodes:
+        node_partition = node_info.partition
+        # Strip '*' from default partition name for comparison.
+        # info_nodes does not strip the '*' from the default partition name.
+        # But non-default partition names can also end with '*',
+        # so we need to check whether the partition name without the '*'
+        # is the same as the default partition name.
+        if (default_partition is not None and
+                node_partition.endswith('*') and
+                node_partition[:-1] == default_partition):
+            node_partition = node_partition[:-1]
+        if node_partition == partition:
+            filtered.append(node_info)
+    return filtered
+
+
+def get_proportional_resources(
+    cluster: str,
+    partition: Optional[str] = None,
+    acc_type: Optional[str] = None,
+    acc_count: int = 0,
+    cpus: Optional[float] = None,
+) -> Optional[Tuple[float, float]]:
+    """Compute proportional CPU and memory based on node resource fraction.
+
+    For GPU jobs: computes proportional CPU and memory based on the GPU
+    fraction requested (e.g., 2 out of 8 GPUs gets 25% of node resources).
+
+    For CPU-only jobs: computes proportional memory based on the CPU
+    fraction requested (e.g., 48 out of 192 CPUs gets 25% of node memory).
+
+    Args:
+        cluster: Name of the Slurm cluster.
+        partition: Optional partition name to filter nodes.
+        acc_type: The requested GPU type (e.g., 'A10G'). None for CPU-only.
+        acc_count: Number of GPUs requested. 0 for CPU-only.
+        cpus: Number of CPUs requested. Used for CPU-only proportional
+            memory calculation.
+
+    Returns:
+        A tuple of (proportional_cpus, proportional_mem_gb), or None if
+        no matching nodes are found.
+    """
+    try:
+        nodes = _get_slurm_nodes_info(cluster)
+    except FileNotFoundError:
+        logger.warning(f'Could not query Slurm cluster {cluster!r} for '
+                       f'proportional resources because the Slurm '
+                       f'configuration file {DEFAULT_SLURM_PATH} does not '
+                       f'exist.')
+        return None
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Could not query Slurm cluster {cluster!r} for '
+                       f'proportional resources: '
+                       f'{common_utils.format_exception(e)}')
+        return None
+
+    default_partition = get_cluster_default_partition(cluster)
+
+    # Filter by partition if specified.
+    if partition is not None:
+        nodes = _filter_nodes_by_partition(nodes, partition,
+                                           default_partition)
+
+    if acc_type is not None and acc_count > 0:
+        # GPU job: find the node with the most matching GPUs and compute
+        # proportional CPU and memory based on GPU fraction.
+        best_node = None
+        best_gpu_count = 0
+        for node_info in nodes:
+            node_gpu_type, node_gpu_count = get_gpu_type_and_count(
+                node_info.gres)
+            if node_gpu_type is None or node_gpu_count == 0:
+                continue
+            if node_gpu_type.lower() != acc_type.lower():
+                continue
+            if node_gpu_count > best_gpu_count:
+                best_gpu_count = node_gpu_count
+                best_node = node_info
+
+        if best_node is None:
+            return None
+
+        prop_cpus = math.floor(best_node.cpus / best_gpu_count * acc_count)
+        prop_mem = math.floor(best_node.memory_gb / best_gpu_count *
+                              acc_count)
+        return (float(prop_cpus), float(prop_mem))
+
+    if cpus is not None and cpus > 0:
+        # CPU-only job: find the node with the most CPUs and compute
+        # proportional memory based on CPU fraction.
+        best_node = None
+        best_cpu_count = 0
+        for node_info in nodes:
+            if node_info.cpus > best_cpu_count:
+                best_cpu_count = node_info.cpus
+                best_node = node_info
+
+        if best_node is None:
+            return None
+
+        prop_mem = math.floor(best_node.memory_gb / best_node.cpus * cpus)
+        return (cpus, float(prop_mem))
+
+    return None
+
+
 class SlurmInstanceType:
     """Class to represent the "Instance Type" in a Slurm cluster.
 
@@ -423,28 +541,10 @@ def check_instance_fits(
 
     default_partition = get_cluster_default_partition(cluster)
 
-    def is_default_partition(node_partition: str) -> bool:
-        if default_partition is None:
-            return False
-
-        # info_nodes does not strip the '*' from the default partition name.
-        # But non-default partition names can also end with '*',
-        # so we need to check whether the partition name without the '*'
-        # is the same as the default partition name.
-        return (node_partition.endswith('*') and
-                node_partition[:-1] == default_partition)
-
     partition_suffix = ''
     if partition is not None:
-        filtered = []
-        for node_info in nodes:
-            node_partition = node_info.partition
-            if is_default_partition(node_partition):
-                # Strip '*' from default partition name.
-                node_partition = node_partition[:-1]
-            if node_partition == partition:
-                filtered.append(node_info)
-        nodes = filtered
+        nodes = _filter_nodes_by_partition(nodes, partition,
+                                           default_partition)
         partition_suffix = f' in partition {partition}'
 
     slurm_instance_type = SlurmInstanceType.from_instance_type(instance_type)
