@@ -1,8 +1,8 @@
 # Fairseq2: Instruction Fine-tuning LLMs on SkyPilot
 #
 # Fairseq2 is Meta FAIR's next-gen sequence modeling toolkit that supports
-# instruction fine-tuning and preference optimization with multi-GPU, multi-node
-# training using DDP, FSDP, and tensor parallelism.
+# instruction fine-tuning with multi-GPU, multi-node training using DDP,
+# FSDP, and tensor parallelism.
 #
 # Usage:
 #   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN
@@ -10,86 +10,101 @@
 # Scale to multiple GPUs:
 #   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8
 #
-# Use a different model:
-#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --env MODEL=llama3_1_8b
+# Use a larger model (8B needs more GPUs):
+#   sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8 --env MODEL=llama3_1_8b
 
 envs:
   MODEL: llama3_2_1b
-  MAX_NUM_STEPS: 1000
-  MAX_NUM_TOKENS: 4096
-  DATASET_PATH: /datasets/facebook/fairseq2-lm-gsm8k
-  # Change this to your own checkpoint bucket
-  CHECKPOINT_BUCKET_NAME: sky-fairseq2-checkpoints
+  MAX_NUM_STEPS: 2000
 
 secrets:
   HF_TOKEN: null  # Pass with `--secret HF_TOKEN` in CLI
 
+workdir:
+  url: https://github.com/facebookresearch/fairseq2.git
+  ref: main
+
 resources:
   accelerators: A100:1
-  disk_size: 200
-  disk_tier: best
 
 file_mounts:
-  /output:
-    name: $CHECKPOINT_BUCKET_NAME
-    mode: MOUNT
+  # Register Llama asset cards so fairseq2 can download gated models from HF.
+  # See https://facebookresearch.github.io/fairseq2/stable/basics/assets.html
+  ~/.config/fairseq2/assets/llama_hf.yaml: llama_hf_assets.yaml
 
 setup: |
-  # Install system dependencies
-  sudo apt-get update
-  sudo apt-get install -y libsndfile1
+  # Install system dependencies (libsndfile required by fairseq2n)
+  sudo apt-get update && sudo apt-get install -y libsndfile1
 
   # Create virtual environment
   uv venv --python 3.11 --seed
   source .venv/bin/activate
 
-  # Install PyTorch and fairseq2
-  uv pip install torch torchvision torchaudio
-  uv pip install fairseq2
-
-  # Install HuggingFace tools
+  # Install PyTorch 2.7.1 with CUDA 12.6 and fairseq2 (nightly for CLI support)
+  # fairseq2 native (fairseq2n) requires an exact PyTorch+CUDA match;
+  # see https://github.com/facebookresearch/fairseq2#variants
+  uv pip install torch==2.7.1 torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu126
+  uv pip install fairseq2 --pre \
+    --extra-index-url https://fair.pkg.atmeta.com/fairseq2/whl/nightly/pt2.7.1/cu126
   uv pip install huggingface_hub
 
   # Login to HuggingFace for model access (if token provided)
   if [ -n "$HF_TOKEN" ]; then
-    huggingface-cli login --token $HF_TOKEN
+    hf auth login --token $HF_TOKEN
   fi
 
   # Download the GSM8K dataset formatted for fairseq2
   echo "Downloading fairseq2-lm-gsm8k dataset..."
-  sudo mkdir -p $DATASET_PATH
-  sudo chown $(whoami) $DATASET_PATH
+  mkdir -p ~/datasets/facebook/fairseq2-lm-gsm8k
 
   # Download all dataset files
-  huggingface-cli download facebook/fairseq2-lm-gsm8k \
-    --local-dir $DATASET_PATH --local-dir-use-symlinks False
+  hf download facebook/fairseq2-lm-gsm8k \
+    --repo-type dataset --local-dir ~/datasets/facebook/fairseq2-lm-gsm8k
 
   echo "Dataset download completed."
 
 run: |
   set -e
+  # Unset CONDA_PREFIX so fairseq2n uses system libsndfile (from apt)
+  # instead of searching only in conda's site-packages.
+  unset CONDA_PREFIX
   source .venv/bin/activate
 
-  OUTPUT_DIR=/output/${MODEL}-sft-$(date +%Y%m%d-%H%M%S)
+  OUTPUT_DIR=~/output/${MODEL}-sft-$(date +%Y%m%d-%H%M%S)
   mkdir -p $OUTPUT_DIR
 
   # Run instruction fine-tuning on GSM8K dataset
-  fairseq2 lm instruction_finetune $OUTPUT_DIR --config \
-    dataset=$DATASET_PATH/sft_train \
-    model=$MODEL \
-    max_num_tokens=$MAX_NUM_TOKENS \
-    max_num_steps=$MAX_NUM_STEPS \
-    checkpoint_every_n_steps=500 \
-    dtype=bfloat16
+  # torchrun enables FSDP across all available GPUs (works with 1 GPU too)
+  NUM_GPUS=${SKYPILOT_NUM_GPUS_PER_NODE:-1}
+  torchrun \
+    --nnodes=1 \
+    --nproc_per_node=$NUM_GPUS \
+    -m recipes.lm.sft \
+    $OUTPUT_DIR \
+    --config \
+    model.name=$MODEL \
+    tokenizer.name=$MODEL \
+    regime.num_steps=$MAX_NUM_STEPS \
+    regime.checkpoint_every_n_steps=500 \
+    dataset.max_seq_len=4096 \
+    dataset.max_num_tokens=4096 \
+    trainer.mixed_precision.dtype=bfloat16 \
+    common.no_sweep_dir=true
 
   echo "Training completed! Checkpoints saved to: $OUTPUT_DIR"
 
-  # Validate the fine-tuned model by generating on test samples
-  echo "Running validation generation..."
-  CKPT_DIR="$OUTPUT_DIR/checkpoints"
-  fairseq2 lm generate $OUTPUT_DIR/eval --no-sweep-dir --config \
-    checkpoint_dir=$CKPT_DIR \
-    dataset=$DATASET_PATH/sft_test \
-    generator_config.temperature=0.1
+  # Validate the fine-tuned model by generating on test samples (rank 0 only)
+  if [ "${SKYPILOT_NODE_RANK:-0}" -eq 0 ]; then
+    head -10 ~/datasets/facebook/fairseq2-lm-gsm8k/sft_test/test.jsonl > /tmp/test_samples.jsonl
 
-  echo "Validation complete! Results saved to: $OUTPUT_DIR/eval"
+    python -m recipes.lm.generate $OUTPUT_DIR/eval --config \
+      model.name=$MODEL \
+      model.dtype=bfloat16 \
+      tokenizer.name=$MODEL \
+      common.assets.prev_checkpoint_dir=$OUTPUT_DIR/checkpoints \
+      "dataset.config_overrides.paths=[/tmp/test_samples.jsonl]" \
+      common.no_sweep_dir=true
+  fi
+
+  echo "All outputs saved to: $OUTPUT_DIR"

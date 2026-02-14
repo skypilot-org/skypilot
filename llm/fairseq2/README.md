@@ -1,6 +1,6 @@
 # Fairseq2: Meta FAIR's Sequence Modeling Toolkit
 
-[Fairseq2](https://github.com/facebookresearch/fairseq2) is Meta AI Research's next-generation sequence modeling toolkit. It provides a clean, modular API for training and fine-tuning large language models with support for instruction fine-tuning, preference optimization (DPO, CPO, SimPO, ORPO), and scalable distributed training.
+[Fairseq2](https://github.com/facebookresearch/fairseq2) is Meta AI Research's next-generation sequence modeling toolkit. It provides a clean, modular API for training and fine-tuning large language models with support for instruction fine-tuning and scalable distributed training.
 
 ## Why SkyPilot + Fairseq2?
 
@@ -42,17 +42,9 @@ Scale to 8 GPUs:
 sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8
 ```
 
-Use a larger model:
+Use a larger model (8B needs more GPUs):
 ```bash
-sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --env MODEL=llama3_1_8b
-```
-
-### Preference Optimization (DPO)
-
-Run Direct Preference Optimization training on the GSM8K preference dataset:
-
-```bash
-sky launch -c fairseq2-dpo llm/fairseq2/dpo.yaml --secret HF_TOKEN
+sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8 --env MODEL=llama3_1_8b
 ```
 
 ### Multi-Node Distributed Training
@@ -75,13 +67,10 @@ Fairseq2 supports multiple model families for language modeling tasks:
 
 | Model Family | Example Configs | Description |
 |--------------|-----------------|-------------|
-| **LLaMA** | `llama3_2_1b`, `llama3_2_3b`, `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA models (gated) |
-| **LLaMA 4** | `llama4_*` | Latest LLaMA 4 variants (gated) |
-| **Mistral** | `mistral_7b` | Mistral AI's models |
-| **Qwen 2.5** | `qwen25_1_5b`, `qwen25_3b`, `qwen25_7b`, `qwen25_14b`, `qwen25_32b` | Alibaba's Qwen 2.5 models |
-| **Qwen 3** | `qwen3_0.6b`, `qwen3_1.7b`, `qwen3_4b`, `qwen3_8b`, `qwen3_14b`, `qwen3_32b` | Alibaba's Qwen 3 models (non-gated) |
+| **LLaMA 3.2** | `llama3_2_1b`, `llama3_2_3b` | Meta's smaller LLaMA models (gated, requires HF token) |
+| **LLaMA 3.1** | `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA 3.1 models (gated, requires HF token) |
 
-Fairseq2 also supports speech and vision models (Wav2Vec2, Conformer, ViT, NLLB) for multimodal tasks.
+These examples include [custom asset cards](https://facebookresearch.github.io/fairseq2/stable/basics/assets.html) (`llama_hf_assets.yaml`) that register HuggingFace download URIs for the Llama model family. To use other model families, you may need to create similar asset cards.
 
 ### Dataset
 
@@ -91,8 +80,6 @@ These examples use the [facebook/fairseq2-lm-gsm8k](https://huggingface.co/datas
 |-------|-------------|
 | `sft_train/` | SFT training data (instruction-response pairs) |
 | `sft_test/` | SFT test data for evaluation |
-| `dpo_train/` | DPO preference pairs (chosen vs rejected) |
-| `dpo_test/` | DPO test data |
 
 The dataset is automatically downloaded during setup.
 
@@ -102,9 +89,9 @@ Customize training by setting environment variables:
 
 ```bash
 sky launch -c fairseq2 llm/fairseq2/sft.yaml --secret HF_TOKEN \
+  --gpus A100:8 \
   --env MODEL=llama3_1_8b \
-  --env MAX_NUM_STEPS=2000 \
-  --env MAX_NUM_TOKENS=8192
+  --env MAX_NUM_STEPS=2000
 ```
 
 ## Preparation
@@ -146,4 +133,3 @@ sky check
 - [Fairseq2 Documentation](https://facebookresearch.github.io/fairseq2/stable/)
 - [Fairseq2 Quick Start Wiki](https://github.com/facebookresearch/fairseq2/wiki/Quick-Start)
 - [SkyPilot Documentation](https://docs.skypilot.co/)
-- [DPO Paper](https://arxiv.org/abs/2305.18290)

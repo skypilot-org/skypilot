@@ -12,60 +12,81 @@
 envs:
   MODEL: llama3_1_8b
   MAX_NUM_STEPS: 2000
-  MAX_NUM_TOKENS: 4096
-  DATASET_PATH: /datasets/facebook/fairseq2-lm-gsm8k
+  # Max tokens per training batch (controls memory usage; reduce if OOM)
+  MAX_TOKENS_PER_BATCH: 4096
   # Change this to your own checkpoint bucket
   CHECKPOINT_BUCKET_NAME: sky-fairseq2-checkpoints
 
 secrets:
   HF_TOKEN: null  # Pass with `--secret HF_TOKEN` in CLI
 
+workdir:
+  url: https://github.com/facebookresearch/fairseq2.git
+  ref: main
+
 resources:
   accelerators: H100:8
-  disk_size: 500
-  disk_tier: best
 
 num_nodes: 2
 
 file_mounts:
-  /output:
-    name: $CHECKPOINT_BUCKET_NAME
-    mode: MOUNT
+  # Shared cloud storage for checkpoints (fairseq2 requires a shared filesystem
+  # for multi-node checkpoint saving — each rank writes its own shard).
+  # NOTE: If you're on a Slurm cluster with NFS, you may remove this mount and
+  # point the checkpoints symlink to a shared NFS path instead.
+  # /output:
+  #   name: $CHECKPOINT_BUCKET_NAME
+  #   mode: MOUNT
+  # Register Llama asset cards so fairseq2 can download gated models from HF.
+  # See https://facebookresearch.github.io/fairseq2/stable/basics/assets.html
+  ~/.config/fairseq2/assets/llama_hf.yaml: llama_hf_assets.yaml
 
 setup: |
-  # Install system dependencies
-  sudo apt-get update
-  sudo apt-get install -y libsndfile1
+  # Install system dependencies (libsndfile required by fairseq2n)
+  sudo apt-get update && sudo apt-get install -y libsndfile1
 
   # Create virtual environment
   uv venv --python 3.11 --seed
   source .venv/bin/activate
 
-  # Install PyTorch and fairseq2
-  uv pip install torch torchvision torchaudio
-  uv pip install fairseq2
-
-  # Install HuggingFace tools
+  # Install PyTorch 2.7.1 with CUDA 12.6 and fairseq2 (nightly for CLI support)
+  # fairseq2 native (fairseq2n) requires an exact PyTorch+CUDA match;
+  # see https://github.com/facebookresearch/fairseq2#variants
+  uv pip install torch==2.7.1 torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu126
+  uv pip install fairseq2 --pre \
+    --extra-index-url https://fair.pkg.atmeta.com/fairseq2/whl/nightly/pt2.7.1/cu126
   uv pip install huggingface_hub
 
   # Login to HuggingFace for model access (if token provided)
   if [ -n "$HF_TOKEN" ]; then
-    huggingface-cli login --token $HF_TOKEN
+    hf auth login --token $HF_TOKEN
+  fi
+
+  # Pre-download model weights on every node. fairseq2 only downloads on
+  # rank 0 and expects a shared filesystem; we must cache on each node.
+  HF_REPO=$(grep -A3 "name: ${MODEL}@" ~/.config/fairseq2/assets/llama_hf.yaml | grep checkpoint | sed 's/.*hg:\/\///' | tr -d '"')
+  if [ -n "$HF_REPO" ]; then
+    echo "Pre-downloading model $HF_REPO..."
+    hf download "$HF_REPO"
   fi
 
   # Download the GSM8K dataset formatted for fairseq2
   echo "Downloading fairseq2-lm-gsm8k dataset..."
-  sudo mkdir -p $DATASET_PATH
-  sudo chown $(whoami) $DATASET_PATH
+  sudo mkdir -p /datasets/facebook/fairseq2-lm-gsm8k
+  sudo chown -R $(whoami) /datasets/facebook
 
   # Download all dataset files
-  huggingface-cli download facebook/fairseq2-lm-gsm8k \
-    --local-dir $DATASET_PATH --local-dir-use-symlinks False
+  hf download facebook/fairseq2-lm-gsm8k \
+    --repo-type dataset --local-dir /datasets/facebook/fairseq2-lm-gsm8k
 
   echo "Dataset download completed."
 
 run: |
   set -e
+  # Unset CONDA_PREFIX so fairseq2n uses system libsndfile (from apt)
+  # instead of searching only in conda's site-packages.
+  unset CONDA_PREFIX
   source .venv/bin/activate
 
   # Extract master address for distributed training
@@ -77,8 +98,12 @@ run: |
   echo "Total nodes: $SKYPILOT_NUM_NODES"
   echo "GPUs per node: $SKYPILOT_NUM_GPUS_PER_NODE"
 
-  OUTPUT_DIR=/output/${MODEL}-multinode-$(date +%Y%m%d-%H%M%S)
+  # Use local dir for training output (logs use append, unsupported by MOUNT).
+  # Symlink checkpoints/ to the shared bucket mount so all nodes can write shards.
+  # NOTE: On Slurm with NFS, you may skip the symlink and use the NFS path directly.
+  OUTPUT_DIR=~/output/${MODEL}-multinode
   mkdir -p $OUTPUT_DIR
+  # ln -sfn /output $OUTPUT_DIR/checkpoints
 
   # Run distributed training with torchrun
   torchrun \
@@ -87,15 +112,17 @@ run: |
     --node_rank=$SKYPILOT_NODE_RANK \
     --master_addr=$MASTER_ADDR \
     --master_port=$MASTER_PORT \
-    -m fairseq2.recipes.lm.instruction_finetune \
+    -m recipes.lm.sft \
     $OUTPUT_DIR \
     --config \
-    dataset=$DATASET_PATH/sft_train \
-    model=$MODEL \
-    max_num_tokens=$MAX_NUM_TOKENS \
-    max_num_steps=$MAX_NUM_STEPS \
-    checkpoint_every_n_steps=500 \
-    dtype=bfloat16 \
-    tensor_parallel_size=$SKYPILOT_NUM_GPUS_PER_NODE
+    model.name=$MODEL \
+    tokenizer.name=$MODEL \
+    regime.num_steps=$MAX_NUM_STEPS \
+    regime.checkpoint_every_n_steps=500 \
+    dataset.max_seq_len=$MAX_TOKENS_PER_BATCH \
+    dataset.max_num_tokens=$MAX_TOKENS_PER_BATCH \
+    trainer.mixed_precision.dtype=bfloat16 \
+    gang.tensor_parallel_size=$SKYPILOT_NUM_GPUS_PER_NODE \
+    common.no_sweep_dir=true
 
   echo "Distributed training completed! Checkpoints saved to: $OUTPUT_DIR"
