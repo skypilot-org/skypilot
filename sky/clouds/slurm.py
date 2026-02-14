@@ -50,6 +50,11 @@ class Slurm(clouds.Cloud):
             'Slurm.',
         clouds.CloudImplementationFeatures.LOCAL_DISK:
             (f'Local disk is not supported on {_REPR}'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            'Docker image is not supported on this Slurm cluster because '
+            'the Pyxis plugin is not installed. Please ask your cluster '
+            'administrator to install Pyxis '
+            '(https://github.com/NVIDIA/pyxis).',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -81,11 +86,6 @@ class Slurm(clouds.Cloud):
         # permissive -- per-cluster filtering happens in
         # regions_with_offering(), which calls check_features_are_supported()
         # with a specific region to filter out non-Pyxis clusters.
-        unsupported[clouds.CloudImplementationFeatures.DOCKER_IMAGE] = (
-            'Docker image is not supported on this Slurm cluster because '
-            'the Pyxis plugin is not installed. Please ask your cluster '
-            'administrator to install Pyxis '
-            '(https://github.com/NVIDIA/pyxis).')
         cluster = region if region is not None else resources.region
         if cluster is None:
             clusters = cls.existing_allowed_clusters()
