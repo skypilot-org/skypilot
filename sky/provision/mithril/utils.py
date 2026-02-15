@@ -12,12 +12,12 @@ from sky.utils import common_utils
 from sky.utils import status_lib
 
 # Mithril API status values
-MithrilStatus = Literal['STATUS_CREATING', 'STATUS_STARTING',
-                        'STATUS_INITIALIZING', 'STATUS_PENDING',
-                        'STATUS_CONFIRMED', 'STATUS_RUNNING', 'STATUS_STOPPING',
-                        'STATUS_TERMINATING', 'STATUS_STOPPED',
-                        'STATUS_TERMINATED', 'STATUS_PAUSED', 'STATUS_FAILED',
-                        'STATUS_ERROR',]
+MithrilStatus = Literal['STATUS_NEW', 'STATUS_CONFIRMED', 'STATUS_SCHEDULED',
+                        'STATUS_INITIALIZING', 'STATUS_STARTING',
+                        'STATUS_RUNNING', 'STATUS_STOPPING', 'STATUS_STOPPED',
+                        'STATUS_TERMINATED', 'STATUS_RELOCATING',
+                        'STATUS_PREEMPTING', 'STATUS_PREEMPTED',
+                        'STATUS_REPLACED', 'STATUS_PAUSED', 'STATUS_ERROR',]
 
 # Lazy imports to avoid dependency issues
 requests = adaptors_common.LazyImport('requests')
@@ -75,20 +75,24 @@ def to_cluster_status(
     query_instances is called with non_terminated_only=True.
     """
     mapping: Dict[MithrilStatus, Optional[status_lib.ClusterStatus]] = {
-        'STATUS_CREATING': status_lib.ClusterStatus.INIT,
-        'STATUS_STARTING': status_lib.ClusterStatus.INIT,
-        'STATUS_INITIALIZING': status_lib.ClusterStatus.INIT,
-        'STATUS_PENDING': status_lib.ClusterStatus.INIT,
+        'STATUS_NEW': status_lib.ClusterStatus.INIT,
         'STATUS_CONFIRMED': status_lib.ClusterStatus.INIT,
+        'STATUS_SCHEDULED': status_lib.ClusterStatus.INIT,
+        'STATUS_INITIALIZING': status_lib.ClusterStatus.INIT,
+        'STATUS_STARTING': status_lib.ClusterStatus.INIT,
         'STATUS_RUNNING': status_lib.ClusterStatus.UP,
-        'STATUS_STOPPING': status_lib.ClusterStatus.INIT,
-        'STATUS_TERMINATING': status_lib.ClusterStatus.UP,  # Being terminated
+        'STATUS_STOPPING': status_lib.ClusterStatus.UP,
         'STATUS_STOPPED': status_lib.ClusterStatus.STOPPED,
         'STATUS_TERMINATED': None,  # Fully terminated
+        'STATUS_RELOCATING':
+            status_lib.ClusterStatus.UP,  # Still running during notice period
+        'STATUS_PREEMPTING':
+            status_lib.ClusterStatus.UP,  # Still running during notice period
+        'STATUS_PREEMPTED': status_lib.ClusterStatus.STOPPED,
+        'STATUS_REPLACED': None,  # Replaced, treat as terminated
         'STATUS_PAUSED': status_lib.ClusterStatus.STOPPED,
-        'STATUS_FAILED':
-            status_lib.ClusterStatus.INIT,  # Failed but still exists
-        'STATUS_ERROR': status_lib.ClusterStatus.INIT,  # Error but still exists
+        'STATUS_ERROR':
+            status_lib.ClusterStatus.STOPPED,  # Error but can recover
     }
     return mapping.get(raw_status)
 

@@ -116,7 +116,9 @@ def run_instances(
     # Check for existing instances
     all_instances = _filter_instances(
         cluster_name_on_cloud,
-        status_not_in=['STATUS_TERMINATED', 'STATUS_FAILED', 'STATUS_ERROR'],
+        status_not_in=[
+            'STATUS_TERMINATED',
+        ],
     )
 
     # Separate instances with and without SSH destinations
@@ -250,10 +252,6 @@ def get_cluster_info(
         cluster_name_on_cloud,
         status_not_in=[
             'STATUS_TERMINATED',
-            'STATUS_STOPPED',
-            'STATUS_FAILED',
-            'STATUS_ERROR',
-            'STATUS_PAUSED',
         ],
         config=config,
     )
