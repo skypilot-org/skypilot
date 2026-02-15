@@ -136,7 +136,7 @@ def fetch_spot_availability(api_key: str,
 
 def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
     """Create Mithril catalog CSV file."""
-    config = mithril_utils.get_config()
+    config = mithril_utils.resolve_current_config()
     api_key = config['api_key']
     api_url = config['api_url']
 

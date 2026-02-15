@@ -8,7 +8,6 @@ from urllib.parse import quote
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.clouds.mithril import Mithril
 from sky.utils import common_utils
 from sky.utils import status_lib
 
@@ -40,6 +39,18 @@ MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
 logger = sky_logging.init_logger(__name__)
+
+
+def get_credentials_path() -> str:
+    """Get the path to the Mithril credentials file.
+
+    Respects XDG_CONFIG_HOME, otherwise defaults to
+    ~/.config/mithril/config.yaml
+    """
+    xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
+    if xdg_config_home:
+        return os.path.join(xdg_config_home, 'mithril', 'config.yaml')
+    return '~/.config/mithril/config.yaml'
 
 
 class MithrilError(Exception):
@@ -82,83 +93,107 @@ def to_cluster_status(
     return mapping.get(raw_status)
 
 
-def _get_profile_config(file_config: Dict[str, Any],
-                        config_path: str) -> Dict[str, Any]:
-    """Extract config from a named profile.
-
-    Profile selection priority:
-    1. MITHRIL_PROFILE env var (highest priority)
-    2. current_profile key in config file (required)
-
-    Args:
-        file_config: The parsed YAML config file contents.
-        config_path: Path to the config file (for error messages).
+def _load_file_config() -> Optional[Dict[str, Any]]:
+    """Load Mithril config file if present.
 
     Returns:
-        The profile-specific config dict.
-
-    Raises:
-        MithrilError: If current_profile is not set or profile doesn't exist.
+        Parsed config dict if file exists, None if file not found.
     """
-    # Determine profile name: env var takes precedence over config file
-    profile_name = os.environ.get(ENV_PROFILE)
-    if not profile_name:
-        profile_name = file_config.get('current_profile')
-
-    if not profile_name:
-        raise MithrilError(
-            f'\'current_profile\' is required in Mithril config. '
-            f'Set MITHRIL_PROFILE or add current_profile to {config_path}')
-
-    profiles = file_config.get('profiles', {})
-    if profile_name not in profiles:
-        available = list(profiles.keys()) if profiles else []
-        available_str = available if available else '(none)'
-        raise MithrilError(f'Mithril profile \'{profile_name}\' not found. '
-                           f'Available profiles: {available_str}. '
-                           f'Check your config at {config_path}')
-
-    return profiles[profile_name]
+    config_path = os.path.expanduser(get_credentials_path())
+    if not os.path.exists(config_path):
+        logger.debug(f'Mithril config file not found at {config_path}')
+        return None
+    logger.debug(f'Loading Mithril config from {config_path}')
+    with open(config_path, 'r', encoding='utf-8') as f:
+        try:
+            # safe_load returns None for empty files; normalize to {}.
+            return yaml.safe_load(f) or {}
+        except yaml.YAMLError as e:
+            raise MithrilError(
+                f'Failed to parse Mithril config at {config_path}: '
+                f'{e}') from e
 
 
-def get_config() -> Dict[str, str]:
-    """Get Mithril config with api_key, project_id, and api_url.
+def get_current_profile() -> Optional[str]:
+    """Get the currently active profile.
 
-    Loads from config file, then environment variables override.
-
-    Returns:
-        Dict with 'api_key', 'project_id', and 'api_url'.
-
-    Raises:
-        MithrilError: If api_key or project_id is not found.
+    Returns the profile from MITHRIL_PROFILE env var or current_profile
+    in the config file. Returns None if no profile is configured.
     """
-    config_path = os.path.expanduser(Mithril.get_credentials_path())
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            file_config = yaml.safe_load(f) or {}
-        profile_config = _get_profile_config(file_config, config_path)
-    else:
-        profile_config = {}
+    profile = os.environ.get(ENV_PROFILE)
+    if profile:
+        return profile
+    file_config = _load_file_config()
+    if file_config is not None:
+        return file_config.get('current_profile')
+    return None
 
-    api_key = os.environ.get(ENV_API_KEY) or profile_config.get('api_key')
-    project_id = os.environ.get(ENV_PROJECT) or profile_config.get('project_id')
-    api_url = os.environ.get(ENV_API_URL) or profile_config.get('api_url')
 
+def _build_config(api_key: Optional[str], project_id: Optional[str],
+                  api_url: Optional[str]) -> Dict[str, str]:
+    """Validate required fields and return a Mithril config dict.
+
+    Raises MithrilError if api_key or project_id is missing. Falls back
+    to DEFAULT_API_URL when api_url is not provided.
+    """
     if not api_key:
         raise MithrilError(f'Mithril API key not found. '
                            f'Set {ENV_API_KEY} or run `sky check mithril` '
                            'for setup instructions.')
-
     if not project_id:
         raise MithrilError(f'Mithril project ID not found. '
                            f'Set {ENV_PROJECT} or run `sky check mithril` '
                            'for setup instructions.')
-
     return {
         'api_key': api_key,
         'project_id': project_id,
         'api_url': api_url or DEFAULT_API_URL,
     }
+
+
+def resolve_current_config() -> Dict[str, str]:
+    """Resolve Mithril config from environment variables and active profile.
+
+    Environment variables take precedence over profile values. Works without
+    a config file if all required env vars are set.
+    """
+    file_config = _load_file_config()
+    profile = get_current_profile()
+    profile_config: Dict[str, Any] = {}
+    if profile and file_config is not None:
+        profiles = file_config.get('profiles', {})
+        if profile not in profiles:
+            available = list(profiles.keys()) or '(none)'
+            raise MithrilError(f'Mithril profile \'{profile}\' not found. '
+                               f'Available profiles: {available}.')
+        profile_config = profiles[profile]
+
+    api_key = os.environ.get(ENV_API_KEY) or profile_config.get('api_key')
+    project_id = os.environ.get(ENV_PROJECT) or profile_config.get('project_id')
+    api_url = os.environ.get(ENV_API_URL) or profile_config.get('api_url')
+    return _build_config(api_key, project_id, api_url)
+
+
+def get_profile_config(profile: str) -> Dict[str, str]:
+    """Get Mithril config for a named profile from the config file.
+
+    Raises MithrilError if the config file or profile is not found.
+    """
+    file_config = _load_file_config()
+    if file_config is None:
+        raise MithrilError(
+            f'Config file not found at {get_credentials_path()}. '
+            f'Cannot resolve profile \'{profile}\'.')
+
+    profiles = file_config.get('profiles', {})
+    if profile not in profiles:
+        available = list(profiles.keys()) or '(none)'
+        raise MithrilError(f'Mithril profile \'{profile}\' not found. '
+                           f'Available profiles: {available}.')
+    profile_config = profiles[profile]
+    return _build_config(profile_config.get('api_key'),
+                         profile_config.get('project_id'),
+                         profile_config.get('api_url'))
 
 
 def _is_retryable_status(status_code: int) -> bool:
@@ -172,9 +207,11 @@ def _make_request(
     endpoint: str,
     payload: Optional[Dict[str, Any]] = None,
     params: Optional[Dict[str, Any]] = None,
+    config: Optional[Dict[str, str]] = None,
 ) -> Any:
     """Make an API request to Mithril with retry and backoff."""
-    config = get_config()
+    if config is None:
+        config = resolve_current_config()
     base_url = config['api_url']
     url = f'{base_url}{endpoint}'
     headers = {
@@ -265,7 +302,7 @@ def _make_request(
 
 def _get_or_create_ssh_key(public_key: str) -> List[str]:
     """Get or create SSH key for instances."""
-    config = get_config()
+    config = resolve_current_config()
     endpoint = '/v2/ssh-keys'
     params = {'project': config['project_id']}
 
@@ -398,12 +435,21 @@ def wait_for_bid(
     return instance_ids
 
 
-def list_instances(status: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+def list_instances(
+    status: Optional[str] = None,
+    config: Optional[Dict[str, str]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """List all instances, optionally filtered by status.
 
     Handles pagination using next_cursor if present in API response.
+
+    Args:
+        status: If provided, only return instances with this raw API status.
+        config: Optional pre-resolved config dict with api_key, project_id,
+            and api_url. If not provided, uses resolve_current_config().
     """
-    config = get_config()
+    if config is None:
+        config = resolve_current_config()
     endpoint = '/v2/instances'
     base_params: Dict[str, Any] = ({
         'project': quote(config['project_id'])
@@ -417,7 +463,10 @@ def list_instances(status: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
             if cursor:
                 params['next_cursor'] = cursor
 
-            response = _make_request('GET', endpoint, params=params)
+            response = _make_request('GET',
+                                     endpoint,
+                                     params=params,
+                                     config=config)
             logger.debug(f'Raw API response: {json.dumps(response, indent=2)}')
 
             instance_list = response.get('data', [])
@@ -488,7 +537,7 @@ def launch_instances(
     Returns:
         Tuple of (bid_id, list of instance_ids)
     """
-    config = get_config()
+    config = resolve_current_config()
     ssh_keys = _get_or_create_ssh_key(public_key)
 
     # Look up instance type FIDs by name and find available regions
@@ -561,23 +610,29 @@ def launch_instances(
         raise
 
 
-def get_bid(bid_name: str) -> Optional[Dict[str, Any]]:
+def get_bid(
+    bid_name: str,
+    config: Optional[Dict[str, str]] = None,
+) -> Optional[Dict[str, Any]]:
     """Get a bid by its exact name.
 
     Args:
         bid_name: The exact name of the bid to retrieve.
+        config: Optional pre-resolved config dict. If not provided,
+            uses resolve_current_config().
 
     Returns:
         Bid dictionary with fid, name, instances, etc., or None if not found.
     """
-    config = get_config()
+    if config is None:
+        config = resolve_current_config()
     endpoint = '/v2/spot/bids'
     params = {
         'project': config['project_id'],
         'name': bid_name,
     }
 
-    response = _make_request('GET', endpoint, params=params)
+    response = _make_request('GET', endpoint, params=params, config=config)
     bids = response.get('data', [])
     if not bids:
         logger.debug(f'No bid found with name {bid_name}')
@@ -586,23 +641,29 @@ def get_bid(bid_name: str) -> Optional[Dict[str, Any]]:
     return bids[0]
 
 
-def cancel_bid(bid_id: str) -> bool:
+def cancel_bid(
+    bid_id: str,
+    config: Optional[Dict[str, str]] = None,
+) -> bool:
     """Cancel a spot bid by its FID.
 
     Args:
         bid_id: The FID of the bid to cancel.
+        config: Optional pre-resolved config dict. If not provided,
+            uses resolve_current_config().
 
     Returns:
         True if the bid was successfully canceled or didn't exist (404),
         False otherwise.
     """
-    config = get_config()
+    if config is None:
+        config = resolve_current_config()
     endpoint = f'/v2/spot/bids/{bid_id}'
     params = {'project': config['project_id']}
 
     try:
         logger.debug(f'Canceling bid {bid_id}')
-        _make_request('DELETE', endpoint, params=params)
+        _make_request('DELETE', endpoint, params=params, config=config)
         logger.debug(f'Successfully canceled bid {bid_id}')
         return True
     except MithrilHttpError as e:
@@ -612,13 +673,19 @@ def cancel_bid(bid_id: str) -> bool:
         raise
 
 
-def update_bid(bid_id: str, paused: bool) -> Dict[str, Any]:
+def update_bid(
+    bid_id: str,
+    paused: bool,
+    config: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """Update a spot bid to pause or unpause it.
 
     Args:
         bid_id: The FID of the bid to update.
         paused: True to pause the bid (stop instances), False to unpause
             (resume).
+        config: Optional pre-resolved config dict. If not provided,
+            uses resolve_current_config().
 
     Returns:
         The updated bid dictionary.
@@ -626,13 +693,18 @@ def update_bid(bid_id: str, paused: bool) -> Dict[str, Any]:
     Raises:
         MithrilError: If the update fails.
     """
-    config = get_config()
+    if config is None:
+        config = resolve_current_config()
     endpoint = f'/v2/spot/bids/{bid_id}'
     params = {'project': config['project_id']}
     payload = {'paused': paused}
 
     logger.debug(f'Updating bid {bid_id}, paused: {paused}')
-    response = _make_request('PATCH', endpoint, payload=payload, params=params)
+    response = _make_request('PATCH',
+                             endpoint,
+                             payload=payload,
+                             params=params,
+                             config=config)
     return response
 
 

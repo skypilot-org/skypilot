@@ -14,10 +14,37 @@ PROVIDER_NAME = 'mithril'
 logger = sky_logging.init_logger(__name__)
 
 
+def _resolve_config(
+    provider_config: Optional[Dict[str,
+                                   Any]] = None,) -> Optional[Dict[str, str]]:
+    """Resolve Mithril API config from stored provider_config.
+
+    If provider_config contains a profile, resolves api_key and api_url
+    from that profile in the config file. This ensures status queries use
+    the same API server the cluster was launched with, even if the user
+    has since switched profiles.
+
+    Returns:
+        Resolved config dict, or None to use the current default config.
+    """
+    if provider_config is None:
+        return None
+    profile = provider_config.get('profile')
+    project_id = provider_config.get('project_id')
+    if profile:
+        config = utils.get_profile_config(profile)
+        if project_id:
+            config['project_id'] = project_id
+        return config
+    # Cluster may have been created via env overrides without a profile.
+    return utils.resolve_current_config()
+
+
 def _filter_instances(
     cluster_name_on_cloud: str,
     status_in: Optional[List[MithrilStatus]] = None,
     status_not_in: Optional[List[MithrilStatus]] = None,
+    config: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Filter instances by cluster name and status.
 
@@ -25,11 +52,12 @@ def _filter_instances(
         cluster_name_on_cloud: Cluster name prefix to match.
         status_in: If provided, only include instances with these statuses.
         status_not_in: If provided, exclude instances with these statuses.
+        config: Optional pre-resolved Mithril config for API calls.
     """
     logger.debug(f'Filtering instances: cluster={cluster_name_on_cloud}, '
                  f'status_in={status_in}, status_not_in={status_not_in}')
 
-    instances = utils.list_instances()
+    instances = utils.list_instances(config=config)
     filtered_instances: Dict[str, Dict[str, Any]] = {}
 
     for instance_id, instance in instances.items():
@@ -186,18 +214,19 @@ def terminate_instances(
     Uses the cancel bid API (DELETE spot/bids/{bid_id}) which immediately
     terminates all instances associated with the bid.
     """
-    del provider_config, worker_only  # unused
+    del worker_only  # unused
+    config = _resolve_config(provider_config)
     logger.debug(
         f'Terminating all instances for cluster {cluster_name_on_cloud}')
 
     # Get the bid for this cluster
-    bid = utils.get_bid(cluster_name_on_cloud)
+    bid = utils.get_bid(cluster_name_on_cloud, config=config)
     if not bid:
         logger.debug(f'No bid found for cluster {cluster_name_on_cloud}')
         return
 
     bid_id = bid['fid']
-    utils.cancel_bid(bid_id)
+    utils.cancel_bid(bid_id, config=config)
     logger.debug(f'Canceled bid {bid_id} for cluster {cluster_name_on_cloud}')
 
 
@@ -214,6 +243,7 @@ def get_cluster_info(
     but may not be fully RUNNING.
     """
     del region  # unused
+    config = _resolve_config(provider_config)
     # Get all non-terminated instances (not just RUNNING) - include any instance
     # with an IP address so that wait_for_ssh can check SSH readiness
     all_instances = _filter_instances(
@@ -225,6 +255,7 @@ def get_cluster_info(
             'STATUS_ERROR',
             'STATUS_PAUSED',
         ],
+        config=config,
     )
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
@@ -267,8 +298,9 @@ def query_instances(
     retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Returns the status of the specified instances for Mithril."""
-    del cluster_name, provider_config, retry_if_missing  # unused
-    instances = _filter_instances(cluster_name_on_cloud)
+    del cluster_name, retry_if_missing  # unused
+    config = _resolve_config(provider_config)
+    instances = _filter_instances(cluster_name_on_cloud, config=config)
 
     statuses: Dict[str, Tuple[Optional['status_lib.ClusterStatus'],
                               Optional[str]]] = {}
@@ -300,16 +332,17 @@ def stop_instances(
     This pauses the bid, which stops all instances associated with it.
     The instances can be resumed later by unpausing the bid.
     """
-    del provider_config, worker_only  # unused
+    del worker_only  # unused
+    config = _resolve_config(provider_config)
     logger.debug(f'Stopping instances for cluster {cluster_name_on_cloud}')
 
-    bid = utils.get_bid(cluster_name_on_cloud)
+    bid = utils.get_bid(cluster_name_on_cloud, config=config)
     if not bid:
         logger.debug(f'No bid found for cluster {cluster_name_on_cloud}')
         return
 
     bid_id = bid['fid']
-    utils.update_bid(bid_id, paused=True)
+    utils.update_bid(bid_id, paused=True, config=config)
     logger.debug(f'Paused bid {bid_id} for cluster {cluster_name_on_cloud}')
 
 

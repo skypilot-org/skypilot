@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.provision.mithril import utils as mithril_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
@@ -29,10 +30,7 @@ class Mithril(clouds.Cloud):
         Respects XDG_CONFIG_HOME, otherwise defaults to
         ~/.config/mithril/config.yaml
         """
-        xdg_config_home = os.environ.get('XDG_CONFIG_HOME')
-        if xdg_config_home:
-            return os.path.join(xdg_config_home, 'mithril', 'config.yaml')
-        return '~/.config/mithril/config.yaml'
+        return mithril_utils.get_credentials_path()
 
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
@@ -282,10 +280,18 @@ class Mithril(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
+        # Get current Mithril profile and project for storing in cluster YAML.
+        # These are persisted so that status queries use the correct API server
+        # even if the user switches profiles later.
+        config = mithril_utils.resolve_current_config()
+        profile = mithril_utils.get_current_profile()
+
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'mithril_profile': profile or '',
+            'mithril_project_id': config['project_id'],
         }
 
         if acc_dict is not None:
