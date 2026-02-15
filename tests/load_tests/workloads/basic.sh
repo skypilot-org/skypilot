@@ -13,7 +13,7 @@ CLUSTER="load-test-${UNIQUE_ID}"
 JOB="load-test-${UNIQUE_ID}"
 
 sky check || true
-sky show-gpus --infra $CLOUD || true
+sky gpus list --infra $CLOUD || true
 workdir=$(mktemp -d)
 dd if=/dev/zero of=${workdir}/file.txt bs=1024 count=10000
 sky launch -y -c $CLUSTER --infra $CLOUD --cpus 2+ --memory 4+ 'for i in {1..60}; do echo "$i" && sleep 0.1; done' --workdir ${workdir}
@@ -34,5 +34,5 @@ sky jobs queue
 sky jobs logs -n $JOB || true
 sky jobs logs -n $JOB --controller
 sky volumes ls
-sky show-gpus || true
+sky gpus list || true
 sky cost-report --days 7 || true

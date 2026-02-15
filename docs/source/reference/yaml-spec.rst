@@ -351,7 +351,7 @@ OR
 
 Accelerator name and count per node (optional).
 
-Use ``sky show-gpus`` to view available accelerator configurations.
+Use ``sky gpus list`` to view available accelerator configurations.
 
 The following three ways are valid for specifying accelerators for a cluster:
 

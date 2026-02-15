@@ -1,7 +1,7 @@
 """Slurm."""
 
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
@@ -47,6 +47,8 @@ class Slurm(clouds.Cloud):
             'controllers is not '
             'well tested with '
             'Slurm.',
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -285,12 +287,14 @@ class Slurm(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for Slurm."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='slurm')
@@ -317,7 +321,7 @@ class Slurm(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del cluster_name, dryrun, volume_mounts  # Unused.
         if region is not None:
             cluster = region.name
@@ -363,6 +367,24 @@ class Slurm(clouds.Cloud):
 
         image_id = resources.extract_docker_image()
 
+        provision_timeout = skypilot_config.get_effective_region_config(
+            cloud='slurm',
+            region=cluster,
+            keys=('provision_timeout',),
+            default_value=None)
+        if provision_timeout is None:
+            if resources.zone is not None:
+                # When zone/partition is specified, there will be no failover,
+                # so we can let Slurm hold on to the job and let it be queued
+                # for a long time.
+                provision_timeout = 24 * 60 * 60  # 24 hours
+            else:
+                # Otherwise, we still want failover, but also wait sufficiently
+                # long for the Slurm scheduler to allocate the resources. We
+                # have seen Slurm taking minutes to schedule a job, when there
+                # are a lot of pending jobs to be processed.
+                provision_timeout = 2 * 60  # 2 minutes
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -372,12 +394,15 @@ class Slurm(clouds.Cloud):
             'accelerator_type': acc_type,
             'slurm_cluster': cluster,
             'slurm_partition': partition,
+            'provision_timeout': provision_timeout,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),
             'ssh_user': ssh_config_dict['user'],
             'slurm_proxy_command': ssh_config_dict.get('proxycommand', None),
             'slurm_proxy_jump': ssh_config_dict.get('proxyjump', None),
+            'slurm_identities_only':
+                slurm_utils.get_identities_only(ssh_config_dict),
             # TODO(jwj): Solve naming collision with 'ssh_private_key'.
             # Please refer to slurm-ray.yml.j2 'ssh' and 'auth' sections.
             'slurm_private_key': slurm_utils.get_identity_file(ssh_config_dict),
@@ -430,6 +455,7 @@ class Slurm(clouds.Cloud):
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier,
+            local_disk=resources.local_disk,
             region=resources.region,
             zone=resources.zone)
         if default_instance_type is None:
@@ -509,7 +535,10 @@ class Slurm(clouds.Cloud):
                     ssh_config_dict['user'],
                     slurm_utils.get_identity_file(ssh_config_dict),
                     ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None))
+                    ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+                    identities_only=slurm_utils.get_identities_only(
+                        ssh_config_dict),
+                )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
                 ctx2text[cluster] = 'enabled'

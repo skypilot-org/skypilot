@@ -216,8 +216,7 @@ def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
             raise exceptions.InvalidRecipeNameError(
                 f'Recipe name "{recipe_name}" is invalid; '
                 'ensure it is fully matched by regex (e.g., '
-                'only contains letters, numbers, and dashes): '
-                f'{valid_regex}')
+                'only contains letters, numbers, and dashes).')
 
 
 def make_cluster_name_on_cloud(display_name: str,

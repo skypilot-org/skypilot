@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { CircularProgress } from '@mui/material';
 import yaml from 'js-yaml';
 import {
+  AlertTriangleIcon,
   ArrowLeftIcon,
   CopyIcon,
   PinIcon,
@@ -66,23 +67,26 @@ function EditModal({ isOpen, onClose, template, onSave }) {
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState(null);
 
   useEffect(() => {
     if (template && isOpen) {
       setDescription(template.description || '');
       setContent(template.content || '');
+      setFormError(null);
     }
   }, [template, isOpen]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setFormError(null);
 
     // Validate YAML syntax
     try {
       yaml.load(content);
     } catch (yamlError) {
-      showToast(`Invalid YAML: ${yamlError.message}`, 'error');
+      setFormError(`Invalid YAML: ${yamlError.message}`);
       setIsSubmitting(false);
       return;
     }
@@ -94,7 +98,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
       });
       onClose();
     } catch (error) {
-      showToast(`Error: ${error.message}`, 'error');
+      setFormError(error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -130,10 +134,20 @@ function EditModal({ isOpen, onClose, template, onSave }) {
             <Label htmlFor="content">YAML Content *</Label>
             <YamlEditor
               value={content}
-              onChange={setContent}
+              onChange={(val) => {
+                setContent(val);
+                setFormError(null);
+              }}
               maxHeight="400px"
             />
           </div>
+
+          {formError && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-800">{formError}</p>
+            </div>
+          )}
 
           <DialogFooter>
             <Button

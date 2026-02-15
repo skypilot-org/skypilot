@@ -5,14 +5,14 @@ infra: k8s  # or k8s/<context>
 size: 10Gi
 
 # Optional: To use an existing PVC instead of creating a new one, set to `true` and set `name` to the existing PVC name.
-use_existing: true
+# use_existing: true
 
 # Optional: add labels to the PVC
-labels:
-  key: value
+# labels:
+#   key: value
 
 # Optional: additional configuration
-config:
-  namespace: default
-  storage_class_name: csi-mounted-fs-path-sc
-  access_mode: ReadWriteMany  # Required for multi-node clusters4
+# config:
+#   namespace: default
+#   storage_class_name: csi-mounted-fs-path-sc
+#   access_mode: ReadWriteMany  # Required for multi-node clusters4

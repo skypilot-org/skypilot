@@ -200,6 +200,13 @@ class EnabledCloudsBody(RequestBody):
     expand: bool = False
 
 
+class KubernetesLabelGpusBody(RequestBody):
+    """The request body for the GPU labeling endpoint."""
+    context: Optional[str] = None
+    cleanup_only: bool = False
+    wait_for_completion: bool = True
+
+
 class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str
@@ -608,6 +615,7 @@ class RequestStatusBody(pydantic.BaseModel):
     all_status: bool = False
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
+    cluster_name: Optional[str] = None
 
 
 class ServeUpBody(RequestBody):

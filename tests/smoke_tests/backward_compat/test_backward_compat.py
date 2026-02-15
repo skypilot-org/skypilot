@@ -842,3 +842,76 @@ class TestBackwardCompatibility:
             teardown = f'{self.ACTIVATE_CURRENT} && (sky down {cluster_name} -y || true) && (sky volumes delete {volume_name} -y || true)'
             self.run_compatibility_test(f'{volume_name}-compat', commands,
                                         teardown)
+
+    def test_cluster_status_filter_compatibility(self, generic_cloud: str):
+        """Test that new --cluster flag is backward compatible with old servers"""
+        CLUSTER_FILTER_MIN_API_VERSION = 38  # The version that introduced this feature
+        if self.BASE_API_VERSION < CLUSTER_FILTER_MIN_API_VERSION:
+            pytest.skip(
+                f'Base API version {self.BASE_API_VERSION} already supports cluster filtering '
+                f'(introduced in version {CLUSTER_FILTER_MIN_API_VERSION}). Skipping test.'
+            )
+
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        another_cluster = f"{cluster_name}-2"
+        job_name = f"{cluster_name}-job"
+        another_job = f"{another_cluster}-job"
+
+        commands = [
+            # Launch two clusters with old version
+            f'{self.ACTIVATE_BASE} && {smoke_tests_utils.SKY_API_RESTART} && '
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_BASE} && '
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} examples/minimal.yaml',
+
+            # Submit long-running jobs so they show up in sky api status
+            f'{self.ACTIVATE_BASE} && sky jobs launch -d -y -n {job_name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} "sleep 300"',
+            f'{self.ACTIVATE_BASE} && sky jobs launch -d -y -n {another_job} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} "sleep 300"',
+            f'{self.ACTIVATE_BASE} && sleep 10',
+
+            # Test New client with Old server
+            # Should show warning and show both jobs (no filtering)
+            f'{self.ACTIVATE_CURRENT} && result="$(sky api status --cluster {cluster_name} 2>&1)"; '
+            f'exit_code=$?; '
+            f'echo "Exit code: $exit_code"; '
+            f'echo "$result"; '
+            # Verify success
+            f'[ "$exit_code" -eq 0 ] || exit 1; '
+            # Verify warning appears (flag is ignored)
+            f'echo "$result" | grep -qi "flag is ignored.*server does not support" || '
+            f'{{ echo "ERROR: Expected warning about unsupported flag"; exit 1; }}; '
+            # Verify no filtering (both clusters shown)
+            f'echo "$result" | grep -q "{job_name}" || exit 1; '
+            f'echo "$result" | grep -q "{another_job}" || '
+            f'{{ echo "ERROR: Flag was applied when it should be ignored"; exit 1; }}',
+
+            # Upgrade server
+            f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART}',
+
+            # Test with New client with New server
+            # Should have NO warning AND show only filtered job
+            f'{self.ACTIVATE_CURRENT} && result="$(sky api status --cluster {cluster_name} 2>&1)"; '
+            f'exit_code=$?; '
+            f'echo "Exit code: $exit_code"; '
+            f'echo "$result"; '
+            # Verify success
+            f'[ "$exit_code" -eq 0 ] || exit 1; '
+            # Verify NO warning (flag is supported)
+            f'! echo "$result" | grep -qi "flag is ignored.*server does not support" || '
+            f'{{ echo "ERROR: Unexpected warning with new server"; exit 1; }}; '
+            # Verify filtering WORKS (only target job shown)
+            f'echo "$result" | grep -q "{job_name}" || exit 1; '
+            f'! echo "$result" | grep -q "{another_job}" || '
+            f'{{ echo "ERROR: Filtering not working - both jobs shown"; exit 1; }}',
+
+            # Without flag should show all
+            f'{self.ACTIVATE_CURRENT} && result="$(sky api status)"; '
+            f'echo "$result" | grep "{job_name}" && '
+            f'echo "$result" | grep "{another_job}"',
+
+            # Cleanup jobs
+            f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {job_name} || true',
+            f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {another_job} || true',
+        ]
+        teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {cluster_name}* || true && sky down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)

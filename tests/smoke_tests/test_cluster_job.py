@@ -758,6 +758,7 @@ def test_inferentia():
 
 
 # ---------- TPU VM. ----------
+@pytest.mark.skip(reason='We are having trouble getting TPUs in GCP.')
 @pytest.mark.gcp
 @pytest.mark.tpu
 def test_tpu_vm():
@@ -784,6 +785,7 @@ def test_tpu_vm():
 
 
 # ---------- TPU VM Pod. ----------
+@pytest.mark.skip(reason='We are having trouble getting TPUs in GCP.')
 @pytest.mark.gcp
 @pytest.mark.tpu
 def test_tpu_vm_pod():

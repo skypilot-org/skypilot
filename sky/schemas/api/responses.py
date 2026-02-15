@@ -86,6 +86,8 @@ class APIHealthResponse(ResponseBaseModel):
     ingress_basic_auth_enabled: bool = False
     # Latest version info (if available)
     latest_version: Optional[str] = None
+    # Whether external proxy auth is enabled
+    external_proxy_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):

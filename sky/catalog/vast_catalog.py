@@ -64,10 +64,11 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None,
                               datacenter_only: bool = False) -> Optional[str]:
-    del disk_tier
+    del disk_tier, local_disk
     # NOTE: After expanding catalog to multiple entries, you may
     # want to specify a default instance type or family.
     df = _apply_datacenter_filter(_df, datacenter_only)
@@ -86,6 +87,7 @@ def get_instance_type_for_accelerator(
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         use_spot: bool = False,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         datacenter_only: bool = False) -> Tuple[Optional[List[str]], List[str]]:
@@ -95,6 +97,7 @@ def get_instance_type_for_accelerator(
         datacenter_only: If True, only return instances hosted in datacenters
             (hosting_type >= 1).
     """
+    del local_disk  # unused
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Vast does not support zones.')

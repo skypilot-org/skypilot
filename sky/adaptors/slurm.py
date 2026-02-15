@@ -3,7 +3,6 @@
 import ipaddress
 import logging
 import re
-import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
@@ -24,9 +23,6 @@ _PARTITION_NAME_REGEX = re.compile(r'PartitionName=(.+?)(?:\s+\w+=|$)')
 # Regex pattern to extract MAXTIME from scontrol output
 # Matches MaxTime=<time> and captures the time
 _MAXTIME_REGEX = re.compile(r'MaxTime=((?:\d+-)?\d{1,2}:\d{2}:\d{2}|UNLIMITED)')
-
-# Default timeout for waiting for job nodes to be allocated, in seconds.
-_SLURM_DEFAULT_PROVISION_TIMEOUT = 10
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Slurm. '
                          'Try running: pip install "skypilot[slurm]"')
@@ -91,6 +87,7 @@ class SlurmClient:
         ssh_proxy_command: Optional[str] = None,
         ssh_proxy_jump: Optional[str] = None,
         is_inside_slurm_cluster: bool = False,
+        identities_only: Optional[bool] = None,
     ):
         """Initialize SlurmClient.
 
@@ -103,6 +100,9 @@ class SlurmClient:
             ssh_proxy_jump: Optional SSH proxy jump destination.
             is_inside_slurm_cluster: If True, uses local execution mode (for
             when running on the Slurm cluster itself). Defaults to False.
+            identities_only: If True, only use the specified identity file and
+                don't try ssh-agent keys. If None, defaults to False (allows
+                ssh-agent fallback for backward compatibility).
         """
         self.ssh_host = ssh_host
         self.ssh_port = ssh_port
@@ -122,6 +122,8 @@ class SlurmClient:
             assert ssh_host is not None
             assert ssh_port is not None
             assert ssh_user is not None
+            # If user has IdentitiesOnly=yes in their config, respect it by
+            # NOT disabling IdentitiesOnly. Otherwise, allow ssh-agent fallback.
             self._runner = command_runner.SSHCommandRunner(
                 (ssh_host, ssh_port),
                 ssh_user,
@@ -129,8 +131,7 @@ class SlurmClient:
                 ssh_proxy_command=ssh_proxy_command,
                 ssh_proxy_jump=ssh_proxy_jump,
                 enable_interactive_auth=True,
-                # Allow ssh-agent and default key fallback for Slurm.
-                disable_identities_only=True,
+                disable_identities_only=not identities_only,
             )
 
     def _run_slurm_cmd(self, cmd: str) -> Tuple[int, str, str]:
@@ -165,7 +166,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to query Slurm jobs.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         job_ids = stdout.strip().splitlines()
         return job_ids
@@ -192,7 +194,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            f'Failed to cancel job {job_name}.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
         logger.debug(f'Successfully cancelled job {job_name}: {stdout}')
 
     def info(self) -> str:
@@ -210,7 +213,8 @@ class SlurmClient:
             rc,
             cmd,
             'Failed to get Slurm cluster information.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
         return stdout
 
     def info_nodes(self) -> List[NodeInfo]:
@@ -226,7 +230,8 @@ class SlurmClient:
             rc,
             cmd,
             'Failed to get Slurm node information.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         nodes = []
         for line in stdout.splitlines():
@@ -276,7 +281,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get detailed node information for {node_name}.',
-            stderr=f'{node_details}\n{stderr}')
+            stderr=f'{node_details}\n{stderr}',
+            stream_logs=False)
         node_info = _parse_scontrol_node_output(node_details)
         return node_info
 
@@ -293,7 +299,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get jobs for node {node_name}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
         return stdout.splitlines()
 
     def get_all_jobs_gres(self) -> Dict[str, List[str]]:
@@ -308,7 +315,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to get all jobs GRES.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         nodes_to_gres: Dict[str, List[str]] = {}
         for line in stdout.splitlines():
@@ -346,7 +354,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get job state for job {job_id}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         state = stdout.strip()
         return state if state else None
@@ -360,7 +369,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get job state for job {job_name}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         states = stdout.splitlines()
         return states
@@ -379,7 +389,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get job reason for job {job_id}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
 
         output = stdout.strip()
         if not output:
@@ -387,77 +398,50 @@ class SlurmClient:
 
         return output if output != 'None' else None
 
-    @timeline.event
-    def wait_for_job_nodes(self, job_id: str, timeout: int) -> None:
-        """Wait for a Slurm job to have nodes allocated.
+    def get_pending_job_count(self,
+                              partition: str,
+                              exclude_job_id: Optional[str] = None) -> int:
+        """Count pending jobs in a partition, excluding our own job.
 
         Args:
-            job_id: The Slurm job ID.
-            timeout: Maximum time to wait in seconds.
+            partition: The Slurm partition to query.
+            exclude_job_id: Optional job ID to exclude from the count.
+
+        Returns:
+            The number of pending jobs, or -1 if the query fails.
         """
-        start_time = time.time()
-        last_state = None
+        cmd = f'squeue -h -p {partition} --states=pending -o "%i"'
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return -1
+        job_ids = [j.strip() for j in stdout.strip().splitlines() if j.strip()]
+        if exclude_job_id:
+            job_ids = [j for j in job_ids if j != exclude_job_id]
+        return len(job_ids)
 
-        while time.time() - start_time < timeout:
-            state = self.get_job_state(job_id)
-
-            if state != last_state:
-                logger.debug(f'Job {job_id} state: {state}')
-                last_state = state
-
-            if state is None:
-                raise RuntimeError(f'Job {job_id} not found. It may have been '
-                                   'cancelled or failed.')
-
-            if state in ('COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT'):
-                raise RuntimeError(
-                    f'Job {job_id} terminated with state {state} '
-                    'before nodes were allocated.')
-            # TODO(kevin): Log reason for pending.
-
-            # Check if nodes are allocated by trying to get node list
-            cmd = f'squeue -h --jobs {job_id} -o "%N"'
-            rc, stdout, stderr = self._run_slurm_cmd(cmd)
-
-            if rc == 0 and stdout.strip():
-                # Nodes are allocated
-                logger.debug(
-                    f'Job {job_id} has nodes allocated: {stdout.strip()}')
-                return
-            elif rc != 0:
-                logger.debug(f'Failed to get nodes for job {job_id}: '
-                             f'{stdout}\n{stderr}')
-
-            # Wait before checking again
-            time.sleep(2)
-
-        raise TimeoutError(f'Job {job_id} did not get nodes allocated within '
-                           f'{timeout} seconds. Last state: {last_state}')
+    def check_job_has_nodes(self, job_id: str) -> bool:
+        """Check if a Slurm job has nodes allocated."""
+        cmd = f'squeue -h --jobs {job_id} -o "%N"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            logger.debug(f'Failed to check nodes for job {job_id}: '
+                         f'{stdout}\n{stderr}')
+            return False
+        return bool(stdout.strip())
 
     @timeline.event
-    def get_job_nodes(
-            self,
-            job_id: str,
-            wait: bool = True,
-            timeout: Optional[int] = None) -> Tuple[List[str], List[str]]:
+    def get_job_nodes(self, job_id: str) -> Tuple[List[str], List[str]]:
         """Get the list of nodes and their IPs for a given job ID.
 
         The ordering is guaranteed to be stable for the lifetime of the job.
 
         Args:
             job_id: The Slurm job ID.
-            wait: If True, wait for nodes to be allocated before returning.
-            timeout: Maximum time to wait in seconds. Only used when wait=True.
 
         Returns:
             A tuple of (nodes, node_ips) where nodes is a list of node names
             and node_ips is a list of corresponding IP addresses.
         """
-        # Wait for nodes to be allocated if requested
-        if wait:
-            if timeout is None:
-                timeout = _SLURM_DEFAULT_PROVISION_TIMEOUT
-            self.wait_for_job_nodes(job_id, timeout=timeout)
 
         cmd = (
             f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
@@ -472,7 +456,8 @@ class SlurmClient:
             rc,
             cmd,
             f'Failed to get nodes for job {job_id}.',
-            stderr=f'{stdout}\n{stderr}')
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
         logger.debug(f'Successfully got nodes for job {job_id}: {stdout}')
 
         node_info = {}
@@ -508,7 +493,8 @@ class SlurmClient:
                 rc,
                 resolve_ip_cmd,
                 f'Failed to resolve hostnames for: {hostnames}',
-                stderr=f'{resolve_stdout}\n{stderr}')
+                stderr=f'{resolve_stdout}\n{stderr}',
+                stream_logs=False)
 
             hostname_to_ip = {}
             unresolved = []
@@ -564,7 +550,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to submit Slurm job.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         # Parse job ID from sbatch output (format: "Submitted batch job 12345")
         job_id_match = re.search(r'Submitted batch job (\d+)', stdout)
@@ -589,7 +576,8 @@ class SlurmClient:
         subprocess_utils.handle_returncode(rc,
                                            cmd,
                                            'Failed to get Slurm partitions.',
-                                           stderr=f'{stdout}\n{stderr}')
+                                           stderr=f'{stdout}\n{stderr}',
+                                           stream_logs=False)
 
         partitions = []
         for line in stdout.strip().splitlines():

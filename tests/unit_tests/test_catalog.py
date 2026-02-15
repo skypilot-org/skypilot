@@ -249,3 +249,115 @@ def test_catalog_prices_are_json_serializable():
     response = {'total_cost': cost}
     serialized_dict = orjson.dumps(response)
     assert orjson.loads(serialized_dict) == {'total_cost': 2.5}
+
+
+# Synthetic catalog DataFrame for local disk tests.
+# Mirrors real AWS patterns:
+#   m5.large    - no local disk         ($0.10)
+#   d2.large    - SSD, no NVMe, 500 GB  ($0.14)
+#   i3.large    - SSD + NVMe, 475 GB    ($0.16)
+#   i3.2xlarge  - SSD + NVMe, 1900 GB   ($0.62)
+_LOCAL_DISK_DF = pd.DataFrame([
+    {
+        'InstanceType': 'm5.large',
+        'vCPUs': 2,
+        'MemoryGiB': 8,
+        'Price': 0.10,
+        'Region': 'us-east-1',
+        'AvailabilityZone': 'us-east-1a',
+        'LocalDiskType': float('nan'),
+        'LocalDiskSize': float('nan'),
+        'LocalDiskCount': float('nan'),
+        'NVMeSupported': False,
+    },
+    {
+        'InstanceType': 'i3.large',
+        'vCPUs': 2,
+        'MemoryGiB': 15.25,
+        'Price': 0.16,
+        'Region': 'us-east-1',
+        'AvailabilityZone': 'us-east-1a',
+        'LocalDiskType': 'ssd',
+        'LocalDiskSize': 475.0,
+        'LocalDiskCount': 1,
+        'NVMeSupported': True,
+    },
+    {
+        'InstanceType': 'i3.2xlarge',
+        'vCPUs': 8,
+        'MemoryGiB': 61,
+        'Price': 0.62,
+        'Region': 'us-east-1',
+        'AvailabilityZone': 'us-east-1a',
+        'LocalDiskType': 'ssd',
+        'LocalDiskSize': 950.0,
+        'LocalDiskCount': 2,
+        'NVMeSupported': True,
+    },
+    {
+        'InstanceType': 'd2.large',
+        'vCPUs': 2,
+        'MemoryGiB': 15.25,
+        'Price': 0.14,
+        'Region': 'us-east-1',
+        'AvailabilityZone': 'us-east-1a',
+        'LocalDiskType': 'ssd',
+        'LocalDiskSize': 500.0,
+        'LocalDiskCount': 1,
+        'NVMeSupported': False,
+    },
+])
+
+
+@pytest.mark.parametrize(
+    'local_disk, expected',
+    [
+        # NVMe at-least: cheapest NVMe with total >= 500 is i3.2xlarge
+        # (i3.large only has 475)
+        ('nvme:500+', 'i3.2xlarge'),
+        # NVMe at-least: only i3.2xlarge has total >= 1500
+        ('nvme:1500+', 'i3.2xlarge'),
+        # NVMe at-least: i3.large (475 >= 100) is cheapest NVMe
+        ('nvme:100+', 'i3.large'),
+        # SSD at-least: NVMe instances also qualify; d2.large ($0.14,
+        # 500 GB) is cheapest SSD with >= 400
+        ('ssd:400+', 'd2.large'),
+        # NVMe exact: only i3.large has total ~475
+        ('nvme:475', 'i3.large'),
+        # NVMe exact: no instance has exactly 300 GB NVMe
+        ('nvme:300', None),
+        # SSD exact: d2.large has 500 GB total (non-NVMe SSD)
+        ('ssd:500', 'd2.large'),
+        # No local disk: cheapest instance overall (m5.large)
+        (None, 'm5.large'),
+        # Size too large: nothing has >= 5000
+        ('nvme:5000+', None),
+    ],
+)
+def test_filter_with_local_disk(local_disk, expected):
+    """Test that filter_with_local_disk + instance selection picks the
+    correct (cheapest) instance satisfying local disk requirements."""
+    filtered = catalog_common.filter_with_local_disk(_LOCAL_DISK_DF.copy(),
+                                                     local_disk)
+    result = catalog_common.get_instance_type_for_cpus_mem_impl(
+        filtered, cpus='1+', memory_gb_or_ratio=None, region=None)
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    'local_disk, expected_instances',
+    [
+        # NVMe filters out non-NVMe and non-SSD instances
+        ('nvme:100+', ['i3.2xlarge', 'i3.large']),
+        # SSD includes NVMe instances too (NVMe is a superset of SSD)
+        ('ssd:100+', ['d2.large', 'i3.2xlarge', 'i3.large']),
+        # None returns all instances (no filtering)
+        (None, ['d2.large', 'i3.2xlarge', 'i3.large', 'm5.large']),
+    ],
+)
+def test_filter_with_local_disk_instance_sets(local_disk, expected_instances):
+    """Test that filter_with_local_disk returns the correct candidate set."""
+    filtered = catalog_common.filter_with_local_disk(_LOCAL_DISK_DF.copy(),
+                                                     local_disk)
+    assert sorted(
+        filtered['InstanceType'].tolist()) == sorted(expected_instances)

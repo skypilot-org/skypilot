@@ -242,7 +242,7 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
 
             gpu_hint = (
                 '\nHint: To see the list of GPUs in the cluster, '
-                'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
+                'run \'sky gpus list --cloud kubernetes\'') if gpus else ''
 
         if num_cpus < 2:
             logger.info('Warning: Local cluster has less than 2 CPUs. '

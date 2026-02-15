@@ -13,6 +13,7 @@ provider:
 
   cluster: {{slurm_cluster}}
   partition: {{slurm_partition}}
+  provision_timeout: {{provision_timeout}}
 
   ssh:
     hostname: {{ssh_hostname}}
@@ -27,6 +28,7 @@ provider:
 {% if slurm_proxy_jump is not none %}
     proxyjump: {{slurm_proxy_jump | tojson }}
 {% endif %}
+    identities_only: {{slurm_identities_only}}
 
 auth:
   ssh_user: {{user}}
