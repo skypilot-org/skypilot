@@ -26,6 +26,7 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
+import io
 import json
 import os
 import pathlib
@@ -3651,19 +3652,13 @@ def _down_or_stop_clusters(
     '-w',
     type=str,
     help='The workspace to check. If None, all workspaces will be checked.')
-@click.option(
-    '--output',
-    '-o',
-    type=click.Choice(['table', 'json'], case_sensitive=False),
-    default='table',
-    help='Output format. "table" for human-readable output (default), '
-    '"json" for machine-readable JSON output.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def check(infra_list: Tuple[str],
           verbose: bool,
           workspace: Optional[str] = None,
-          output: str = 'table'):
+          output_format: str = 'table'):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3688,29 +3683,17 @@ def check(infra_list: Tuple[str],
       # Output in JSON format for scripting.
       sky check -o json
     """
-    import io
-    import json as json_lib
-
     infra_arg = infra_list if len(infra_list) > 0 else None
-    output_format = output.lower()
+    request_id = sdk.check(infra_list=infra_arg,
+                           verbose=verbose,
+                           workspace=workspace)
 
-    if output_format == 'json':
-        # In JSON mode, capture the result and suppress regular output
-        request_id = sdk.check(infra_list=infra_arg,
-                               verbose=verbose,
-                               workspace=workspace,
-                               output_format='json')
-        # Suppress streamed output by redirecting to a null stream
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        # Suppress streamed output and print the result as JSON
         null_stream = io.StringIO()
         result = sdk.stream_and_get(request_id, output_stream=null_stream)
-        # Output clean JSON to stdout
-        click.echo(json_lib.dumps(result, indent=2))
+        click.echo(json.dumps(result, indent=2))
     else:
-        # Default table output
-        request_id = sdk.check(infra_list=infra_arg,
-                               verbose=verbose,
-                               workspace=workspace,
-                               output_format='table')
         sdk.stream_and_get(request_id)
         api_server_url = server_common.get_server_url()
         click.echo()

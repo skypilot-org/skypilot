@@ -192,25 +192,22 @@ def stream_response(request_id: Optional[server_common.RequestId[T]],
 def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
-    workspace: Optional[str] = None,
-    output_format: str = 'table'
-) -> server_common.RequestId[Union[Dict[str, List[str]], Dict[str, Any]]]:
+    workspace: Optional[str] = None
+) -> server_common.RequestId[Dict[str, Dict[str, List[str]]]]:
     """Checks the credentials to enable clouds.
 
     Args:
         infra: The infra to check.
         verbose: Whether to show verbose output.
         workspace: The workspace to check. If None, all workspaces will be
-            checked.
-        output_format: Output format - 'table' (default) or 'json'.
+        checked.
 
     Returns:
         The request ID of the check request.
 
     Request Returns:
-        If output_format is 'table': Dict mapping workspace to list of
-            enabled cloud names.
-        If output_format is 'json': Dict with structured data for JSON output.
+        Dict mapping workspace name to a dict of cloud name to list of
+        enabled capability strings (e.g. 'compute', 'storage').
     """
     if infra_list is None:
         clouds = None
@@ -230,8 +227,7 @@ def check(
         clouds = tuple(specified_clouds)
     body = payloads.CheckBody(clouds=clouds,
                               verbose=verbose,
-                              workspace=workspace,
-                              output_format=output_format)
+                              workspace=workspace)
     response = server_common.make_authenticated_request(
         'POST', '/check', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
