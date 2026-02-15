@@ -91,7 +91,6 @@ def run_instances(
     3. Check for existing instances without SSH destinations → wait for them
     4. No instances exist → launch new ones
     """
-    del cluster_name  # unused
     logger.debug(f'Starting run_instances with region={region}, '
                  f'cluster={cluster_name_on_cloud}')
     logger.debug(f'Config: {config}')
@@ -103,10 +102,12 @@ def run_instances(
         if bid:
             bid_status = bid.get('status')
             if bid_status == 'Terminated':
-                raise RuntimeError(
-                    f'Cluster {cluster_name_on_cloud} has been terminated '
-                    'and cannot be resumed. Use \'sky down\' to clean up '
-                    'and \'sky launch\' to create a new cluster.')
+                msg = (f'The spot bid ({cluster_name_on_cloud}) for '
+                       f'cluster {cluster_name!r} has been terminated on '
+                       'Mithril and cannot be resumed. Please use a '
+                       'different name.')
+                logger.warning(msg)
+                raise utils.MithrilError(msg)
             if bid_status == 'Paused':
                 bid_id = bid['fid']
                 resumed_instance_ids = bid.get('instances', [])
