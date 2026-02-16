@@ -387,3 +387,50 @@ def test_is_controller_accessible_accepts_autostopping(mock_refresh):
         stopped_message='Test stopped',
         exit_if_not_accessible=False)
     assert result == mock_handle
+
+
+class TestCheckNetworkConnection:
+    """Tests for check_network_connection functions."""
+
+    def test_check_network_connection_skips_in_kubernetes(self):
+        """Test that network check is skipped inside Kubernetes pods."""
+        # When KUBERNETES_SERVICE_HOST is set, should return immediately
+        with mock.patch.dict(os.environ,
+                             {'KUBERNETES_SERVICE_HOST': '10.0.0.1'}):
+            # Should not raise, should return immediately without making
+            # any network requests
+            backend_utils.check_network_connection()
+
+    @mock.patch('requests.Session')
+    def test_check_network_connection_runs_outside_kubernetes(
+            self, mock_session_class):
+        """Test that network check runs normally outside Kubernetes."""
+        # Ensure KUBERNETES_SERVICE_HOST is not set
+        env = os.environ.copy()
+        env.pop('KUBERNETES_SERVICE_HOST', None)
+
+        mock_session = mock.MagicMock()
+        mock_session_class.return_value = mock_session
+        # Simulate successful connection
+        mock_session.head.return_value = mock.MagicMock()
+
+        with mock.patch.dict(os.environ, env, clear=True):
+            backend_utils.check_network_connection()
+
+        # Verify that network check was actually performed
+        mock_session.head.assert_called()
+
+
+import pytest
+
+
+class TestAsyncCheckNetworkConnection:
+    """Tests for async_check_network_connection function."""
+
+    @pytest.mark.asyncio
+    async def test_async_check_network_connection_skips_in_kubernetes(self):
+        """Test that async network check is skipped inside Kubernetes pods."""
+        with mock.patch.dict(os.environ,
+                             {'KUBERNETES_SERVICE_HOST': '10.0.0.1'}):
+            # Should not raise, should return immediately
+            await backend_utils.async_check_network_connection()

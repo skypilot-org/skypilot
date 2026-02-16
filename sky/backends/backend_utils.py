@@ -1875,6 +1875,15 @@ def get_node_ips(cluster_yaml: str,
 
 
 def check_network_connection():
+    # In Kubernetes pods, public internet may not be available due to:
+    # 1. TLS handshake failures (container's OpenSSL vs external HTTPS endpoints)
+    # 2. Air-gapped / restricted networks with no public egress
+    # SkyPilot operations in K8s only need cluster-internal connectivity, which
+    # is managed by the CNI. KUBERNETES_SERVICE_HOST is automatically set by
+    # Kubernetes in every pod.
+    if os.environ.get('KUBERNETES_SERVICE_HOST'):
+        return
+
     # Tolerate 3 retries as it is observed that connections can fail.
     http = requests.Session()
     http.mount('https://', adapters.HTTPAdapter())
@@ -1906,6 +1915,13 @@ async def async_check_network_connection():
     Tolerates 3 retries as it is observed that connections can fail.
     Uses aiohttp for async HTTP requests.
     """
+    # In Kubernetes pods, public internet may not be available due to:
+    # 1. TLS handshake failures (container's OpenSSL vs external HTTPS endpoints)
+    # 2. Air-gapped / restricted networks with no public egress
+    # SkyPilot operations in K8s only need cluster-internal connectivity.
+    if os.environ.get('KUBERNETES_SERVICE_HOST'):
+        return
+
     # Create a session with retry logic
     timeout = ClientTimeout(total=15)
     connector = TCPConnector(limit=1)  # Limit to 1 connection at a time
