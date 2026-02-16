@@ -209,6 +209,8 @@ auth:
     # Mutually exclusive with authentication on ingress, including basic auth and OAuth2 Proxy on ingress.
     # @schema type: [boolean]
     enabled: false
+    # Number of replicas for OAuth2 Proxy deployment (requires external Redis for session storage when replicas > 1)
+    replicas: 1
     # OIDC issuer URL (e.g. Okta domain URL), required when enabled=true
     # @schema type: [string, null]
     oidc-issuer-url: null
@@ -356,6 +358,8 @@ ingress:
   oauth2-proxy:
     # Enable/disable OAuth2 Proxy deployment
     enabled: false
+    # Number of replicas for OAuth2 Proxy deployment (requires external Redis for session storage when replicas > 1)
+    replicas: 1
     # Docker image for OAuth2 Proxy
     image: "quay.io/oauth2-proxy/oauth2-proxy:v7.9.0"
     # Okta domain URL for OIDC issuer (required when enabled=true)

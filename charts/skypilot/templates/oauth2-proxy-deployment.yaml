@@ -49,7 +49,7 @@ metadata:
   name: {{ $fullName }}-oauth2-proxy
   namespace: {{ .Release.Namespace }}
 spec:
-  replicas: 1
+  replicas: {{ index $oauth2 "replicas" | default 1 }}
   selector:
     matchLabels:
       app: {{ $fullName }}-oauth2-proxy

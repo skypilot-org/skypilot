@@ -488,3 +488,45 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: "redis-url and redis-secret are mutually exclusive when OAuth2 proxy is enabled"
+
+  - it: should configure oauth2-proxy with multiple replicas (legacy)
+    set:
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+      ingress.oauth2-proxy.replicas: 3
+      ingress.oauth2-proxy.redis-url: "redis://external-redis:6379/1"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: should configure oauth2-proxy with multiple replicas (new config)
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+      auth.oauth.replicas: 2
+      auth.oauth.redis-url: "redis://external-redis:6379/1"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 2
+
+  - it: should default oauth2-proxy replicas to 1 when not specified
+    set:
+      auth.oauth.enabled: true
+      auth.oauth.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      auth.oauth.client-id: "test-client-id"
+      auth.oauth.client-secret: "test-client-secret"
+    template: templates/oauth2-proxy-deployment.yaml
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
