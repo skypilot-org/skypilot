@@ -276,7 +276,7 @@ def kill_process_with_grace_period(proc: GenericProcess,
     except (psutil.NoSuchProcess, ValueError):
         # The child process may have already been terminated.
         return
-    except psutil.TimeoutExpired:
+    except (psutil.TimeoutExpired, subprocess.TimeoutExpired):
         logger.debug(f'Process {proc.pid} did not terminate after '
                      f'{grace_period} seconds')
     finally:
