@@ -71,7 +71,7 @@ class DisablePublicIpPolicy(sky.AdminPolicy):
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         config = user_request.skypilot_config
         config.set_nested(('aws', 'use_internal_ip'), True)
-        if config.get_nested(('aws', 'vpc_name'), None) is None:
+        if config.get_nested(('aws', 'vpc_names'), None) is None:
             # If no VPC name is specified, it is likely a mistake. We should
             # reject the request
             raise RuntimeError('VPC name should be set. Check organization '

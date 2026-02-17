@@ -367,6 +367,24 @@ class Slurm(clouds.Cloud):
 
         image_id = resources.extract_docker_image()
 
+        provision_timeout = skypilot_config.get_effective_region_config(
+            cloud='slurm',
+            region=cluster,
+            keys=('provision_timeout',),
+            default_value=None)
+        if provision_timeout is None:
+            if resources.zone is not None:
+                # When zone/partition is specified, there will be no failover,
+                # so we can let Slurm hold on to the job and let it be queued
+                # for a long time.
+                provision_timeout = 24 * 60 * 60  # 24 hours
+            else:
+                # Otherwise, we still want failover, but also wait sufficiently
+                # long for the Slurm scheduler to allocate the resources. We
+                # have seen Slurm taking minutes to schedule a job, when there
+                # are a lot of pending jobs to be processed.
+                provision_timeout = 2 * 60  # 2 minutes
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -376,6 +394,7 @@ class Slurm(clouds.Cloud):
             'accelerator_type': acc_type,
             'slurm_cluster': cluster,
             'slurm_partition': partition,
+            'provision_timeout': provision_timeout,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),

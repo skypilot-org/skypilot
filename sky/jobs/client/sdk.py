@@ -330,7 +330,7 @@ def cancel(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
-    if graceful and (remote_api_version is None or remote_api_version < 38):
+    if graceful and (remote_api_version is None or remote_api_version < 39):
         logger.warning('`--graceful` is ignored because the server does '
                        'not support it yet.')
     if graceful and pool is not None:

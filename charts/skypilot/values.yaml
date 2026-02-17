@@ -514,10 +514,11 @@ kubernetesCredentials:
 
 awsCredentials:
   enabled: false
-  # Name of the secret containing the aws credentials. Only used if enabled is true.
+  # Name of the secret containing the aws config and credentials. Only used if enabled is true.
   awsSecretName: aws-credentials
 
-  # Set to true to mount a complete AWS credentials file with multiple profiles.
+  # Set to true to mount a complete AWS config directory, including the config and the credentials file with multiple profiles.
+  # Credentials should be defined in the `credentials` file. If a non-default profile is used, the profile must be additionally be declared in the `config` file.
   # This is required for using different AWS profiles with different workspaces.
   useCredentialsFile: false
 
@@ -746,6 +747,7 @@ grafana:
     # Enable datasources discovery in grafana sidecar.
     datasources:
       enabled: true
+      initDatasources: true
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true
