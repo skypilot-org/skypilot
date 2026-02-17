@@ -57,7 +57,7 @@ The following yaml is the SkyPilot config which can be edited at ``http://<api-s
 
     # ~/.sky/config.yaml
     aws:
-        vpc_name: <private-vpc>
+        vpc_names: <private-vpc>
         security_group_name: <private-sg>
         use_internal_ips: true
         use_ssm: true

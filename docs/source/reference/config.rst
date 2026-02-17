@@ -118,11 +118,16 @@ Below is the configuration syntax and some example values. See detailed explanat
       - node-pool-1
       - node-pool-2
 
+  :ref:`slurm <config-yaml-slurm>`:
+    :ref:`allowed_clusters <config-yaml-slurm-allowed-clusters>`:
+      - mycluster1
+      - mycluster2
+    :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
+
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
       Owner: user-unique-name
-    :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
@@ -682,20 +687,6 @@ Example:
       my-tag: my-value
 
 
-.. _config-yaml-aws-vpc-name:
-
-``aws.vpc_name``
-~~~~~~~~~~~~~~~~
-
-VPC to use in each region (optional).
-
-If this is set, SkyPilot will only provision in regions that contain a VPC
-with this name (provisioner automatically looks for such regions).
-Regions without a VPC with this name will not be used to launch nodes.
-
-Default: ``null`` (use the default VPC in each region).
-
-Deprecated: use ``aws.vpc_names`` instead.
 
 .. _config-yaml-aws-vpc-names:
 
@@ -731,7 +722,7 @@ Private subnets are defined as those satisfying both of these properties:
   2. Subnets that are configured to not assign public IPs by default
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
-This flag is typically set together with ``vpc_name`` above and
+This flag is typically set together with ``vpc_names`` above and
 ``ssh_proxy_command`` or ``use_ssm`` below.
 
 Default: ``false``.
@@ -741,7 +732,7 @@ Default: ``false``.
 ``aws.use_ssm``
 ~~~~~~~~~~~~~~~~
 
-Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_names`` and
 ``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
@@ -755,7 +746,7 @@ SSH proxy command (optional).
 
 Useful for using a jump server to communicate with SkyPilot nodes hosted
 in private VPC/subnets without public IPs. Typically set together with
-``vpc_name`` and ``use_internal_ips`` above.
+``vpc_names`` and ``use_internal_ips`` above.
 
 If set, this is passed as the ``-o ProxyCommand`` option for any SSH
 connections (including rsync) used to communicate between the local client
@@ -1601,6 +1592,60 @@ List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
 
+.. _config-yaml-slurm:
+
+``slurm``
+~~~~~~~~~
+
+Advanced Slurm configuration (optional).
+
+.. _config-yaml-slurm-allowed-clusters:
+
+``slurm.allowed_clusters``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed Slurm clusters (optional).
+
+List of cluster names that SkyPilot is allowed to use.
+
+If you want all available clusters to be allowed, set it to ``all`` like this:
+
+.. code-block:: yaml
+
+  slurm:
+    allowed_clusters: all
+
+.. _config-yaml-slurm-provision-timeout:
+
+``slurm.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout for Slurm job allocation (optional).
+
+Timeout in seconds for waiting on Slurm to allocate nodes for a launched job.
+If the timeout is reached, SkyPilot will fail over to other Slurm
+partitions or clusters.
+
+.. note::
+
+  If your Slurm cluster has long queueing delays, consider increasing
+  ``slurm.provision_timeout``. This helps avoid premature failover while Slurm
+  is still working to allocate resources.
+
+Default:
+
+- ``120`` seconds (2 minutes) when a partition is not specified
+- ``86400`` seconds (24 hours) when a specific partition is specified
+
+Set to a negative value (e.g., ``-1``) to wait indefinitely.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    provision_timeout: 1200
+
 .. _config-yaml-oci:
 
 ``oci``
@@ -1949,6 +1994,10 @@ even if ``db`` is specified.
   (available on nightly version 20250626 and later)
 
   ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+
+  This is optional. For larger deployments (for example, many nodes/clusters
+  and many pending jobs), consider configuring a PostgreSQL backend via
+  ``db`` or ``SKYPILOT_DB_CONNECTION_URI``.
 
 .. note::
 

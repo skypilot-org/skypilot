@@ -135,6 +135,32 @@ const getGPUCount = (accelerators, source) => {
   return 0;
 };
 
+// Helper function to fetch clusters and managed jobs data with independent error handling
+// Uses Promise.allSettled so one failure doesn't affect the other
+const fetchClustersAndJobs = async () => {
+  const [clustersResult, jobsResult] = await Promise.allSettled([
+    dashboardCache.get(getClusters),
+    // Use shared cache key (no field filtering) - preloader uses same args
+    dashboardCache.get(getManagedJobs, [
+      { allUsers: true, skipFinished: true },
+    ]),
+  ]);
+
+  const clustersData =
+    (clustersResult.status === 'fulfilled' && clustersResult.value) || [];
+  const jobsResponse = (jobsResult.status === 'fulfilled' &&
+    jobsResult.value) || { jobs: [] };
+
+  if (clustersResult.status === 'rejected') {
+    console.error('Error fetching clusters:', clustersResult.reason);
+  }
+  if (jobsResult.status === 'rejected') {
+    console.error('Error fetching managed jobs:', jobsResult.reason);
+  }
+
+  return { clustersData, jobsResponse };
+};
+
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
   if (username && username.includes('@')) {
@@ -1380,21 +1406,9 @@ function UsersTable({
         if (showLoading) setIsLoading(false);
 
         // Step 2: Load clusters and jobs in background and update counts
-        let clustersData = [];
-        let managedJobsResponse = { jobs: [] };
-        try {
-          [clustersData, managedJobsResponse] = await Promise.all([
-            dashboardCache.get(getClusters),
-            // Use shared cache key (no field filtering) - preloader uses same args
-            dashboardCache.get(getManagedJobs, [
-              { allUsers: true, skipFinished: true },
-            ]),
-          ]);
-        } catch (error) {
-          console.error('Error fetching clusters and managed jobs:', error);
-        }
+        const { clustersData, jobsResponse } = await fetchClustersAndJobs();
 
-        const jobsData = managedJobsResponse.jobs || [];
+        const jobsData = jobsResponse.jobs || [];
 
         // Build combined lookup dictionary for GPU type and infra filtering
         // Structure: userId -> infra -> gpuType -> { clusterCount, jobCount, gpuCount }
@@ -2416,21 +2430,7 @@ function ServiceAccountTokensView({
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
-      let clustersResponse = [];
-      let jobsResponse = { jobs: [] };
-      try {
-        [clustersResponse, jobsResponse] = await Promise.all([
-          dashboardCache.get(getClusters),
-          // Use shared cache key (no field filtering) - preloader uses same args
-          dashboardCache.get(getManagedJobs, [
-            { allUsers: true, skipFinished: true },
-          ]),
-        ]);
-      } catch (error) {
-        console.error('Error fetching clusters and managed jobs:', error);
-      }
-
-      const clustersData = clustersResponse || [];
+      const { clustersData, jobsResponse } = await fetchClustersAndJobs();
       const jobsData = jobsResponse?.jobs || [];
 
       // Step 3: Calculate counts for each service account

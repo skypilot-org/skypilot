@@ -310,10 +310,9 @@ spec:
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         {{- if .Values.awsCredentials.useCredentialsFile }}
-        # Mount the credentials file directly from secret
-        - name: aws-credentials-file
-          mountPath: /root/.aws/credentials
-          subPath: credentials
+          # Mount the config and credentials files directly from secret
+        - name: aws-config-files
+          mountPath: /root/.aws
           readOnly: true
         {{- else }}
         # Mount emptyDir that will be populated by initContainer
@@ -712,8 +711,8 @@ spec:
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
       {{- if .Values.awsCredentials.useCredentialsFile }}
-      # Mount the credentials file directly from secret
-      - name: aws-credentials-file
+      # Mount the config and credentials files directly from secret
+      - name: aws-config-files
         secret:
           secretName: {{ .Values.awsCredentials.awsSecretName }}
       {{- else }}

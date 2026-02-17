@@ -344,6 +344,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   SkyPilot Recipes <../reference/recipes>
    Migrating from Slurm <../reference/slurm-migration>
    External Links <../running-jobs/external-links>
    ../reference/async

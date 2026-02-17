@@ -579,7 +579,7 @@ tests:
       - contains:
           path: spec.template.spec.volumes
           content:
-            name: aws-credentials-file
+            name: aws-config-files
             secret:
               secretName: aws-credentials
       # Should NOT have emptyDir volume
@@ -592,9 +592,8 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].volumeMounts
           content:
-            name: aws-credentials-file
-            mountPath: /root/.aws/credentials
-            subPath: credentials
+            name: aws-config-files
+            mountPath: /root/.aws
             readOnly: true
       # Should NOT have init container
       - notMatchRegexRaw:
@@ -609,11 +608,11 @@ tests:
           path: spec.template.spec.volumes
           content:
             name: aws-config
-      # Should NOT have aws-credentials-file volume
+      # Should NOT have aws-config-files volume
       - notContains:
           path: spec.template.spec.volumes
           content:
-            name: aws-credentials-file
+            name: aws-config-files
       # Should NOT have volumeMount
       - notMatchRegexRaw:
           pattern: "mountPath: /root/.aws"
@@ -656,7 +655,7 @@ tests:
       - contains:
           path: spec.template.spec.volumes
           content:
-            name: aws-credentials-file
+            name: aws-config-files
             secret:
               secretName: my-aws-profiles
 
