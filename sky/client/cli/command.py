@@ -2353,11 +2353,16 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
+@flags.output_format_option()
 @usage_lib.entrypoint
-def queue(clusters: List[str], skip_finished: bool, all_users: bool):
+def queue(clusters: List[str],
+          skip_finished: bool,
+          all_users: bool,
+          output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='cyan')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.secho('Fetching and parsing job queue...', fg='cyan')
     if not clusters:
         cluster_records = _get_cluster_records_and_set_ssh_config(
             None, all_users=all_users)
@@ -2366,6 +2371,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     logger.info(f'Fetching job queue for: {", ".join(clusters)}')
     job_tables = {}
+    job_records: Dict[str, list] = {}
 
     def _get_job_queue(cluster):
         try:
@@ -2381,9 +2387,19 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
                        f'  {common_utils.format_exception(e)}')
             return
-        job_tables[cluster] = table_utils.format_job_queue(job_table)
+        if output_format == flags.OUTPUT_FORMAT_JSON:
+            job_records[cluster] = [
+                r.model_dump(mode='json') for r in job_table
+            ]
+        else:
+            job_tables[cluster] = table_utils.format_job_queue(job_table)
 
     subprocess_utils.run_in_parallel(_get_job_queue, clusters)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(json.dumps(job_records, indent=2))
+        return
+
     user_str = 'all users' if all_users else 'current user'
     for cluster, job_table in job_tables.items():
         click.echo(f'\nJob queue of {user_str} on cluster {cluster}\n'
@@ -7407,10 +7423,15 @@ INT_OR_NONE = IntOrNone()
               required=False,
               help=('Filter request by cluster name.'))
 @flags.verbose_option('Show more details.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: Optional[int], cluster: Optional[str]):
+def api_status(request_id_prefixes: Optional[List[str]],
+               all_status: bool,
+               verbose: bool,
+               limit: Optional[int],
+               cluster: Optional[str],
+               output_format: str = 'table'):
     """List requests on SkyPilot API server."""
     if not request_id_prefixes:
         request_id_prefixes = None
@@ -7419,6 +7440,13 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
     request_list = sdk.api_status(request_id_prefixes, all_status, limit,
                                   fields, cluster)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([r.model_dump(mode='json') for r in request_list],
+                       indent=2))
+        return
+
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
