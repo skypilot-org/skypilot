@@ -865,8 +865,8 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} examples/minimal.yaml',
 
             # Submit long-running jobs so they show up in sky api status
-            f'{self.ACTIVATE_BASE} && sky exec -d -y -n {job_name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} "sleep 300"',
-            f'{self.ACTIVATE_BASE} && sky exec -d -y -n {another_job} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} "sleep 300"',
+            f'{self.ACTIVATE_BASE} && sky exec -d -n {job_name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} "sleep 300"',
+            f'{self.ACTIVATE_BASE} && sky exec -d -n {another_job} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} "sleep 300"',
             f'{self.ACTIVATE_BASE} && sleep 10',
 
             # Test New client with Old server
