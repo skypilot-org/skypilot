@@ -42,6 +42,10 @@ RECIPES_DB_NAME = 'recipes_db'
 RECIPES_VERSION = '001'
 RECIPES_LOCK_PATH = f'~/.sky/locks/.{RECIPES_DB_NAME}.lock'
 
+NOTIFICATIONS_DB_NAME = 'notifications_db'
+NOTIFICATIONS_VERSION = '001'
+NOTIFICATIONS_LOCK_PATH = f'~/.sky/locks/.{NOTIFICATIONS_DB_NAME}.lock'
+
 
 @contextlib.contextmanager
 def db_lock(db_name: str):
