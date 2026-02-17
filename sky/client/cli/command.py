@@ -1863,12 +1863,20 @@ def _show_enabled_infra(
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_users_option('Show all clusters, including those not owned by the '
                         'current user.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
-           endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, show_pools: bool, clusters: List[str],
-           all_users: bool):
+def status(verbose: bool,
+           refresh: bool,
+           ip: bool,
+           endpoints: bool,
+           endpoint: Optional[int],
+           show_managed_jobs: bool,
+           show_services: bool,
+           show_pools: bool,
+           clusters: List[str],
+           all_users: bool,
+           output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -2055,6 +2063,15 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
         query_clusters, refresh_mode, all_users, verbose)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([
+                r.model_dump(mode='json', exclude={'handle', 'credentials'})
+                for r in cluster_records
+            ],
+                       indent=2))
+        return
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
@@ -3803,7 +3820,8 @@ def _show_gpus_impl(
         cloud: Optional[str],
         region: Optional[str],
         all_regions: bool,
-        verbose: bool = False):
+        verbose: bool = False,
+        output_format: str = 'table'):
     """Shared implementation for show_gpus and gpus_list commands."""
     cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
                                                                cloud,
@@ -3862,6 +3880,28 @@ def _show_gpus_impl(
                               (cloud_name is None or cloud_is_kubernetes))
     query_ssh_realtime_gpu = (ssh_is_enabled and
                               (cloud_name is None or cloud_is_ssh))
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        name, quantity = None, None
+        if accelerator_str is not None:
+            parts = accelerator_str.split(':')
+            name = parts[0]
+            if len(parts) == 2:
+                quantity = int(parts[1])
+        result = sdk.stream_and_get(
+            sdk.list_accelerators(gpus_only=True,
+                                  name_filter=name,
+                                  quantity_filter=quantity,
+                                  region_filter=region,
+                                  clouds=cloud_name,
+                                  case_sensitive=False,
+                                  all_regions=all_regions))
+        json_result = {
+            gpu: [item._asdict() for item in items
+                 ] for gpu, items in result.items()
+        }
+        click.echo(json.dumps(json_result, indent=2))
+        return
 
     def _list_to_str(lst):
 
@@ -4840,6 +4880,7 @@ def gpus_cli():
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
 @flags.verbose_option()
+@flags.output_format_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def gpus_list(
@@ -4849,7 +4890,8 @@ def gpus_list(
         cloud: Optional[str],
         region: Optional[str],
         all_regions: bool,
-        verbose: bool):
+        verbose: bool,
+        output_format: str = 'table'):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -4900,7 +4942,8 @@ def gpus_list(
                     cloud,
                     region,
                     all_regions,
-                    verbose=verbose)
+                    verbose=verbose,
+                    output_format=output_format)
 
 
 @gpus_cli.command('label', cls=_DocumentedCodeCommand)
@@ -5570,10 +5613,16 @@ def jobs_launch(
               help='Show only pending/running jobs\' information.')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool, limit: int):
+def jobs_queue(verbose: bool,
+               refresh: bool,
+               skip_finished: bool,
+               all_users: bool,
+               all: bool,
+               limit: int,
+               output_format: str = 'table'):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -5631,7 +5680,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
       sky jobs queue -l 10
 
     """
-    click.secho('Fetching managed job statuses...', fg='cyan')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         max_num_jobs_to_show = (limit if not all else None)
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
@@ -5664,6 +5714,17 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             (managed_jobs_request_id,
              queue_result_version) = managed_jobs_future.result()
             pool_status_request_id = pool_status_future.result()
+
+        if output_format == flags.OUTPUT_FORMAT_JSON:
+            result = sdk.stream_and_get(managed_jobs_request_id)
+            if queue_result_version.v2():
+                managed_jobs_, _, _, _ = result
+            else:
+                managed_jobs_ = result
+            click.echo(
+                json.dumps([r.model_dump(mode='json') for r in managed_jobs_],
+                           indent=2))
+            return
 
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
