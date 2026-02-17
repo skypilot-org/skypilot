@@ -1,11 +1,11 @@
 # Fairseq2: Meta FAIR's Sequence Modeling Toolkit
 
-[Fairseq2](https://github.com/facebookresearch/fairseq2) is Meta AI Research's next-generation sequence modeling toolkit. It provides a clean, modular API for training and fine-tuning large language models with support for instruction fine-tuning and scalable distributed training.
+[Fairseq2](https://github.com/facebookresearch/fairseq2) is Meta FAIR's next-generation sequence modeling toolkit. It provides recipes for LLM instruction finetuning and preference optimization, with multi-GPU and multi-node support via DDP, FSDP, and tensor parallelism.
 
 ## Why SkyPilot + Fairseq2?
 
 SkyPilot makes fine-tuning with fairseq2 **effortless**:
-- **Run anywhere** - Same YAML works on Kubernetes, AWS, GCP, Azure, and 20+ other clouds
+- **Run anywhere** - Same YAML works on Kubernetes, Slurm, AWS, GCP, Azure, and 20+ other clouds
 - **Multi-node with zero setup** - Handles distributed fine-tuning across nodes automatically
 - **No vendor lock-in** - Checkpoints saved to your own cloud storage
 
