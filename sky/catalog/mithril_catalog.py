@@ -50,12 +50,19 @@ def get_hourly_cost(
 
 def get_vcpus_mem_from_instance_type(
     instance_type: str,) -> Tuple[Optional[float], Optional[float]]:
-    return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+    try:
+        return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
+    except ValueError:
+        return None, None
 
 
 def get_accelerators_from_instance_type(
     instance_type: str,) -> Optional[Dict[str, Union[int, float]]]:
-    return common.get_accelerators_from_instance_type_impl(_df, instance_type)
+    try:
+        return common.get_accelerators_from_instance_type_impl(
+            _df, instance_type)
+    except ValueError:
+        return None
 
 
 def get_default_instance_type(
