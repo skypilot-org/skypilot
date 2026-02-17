@@ -16,6 +16,7 @@ from sky import sky_logging
 from sky.skylet import constants
 from sky.users import rbac
 from sky.utils import annotations
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 
@@ -197,7 +198,14 @@ class PermissionService:
                 user_added = self._add_user_if_not_exists_no_lock(
                     existing_user.id)
                 policy_updated = policy_updated or user_added
-
+        for system_user_id in [
+                common.SERVER_ID, constants.SKYPILOT_SYSTEM_USER_ID
+        ]:
+            if system_user_id not in users_with_roles:
+                logger.debug(f'Adding role for system user: {system_user_id}')
+                user_added = self._add_user_if_not_exists_no_lock(
+                    system_user_id, rbac.RoleName.ADMIN.value)
+                policy_updated = policy_updated or user_added
         if policy_updated:
             enforcer.save_policy()
 
@@ -207,7 +215,9 @@ class PermissionService:
         with _policy_lock():
             self._add_user_if_not_exists_no_lock(user_id)
 
-    def _add_user_if_not_exists_no_lock(self, user_id: str) -> bool:
+    def _add_user_if_not_exists_no_lock(self,
+                                        user_id: str,
+                                        role: Optional[str] = None) -> bool:
         """Add user role relationship without lock.
 
         Returns:
@@ -216,7 +226,8 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         user_roles = enforcer.get_roles_for_user(user_id)
         if not user_roles:
-            enforcer.add_grouping_policy(user_id, rbac.get_default_role())
+            enforcer.add_grouping_policy(user_id, role or
+                                         rbac.get_default_role())
             return True
         return False
 

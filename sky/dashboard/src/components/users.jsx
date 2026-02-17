@@ -1651,6 +1651,7 @@ function UsersTable({
         if (setLastFetchedTime) setLastFetchedTime(new Date());
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [setLoading, setLastFetchedTime]
   );
 

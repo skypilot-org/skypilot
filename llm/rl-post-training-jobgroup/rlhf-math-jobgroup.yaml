@@ -1,0 +1,226 @@
+# RLHF Math Training with Job Groups
+#
+# This example demonstrates a distributed RLHF architecture using SkyPilot job groups.
+# It trains an LLM on mathematical reasoning using GRPO (Group Relative Policy Optimization)
+# with verifiable rewards.
+#
+# Architecture:
+#   - data-server (auxiliary): Serves GSM8K math prompts
+#   - rollout-server (auxiliary, x2): SGLang instances + SGLang router
+#   - reward-server (auxiliary): Verifies math answers against ground truth
+#   - replay-buffer (auxiliary): Stores experience tuples for sampling
+#   - ppo-trainer (primary): Orchestrates GRPO training across multiple nodes
+#
+# Primary/Auxiliary Behavior:
+#   The ppo-trainer is the primary task. When training completes, all auxiliary
+#   services (data-server, rollout-server, reward-server, replay-buffer) are
+#   terminated after a 10-second grace period to ensure clean shutdown.
+#
+# Load Balancing:
+#   The head node runs SGLang's native router (sglang_router) which provides
+#   cache-aware load balancing across all SGLang instances for optimal KV cache reuse.
+#   The trainer connects to the router endpoint on port 30000.
+#
+# Usage:
+#   sky jobs launch llm/rl-post-training-jobgroup/rlhf-math-jobgroup.yaml
+#
+# The components communicate over the job group network using DNS names:
+#   - data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000
+#   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30000 (SGLang router endpoint)
+#   - rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30001 (SGLang backend 1)
+#   - rollout-server-1.${SKYPILOT_JOBGROUP_NAME}:30001 (SGLang backend 2)
+#   - reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002
+#   - replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003
+---
+name: rlhf-math
+execution: parallel
+primary_tasks: [ppo-trainer]
+termination_delay: 10s
+
+---
+# Data Server: Serves math prompts from GSM8K dataset
+name: data-server
+resources:
+  cpus: 4
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  uv pip install fastapi uvicorn datasets --system
+
+run: |
+  echo "Starting data server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "This server provides math prompts at http://data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+
+  cd /code
+  python data_server.py --port 8000
+
+---
+# Rollout Servers: Multiple SGLang instances with SGLang router on head node
+# Using num_nodes=2 to create rollout-server-0 and rollout-server-1
+# Head node (rank 0) runs both SGLang server and SGLang router for load balancing
+name: rollout-server
+num_nodes: 2
+resources:
+  accelerators: H100:1
+  memory: 32+
+  infra: kubernetes
+
+envs:
+  MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
+
+setup: |
+  # Install system dependencies (libnuma is required by SGLang kernel)
+  sudo apt-get update && sudo apt-get install -y libnuma-dev
+  uv pip install "sglang[all]" sglang-router --system
+
+run: |
+  echo "Starting rollout server with SGLang..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
+  echo "Model: ${MODEL_NAME}"
+
+  # Start SGLang server in background
+  python -m sglang.launch_server \
+    --model ${MODEL_NAME} \
+    --host 0.0.0.0 \
+    --port 30001 &
+  SGLANG_PID=$!
+
+  # On head node, also run the SGLang router for load balancing
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Head node: starting SGLang router..."
+
+    # Build worker URL list for all rollout servers
+    WORKER_URLS=""
+    for i in $(seq 0 $((SKYPILOT_NUM_NODES - 1))); do
+      WORKER_URLS="${WORKER_URLS} http://rollout-server-${i}.${SKYPILOT_JOBGROUP_NAME}:30001"
+    done
+
+    echo "Load balancing across:${WORKER_URLS}"
+    echo "Router API available at http://rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30000/v1"
+
+    # Wait for SGLang backends to start
+    sleep 60
+
+    python -m sglang_router.launch_router \
+      --worker-urls ${WORKER_URLS} \
+      --host 0.0.0.0 \
+      --port 30000 \
+      --policy cache_aware &
+    ROUTER_PID=$!
+
+    # Wait for both processes
+    wait $SGLANG_PID $ROUTER_PID
+  else
+    # Worker nodes just run SGLang server
+    wait $SGLANG_PID
+  fi
+
+---
+# Reward Server: Verifies math answers against ground truth
+name: reward-server
+resources:
+  cpus: 4
+  memory: 8+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  uv pip install fastapi uvicorn --system
+
+run: |
+  echo "Starting reward server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Reward API at http://reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+
+  cd /code
+  python reward_server.py --port 8002
+
+---
+# Replay Buffer: Stores experience tuples for training
+name: replay-buffer
+resources:
+  cpus: 4
+  memory: 16+
+  infra: kubernetes
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  uv pip install fastapi uvicorn --system
+
+run: |
+  echo "Starting replay buffer server..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Replay Buffer API at http://replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
+
+  cd /code
+  python replay_buffer.py --port 8003 --capacity 10000
+
+---
+# PPO Trainer: Multi-node GRPO training
+name: ppo-trainer
+resources:
+  accelerators: H100:1
+  memory: 32+
+  infra: kubernetes
+num_nodes: 2
+
+envs:
+  MODEL_NAME: Qwen/Qwen2.5-0.5B-Instruct
+  NUM_EPOCHS: 3
+  BATCH_SIZE: 4
+
+file_mounts:
+  /code: llm/rl-post-training-jobgroup/code
+
+setup: |
+  uv pip install torch transformers accelerate httpx --system
+
+run: |
+  echo "Starting GRPO trainer..."
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Node rank: ${SKYPILOT_NODE_RANK} / ${SKYPILOT_NUM_NODES}"
+
+  # Service discovery via job group DNS
+  # The rollout head node provides load balancing across all SGLang instances
+  DATA_SERVER="data-server-0.${SKYPILOT_JOBGROUP_NAME}:8000"
+  ROLLOUT_SERVER="rollout-server-0.${SKYPILOT_JOBGROUP_NAME}:30000"
+  REWARD_SERVER="reward-server-0.${SKYPILOT_JOBGROUP_NAME}:8002"
+  REPLAY_BUFFER="replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:8003"
+
+  echo "Data server: ${DATA_SERVER}"
+  echo "Rollout server (load balanced): ${ROLLOUT_SERVER}"
+  echo "Reward server: ${REWARD_SERVER}"
+  echo "Replay buffer: ${REPLAY_BUFFER}"
+
+  # Wait for services to be ready
+  echo "Waiting for services to be available..."
+  sleep 30
+
+  # Only run training on rank 0 (coordinator)
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Starting training on coordinator node..."
+    cd /code
+    python trainer.py \
+      --data-server ${DATA_SERVER} \
+      --rollout-server ${ROLLOUT_SERVER} \
+      --reward-server ${REWARD_SERVER} \
+      --replay-buffer ${REPLAY_BUFFER} \
+      --model ${MODEL_NAME} \
+      --batch-size ${BATCH_SIZE} \
+      --num-epochs ${NUM_EPOCHS}
+  else
+    echo "Worker node ${SKYPILOT_NODE_RANK} ready for distributed training"
+    # In a full implementation, worker nodes would join distributed training
+    # For this demo, they just wait
+    sleep infinity
+  fi

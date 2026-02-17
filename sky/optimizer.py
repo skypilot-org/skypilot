@@ -11,6 +11,7 @@ import prettytable
 
 from sky import check as sky_check
 from sky import clouds
+from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
@@ -32,8 +33,6 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-
-    from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
 
@@ -1034,6 +1033,351 @@ class Optimizer:
                     f'To list more details, run: sky show-gpus {acc_name}\n')
 
     @staticmethod
+    @timeline.event
+    def optimize_job_group(
+            dag: 'dag_lib.Dag',
+            minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+            blocked_resources: Optional[Iterable[
+                resources_lib.Resources]] = None,
+            quiet: bool = False) -> 'dag_lib.Dag':
+        """Optimize a JobGroup DAG.
+
+        This method optimizes all tasks in a JobGroup to run on the same
+        infrastructure (cloud + region/zone or K8s cluster).
+
+        Args:
+            dag: The JobGroup DAG to optimize.
+            minimize: Whether to minimize cost or time.
+            blocked_resources: Resources that should not be used.
+            quiet: Whether to suppress logging.
+
+        Returns:
+            The optimized DAG with best_resources set for each task.
+
+        Raises:
+            exceptions.ResourcesUnavailableError: If no common infrastructure
+                can satisfy all tasks.
+        """
+        if not dag.is_job_group():
+            # Fall back to normal optimization for non-JobGroup DAGs
+            return Optimizer.optimize(dag, minimize, blocked_resources, quiet)
+
+        tasks = dag.tasks
+
+        if not quiet:
+            logger.info(
+                f'Optimizing JobGroup "{dag.name}" with {len(tasks)} jobs')
+
+        # Find common infrastructure for all tasks in the JobGroup
+        return Optimizer._optimize_same_infra(dag, minimize, blocked_resources,
+                                              quiet)
+
+    @staticmethod
+    def _optimize_independent(dag: 'dag_lib.Dag',
+                              minimize: common.OptimizeTarget,
+                              blocked_resources: Optional[Iterable[
+                                  resources_lib.Resources]],
+                              quiet: bool) -> 'dag_lib.Dag':
+        """Optimize each task in the JobGroup independently."""
+        for task in dag.tasks:
+            # Create a temporary single-task DAG for optimization
+            temp_dag = dag_lib.Dag()
+            temp_dag.add(task)
+            temp_dag.name = task.name
+
+            # Optimize this task
+            Optimizer.optimize(temp_dag, minimize, blocked_resources, quiet)
+
+        return dag
+
+    @staticmethod
+    def _optimize_same_infra(dag: 'dag_lib.Dag',
+                             minimize: common.OptimizeTarget,
+                             blocked_resources: Optional[Iterable[
+                                 resources_lib.Resources]],
+                             quiet: bool) -> 'dag_lib.Dag':
+        """Optimize JobGroup with SAME_INFRA constraint.
+
+        Find a common cloud+region that can satisfy all tasks.
+        """
+        tasks = dag.tasks
+
+        # Step 1: Get feasible resources for each task
+        # Use launchable_resources (with regions) instead of cloud_candidates
+        # (without regions) to ensure proper region constraints.
+        task_launchables: Dict[task_lib.Task, _PerCloudCandidates] = {}
+
+        for task in tasks:
+            # Get launchable resources for this task
+            launchable_resources, _, _, _ = (_fill_in_launchable_resources(
+                task, blocked_resources=blocked_resources, quiet=quiet))
+
+            if not any(launchable_resources.values()):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(
+                        f'No resources available for job "{task.name}" '
+                        f'in JobGroup "{dag.name}"')
+
+            # Build cloud -> launchable resources mapping (with regions)
+            cloud_launchables: _PerCloudCandidates = collections.defaultdict(
+                list)
+            for launchable_list in launchable_resources.values():
+                for res in launchable_list:
+                    if res.cloud is not None:
+                        cloud_launchables[res.cloud].append(res)
+            task_launchables[task] = cloud_launchables
+
+        # Step 2: Find common cloud+region combinations
+        common_infras = Optimizer._find_common_infras(task_launchables)
+
+        if not common_infras:
+            # If no common infra, fallback to independent optimization
+            if not quiet:
+                logger.warning('No common infrastructure found for all jobs. '
+                               'Falling back to independent optimization.')
+            return Optimizer._optimize_independent(dag, minimize,
+                                                   blocked_resources, quiet)
+
+        # Step 3: Select best infra based on minimize target
+        best_infra = Optimizer._select_best_infra(
+            common_infras, task_launchables, tasks,
+            minimize == common.OptimizeTarget.COST)
+
+        if not quiet:
+            cloud, region = best_infra
+            # Format infra as lowercase cloud/region
+            infra_str = f'{str(cloud).lower()}/{region}'
+            logger.info(f'Selected infrastructure: {infra_str}')
+            # Hint user about other available infras
+            other_infras = [(c, r)
+                            for c, r in common_infras
+                            if not (str(c) == str(cloud) and r == region)]
+            if other_infras:
+                other_infras_str = ', '.join(
+                    [f'{str(c).lower()}/{r}' for c, r in other_infras[:3]])
+                if len(other_infras) > 3:
+                    other_infras_str += f', ... ({len(other_infras) - 3} more)'
+                logger.info(
+                    f'Other available common infras: {other_infras_str}')
+
+        # Step 4: Assign resources for each task on the selected infra
+        cloud, region = best_infra
+        cloud_name = str(cloud)
+        for task in tasks:
+            candidates = task_launchables[task]
+            # Find the cloud object in candidates that matches (by name)
+            # since different tasks may have different Cloud instances
+            matching_cloud = None
+            for cand_cloud in candidates.keys():
+                if str(cand_cloud) == cloud_name:
+                    matching_cloud = cand_cloud
+                    break
+            if matching_cloud is None:
+                continue
+
+            # Find resources in this cloud+region
+            for resources in candidates[matching_cloud]:
+                if resources.region == region:
+                    # Set best_resources on the task
+                    task.best_resources = resources
+                    # Also set resources override to ensure the constraint
+                    # persists through YAML serialization to the controller.
+                    # Without this, the controller would re-optimize each
+                    # task independently, placing them on different infras.
+                    override_params: Dict[str, Any] = {}
+                    if resources.cloud is not None:
+                        override_params['cloud'] = resources.cloud
+                    if resources.region is not None:
+                        override_params['region'] = resources.region
+                    if override_params:
+                        task.set_resources_override(override_params)
+                    break
+
+        # Step 5: Print optimizer table for job groups
+        if not quiet and len(tasks) > 1:
+            Optimizer._print_job_group_plan(tasks)
+
+        return dag
+
+    @staticmethod
+    def _print_job_group_plan(tasks: List[task_lib.Task]) -> None:
+        """Print the optimizer table for a job group."""
+        resource_fields = ['INFRA', 'INSTANCE', 'vCPUs', 'Mem(GB)', 'GPUS']
+        table = _create_table(['TASK', '#NODES'] + resource_fields)
+
+        rows = []
+        for task in tasks:
+            best_resources = task.best_resources
+            if best_resources is None:
+                continue
+
+            # Get instance type string (display '-' for K8s/Slurm in table)
+            instance_type = best_resources.instance_type
+            if instance_type is None:
+                display_instance_type = '-'
+            elif isinstance(best_resources.cloud,
+                            (clouds.Kubernetes, clouds.Slurm)):
+                display_instance_type = '-'
+            else:
+                display_instance_type = instance_type
+
+            # Get vCPUs and memory
+            vcpus = '-'
+            mem = '-'
+            if best_resources.cloud is not None and instance_type is not None:
+                cloud = best_resources.cloud
+                vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
+                    instance_type)
+                if vcpus_ is not None:
+                    vcpus = (str(int(vcpus_))
+                             if vcpus_.is_integer() else f'{vcpus_:.1f}')
+                if mem_ is not None:
+                    mem = (str(int(mem_))
+                           if mem_.is_integer() else f'{mem_:.1f}')
+
+            # Get accelerators
+            accelerators = best_resources.get_accelerators_str()
+
+            # Get spot string
+            spot = best_resources.get_spot_str()
+
+            # Get infra string
+            infra = best_resources.infra.formatted_str()
+
+            row = [
+                task.name,
+                str(task.num_nodes), infra, display_instance_type + spot, vcpus,
+                mem,
+                str(accelerators)
+            ]
+            rows.append(row)
+
+        if rows:
+            table.add_rows(rows)
+            logger.info(f'{colorama.Style.BRIGHT}Best plan: '
+                        f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{table}')
+
+    @staticmethod
+    def _find_common_infras(
+        task_candidates: Dict[task_lib.Task, _PerCloudCandidates]
+    ) -> List[Tuple[clouds.Cloud, Optional[str]]]:
+        """Find cloud+region combinations that satisfy all tasks.
+
+        Returns:
+            List of (cloud, region) tuples that can run all tasks.
+        """
+        if not task_candidates:
+            return []
+
+        # Collect infras per task
+        infras_per_task: List[Set[Tuple[str, Optional[str]]]] = []
+
+        for _, cloud_candidates in task_candidates.items():
+            task_infras: Set[Tuple[str, Optional[str]]] = set()
+            for cloud, resources_list in cloud_candidates.items():
+                cloud_name = str(cloud)
+                for resources in resources_list:
+                    # Use (cloud_name, region) as infra identifier
+                    region = resources.region
+                    task_infras.add((cloud_name, region))
+            infras_per_task.append(task_infras)
+
+        if not infras_per_task:
+            return []
+
+        # Find intersection of all task infras
+        common_infras = infras_per_task[0]
+        for infra_set in infras_per_task[1:]:
+            common_infras = common_infras & infra_set
+
+        # Convert back to (Cloud, region) tuples
+        result: List[Tuple[clouds.Cloud, Optional[str]]] = []
+        for cloud_name, region in common_infras:
+            # Get Cloud object from name
+            cloud_obj = None
+            for task_cloud_candidates in task_candidates.values():
+                for cloud in task_cloud_candidates.keys():
+                    if str(cloud) == cloud_name:
+                        cloud_obj = cloud
+                        break
+                if cloud_obj:
+                    break
+            if cloud_obj:
+                result.append((cloud_obj, region))
+
+        return result
+
+    @staticmethod
+    def _select_best_infra(
+            common_infras: List[Tuple[clouds.Cloud, Optional[str]]],
+            task_candidates: Dict[task_lib.Task, _PerCloudCandidates],
+            tasks: List[task_lib.Task],
+            minimize_cost: bool) -> Tuple[clouds.Cloud, Optional[str]]:
+        """Select the best infrastructure from common options.
+
+        Args:
+            common_infras: List of (cloud, region) that can run all tasks.
+            task_candidates: Per-task candidate resources.
+            tasks: List of tasks.
+            minimize_cost: If True, minimize cost; else minimize time.
+
+        Returns:
+            Best (cloud, region) tuple.
+        """
+        if len(common_infras) == 1:
+            return common_infras[0]
+
+        # Estimate total cost/time for each infra
+        best_infra: Optional[Tuple[clouds.Cloud, Optional[str]]] = None
+        best_score = float('inf')
+
+        for cloud, region in common_infras:
+            total_score = 0.0
+            all_tasks_valid = True
+
+            for task in tasks:
+                candidates = task_candidates.get(task, {})
+                if cloud not in candidates:
+                    # Task cannot run on this cloud - skip this infra
+                    all_tasks_valid = False
+                    break
+
+                # Find cheapest/fastest resources in this infra
+                best_task_score = float('inf')
+                for resources in candidates[cloud]:
+                    if resources.region == region or resources.region is None:
+                        # Estimate score for this resource
+                        if task.time_estimator_func is None:
+                            runtime = 3600  # Default 1 hour
+                        else:
+                            runtime = task.estimate_runtime(resources)
+                            if runtime is None:
+                                runtime = 3600  # Default 1 hour
+
+                        if minimize_cost:
+                            hourly_cost = resources.get_cost(runtime)
+                            score = hourly_cost * task.num_nodes
+                        else:
+                            score = runtime
+
+                        if score < best_task_score:
+                            best_task_score = score
+
+                if best_task_score < float('inf'):
+                    total_score += best_task_score
+                else:
+                    # No valid resources found for this task on this infra
+                    all_tasks_valid = False
+                    break
+
+            if all_tasks_valid and total_score < best_score:
+                best_score = total_score
+                best_infra = (cloud, region)
+
+        return best_infra if best_infra else common_infras[0]
+
+    @staticmethod
     def _optimize_dag(
         dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
@@ -1426,3 +1770,16 @@ def _fill_in_launchable_resources(
             launchable[resources], blocked_resources)
     return launchable, cloud_candidates, list(
         sorted(all_fuzzy_candidates)), resource_hints
+
+
+# Expose optimize_job_group as a module-level function
+def optimize_job_group(
+        dag: 'dag_lib.Dag',
+        minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+        blocked_resources: Optional[Iterable[resources_lib.Resources]] = None,
+        quiet: bool = False) -> 'dag_lib.Dag':
+    """Optimize a JobGroup DAG with SAME_INFRA constraint.
+
+    This is a convenience wrapper around Optimizer.optimize_job_group().
+    """
+    return Optimizer.optimize_job_group(dag, minimize, blocked_resources, quiet)

@@ -141,8 +141,7 @@ class TestBearerTokenMiddleware:
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
-                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
-                mock.patch('sky.server.auth.authn.override_user_info_in_request_body') as mock_override_user_info:
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
@@ -156,8 +155,6 @@ class TestBearerTokenMiddleware:
             assert base_mock_request.state.auth_user.name == 'test-service-account'
             # Verify token last used was updated
             mock_update_last_used.assert_called_once_with('token_123')
-            # Verify user info override was called
-            mock_override_user_info.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_missing_user_id_in_token(self, middleware, base_mock_request,
@@ -262,8 +259,7 @@ class TestBearerTokenMiddleware:
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
-                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used, \
-                mock.patch('sky.server.auth.authn.override_user_info_in_request_body'):
+                mock.patch('sky.global_user_state.update_service_account_token_last_used') as mock_update_last_used:
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
@@ -323,8 +319,7 @@ class TestBearerTokenMiddleware:
             {constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS: 'true'}), \
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
-                mock.patch('sky.global_user_state.update_service_account_token_last_used'), \
-                mock.patch('sky.server.auth.authn.override_user_info_in_request_body'):
+                mock.patch('sky.global_user_state.update_service_account_token_last_used'):
 
             mock_token_service.verify_token.return_value = mock_payload
             mock_get_user.return_value = mock_user_info
@@ -409,7 +404,6 @@ class TestBearerTokenMiddleware:
                 mock.patch('sky.users.token_service.token_service') as mock_token_service, \
                 mock.patch('sky.global_user_state.get_user') as mock_get_user, \
                 mock.patch('sky.global_user_state.update_service_account_token_last_used'), \
-                mock.patch('sky.server.auth.authn.override_user_info_in_request_body'), \
                 mock.patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
 
             mock_token_service.verify_token.return_value = mock_payload

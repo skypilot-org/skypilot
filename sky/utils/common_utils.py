@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import base64
 import ctypes
 import difflib
 import enum
@@ -723,7 +724,7 @@ def remove_file_if_exists(path: Optional[str]):
 
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
-    return 'microsoft' in platform.uname()[3].lower()
+    return 'microsoft' in platform.uname().release.lower()
 
 
 def find_free_port(start_port: int) -> int:
@@ -1139,3 +1140,24 @@ def release_memory():
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0
+
+
+def base64_url_encode(data: bytes) -> str:
+    """Base64url encode data without padding.
+
+    Uses URL-safe alphabet (- and _ instead of + and /) and strips padding
+    to avoid URL encoding issues with = characters.
+    """
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def compute_code_challenge(code_verifier: str) -> str:
+    """Compute a code_challenge from code_verifier using SHA256.
+
+    Used in the CLI login flow for CSRF protection. The CLI generates a
+    random code_verifier, computes the challenge, and sends the challenge
+    to the server. Later, the CLI proves it initiated the request by
+    providing the original verifier which the server hashes to verify.
+    """
+    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    return base64_url_encode(digest)

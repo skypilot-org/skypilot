@@ -44,7 +44,7 @@ EVENTS = [
 
 def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     """Start the gRPC server."""
-    # This is the default value in Python 3.8 - 3.12,
+    # This is the default value in Python 3.9 - 3.12,
     # putting it here for visibility.
     # TODO(kevin): Determine the optimal max number of threads.
     max_workers = min(32, (os.cpu_count() or 1) + 4)

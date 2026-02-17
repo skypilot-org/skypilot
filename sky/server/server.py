@@ -8,6 +8,7 @@ import contextlib
 import datetime
 from enum import IntEnum
 import hashlib
+import html
 import json
 import multiprocessing
 import os
@@ -64,14 +65,13 @@ from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
 from sky.server import plugins
-from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import version_check
 from sky.server import versions
-from sky.server.auth import authn
 from sky.server.auth import loopback
 from sky.server.auth import oauth2_proxy
+from sky.server.auth import sessions as auth_sessions
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
@@ -204,6 +204,23 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+def _generate_auth_token(request: fastapi.Request) -> str:
+    """Generate an auth token from the request.
+
+    The token contains the user info and cookies, base64 encoded.
+    Used by both /token and /api/v1/auth/authorize endpoints.
+    """
+    user = _get_auth_user_header(request)
+    token_data = {
+        # Token version number, bump for backwards incompatible changes.
+        'v': 1,
+        'user': user.id if user is not None else None,
+        'cookies': dict(request.cookies),
+    }
+    json_bytes = json.dumps(token_data).encode('utf-8')
+    return base64.b64encode(json_bytes).decode('utf-8')
+
+
 @middleware_utils.websocket_aware
 class InitializeRequestAuthUserMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
@@ -262,7 +279,6 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     common.crypt_ctx.verify(password, user.password)):
                 valid_user = True
                 request.state.auth_user = user
-                await authn.override_user_info_in_request_body(request, user)
                 break
         if not valid_user:
             return _basic_auth_401_response('Invalid credentials')
@@ -385,9 +401,6 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                                     name=user_name or user_info.name)
             request.state.auth_user = auth_user
 
-            # Override user info in request body for service account requests
-            await authn.override_user_info_in_request_body(request, auth_user)
-
             logger.debug(f'Authenticated service account: {user_id}')
 
         except Exception as e:  # pylint: disable=broad-except
@@ -432,7 +445,6 @@ class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         if auth_user is not None:
             request.state.auth_user = auth_user
 
-        await authn.override_user_info_in_request_body(request, auth_user)
         return await call_next(request)
 
 
@@ -492,8 +504,7 @@ async def schedule_on_boot_check_async():
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name=request_names.RequestName.CHECK,
-            request_body=server_utils.build_body_at_server(
-                request=None, body_type=payloads.CheckBody),
+            request_body=payloads.CheckBody(),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
@@ -516,8 +527,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
-                request_body=server_utils.build_body_at_server(
-                    request=None, body_type=payloads.RequestBody),
+                request_body=payloads.RequestBody(),
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
@@ -727,16 +737,9 @@ def handle_concurrent_worker_exhausted_error(
 async def token(request: fastapi.Request,
                 local_port: Optional[int] = None) -> fastapi.responses.Response:
     del local_port  # local_port is used by the served js, but ignored by server
-    user = _get_auth_user_header(request)
-
-    token_data = {
-        'v': 1,  # Token version number, bump for backwards incompatible.
-        'user': user.id if user is not None else None,
-        'cookies': request.cookies,
-    }
     # Use base64 encoding to avoid having to escape anything in the HTML.
-    json_bytes = json.dumps(token_data).encode('utf-8')
-    base64_str = base64.b64encode(json_bytes).decode('utf-8')
+    base64_str = _generate_auth_token(request)
+    user = _get_auth_user_header(request)
 
     html_dir = pathlib.Path(__file__).parent / 'html'
     token_page_path = html_dir / 'token_page.html'
@@ -747,7 +750,8 @@ async def token(request: fastapi.Request,
         raise fastapi.HTTPException(
             status_code=500, detail='Token page template not found.') from e
 
-    user_info_string = f'Logged in as {user.name}' if user is not None else ''
+    user_info_string = html.escape(
+        f'Logged in as {user.name}') if user is not None else ''
     html_content = html_content.replace(
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
         base64_str).replace('USER_PLACEHOLDER', user_info_string)
@@ -762,6 +766,97 @@ async def token(request: fastapi.Request,
         })
 
 
+@app.get('/api/v1/auth/token')
+async def poll_auth_token(
+        code_verifier: Optional[str] = None) -> fastapi.responses.Response:
+    """Poll for auth token using code_verifier.
+
+    Computes code_challenge from code_verifier to look up the session.
+
+    Query params:
+        code_verifier: The original code verifier (required)
+
+    Returns:
+        - 200 with token if session is authorized
+        - 404 if session not found (user hasn't clicked Authorize yet)
+    """
+    if not code_verifier:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_verifier is required')
+
+    auth_token = auth_sessions.auth_session_store.poll_session(code_verifier)
+
+    if auth_token is None:
+        raise fastapi.HTTPException(status_code=404, detail='Session not found')
+
+    return fastapi.responses.JSONResponse(content={'token': auth_token},
+                                          headers={'Cache-Control': 'no-store'})
+
+
+@app.post('/api/v1/auth/authorize')
+async def authorize_auth_session(
+        request: fastapi.Request) -> fastapi.responses.JSONResponse:
+    """Authorize an auth session (called when user clicks Authorize button).
+
+    This endpoint requires authentication (via auth proxy cookies).
+    It generates the token and creates a session for the CLI to retrieve.
+
+    Request body:
+        code_challenge: The code challenge from the CLI
+
+    Returns:
+        - 200 if successfully authorized
+    """
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid JSON body') from e
+
+    code_challenge = body.get('code_challenge')
+    if not code_challenge:
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='code_challenge is required')
+    # Validate format: base64url-encoded SHA256, 43 chars of A-Za-z0-9_-
+    if not re.match(r'^[A-Za-z0-9_-]{43}$', code_challenge):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail='Invalid code_challenge format')
+
+    auth_token = _generate_auth_token(request)
+
+    # Create the session with the token
+    auth_sessions.auth_session_store.create_session(code_challenge, auth_token)
+
+    return fastapi.responses.JSONResponse(content={'status': 'authorized'},
+                                          headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/auth/authorize')
+async def authorize_page(
+        request: fastapi.Request) -> fastapi.responses.Response:
+    """Serve the authorization page where users click to authorize the CLI.
+
+    This page requires authentication (via auth proxy). The code_challenge
+    query param is read by JavaScript and sent to the POST endpoint.
+    """
+    user = request.state.auth_user
+    if user is None:
+        user = _get_auth_user_header(request)
+    user_info = html.escape(
+        f'Logged in as {user.name}') if user is not None else ''
+
+    html_dir = pathlib.Path(__file__).parent / 'html'
+    authorize_page_path = html_dir / 'authorize_page.html'
+    with open(authorize_page_path, 'r', encoding='utf-8') as f:
+        html_content = f.read()
+
+    html_content = html_content.replace('USER_PLACEHOLDER', user_info)
+
+    return fastapi.responses.HTMLResponse(
+        content=html_content,
+        headers={'Cache-Control': 'no-cache, no-transform'})
+
+
 @app.post('/check')
 async def check(request: fastapi.Request,
                 check_body: payloads.CheckBody) -> None:
@@ -772,6 +867,7 @@ async def check(request: fastapi.Request,
         request_body=check_body,
         func=sky_check.check,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -783,13 +879,11 @@ async def enabled_clouds(request: fastapi.Request,
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=server_utils.build_body_at_server(
-            request=request,
-            body_type=payloads.EnabledCloudsBody,
-            workspace=workspace,
-            expand=expand),
+        request_body=payloads.EnabledCloudsBody(workspace=workspace,
+                                                expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -806,6 +900,7 @@ async def realtime_kubernetes_gpu_availability(
         request_body=realtime_gpu_availability_body,
         func=core.realtime_kubernetes_gpu_availability,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -821,6 +916,7 @@ async def kubernetes_node_info(
         request_body=kubernetes_node_info_body,
         func=kubernetes_utils.get_kubernetes_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -836,6 +932,7 @@ async def slurm_gpu_availability(
         request_body=slurm_gpu_availability_body,
         func=core.realtime_slurm_gpu_availability,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -851,6 +948,7 @@ async def slurm_node_info(
         request_body=slurm_node_info_body,
         func=slurm_utils.slurm_node_info,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -861,10 +959,10 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
-        request_body=server_utils.build_body_at_server(
-            request=request, body_type=payloads.RequestBody),
+        request_body=payloads.RequestBody(),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -879,6 +977,7 @@ async def list_accelerators(
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerators,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -894,6 +993,7 @@ async def list_accelerator_counts(
         request_body=list_accelerator_counts_body,
         func=catalog.list_accelerator_counts,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -933,10 +1033,10 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
             dag.validate(skip_file_mounts=True, skip_workdir=True)
 
     try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        dag = dag_utils.load_dag_from_yaml_str(validate_body.dag)
         # Apply admin policy and validate DAG is blocking, run it in a separate
         # thread executor to avoid blocking the uvicorn event loop.
-        await context_utils.to_thread(validate_dag, dag)
+        await asyncio.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
         # Print the exception to the API server log.
         if env_options.Options.SHOW_DEBUG_INFO.get():
@@ -958,6 +1058,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         ignore_return_value=True,
         func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1075,7 +1176,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     logger.info(f'Uploaded zip file: {zip_file_path}')
     await unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
-        await context_utils.to_thread(shutil.rmtree, chunk_dir)
+        await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -1152,7 +1253,7 @@ async def unzip_file(zip_file_path: pathlib.Path,
             # success/failure handling above
             zip_file_path.unlink(missing_ok=True)
 
-    await context_utils.to_thread(_do_unzip)
+    await asyncio.to_thread(_do_unzip)
 
 
 @app.post('/launch')
@@ -1169,6 +1270,7 @@ async def launch(launch_body: payloads.LaunchBody,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=launch_body.cluster_name,
         retryable=launch_body.retry_until_up,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1188,6 +1290,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
         ),
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1202,6 +1305,7 @@ async def stop(request: fastapi.Request,
         func=core.stop,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=stop_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1223,6 +1327,7 @@ async def status(
         schedule_type=(requests_lib.ScheduleType.LONG if
                        status_body.refresh != common_lib.StatusRefreshMode.NONE
                        else requests_lib.ScheduleType.SHORT),
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1237,6 +1342,7 @@ async def endpoints(request: fastapi.Request,
         func=core.endpoints,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=endpoint_body.cluster,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1251,6 +1357,7 @@ async def down(request: fastapi.Request,
         func=core.down,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=down_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1265,6 +1372,7 @@ async def start(request: fastapi.Request,
         func=core.start,
         schedule_type=requests_lib.ScheduleType.LONG,
         request_cluster_name=start_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1279,6 +1387,7 @@ async def autostop(request: fastapi.Request,
         func=core.autostop,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=autostop_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1293,6 +1402,7 @@ async def queue(request: fastapi.Request,
         func=core.queue,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=queue_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1307,6 +1417,7 @@ async def job_status(request: fastapi.Request,
         func=core.job_status,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=job_status_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1321,6 +1432,7 @@ async def cancel(request: fastapi.Request,
         func=core.cancel,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cancel_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1341,6 +1453,7 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
     background_tasks.add_task(task.cancel)
@@ -1372,6 +1485,7 @@ async def download_logs(
         func=core.download_logs,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_jobs_body.cluster_name,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1419,8 +1533,7 @@ async def download(download_body: payloads.DownloadBody,
                 # CLI-friendly (default): entries with full paths for mapping
                 storage_utils.zip_files_and_folders(folders, zip_path)
 
-        await context_utils.to_thread(_zip_files_and_folders, folder_paths,
-                                      zip_path)
+        await asyncio.to_thread(_zip_files_and_folders, folder_paths, zip_path)
 
         # Add home path to the response headers, so that the client can replace
         # the remote path in the zip file to the local path.
@@ -1512,6 +1625,32 @@ def provision_logs(provision_logs_body: payloads.ProvisionLogsBody,
     )
 
 
+@app.post('/autostop_logs')
+async def autostop_logs(
+    request: fastapi.Request, autostop_logs_body: payloads.AutostopLogsBody,
+    background_tasks: fastapi.BackgroundTasks
+) -> fastapi.responses.StreamingResponse:
+    """Tails the autostop hook logs of a cluster."""
+    executor.check_request_thread_executor_available()
+    request_task = await executor.prepare_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.CLUSTER_AUTOSTOP_LOGS,
+        request_body=autostop_logs_body,
+        func=core.tail_autostop_logs,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        request_cluster_name=autostop_logs_body.cluster_name,
+        auth_user=request.state.auth_user,
+    )
+    task = executor.execute_request_in_coroutine(request_task)
+    background_tasks.add_task(task.cancel)
+    return stream_utils.stream_response_for_long_request(
+        request_id=request.state.request_id,
+        logs_path=request_task.log_path,
+        background_tasks=background_tasks,
+        kill_request_on_disconnect=False,
+    )
+
+
 @app.post('/cost_report')
 async def cost_report(request: fastapi.Request,
                       cost_report_body: payloads.CostReportBody) -> None:
@@ -1522,6 +1661,7 @@ async def cost_report(request: fastapi.Request,
         request_body=cost_report_body,
         func=core.cost_report,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1537,6 +1677,7 @@ async def cluster_events(
         func=core.get_cluster_events,
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_events_body.cluster_name or '',
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1546,10 +1687,10 @@ async def storage_ls(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=server_utils.build_body_at_server(
-            request=request, body_type=payloads.RequestBody),
+        request_body=payloads.RequestBody(),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1563,6 +1704,7 @@ async def storage_delete(request: fastapi.Request,
         request_body=storage_body,
         func=core.storage_delete,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1576,6 +1718,7 @@ async def local_up(request: fastapi.Request,
         request_body=local_up_body,
         func=core.local_up,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1589,6 +1732,7 @@ async def local_down(request: fastapi.Request,
         request_body=local_down_body,
         func=core.local_down,
         schedule_type=requests_lib.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1797,6 +1941,7 @@ async def api_cancel(request: fastapi.Request,
         request_body=request_cancel_body,
         func=requests_lib.kill_requests_with_prefix,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -1844,8 +1989,11 @@ async def list_plugins() -> Dict[str, List[Dict[str, Any]]]:
     """Return metadata about loaded backend plugins."""
     plugin_infos = []
     for plugin_info in plugins.get_plugins():
+        if plugin_info.hidden_from_display:
+            continue
         info = {
             'js_extension_path': plugin_info.js_extension_path,
+            'requires_early_init': plugin_info.requires_early_init,
         }
         for attr in ('name', 'version', 'commit'):
             value = getattr(plugin_info, attr, None)
@@ -1953,7 +2101,9 @@ async def _get_cluster_and_validate(
         cluster_records = await context_utils.to_thread_with_executor(
             thread_pool_executor, core.status, cluster_name, all_users=True)
     cluster_record = cluster_records[0]
-    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+    if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
+                                        status_lib.ClusterStatus.UP,
+                                        status_lib.ClusterStatus.AUTOSTOPPING):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Cluster {cluster_name} is not running')
 
@@ -2397,10 +2547,10 @@ async def all_contexts(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
-        request_body=server_utils.build_body_at_server(
-            request=request, body_type=payloads.RequestBody),
+        request_body=payloads.RequestBody(),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -2455,19 +2605,19 @@ async def download_debug_dump(
 # === Internal APIs ===
 @app.get('/api/completion/cluster_name')
 async def complete_cluster_name(incomplete: str,) -> List[str]:
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         global_user_state.get_cluster_names_start_with, incomplete)
 
 
 @app.get('/api/completion/storage_name')
 async def complete_storage_name(incomplete: str,) -> List[str]:
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         global_user_state.get_storage_names_start_with, incomplete)
 
 
 @app.get('/api/completion/volume_name')
 async def complete_volume_name(incomplete: str,) -> List[str]:
-    return await context_utils.to_thread(
+    return await asyncio.to_thread(
         global_user_state.get_volume_names_start_with, incomplete)
 
 
@@ -2608,6 +2758,10 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Pre-load plugin RBAC rules before initializing permission service.
+    # This ensures plugin RBAC rules are available when policies are created.
+    logger.info('Pre-loading plugin RBAC rules')
+    plugins.load_plugin_rbac_rules()
     logger.info('Initializing permission service')
     permission.permission_service.initialize()
     logger.info('Permission service initialized')

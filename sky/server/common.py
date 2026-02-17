@@ -593,8 +593,6 @@ def get_request_id(response: 'requests.Response') -> RequestId[T]:
     handle_request_error(response)
     request_id = response.headers.get('X-Skypilot-Request-ID')
     if request_id is None:
-        request_id = response.headers.get('X-Request-ID')
-    if request_id is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 'Failed to get request ID from SkyPilot API server at '
@@ -989,7 +987,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
     yaml_utils.dump_yaml(str(translated_client_task_path), task_configs)
 
-    dag = dag_utils.load_chain_dag_from_yaml(str(translated_client_task_path))
+    dag = dag_utils.load_dag_from_yaml(str(translated_client_task_path))
     return dag
 
 

@@ -731,9 +731,21 @@ async def prepare_request_async(
     request_cluster_name: Optional[str] = None,
     schedule_type: api_requests.ScheduleType = (api_requests.ScheduleType.LONG),
     is_skypilot_system: bool = False,
+    auth_user: Optional[models.User] = None,
 ) -> api_requests.Request:
     """Prepare a request for execution."""
-    user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
+    if auth_user is not None:
+        assert auth_user.name is not None
+        # Use the authenticated user identity as the single source of truth
+        # if present.
+        user_id = auth_user.id
+        # Set user identity for executors.
+        request_body.env_vars[constants.USER_ID_ENV_VAR] = user_id
+        request_body.env_vars[constants.USER_ENV_VAR] = auth_user.name
+    else:
+        # Fallback to legacy environment variable based identity if no
+        # authentication is set.
+        user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
@@ -757,18 +769,19 @@ async def prepare_request_async(
     return request
 
 
-async def schedule_request_async(request_id: str,
-                                 request_name: request_names.RequestName,
-                                 request_body: payloads.RequestBody,
-                                 func: Callable[P, Any],
-                                 request_cluster_name: Optional[str] = None,
-                                 ignore_return_value: bool = False,
-                                 schedule_type: api_requests.ScheduleType = (
-                                     api_requests.ScheduleType.LONG),
-                                 is_skypilot_system: bool = False,
-                                 precondition: Optional[
-                                     preconditions.Precondition] = None,
-                                 retryable: bool = False) -> None:
+async def schedule_request_async(
+        request_id: str,
+        request_name: request_names.RequestName,
+        request_body: payloads.RequestBody,
+        func: Callable[P, Any],
+        request_cluster_name: Optional[str] = None,
+        ignore_return_value: bool = False,
+        schedule_type: api_requests.ScheduleType = (
+            api_requests.ScheduleType.LONG),
+        is_skypilot_system: bool = False,
+        precondition: Optional[preconditions.Precondition] = None,
+        retryable: bool = False,
+        auth_user: Optional[models.User] = None) -> None:
     """Enqueue a request to the request queue.
 
     Args:
@@ -789,11 +802,14 @@ async def schedule_request_async(request_id: str,
             The precondition is waited asynchronously and does not block the
             caller.
     """
-    request_task = await prepare_request_async(request_id, request_name,
-                                               request_body, func,
+    request_task = await prepare_request_async(request_id,
+                                               request_name,
+                                               request_body,
+                                               func,
                                                request_cluster_name,
                                                schedule_type,
-                                               is_skypilot_system)
+                                               is_skypilot_system,
+                                               auth_user=auth_user)
     schedule_prepared_request(request_task, ignore_return_value, precondition,
                               retryable)
 

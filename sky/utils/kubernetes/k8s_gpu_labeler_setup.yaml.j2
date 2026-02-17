@@ -52,29 +52,44 @@ data:
     #!/usr/bin/env python3
     import os
     import subprocess
+    import sys
     from typing import Optional
 
     from kubernetes import client
     from kubernetes import config
 
-    canonical_gpu_names = [
-        'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4', 'V100',
-        'A10', 'P100', 'P40', 'P4', 'L4'
-    ]
+    # Canonical GPU names - injected from sky.provision.kubernetes.constants
+    canonical_gpu_names = {{ canonical_gpu_names }}
 
 
     def get_gpu_name() -> Optional[str]:
         try:
             result = subprocess.run(
                 ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader,nounits'],
-                stdout=subprocess.PIPE)
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                timeout=30)
             gpu_name = result.stdout.decode('utf-8').strip()
+            if not gpu_name:
+                print('nvidia-smi returned empty output. GPU driver may not be loaded.')
+                return None
             # In the case of multi-gpu nodes, we assume the node is homogenous and
             # just use the first GPU name.
             gpu_name = gpu_name.split('\n')[0]
             return gpu_name.lower()
+        except FileNotFoundError:
+            print('nvidia-smi not found. Ensure NVIDIA drivers are installed.')
+            return None
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode('utf-8') if e.stderr else ''
+            print(f'nvidia-smi failed with exit code {e.returncode}: {stderr}')
+            return None
+        except subprocess.TimeoutExpired:
+            print('nvidia-smi timed out. GPU may be unresponsive.')
+            return None
         except Exception as e:
-            print(f'Error getting GPU name: {e}')
+            print(f'Unexpected error getting GPU name: {type(e).__name__}: {e}')
             return None
 
 
@@ -96,6 +111,8 @@ data:
 
         except Exception as e:
             print(f'Error labeling node: {e}')
+            # Re-raise so the script exits non-zero and the job is marked as failed
+            raise
 
 
     def main():
@@ -119,6 +136,7 @@ data:
                 labelled = True
         else:
             print('No GPU detected. Try running nvidia-smi in the container.')
+            sys.exit(1)
 
 
     if __name__ == '__main__':

@@ -66,32 +66,36 @@ class QueueJobRequest(_message.Message):
     def __init__(self, job_id: _Optional[int] = ..., codegen: _Optional[str] = ..., script_path: _Optional[str] = ..., remote_log_dir: _Optional[str] = ..., managed_job: _Optional[_Union[ManagedJobInfo, _Mapping]] = ...) -> None: ...
 
 class ManagedJobInfo(_message.Message):
-    __slots__ = ("name", "pool", "workspace", "entrypoint", "tasks", "user_id")
+    __slots__ = ("name", "pool", "workspace", "entrypoint", "tasks", "user_id", "execution")
     NAME_FIELD_NUMBER: _ClassVar[int]
     POOL_FIELD_NUMBER: _ClassVar[int]
     WORKSPACE_FIELD_NUMBER: _ClassVar[int]
     ENTRYPOINT_FIELD_NUMBER: _ClassVar[int]
     TASKS_FIELD_NUMBER: _ClassVar[int]
     USER_ID_FIELD_NUMBER: _ClassVar[int]
+    EXECUTION_FIELD_NUMBER: _ClassVar[int]
     name: str
     pool: str
     workspace: str
     entrypoint: str
     tasks: _containers.RepeatedCompositeFieldContainer[ManagedJobTask]
     user_id: str
-    def __init__(self, name: _Optional[str] = ..., pool: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., tasks: _Optional[_Iterable[_Union[ManagedJobTask, _Mapping]]] = ..., user_id: _Optional[str] = ...) -> None: ...
+    execution: str
+    def __init__(self, name: _Optional[str] = ..., pool: _Optional[str] = ..., workspace: _Optional[str] = ..., entrypoint: _Optional[str] = ..., tasks: _Optional[_Iterable[_Union[ManagedJobTask, _Mapping]]] = ..., user_id: _Optional[str] = ..., execution: _Optional[str] = ...) -> None: ...
 
 class ManagedJobTask(_message.Message):
-    __slots__ = ("task_id", "name", "resources_str", "metadata_json")
+    __slots__ = ("task_id", "name", "resources_str", "metadata_json", "is_primary_in_job_group")
     TASK_ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     RESOURCES_STR_FIELD_NUMBER: _ClassVar[int]
     METADATA_JSON_FIELD_NUMBER: _ClassVar[int]
+    IS_PRIMARY_IN_JOB_GROUP_FIELD_NUMBER: _ClassVar[int]
     task_id: int
     name: str
     resources_str: str
     metadata_json: str
-    def __init__(self, task_id: _Optional[int] = ..., name: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata_json: _Optional[str] = ...) -> None: ...
+    is_primary_in_job_group: bool
+    def __init__(self, task_id: _Optional[int] = ..., name: _Optional[str] = ..., resources_str: _Optional[str] = ..., metadata_json: _Optional[str] = ..., is_primary_in_job_group: bool = ...) -> None: ...
 
 class QueueJobResponse(_message.Message):
     __slots__ = ()

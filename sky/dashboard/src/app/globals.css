@@ -505,3 +505,73 @@
   text-align: left !important;
   white-space: nowrap !important;
 }
+
+/* ===== Infra Page Glassy Loading Styles ===== */
+
+@keyframes infra-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Skeleton text placeholder - replaces CircularProgress in cells */
+.infra-skeleton-text {
+  display: inline-block;
+  height: 0.75rem;
+  background: linear-gradient(
+    90deg,
+    hsl(var(--border)) 0%,
+    hsl(var(--secondary)) 50%,
+    hsl(var(--border)) 100%
+  );
+  background-size: 200% 100%;
+  animation: infra-shimmer 1.5s infinite;
+  border-radius: 3px;
+  min-width: 24px;
+}
+
+/* Row shimmer effect for progressive loading */
+.infra-loading-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.infra-loading-row::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.5) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 200% 100%;
+  animation: infra-shimmer 1.5s infinite;
+  pointer-events: none;
+}
+
+/* Glass overlay for table during refresh */
+.infra-table-refreshing {
+  position: relative;
+}
+
+.infra-table-refreshing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(1px);
+  z-index: 5;
+  border-radius: inherit;
+  pointer-events: none;
+}

@@ -6,9 +6,11 @@ import subprocess
 from typing import Dict, Optional, Tuple
 
 import colorama
+import jinja2
 import yaml
 
 from sky.adaptors import kubernetes
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import directory_utils
 from sky.utils import rich_utils
@@ -25,12 +27,13 @@ def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
     invoked if --cleanup is passed to the script.
     """
     # Delete any existing GPU labeler Kubernetes resources:
-    del_command = ('kubectl delete pods,services,deployments,jobs,daemonsets,'
-                   'replicasets,configmaps,secrets,pv,pvc,clusterrole,'
-                   'serviceaccount,clusterrolebinding -n kube-system '
-                   '-l job=sky-gpu-labeler')
+    del_command = 'kubectl '
     if context:
-        del_command += f' --context {context}'
+        del_command += f'--context {context} '
+    del_command += ('delete pods,services,deployments,jobs,daemonsets,'
+                    'replicasets,configmaps,secrets,pv,pvc,clusterrole,'
+                    'serviceaccount,clusterrolebinding -n kube-system '
+                    '-l job=sky-gpu-labeler')
     success = False
     reason = ''
     with rich_utils.client_status('Cleaning up existing GPU labeling '
@@ -78,16 +81,43 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
 
     # Apply the RBAC manifest using kubectl since it contains multiple resources
     with rich_utils.client_status('Setting up GPU labeling'):
-        rbac_manifest_path = os.path.join(manifest_dir,
-                                          'k8s_gpu_labeler_setup.yaml')
+        rbac_template_path = os.path.join(manifest_dir,
+                                          'k8s_gpu_labeler_setup.yaml.j2')
         try:
-            apply_command = ['kubectl', 'apply', '-f', rbac_manifest_path]
+            with open(rbac_template_path, 'r', encoding='utf-8') as f:
+                template_content = f.read()
+        except FileNotFoundError:
+            print(f'Error: GPU labeler template not found at '
+                  f'{rbac_template_path}. '
+                  'Your SkyPilot installation may be incomplete.')
+            return
+        except IOError as e:
+            print(f'Error reading GPU labeler template: {e}')
+            return
+
+        try:
+            # Render the Jinja2 template with canonical GPU names
+            template = jinja2.Template(template_content)
+            manifest_content = template.render(
+                canonical_gpu_names=kubernetes_constants.CANONICAL_GPU_NAMES)
+        except jinja2.TemplateError as e:
+            print(f'Error rendering GPU labeler template: {e}')
+            return
+
+        try:
+            # Apply via stdin to use the rendered content
+            apply_command = ['kubectl']
             if context:
                 apply_command += ['--context', context]
-            subprocess.check_output(apply_command)
+            apply_command += ['apply', '-f', '-']
+            subprocess.run(apply_command,
+                           input=manifest_content.encode(),
+                           check=True,
+                           capture_output=True)
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
-            print('Error setting up GPU labeling: ' + output)
+            stderr = e.stderr.decode('utf-8')
+            print('Error applying GPU labeler manifest: ' + output + stderr)
             return
 
     jobs_to_node_names: Dict[str, str] = {}

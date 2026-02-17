@@ -1,6 +1,7 @@
 """Initialize docker containers on a remote node."""
 
 import dataclasses
+import re
 import shlex
 import time
 from typing import Any, Dict, List, Optional
@@ -47,6 +48,9 @@ INSTALL_AWS_CLI_CMD = (
     '-o "/tmp/awscliv2.zip" && '
     'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
     '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
+
+# Pattern to extract SSH user from command output, handling MOTD contamination
+_DOCKER_USER_PATTERN = re.compile(r'SKYPILOT_DOCKER_USER: ([^\s\n]+)')
 
 
 def _extract_region_from_ecr_server(server: str) -> str:
@@ -456,7 +460,16 @@ class DockerInitializer:
             run_env='docker')
 
         # SkyPilot: End of Setup Commands.
-        docker_user = self._run('whoami', run_env='docker')
+        # Pattern matching to prevent MOTD contamination and reliably
+        # parse docker user. Refer to CommandRunner::_get_remote_home_dir.
+        docker_user_output = self._run('echo "SKYPILOT_DOCKER_USER: $(whoami)"',
+                                       run_env='docker')
+        docker_user_match = _DOCKER_USER_PATTERN.search(docker_user_output)
+        if docker_user_match:
+            docker_user = docker_user_match.group(1)
+        else:
+            raise ValueError('Failed to find Docker user identifier: '
+                             f'{docker_user_output}')
         self.initialized = True
         return docker_user
 

@@ -522,7 +522,7 @@ def update(
                     f'{workers} is not supported. Ignoring the update.')
 
         # Load the existing task configuration from the service's YAML file
-        yaml_content = service_record['pool_yaml']
+        yaml_content = service_record['yaml_content']
 
         # Load the existing task configuration
         task = task_lib.Task.from_yaml_str(yaml_content)

@@ -117,6 +117,7 @@ setup_commands:
   # Line 'sudo mv /etc/nccl.conf /etc/nccl.conf.bak' removes the default nccl.conf which is wrongly configured on many multi-GPU Azure VM, causing failure for multi-GPU workloads using NCCL.
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
+    {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
     touch ~/.sudo_as_admin_successful;

@@ -222,7 +222,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
 def _storage_mount_cached_test_command_generator(f1: TextIO, f2: TextIO,
                                                  cluster_name: str,
                                                  storage_name: str, cloud: str):
-    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes', 'slurm']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mount_cached.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -516,6 +516,24 @@ def test_kubernetes_storage_mounts_cached():
                 f1, f2, name, storage_name, cloud)
             test = smoke_tests_utils.Test(
                 'kubernetes_storage_mount_cached',
+                test_commands,
+                clean_command,
+                timeout=20 * 60,  # 20 mins
+            )
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.slurm
+def test_slurm_storage_mounts_cached():
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'slurm'
+    storage_name = f'sky-test-{int(time.time())}'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f1:
+        with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f2:
+            test_commands, clean_command = _storage_mount_cached_test_command_generator(
+                f1, f2, name, storage_name, cloud)
+            test = smoke_tests_utils.Test(
+                'slurm_storage_mount_cached',
                 test_commands,
                 clean_command,
                 timeout=20 * 60,  # 20 mins

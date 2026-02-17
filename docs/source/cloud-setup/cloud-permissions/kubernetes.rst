@@ -266,7 +266,6 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     apiVersion: rbac.authorization.k8s.io/v1
     metadata:
       name: sky-sa-cluster-role  # Can be changed if needed
-      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     rules:
@@ -291,7 +290,6 @@ To create a service account that has all necessary permissions for SkyPilot (inc
     kind: ClusterRoleBinding
     metadata:
       name: sky-sa-cluster-role-binding  # Can be changed if needed
-      namespace: default  # Change to your namespace if using a different one.
       labels:
         parent: skypilot
     subjects:
@@ -300,7 +298,7 @@ To create a service account that has all necessary permissions for SkyPilot (inc
         namespace: default  # Change to your namespace if using a different one.
     roleRef:
       kind: ClusterRole
-      name: sky-sa-cluster-role  # Use the same name as the cluster role at line 43
+      name: sky-sa-cluster-role  # Use the same name as the cluster role at line 56
       apiGroup: rbac.authorization.k8s.io
     ---
     # Optional: If using object store mounting, create the skypilot-system namespace

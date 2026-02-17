@@ -80,7 +80,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             self.running.decrement()
         return count
 
-    def submit(self, fn: Callable[_P, _T], *args: _P.args,
+    def submit(self, fn: Callable[_P, _T], /, *args: _P.args,
                **kwargs: _P.kwargs) -> 'concurrent.futures.Future[_T]':
         with self._shutdown_lock:
             if self._shutdown:
@@ -106,7 +106,10 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             assert thread.ident is not None, 'Thread should be started'
             return fut
 
-    def shutdown(self, wait=True):
+    def shutdown(self,
+                 wait: bool = True,
+                 *,
+                 cancel_futures: bool = False) -> None:
         with self._shutdown_lock:
             self._shutdown = True
         if not wait:

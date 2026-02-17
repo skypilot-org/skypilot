@@ -73,18 +73,24 @@ def service_exception():
 
 
 def with_oci_env(f):
+    """Wraps a function to return a single shell command string (joined by '&&')
+    that ensures OCI CLI is available before running the actual OCI
+    command returned by `f`.
+    """
 
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
-        # pylint: disable=line-too-long
+        oci_venv_dir = '"$HOME/sky-oci-cli-env"'
         enter_env_cmds = [
-            'conda info --envs | grep "sky-oci-cli-env" || conda create -n sky-oci-cli-env python=3.10 -y',
-            '. $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true',
-            'conda activate sky-oci-cli-env', 'pip install oci-cli',
-            'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True'
+            # Create the venv if missing
+            (f'[ -d {oci_venv_dir} ] || '
+             f'uv venv --seed {oci_venv_dir} --python 3.10'),
+            f'source {oci_venv_dir}/bin/activate',
+            'uv pip install oci-cli',
+            'export OCI_CLI_SUPPRESS_FILE_PERMISSIONS_WARNING=True',
         ]
         operation_cmd = [f(*args, **kwargs)]
-        leave_env_cmds = ['conda deactivate']
+        leave_env_cmds = ['deactivate']
         return ' && '.join(enter_env_cmds + operation_cmd + leave_env_cmds)
 
     return wrapper

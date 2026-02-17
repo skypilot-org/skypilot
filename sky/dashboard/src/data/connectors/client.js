@@ -3,8 +3,39 @@
 import { getErrorMessageFromResponse } from '@/data/utils';
 import { ENDPOINT } from './constants';
 
+// Wait for plugins that need early initialization (e.g., fetch interceptors)
+// Such plugins are marked with data-requires-early-init="true" and set
+// window.__skyPluginsReady = true when ready
+let pluginsReadyPromise = null;
+
+async function waitForPlugins() {
+  if (window.__skyPluginsReady) return;
+  if (pluginsReadyPromise) return pluginsReadyPromise;
+
+  // Check if any plugin needs early init
+  const needsWait = document.querySelector(
+    'script[src*="/plugins/"][data-requires-early-init="true"]'
+  );
+  if (!needsWait) return;
+
+  // Wait for plugin to signal ready (max 1s)
+  pluginsReadyPromise = new Promise((resolve) => {
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (window.__skyPluginsReady || Date.now() - start >= 1000) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 50);
+  });
+  return pluginsReadyPromise;
+}
+
 export const apiClient = {
   fetchImmediate: async (path, body, method = 'POST', options = {}) => {
+    // Wait for plugins to be ready before making API calls
+    await waitForPlugins();
+
     // Call a skypilot API and get the result
     const headers =
       method === 'POST'
@@ -45,10 +76,8 @@ export const apiClient = {
         throw new Error(msg);
       }
 
-      // Handle X-Request-ID for API requests
-      const id =
-        response.headers.get('X-Skypilot-Request-ID') ||
-        response.headers.get('X-Request-ID');
+      // Handle X-Skypilot-Request-ID for API requests
+      const id = response.headers.get('X-Skypilot-Request-ID');
 
       // Handle empty request ID
       if (!id) {

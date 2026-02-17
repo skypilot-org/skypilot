@@ -1,6 +1,6 @@
 # RedisVL + SkyPilot: Vector Search at Scale
 
-Distributed vector search over [1M research papers](https://www.kaggle.com/datasets/nechbamohammed/research-papers-dataset) using [RedisVL](https://docs.redisvl.com/en/latest/) and [SkyPilot](https://skypilot.readthedocs.io/en/latest/).
+Distributed vector search over [1M research papers](https://www.kaggle.com/datasets/nechbamohammed/research-papers-dataset) using [RedisVL](https://docs.redisvl.com/en/latest/) and [SkyPilot](https://docs.skypilot.co/en/latest/).
 
 📖 [Read the full blog post](https://blog.skypilot.co/redisvl-skypilot/).
 
