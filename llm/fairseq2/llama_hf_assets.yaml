@@ -21,3 +21,15 @@ base: llama3_instruct
 model_arch: llama3_1_8b
 checkpoint: "hg://meta-llama/Llama-3.1-8B-Instruct"
 tokenizer: "hg://meta-llama/Llama-3.1-8B-Instruct"
+---
+name: llama3_1_70b@user
+base: llama3
+model_arch: llama3_1_70b
+checkpoint: "hg://meta-llama/Llama-3.1-70B"
+tokenizer: "hg://meta-llama/Llama-3.1-70B"
+---
+name: llama3_1_70b_instruct@user
+base: llama3_instruct
+model_arch: llama3_1_70b
+checkpoint: "hg://meta-llama/Llama-3.1-70B-Instruct"
+tokenizer: "hg://meta-llama/Llama-3.1-70B-Instruct"

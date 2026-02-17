@@ -4,10 +4,9 @@
 
 ## Why SkyPilot + Fairseq2?
 
-SkyPilot makes training with fairseq2 **effortless**:
+SkyPilot makes fine-tuning with fairseq2 **effortless**:
 - **Run anywhere** - Same YAML works on Kubernetes, AWS, GCP, Azure, and 20+ other clouds
-- **3x cheaper** with managed spot instances and automatic recovery
-- **Multi-node with zero setup** - Handles distributed training across nodes automatically
+- **Multi-node with zero setup** - Handles distributed fine-tuning across nodes automatically
 - **No vendor lock-in** - Checkpoints saved to your own cloud storage
 
 ## Quick Start
@@ -19,7 +18,8 @@ export HF_TOKEN=your_hf_token_here
 
 Launch instruction fine-tuning on a single GPU:
 ```bash
-sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN
+cd llm/fairseq2
+sky launch -c fairseq2-sft sft.sky.yaml --secret HF_TOKEN
 ```
 
 Monitor training progress:
@@ -31,76 +31,36 @@ sky logs fairseq2-sft
 
 ### Instruction Fine-tuning (SFT)
 
-Fine-tune a LLaMA model on the GSM8K math reasoning dataset:
+Fine-tune Llama 3.2 1B on the GSM8K math reasoning dataset:
 
 ```bash
-sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN
+sky launch -c fairseq2-sft sft.sky.yaml --secret HF_TOKEN
 ```
 
-Scale to 8 GPUs:
+Use a larger model:
 ```bash
-sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8
+sky launch -c fairseq2-sft sft.sky.yaml --secret HF_TOKEN \
+  --gpus H100:8 --env MODEL=llama3_1_70b
 ```
 
-Use a larger model (8B needs more GPUs):
-```bash
-sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN --gpus A100:8 --env MODEL=llama3_1_8b
-```
+### Multi-Node Fine-tuning
 
-### Multi-Node Distributed Training
-
-Train larger models across multiple nodes with FSDP:
+Fine-tune across multiple nodes with FSDP:
 
 ```bash
-# 2 nodes with 8 H100s each (16 GPUs total)
-sky launch -c fairseq2-multi llm/fairseq2/multinode.yaml --secret HF_TOKEN
+sky launch -c fairseq2-multi multinode.sky.yaml --secret HF_TOKEN
 
-# Scale to 4 nodes (32 GPUs total)
-sky launch -c fairseq2-multi llm/fairseq2/multinode.yaml --secret HF_TOKEN --num-nodes 4
-```
-
-## Configuration Options
-
-### Supported Models
-
-Fairseq2 supports multiple model families for language modeling tasks:
-
-| Model Family | Example Configs | Description |
-|--------------|-----------------|-------------|
-| **LLaMA 3.2** | `llama3_2_1b`, `llama3_2_3b` | Meta's smaller LLaMA models (gated, requires HF token) |
-| **LLaMA 3.1** | `llama3_1_8b`, `llama3_1_70b` | Meta's LLaMA 3.1 models (gated, requires HF token) |
-
-These examples include [custom asset cards](https://facebookresearch.github.io/fairseq2/stable/basics/assets.html) (`llama_hf_assets.yaml`) that register HuggingFace download URIs for the Llama model family. To use other model families, you may need to create similar asset cards.
-
-### Dataset
-
-These examples use the [facebook/fairseq2-lm-gsm8k](https://huggingface.co/datasets/facebook/fairseq2-lm-gsm8k) dataset, which contains:
-
-| Split | Description |
-|-------|-------------|
-| `sft_train/` | SFT training data (instruction-response pairs) |
-| `sft_test/` | SFT test data for evaluation |
-
-The dataset is automatically downloaded during setup.
-
-### Training Parameters
-
-Customize training by setting environment variables:
-
-```bash
-sky launch -c fairseq2-sft llm/fairseq2/sft.yaml --secret HF_TOKEN \
-  --gpus A100:8 \
-  --env MODEL=llama3_1_8b \
-  --env MAX_NUM_STEPS=2000
+# Use a larger model:
+sky launch -c fairseq2-multi multinode.sky.yaml --secret HF_TOKEN \
+  --gpus H100:8 --env MODEL=llama3_1_70b
 ```
 
 ## Preparation
 
 ### 1. Request Model Access
 
-Some models require access approval:
-- Request access to [LLaMA models on Hugging Face](https://huggingface.co/meta-llama)
-- Qwen models are non-gated and don't require approval
+Llama models are gated and require access approval:
+- Request access to [Llama models on Hugging Face](https://huggingface.co/meta-llama)
 
 ### 2. Get Your Hugging Face Token
 
