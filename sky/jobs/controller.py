@@ -1964,7 +1964,13 @@ class ControllerManager:
         while True:
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
-                if cancel.endswith('.lock'):
+                if not cancel.isdigit():
+                    # There maybe unexpected files that are written to the
+                    # signal directory. We for sure write filelocks to the
+                    # directory, so we need to skip.
+                    if not cancel.endswith('.lock'):
+                        logger.debug('Detected unexpected file in signal '
+                                     f'directory: {cancel}. Skipping...')
                     continue
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
