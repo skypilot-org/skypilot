@@ -13,8 +13,9 @@
 envs:
   MODEL: llama3_2_1b
   MAX_NUM_STEPS: 2000
-  # Max tokens per training batch (controls memory usage; reduce if OOM)
-  MAX_TOKENS_PER_BATCH: 4096
+  # Max sequence length (controls memory usage; reduce if OOM).
+  # max_num_tokens is set to 2x this value, following fairseq2 defaults.
+  MAX_SEQ_LEN: 2048
   # Change this to your own checkpoint bucket
   CHECKPOINT_BUCKET_NAME: sky-fairseq2-checkpoints
 
@@ -31,8 +32,7 @@ resources:
 num_nodes: 2
 
 file_mounts:
-  # Shared cloud storage for checkpoints (fairseq2 requires a shared filesystem
-  # for multi-node checkpoint saving — each rank writes its own shard).
+  # Shared cloud storage for checkpoints.
   # NOTE: If you're on a Slurm cluster with NFS, you may remove this mount and
   # point the checkpoints symlink to a shared NFS path instead.
   /output:
@@ -74,8 +74,7 @@ setup: |
 
   # Download the GSM8K dataset formatted for fairseq2
   echo "Downloading fairseq2-lm-gsm8k dataset..."
-  sudo mkdir -p ~/datasets/facebook/fairseq2-lm-gsm8k
-  sudo chown -R $(whoami) ~/datasets/facebook
+  mkdir -p ~/datasets/facebook/fairseq2-lm-gsm8k
 
   # Download all dataset files
   hf download facebook/fairseq2-lm-gsm8k \
@@ -119,9 +118,8 @@ run: |
     model.name=$MODEL \
     tokenizer.name=$MODEL \
     regime.num_steps=$MAX_NUM_STEPS \
-    regime.checkpoint_every_n_steps=500 \
-    dataset.max_seq_len=$MAX_TOKENS_PER_BATCH \
-    dataset.max_num_tokens=$MAX_TOKENS_PER_BATCH \
+    dataset.max_seq_len=$MAX_SEQ_LEN \
+    dataset.max_num_tokens=$((MAX_SEQ_LEN * 2)) \
     trainer.mixed_precision.dtype=bfloat16 \
     gang.tensor_parallel_size=$SKYPILOT_NUM_GPUS_PER_NODE \
     common.no_sweep_dir=true
