@@ -100,6 +100,9 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
+# Content written to the jobs cancel signal file.
+_JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
+
 # After enabling consolidation mode, we need to restart the API server to get
 # the jobs refresh deamon and correct number of executors. We use this file to
 # indicate that the API server has been restarted after enabling consolidation
@@ -874,13 +877,14 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
             try:
                 signal_file = pathlib.Path(
                     managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                if graceful:
-                    content = 'graceful'
-                    if graceful_timeout is not None:
-                        content = f'graceful:{graceful_timeout}'
-                    signal_file.write_text(content, encoding='utf-8')
-                else:
-                    signal_file.touch()
+                with filelock.FileLock(str(signal_file) + '.lock'):
+                    if graceful:
+                        content = _JOBS_GRACEFUL_CANCEL_SIGNAL
+                        if graceful_timeout is not None:
+                            content += f':{graceful_timeout}'
+                        signal_file.write_text(content, encoding='utf-8')
+                    else:
+                        signal_file.touch()
             except OSError as e:
                 logger.error(f'Failed to cancel job {job_id}: {e}')
                 # Don't add it to the to be cancelled job ids
@@ -2354,6 +2358,28 @@ def _job_proto_to_dict(
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
     return job_dict
+
+
+def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
+    """Parse the job cancel signal file to check if graceful cancel is enabled.
+
+    Args:
+        content: content of the signal file, if any.
+
+    Returns:
+        A tuple of whether graceful cancel is enabled, and cancel timeout if
+        present.
+    """
+    graceful, graceful_timeout = False, None
+    if content and content.startswith(_JOBS_GRACEFUL_CANCEL_SIGNAL):
+        graceful = True
+        if ':' in content:
+            try:
+                graceful_timeout = int(content.split(':')[1])
+            except (ValueError, IndexError):
+                logger.warning('Incorrect graceful signal contents. Got: '
+                               f'{content}. Ignoring timeout...')
+    return graceful, graceful_timeout
 
 
 class ManagedJobCodeGen:

@@ -15,6 +15,7 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 import dotenv
+import filelock
 
 import sky
 from sky import core
@@ -1852,8 +1853,8 @@ class ControllerManager:
                 cancel_info = self._cancel_info.pop(job_id, None)
             if cancel_info is not None:
                 graceful, graceful_timeout = cancel_info
-                logger.info(f'Job {job_id} graceful cancel: '
-                            f'graceful={graceful}, timeout={graceful_timeout}')
+                logger.debug(f'Job {job_id} graceful cancel: '
+                             f'graceful={graceful}, timeout={graceful_timeout}')
 
             dag = _get_dag(job_id)
             task_id, _ = await (
@@ -1973,24 +1974,22 @@ class ControllerManager:
                         signal_path = os.path.join(
                             jobs_constants.CONSOLIDATED_SIGNAL_PATH, cancel)
                         try:
-                            content = pathlib.Path(signal_path).read_text(
-                                encoding='utf-8').strip()
-                        except Exception:  # pylint: disable=broad-except
+                            with filelock.FileLock(signal_path + '.lock'):
+                                content = pathlib.Path(signal_path).read_text(
+                                    encoding='utf-8').strip()
+                        except Exception as e:  # pylint: disable=broad-except
                             content = ''
+                            logger.debug('Problem occurred when reading '
+                                         f'{signal_path}: '
+                                         f'{common_utils.format_exception(e)}')
 
                         # Parse and store graceful cancel info before
                         # cancelling the task.
-                        if content and content.startswith('graceful'):
-                            graceful_timeout = None
-                            if ':' in content:
-                                try:
-                                    graceful_timeout = int(
-                                        content.split(':')[1])
-                                except (ValueError, IndexError):
-                                    pass
-                            async with self._cancel_info_lock:
-                                self._cancel_info[job_id] = (True,
-                                                             graceful_timeout)
+                        graceful, graceful_timeout = managed_job_utils.parse_job_cancel_file(  # pylint: disable=line-too-long
+                            content)
+                        async with self._cancel_info_lock:
+                            self._cancel_info[job_id] = (graceful,
+                                                         graceful_timeout)
                         task.cancel()
                         logger.info(f'Job {job_id} cancelled successfully')
 
