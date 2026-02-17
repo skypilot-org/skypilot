@@ -77,7 +77,7 @@ export HF_TOKEN="your_token_here"
 ### 4. Install SkyPilot
 
 ```bash
-uv pip install "skypilot-nightly[aws,gcp,kubernetes]"
+uv pip install "skypilot-nightly[aws,gcp,kubernetes,slurm]"
 # See: https://docs.skypilot.co/en/latest/getting-started/installation.html
 ```
 
@@ -92,4 +92,3 @@ sky check
 - [Fairseq2 GitHub Repository](https://github.com/facebookresearch/fairseq2)
 - [Fairseq2 Documentation](https://facebookresearch.github.io/fairseq2/stable/)
 - [Fairseq2 Quick Start Wiki](https://github.com/facebookresearch/fairseq2/wiki/Quick-Start)
-- [SkyPilot Documentation](https://docs.skypilot.co/)
