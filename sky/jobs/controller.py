@@ -1964,6 +1964,8 @@ class ControllerManager:
         while True:
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
+                if cancel.endswith('.lock'):
+                    continue
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
                     if job_id in self.job_tasks:
@@ -1973,15 +1975,17 @@ class ControllerManager:
 
                         signal_path = os.path.join(
                             jobs_constants.CONSOLIDATED_SIGNAL_PATH, cancel)
-                        try:
-                            with filelock.FileLock(signal_path + '.lock'):
+                        with filelock.FileLock(signal_path + '.lock'):
+                            try:
                                 content = pathlib.Path(signal_path).read_text(
                                     encoding='utf-8').strip()
-                        except Exception as e:  # pylint: disable=broad-except
-                            content = ''
-                            logger.debug('Problem occurred when reading '
-                                         f'{signal_path}: '
-                                         f'{common_utils.format_exception(e)}')
+                            except Exception as e:  # pylint: disable=broad-except
+                                content = ''
+                                logger.debug('Problem occurred when reading '
+                                            f'{signal_path}: '
+                                            f'{common_utils.format_exception(e)}')
+                            finally:
+                                os.remove(signal_path)
 
                         # Parse and store graceful cancel info before
                         # cancelling the task.
@@ -1992,8 +1996,6 @@ class ControllerManager:
                                                          graceful_timeout)
                         task.cancel()
                         logger.info(f'Job {job_id} cancelled successfully')
-
-                        os.remove(signal_path)
             await asyncio.sleep(15)
 
     async def monitor_loop(self):
