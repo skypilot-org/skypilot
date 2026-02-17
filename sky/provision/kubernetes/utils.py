@@ -1408,7 +1408,7 @@ class V1Node:
         exclude_not_ready: bool = False,
         exclude_effects: Optional[List[str]] = None,
         exclude_keys: Optional[List[str]] = None,
-        exclude_key_prefixes: Optional[List[str]] = None,
+        include_key_prefixes: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get the taints on the node.
 
@@ -1418,8 +1418,9 @@ class V1Node:
             exclude_effects: The taint effects to exclude,
               e.g. ['PreferNoSchedule'].
             exclude_keys: The taint keys to exclude.
-            exclude_key_prefixes: Taint key prefixes to exclude,
-              e.g. ['node-role.kubernetes.io/'].
+            include_key_prefixes: If specified, only include taints whose key
+              starts with one of these prefixes, e.g. ['skypilot.co'].
+              Taints with keys that do not match any prefix are excluded.
 
         Returns:
             List[Dict[str, Any]]: The taints on the node.
@@ -1438,8 +1439,8 @@ class V1Node:
                 continue
             if exclude_keys and t.key in exclude_keys:
                 continue
-            if exclude_key_prefixes and any(
-                    t.key.startswith(p) for p in exclude_key_prefixes):
+            if include_key_prefixes and not any(
+                    t.key.startswith(p) for p in include_key_prefixes):
                 continue
             taints.append({
                 'key': t.key,
@@ -3276,11 +3277,11 @@ def get_handled_taint_keys() -> List[str]:
     return keys
 
 
-# Taint key prefixes that indicate node roles rather than problems.
-# These are excluded when determining if a node has problematic taints.
-# Examples: node-role.kubernetes.io/control-plane, node-role.kubernetes.io/master
-_ROLE_TAINT_KEY_PREFIXES = [
-    'node-role.kubernetes.io/',
+# Only taints with these key prefixes are considered when determining if a
+# node has problematic taints. This ensures we only surface SkyPilot-managed
+# taints and ignore taints set by Kubernetes or other sources.
+_SKYPILOT_TAINT_KEY_PREFIXES = [
+    'skypilot.co',
 ]
 
 
@@ -3433,7 +3434,7 @@ def get_kubernetes_node_info(
             exclude_not_ready=True,
             exclude_effects=['PreferNoSchedule'],
             exclude_keys=get_handled_taint_keys(),
-            exclude_key_prefixes=_ROLE_TAINT_KEY_PREFIXES)
+            include_key_prefixes=_SKYPILOT_TAINT_KEY_PREFIXES)
         node_is_tainted = len(node_taints) > 0
 
         if accelerator_count == 0:
