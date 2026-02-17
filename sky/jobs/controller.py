@@ -1987,9 +1987,10 @@ class ControllerManager:
                                     encoding='utf-8').strip()
                             except Exception as e:  # pylint: disable=broad-except
                                 content = ''
-                                logger.debug('Problem occurred when reading '
-                                            f'{signal_path}: '
-                                            f'{common_utils.format_exception(e)}')
+                                logger.debug(
+                                    'Problem occurred when reading '
+                                    f'{signal_path}: '
+                                    f'{common_utils.format_exception(e)}')
                             finally:
                                 os.remove(signal_path)
 
