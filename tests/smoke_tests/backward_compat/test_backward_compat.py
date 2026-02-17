@@ -865,8 +865,8 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} examples/minimal.yaml',
 
             # Submit long-running jobs so they show up in sky api status
-            f'{self.ACTIVATE_BASE} && sky jobs launch -d -y -n {job_name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} "sleep 300"',
-            f'{self.ACTIVATE_BASE} && sky jobs launch -d -y -n {another_job} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} "sleep 300"',
+            f'{self.ACTIVATE_BASE} && sky exec -d -y -n {job_name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {cluster_name} "sleep 300"',
+            f'{self.ACTIVATE_BASE} && sky exec -d -y -n {another_job} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -c {another_cluster} "sleep 300"',
             f'{self.ACTIVATE_BASE} && sleep 10',
 
             # Test New client with Old server
@@ -908,10 +908,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky api status)"; '
             f'echo "$result" | grep "{job_name}" && '
             f'echo "$result" | grep "{another_job}"',
-
-            # Cleanup jobs
-            f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {job_name} || true',
-            f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {another_job} || true',
         ]
-        teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {cluster_name}* || true && sky down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
