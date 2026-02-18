@@ -1,5 +1,6 @@
 """Tests for Slurm cloud implementation."""
 
+import math
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -808,3 +809,391 @@ class TestOnPendingMessage:
             msg = 'Launching'
 
         assert msg == expected
+
+
+class TestProportionalResources:
+    """Test slurm_utils.get_proportional_resources()."""
+
+    # 192 CPUs, 786 GB RAM, 8 A10G GPUs
+    node_8gpu = slurm.NodeInfo(node='gpu-node1',
+                               state='idle',
+                               gres='gpu:a10g:8',
+                               cpus=192,
+                               memory_gb=786,
+                               partition='gpus')
+
+    # 96 CPUs, 384 GB RAM, 4 H100 GPUs
+    node_4gpu = slurm.NodeInfo(node='gpu-node2',
+                               state='idle',
+                               gres='gpu:H100:4',
+                               cpus=96,
+                               memory_gb=384,
+                               partition='gpus')
+
+    # CPU-only node (no GPUs)
+    node_cpu_only = slurm.NodeInfo(node='cpu-node1',
+                                   state='idle',
+                                   gres='(null)',
+                                   cpus=64,
+                                   memory_gb=256,
+                                   partition='cpus')
+
+    # Heterogeneous partition: 2 GPU node (smaller)
+    node_2gpu = slurm.NodeInfo(node='gpu-node3',
+                               state='idle',
+                               gres='gpu:a10g:2',
+                               cpus=48,
+                               memory_gb=196,
+                               partition='gpus')
+
+    # Default partition node (with '*')
+    node_default_part = slurm.NodeInfo(node='gpu-node4',
+                                       state='idle',
+                                       gres='gpu:a10g:8',
+                                       cpus=192,
+                                       memory_gb=786,
+                                       partition='default*')
+
+    @pytest.mark.parametrize(
+        'nodes,acc_type,acc_count,partition,expected',
+        [
+            # Full allocation: 8/8 GPUs on 192-CPU/786GB node
+            ([node_8gpu], 'a10g', 8, None, (192.0, 786.0)),
+            # Partial allocation: 2/8 GPUs → 48 CPUs, 196GB
+            ([node_8gpu], 'a10g', 2, None,
+             (float(math.floor(192 / 8 * 2)), float(math.floor(786 / 8 * 2)))),
+            # Single GPU: 1/8 GPUs → 24 CPUs, 98GB
+            ([node_8gpu], 'a10g', 1, None,
+             (float(math.floor(192 / 8 * 1)), float(math.floor(786 / 8 * 1)))),
+            # 4/8 GPUs → 96 CPUs, 393GB
+            ([node_8gpu], 'a10g', 4, None,
+             (float(math.floor(192 / 8 * 4)), float(math.floor(786 / 8 * 4)))),
+            # No matching GPU type → None
+            ([node_8gpu], 'H100', 2, None, None),
+            # CPU-only nodes → None
+            ([node_cpu_only], 'a10g', 1, None, None),
+            # H100 node: 2/4 GPUs → 48 CPUs, 192GB
+            ([node_4gpu], 'H100', 2, None,
+             (float(math.floor(96 / 4 * 2)), float(math.floor(384 / 4 * 2)))),
+            # Partition filtering: only considers matching partition
+            ([node_8gpu, node_cpu_only], 'a10g', 2, 'gpus',
+             (float(math.floor(192 / 8 * 2)), float(math.floor(786 / 8 * 2)))),
+            # Partition filtering: no matching nodes in partition
+            ([node_8gpu], 'a10g', 2, 'nonexistent', None),
+            # Heterogeneous partition: uses node with max GPU count
+            ([node_8gpu, node_2gpu], 'a10g', 2, None,
+             (float(math.floor(192 / 8 * 2)), float(math.floor(786 / 8 * 2)))),
+        ])
+    @patch('sky.provision.slurm.utils.get_cluster_default_partition')
+    @patch('sky.provision.slurm.utils._get_slurm_nodes_info')
+    def test_get_proportional_resources(self, mock_get_nodes,
+                                        mock_default_partition, nodes, acc_type,
+                                        acc_count, partition, expected):
+        """Test proportional resource computation for various scenarios."""
+        mock_get_nodes.return_value = nodes
+        mock_default_partition.return_value = 'default'
+
+        result = slurm_utils.get_proportional_resources(
+            'test-cluster',
+            partition=partition,
+            acc_type=acc_type,
+            acc_count=acc_count)
+        assert result == expected
+
+    @patch('sky.provision.slurm.utils.get_cluster_default_partition')
+    @patch('sky.provision.slurm.utils._get_slurm_nodes_info')
+    def test_default_partition_star_handling(self, mock_get_nodes,
+                                            mock_default_partition):
+        """Test that default partition with '*' suffix is handled correctly."""
+        mock_get_nodes.return_value = [self.node_default_part]
+        mock_default_partition.return_value = 'default'
+
+        result = slurm_utils.get_proportional_resources(
+            'test-cluster',
+            partition='default',
+            acc_type='a10g',
+            acc_count=2)
+        assert result is not None
+        assert result == (float(math.floor(192 / 8 * 2)),
+                          float(math.floor(786 / 8 * 2)))
+
+    @patch('sky.provision.slurm.utils._get_slurm_nodes_info')
+    def test_node_info_query_failure(self, mock_get_nodes):
+        """Test that node info query failures return None with warning."""
+        mock_get_nodes.side_effect = Exception('SSH connection failed')
+
+        result = slurm_utils.get_proportional_resources(
+            'test-cluster', acc_type='a10g', acc_count=2)
+        assert result is None
+
+    @pytest.mark.parametrize(
+        'nodes,cpus,partition,expected',
+        [
+            # 48/192 CPUs on 192-CPU/786GB node → 196GB
+            ([node_8gpu], 48.0, None,
+             (48.0, float(math.floor(786 / 192 * 48)))),
+            # Full CPU allocation
+            ([node_cpu_only], 64.0, None, (64.0, 256.0)),
+            # Partial CPU on CPU-only node: 16/64 CPUs → 64GB
+            ([node_cpu_only], 16.0, None,
+             (16.0, float(math.floor(256 / 64 * 16)))),
+            # Partition filtering
+            ([node_cpu_only, node_8gpu], 16.0, 'cpus',
+             (16.0, float(math.floor(256 / 64 * 16)))),
+            # No nodes in partition
+            ([node_cpu_only], 16.0, 'nonexistent', None),
+            # Picks node with most CPUs
+            ([node_cpu_only, node_8gpu], 16.0, None,
+             (16.0, float(math.floor(786 / 192 * 16)))),
+        ])
+    @patch('sky.provision.slurm.utils.get_cluster_default_partition')
+    @patch('sky.provision.slurm.utils._get_slurm_nodes_info')
+    def test_cpu_only_proportional_memory(self, mock_get_nodes,
+                                          mock_default_partition, nodes, cpus,
+                                          partition, expected):
+        """Test proportional memory for CPU-only jobs."""
+        mock_get_nodes.return_value = nodes
+        mock_default_partition.return_value = 'default'
+
+        result = slurm_utils.get_proportional_resources(
+            'test-cluster', partition=partition, cpus=cpus)
+        assert result == expected
+
+
+class TestMakeDeployResourcesWithProportional:
+    """Test that make_deploy_resources_variables() uses proportional values."""
+
+    @patch('sky.provision.slurm.utils.get_proportional_resources')
+    @patch('sky.provision.slurm.utils.get_gres_gpu_type')
+    @patch('sky.provision.slurm.utils.get_partitions')
+    def test_proportional_values_used_when_no_user_override(
+            self, mock_get_partitions, mock_get_gres, mock_get_proportional):
+        """When user doesn't set CPU/memory, proportional values are used."""
+        mock_get_partitions.return_value = ['gpus']
+        mock_get_gres.return_value = 'a10g'
+        mock_get_proportional.return_value = (48.0, 196.0)
+
+        cloud = slurm_cloud.Slurm()
+        # Instance type with defaults: 8 CPUs, 32GB, 2 A10G
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            instance_type='8CPU--32GB--a10g:2',
+        )
+        resources = resources.assert_launchable()
+
+        region = mock.MagicMock()
+        region.name = 'test-cluster'
+        cluster_name = mock.MagicMock()
+
+        with patch.object(slurm_utils, 'get_slurm_ssh_config') as mock_ssh:
+            mock_ssh_obj = mock.MagicMock()
+            mock_ssh_obj.lookup.return_value = {
+                'hostname': 'login.example.com',
+                'port': '22',
+                'user': 'testuser',
+                'identityfile': ['/path/to/key'],
+            }
+            mock_ssh.return_value = mock_ssh_obj
+
+            deploy_vars = cloud.make_deploy_resources_variables(
+                resources, cluster_name, region, None, 1)
+
+        assert deploy_vars['cpus'] == '48.0'
+        assert deploy_vars['memory'] == '196.0'
+
+    @patch('sky.provision.slurm.utils.get_proportional_resources')
+    @patch('sky.provision.slurm.utils.get_gres_gpu_type')
+    @patch('sky.provision.slurm.utils.get_partitions')
+    def test_user_overrides_preserved(self, mock_get_partitions, mock_get_gres,
+                                      mock_get_proportional):
+        """When user sets CPU and memory, proportional values are not used."""
+        mock_get_partitions.return_value = ['gpus']
+        mock_get_gres.return_value = 'a10g'
+        mock_get_proportional.return_value = (48.0, 196.0)
+
+        cloud = slurm_cloud.Slurm()
+        # User explicitly sets cpus and memory
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            instance_type='16CPU--64GB--a10g:2',
+            cpus='16',
+            memory='64',
+        )
+        resources = resources.assert_launchable()
+
+        region = mock.MagicMock()
+        region.name = 'test-cluster'
+        cluster_name = mock.MagicMock()
+
+        with patch.object(slurm_utils, 'get_slurm_ssh_config') as mock_ssh:
+            mock_ssh_obj = mock.MagicMock()
+            mock_ssh_obj.lookup.return_value = {
+                'hostname': 'login.example.com',
+                'port': '22',
+                'user': 'testuser',
+                'identityfile': ['/path/to/key'],
+            }
+            mock_ssh.return_value = mock_ssh_obj
+
+            deploy_vars = cloud.make_deploy_resources_variables(
+                resources, cluster_name, region, None, 1)
+
+        # User values should be preserved
+        assert deploy_vars['cpus'] == '16.0'
+        assert deploy_vars['memory'] == '64.0'
+
+    @patch('sky.provision.slurm.utils.get_proportional_resources')
+    @patch('sky.provision.slurm.utils.get_gres_gpu_type')
+    @patch('sky.provision.slurm.utils.get_partitions')
+    def test_partial_user_override(self, mock_get_partitions, mock_get_gres,
+                                   mock_get_proportional):
+        """When user sets only CPU, memory uses proportional value."""
+        mock_get_partitions.return_value = ['gpus']
+        mock_get_gres.return_value = 'a10g'
+        mock_get_proportional.return_value = (48.0, 196.0)
+
+        cloud = slurm_cloud.Slurm()
+        # User only sets cpus, not memory
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            instance_type='16CPU--32GB--a10g:2',
+            cpus='16',
+        )
+        resources = resources.assert_launchable()
+
+        region = mock.MagicMock()
+        region.name = 'test-cluster'
+        cluster_name = mock.MagicMock()
+
+        with patch.object(slurm_utils, 'get_slurm_ssh_config') as mock_ssh:
+            mock_ssh_obj = mock.MagicMock()
+            mock_ssh_obj.lookup.return_value = {
+                'hostname': 'login.example.com',
+                'port': '22',
+                'user': 'testuser',
+                'identityfile': ['/path/to/key'],
+            }
+            mock_ssh.return_value = mock_ssh_obj
+
+            deploy_vars = cloud.make_deploy_resources_variables(
+                resources, cluster_name, region, None, 1)
+
+        # User-set CPU preserved, memory uses proportional
+        assert deploy_vars['cpus'] == '16.0'
+        assert deploy_vars['memory'] == '196.0'
+
+    @patch('sky.provision.slurm.utils.get_proportional_resources')
+    @patch('sky.provision.slurm.utils.get_gres_gpu_type')
+    @patch('sky.provision.slurm.utils.get_partitions')
+    def test_cpu_only_proportional_memory_in_deploy(self, mock_get_partitions,
+                                                    mock_get_gres,
+                                                    mock_get_proportional):
+        """CPU-only instances use proportional memory based on CPU fraction."""
+        mock_get_partitions.return_value = ['cpus']
+        mock_get_proportional.return_value = (4.0, 64.0)
+
+        cloud = slurm_cloud.Slurm()
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            instance_type='4CPU--16GB',
+        )
+        resources = resources.assert_launchable()
+
+        region = mock.MagicMock()
+        region.name = 'test-cluster'
+        cluster_name = mock.MagicMock()
+
+        with patch.object(slurm_utils, 'get_slurm_ssh_config') as mock_ssh:
+            mock_ssh_obj = mock.MagicMock()
+            mock_ssh_obj.lookup.return_value = {
+                'hostname': 'login.example.com',
+                'port': '22',
+                'user': 'testuser',
+                'identityfile': ['/path/to/key'],
+            }
+            mock_ssh.return_value = mock_ssh_obj
+
+            deploy_vars = cloud.make_deploy_resources_variables(
+                resources, cluster_name, region, None, 1)
+
+        mock_get_proportional.assert_called_once_with(
+            'test-cluster', partition='cpus', cpus=4.0)
+        assert deploy_vars['cpus'] == '4.0'
+        assert deploy_vars['memory'] == '64.0'
+
+    @patch('sky.provision.slurm.utils.get_proportional_resources')
+    @patch('sky.provision.slurm.utils.get_gres_gpu_type')
+    @patch('sky.provision.slurm.utils.get_partitions')
+    def test_cpu_only_user_memory_override(self, mock_get_partitions,
+                                           mock_get_gres,
+                                           mock_get_proportional):
+        """CPU-only with user-set memory skips proportional."""
+        mock_get_partitions.return_value = ['cpus']
+
+        cloud = slurm_cloud.Slurm()
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            instance_type='4CPU--16GB',
+            memory='16',
+        )
+        resources = resources.assert_launchable()
+
+        region = mock.MagicMock()
+        region.name = 'test-cluster'
+        cluster_name = mock.MagicMock()
+
+        with patch.object(slurm_utils, 'get_slurm_ssh_config') as mock_ssh:
+            mock_ssh_obj = mock.MagicMock()
+            mock_ssh_obj.lookup.return_value = {
+                'hostname': 'login.example.com',
+                'port': '22',
+                'user': 'testuser',
+                'identityfile': ['/path/to/key'],
+            }
+            mock_ssh.return_value = mock_ssh_obj
+
+            deploy_vars = cloud.make_deploy_resources_variables(
+                resources, cluster_name, region, None, 1)
+
+        mock_get_proportional.assert_not_called()
+        assert deploy_vars['cpus'] == '4.0'
+        assert deploy_vars['memory'] == '16.0'
+
+    @patch('sky.provision.slurm.utils.get_proportional_resources')
+    @patch('sky.provision.slurm.utils.get_gres_gpu_type')
+    @patch('sky.provision.slurm.utils.get_partitions')
+    def test_proportional_returns_none_fallback(self, mock_get_partitions,
+                                                mock_get_gres,
+                                                mock_get_proportional):
+        """When proportional returns None, instance type defaults are used."""
+        mock_get_partitions.return_value = ['gpus']
+        mock_get_gres.return_value = 'a10g'
+        mock_get_proportional.return_value = None
+
+        cloud = slurm_cloud.Slurm()
+        resources = resources_lib.Resources(
+            cloud=slurm_cloud.Slurm(),
+            instance_type='8CPU--32GB--a10g:2',
+        )
+        resources = resources.assert_launchable()
+
+        region = mock.MagicMock()
+        region.name = 'test-cluster'
+        cluster_name = mock.MagicMock()
+
+        with patch.object(slurm_utils, 'get_slurm_ssh_config') as mock_ssh:
+            mock_ssh_obj = mock.MagicMock()
+            mock_ssh_obj.lookup.return_value = {
+                'hostname': 'login.example.com',
+                'port': '22',
+                'user': 'testuser',
+                'identityfile': ['/path/to/key'],
+            }
+            mock_ssh.return_value = mock_ssh_obj
+
+            deploy_vars = cloud.make_deploy_resources_variables(
+                resources, cluster_name, region, None, 1)
+
+        # Falls back to instance type defaults
+        assert deploy_vars['cpus'] == '8.0'
+        assert deploy_vars['memory'] == '32.0'
