@@ -2199,6 +2199,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
+        # VM SSH proxy mode (from server.yaml config)
+        vm_ssh_proxy_mode=server_config.load_vm_ssh_proxy_mode().value,
     )
 
 
