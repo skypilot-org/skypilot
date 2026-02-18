@@ -216,9 +216,7 @@ export function TopBar() {
   const dropdownRef = useRef(null);
   const mobileNavRef = useRef(null);
   const navDropdownRef = useRef(null);
-  const navRef = useRef(null);
   const moreMenuRef = useRef(null);
-  const [isNavOverflowing, setIsNavOverflowing] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -254,18 +252,6 @@ export function TopBar() {
     };
   }, [dropdownRef, isMobileSidebarOpen, toggleMobileSidebar]);
 
-  // Detect when the nav area overflows (needs scrolling)
-  useEffect(() => {
-    const navEl = navRef.current;
-    if (!navEl) return;
-    const checkOverflow = () => {
-      setIsNavOverflowing(navEl.scrollHeight > navEl.clientHeight);
-    };
-    const observer = new ResizeObserver(checkOverflow);
-    observer.observe(navEl);
-    checkOverflow();
-    return () => observer.disconnect();
-  }, []);
 
   // Close "More" menu when sidebar collapse state changes
   useEffect(() => {
@@ -568,7 +554,7 @@ export function TopBar() {
   if (!isMobile) {
     const collapsed = isSidebarCollapsed;
     return (
-      <aside data-sidebar-collapsed={collapsed ? 'true' : 'false'} className={`fixed top-0 left-0 bottom-0 bg-white border-r border-gray-200 z-30 flex flex-col h-screen transition-all duration-200 ease-in-out ${collapsed ? 'w-14' : 'w-48'}`}>
+      <aside data-sidebar-collapsed={collapsed ? 'true' : 'false'} className={`fixed top-0 left-0 bottom-0 bg-white border-r border-gray-200 z-30 flex flex-col h-screen transition-[width] duration-200 ease-in-out ${collapsed ? 'w-14' : 'w-48'}`}>
         {/* Header: Logo + Collapse toggle */}
         <div className={`h-14 flex items-center shrink-0 ${collapsed ? 'px-2' : 'px-3'}`}>
           <div className={`overflow-hidden transition-all duration-200 shrink-0 ${collapsed ? 'w-0 opacity-0' : 'w-24 opacity-100'}`}>
@@ -609,7 +595,7 @@ export function TopBar() {
         </div>
 
         {/* Primary nav (scrollable) */}
-        <nav ref={navRef} className={`flex-1 pt-1 pb-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
+        <nav className={`flex-1 pt-1 pb-2 space-y-1 ${collapsed ? 'px-2 overflow-visible' : 'px-3 overflow-y-auto'}`}>
           <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-gray-400 tracking-wider overflow-hidden whitespace-nowrap">
             <span className={`transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>Workloads</span>
           </div>
@@ -649,52 +635,8 @@ export function TopBar() {
 
         {/* Footer: pinned at bottom */}
         <div className={`mt-auto border-t border-gray-200 py-3 space-y-1 shrink-0 ${collapsed ? 'px-2' : 'px-3'}`}>
-          {/* External links + Settings: show normally when no SSO and not overflowing */}
-          {!userEmail && !isNavOverflowing && (
-            <>
-              {externalLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`group relative flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-50/50 hover:text-blue-600 rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'}`}
-                >
-                  <link.icon className="w-4 h-4 shrink-0 text-gray-400" />
-                  <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
-                    {link.label}
-                  </span>
-                  {collapsed && (
-                    <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                      {link.label}
-                    </span>
-                  )}
-                </a>
-              ))}
-              <Link
-                href="/config"
-                className={`group relative flex items-center px-3 py-2 text-sm rounded-md transition-all duration-200 ${collapsed ? 'overflow-visible' : 'overflow-hidden'} ${
-                  isActivePath('/config')
-                    ? 'bg-blue-50/50 text-blue-600 font-medium hover:bg-gray-50/50'
-                    : 'text-gray-600 hover:bg-gray-50/50 hover:text-blue-600'
-                }`}
-                prefetch={false}
-              >
-                <Settings className={`w-4 h-4 shrink-0 ${isActivePath('/config') ? 'text-blue-600' : 'text-gray-400'}`} />
-                <span className={`ml-3 whitespace-nowrap transition-opacity duration-200 ${collapsed ? 'opacity-0' : 'opacity-100'}`}>
-                  Settings
-                </span>
-                {collapsed && (
-                  <span className="absolute left-full ml-2 px-2 py-1 text-xs font-medium text-white bg-[#5b6472] rounded shadow-md whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50">
-                    Settings
-                  </span>
-                )}
-              </Link>
-            </>
-          )}
-
-          {/* "More" button when no SSO but sidebar is overflowing */}
-          {!userEmail && isNavOverflowing && (
+          {/* "More" button with dropdown for external links + Settings (no SSO) */}
+          {!userEmail && (
             <div className="relative" ref={moreMenuRef}>
               <button
                 onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
