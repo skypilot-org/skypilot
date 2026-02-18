@@ -89,4 +89,3 @@ Table of contents
    :hidden:
 
    Getting Started <slurm-getting-started>
-   Configuring Pricing <slurm-pricing>
