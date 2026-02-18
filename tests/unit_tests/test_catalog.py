@@ -403,18 +403,6 @@ def test_accelerator_name_case_insensitive():
     assert cost == pytest.approx(3.50)
 
 
-def test_combined_pricing():
-    """4CPU--16GB--A100:1 -> cpu + mem + accel."""
-    pricing = {'cpu': 0.05, 'memory': 0.01, 'accelerators': {'A100': 3.50}}
-    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
-                                                       cpus=4,
-                                                       memory=16,
-                                                       accelerator_name='A100',
-                                                       accelerator_count=1)
-    expected = 4 * 0.05 + 16 * 0.01 + 1 * 3.50
-    assert cost == pytest.approx(expected)
-
-
 def test_unknown_accelerator_returns_zero_accel_price():
     """If accelerator isn't in config, its price component is 0."""
     pricing = {'cpu': 0.05, 'memory': 0.01, 'accelerators': {'A100': 3.50}}
@@ -435,17 +423,6 @@ def test_empty_pricing_returns_zero():
                                                        accelerator_name='A100',
                                                        accelerator_count=4)
     assert cost == 0.0
-
-
-def test_partial_pricing_defaults_missing_to_zero():
-    """Only cpu set; memory defaults to 0.0."""
-    pricing = {'cpu': 0.10}
-    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
-                                                       cpus=4,
-                                                       memory=16,
-                                                       accelerator_name=None,
-                                                       accelerator_count=None)
-    assert cost == pytest.approx(4 * 0.10)
 
 
 # -- merge_pricing_dicts ---------------------------------------------------
@@ -661,3 +638,34 @@ def test_slurm_fallback_to_cloud_level(mock_nested):
                                                        accelerator_name=None,
                                                        accelerator_count=None)
     assert cost == pytest.approx(4 * 0.04 + 16 * 0.01)
+
+
+# -- End-to-end get_hourly_cost tests (instance type string -> cost) ---------
+# These exercise the full pipeline: instance type parsing + config resolution.
+# One per cloud, with accelerators, to verify the parser ↔ pricing glue.
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_get_hourly_cost_end_to_end(mock_nested):
+    """K8s get_hourly_cost: instance type string → parsed resources → cost."""
+    mock_nested.side_effect = _mock_get_nested(_K8S_CONFIG)
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    cost = kubernetes_catalog.get_hourly_cost('8CPU--64GB--A100:2',
+                                              use_spot=False,
+                                              region=None)
+    expected = 8 * 0.05 + 64 * 0.01 + 2 * 3.50
+    assert cost == pytest.approx(expected)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_get_hourly_cost_end_to_end(mock_nested):
+    """Slurm get_hourly_cost: full 3-level merge via the public API."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    cost = slurm_catalog.get_hourly_cost('8CPU--64GB--A100:4',
+                                         use_spot=False,
+                                         region='my-slurm',
+                                         zone='high-pri')
+    # cluster cpu=0.06, cloud memory=0.01, partition A100=5.00
+    expected = 8 * 0.06 + 64 * 0.01 + 4 * 5.00
+    assert cost == pytest.approx(expected)
