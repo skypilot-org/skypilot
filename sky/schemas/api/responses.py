@@ -88,6 +88,10 @@ class APIHealthResponse(ResponseBaseModel):
     latest_version: Optional[str] = None
     # Whether external proxy auth is enabled
     external_proxy_auth_enabled: bool = False
+    # VM SSH proxy mode: 'none', 'all', or 'only-internal'
+    # Controls when SSH connections to cloud VMs should be proxied through
+    # the API server. Default is 'only-internal'.
+    vm_ssh_proxy_mode: str = 'only-internal'
 
 
 class StatusResponse(ResponseBaseModel):

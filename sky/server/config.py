@@ -69,6 +69,28 @@ class QueueBackend(enum.Enum):
     # TODO(zhwu): we can add redis backend in the future.
 
 
+class VmSshProxyMode(enum.Enum):
+    """Mode for proxying SSH connections to cloud VMs through the API server.
+
+    This configuration controls when the API server should act as an SSH proxy
+    for cloud VM clusters (AWS, GCP, Azure, etc.). This is useful when the API
+    server is deployed in a private network with direct access to VMs, but
+    clients are outside the network.
+
+    Modes:
+        NONE: Never proxy SSH through the API server. Clients must have direct
+            network access to VMs or configure their own SSH proxy.
+        ALL: Always proxy SSH through the API server for all cloud VM clusters.
+            Use this when clients typically cannot reach VMs directly.
+        ONLY_INTERNAL: Only proxy SSH when the cluster uses internal IPs
+            (use_internal_ips: true). This is the default and recommended mode
+            for most deployments where the API server is in a private network.
+    """
+    NONE = 'none'
+    ALL = 'all'
+    ONLY_INTERNAL = 'only-internal'
+
+
 @dataclasses.dataclass
 class WorkerConfig:
     garanteed_parallelism: int
@@ -290,12 +312,24 @@ def _get_server_config_schema() -> dict:
         },
     }
 
+    ssh_schema = {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'vm_proxy_mode': {
+                'type': 'string',
+                'enum': ['none', 'all', 'only-internal'],
+            },
+        },
+    }
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
         'additionalProperties': False,
         'properties': {
             'auth': auth_schema,
+            'ssh': ssh_schema,
         },
     }
 
@@ -397,3 +431,27 @@ def load_external_proxy_config() -> ExternalProxyConfig:
         header_format=header_format,
         jwt_identity_claim=jwt_identity_claim,
     )
+
+
+@functools.lru_cache(maxsize=1)
+def load_vm_ssh_proxy_mode() -> VmSshProxyMode:
+    """Load the VM SSH proxy mode from server configuration.
+
+    Returns:
+        VmSshProxyMode: The configured proxy mode. Defaults to ONLY_INTERNAL
+            if not specified, which means SSH is proxied through the API server
+            only when the cluster uses internal IPs (use_internal_ips: true).
+    """
+    server_config = load_server_config()
+    mode_str = server_config.get_nested(('ssh', 'vm_proxy_mode'), None)
+
+    if mode_str is None:
+        # Default to ONLY_INTERNAL - proxy only when cluster uses internal IPs
+        return VmSshProxyMode.ONLY_INTERNAL
+
+    try:
+        return VmSshProxyMode(mode_str)
+    except ValueError:
+        logger.warning(f'Invalid vm_proxy_mode value: {mode_str}. '
+                       f'Using default: only-internal')
+        return VmSshProxyMode.ONLY_INTERNAL

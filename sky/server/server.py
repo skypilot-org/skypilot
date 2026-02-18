@@ -2199,6 +2199,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
+        # VM SSH proxy mode (from server.yaml config)
+        vm_ssh_proxy_mode=server_config.load_vm_ssh_proxy_mode().value,
     )
 
 
@@ -2210,9 +2212,15 @@ class SSHMessageType(IntEnum):
 
 async def _get_cluster_and_validate(
     cluster_name: str,
-    cloud_type: Type[clouds.Cloud],
+    cloud_type: Optional[Type[clouds.Cloud]] = None,
 ) -> 'backends.CloudVmRayResourceHandle':
-    """Fetch cluster status and validate it's UP and correct cloud type."""
+    """Fetch cluster status and validate it's UP and correct cloud type.
+
+    Args:
+        cluster_name: Name of the cluster to fetch.
+        cloud_type: If specified, validate the cluster is of this cloud type.
+            If None, any cloud type is accepted.
+    """
     # Run core.status in another thread to avoid blocking the event loop.
     # TODO(aylei): core.status() will be called with server user, which has
     # permission to all workspaces, this will break workspace isolation.
@@ -2231,7 +2239,8 @@ async def _get_cluster_and_validate(
     handle: Optional['backends.CloudVmRayResourceHandle'] = cluster_record[
         'handle']
     assert handle is not None, 'Cluster handle is None'
-    if not isinstance(handle.launched_resources.cloud, cloud_type):
+    if cloud_type is not None and not isinstance(
+            handle.launched_resources.cloud, cloud_type):
         raise fastapi.HTTPException(
             status_code=400,
             detail=f'Cluster {cluster_name} is not a {str(cloud_type())} '
@@ -2577,6 +2586,195 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
                 await stderr_task
             except asyncio.CancelledError:
                 pass
+
+
+# Limit concurrent VM SSH proxy sessions to prevent resource exhaustion.
+# Each session spawns an SSH subprocess (~10-20MB), so this bounds memory usage.
+_VM_SSH_PROXY_MAX_SESSIONS = 100
+_vm_ssh_proxy_semaphore = asyncio.Semaphore(_VM_SSH_PROXY_MAX_SESSIONS)
+
+
+@app.websocket('/vm-ssh-proxy')
+async def vm_ssh_proxy(websocket: fastapi.WebSocket,
+                       cluster_name: str,
+                       worker: int = 0,
+                       client_version: Optional[int] = None) -> None:
+    """Proxies SSH to cloud VMs (AWS, GCP, Azure, etc.) via the API server.
+
+    This endpoint allows clients outside a private network to SSH into VMs
+    that are only accessible from the API server's network. The API server
+    acts as a bastion/jump host, proxying the SSH connection over websocket.
+
+    This is similar to how kubernetes-pod-ssh-proxy works, but for cloud VMs
+    instead of Kubernetes pods.
+
+    Note: Each session involves double encryption — the client's SSH encrypts
+    data, which is then re-encrypted by the server-side SSH tunnel (ssh -W).
+    This is inherent to the bastion design and may impact throughput for large
+    file transfers.
+
+    Args:
+        websocket: The websocket connection from the client.
+        cluster_name: The name of the cluster to connect to.
+        worker: The worker index to connect to (0 for head node).
+        client_version: The client API version for feature negotiation.
+    """
+    await websocket.accept()
+    logger.info(f'WebSocket connection accepted for VM cluster: {cluster_name}')
+
+    if not _vm_ssh_proxy_semaphore.locked():
+        pass  # Fast path: semaphore available
+    else:
+        logger.warning(
+            f'VM SSH proxy at capacity ({_VM_SSH_PROXY_MAX_SESSIONS} '
+            f'sessions). Waiting for a slot...')
+    try:
+        await asyncio.wait_for(_vm_ssh_proxy_semaphore.acquire(), timeout=10)
+    except asyncio.TimeoutError:
+        await websocket.close(
+            code=1013,  # Try Again Later
+            reason=f'Too many concurrent VM SSH proxy sessions '
+            f'(max={_VM_SSH_PROXY_MAX_SESSIONS}). Try again later.')
+        return
+
+    try:
+        timestamps_supported = (client_version is not None and
+                                client_version > 21)
+        logger.info(
+            f'Websocket timestamps supported: {timestamps_supported}, '
+            f'client_version = {client_version}')
+
+        # Get the cluster handle - accept any cloud type (VM-based clouds)
+        handle = await _get_cluster_and_validate(cluster_name)
+
+        # Ensure this is not a Kubernetes or Slurm cluster (they have their
+        # own endpoints)
+        if isinstance(handle.launched_resources.cloud,
+                      (clouds.Kubernetes, clouds.Slurm)):
+            await websocket.close(
+                code=1008,
+                reason=f'Cluster {cluster_name} is a '
+                f'{type(handle.launched_resources.cloud).__name__} cluster. '
+                'Use the appropriate endpoint instead.')
+            return
+
+        # Get the command runner for the target node
+        runners = handle.get_command_runners()
+        if worker >= len(runners):
+            await websocket.close(
+                code=1008,
+                reason=f'Worker index {worker} out of range. '
+                f'Cluster has {len(runners)} nodes.')
+            return
+
+        runner = runners[worker]
+
+        # For VM clusters, we need to establish an SSH connection to the
+        # target VM and proxy the data over the websocket.
+        # We use the SSH command runner's ssh_base_command to get the SSH
+        # command with all the necessary options (proxy commands, keys, etc.)
+        ssh_cmd = runner.ssh_base_command(
+            ssh_mode=command_runner.SshMode.NON_INTERACTIVE,
+            port_forward=None,
+            connect_timeout=30,
+        )
+        # Add netcat-style forwarding to stdin/stdout for SSH port
+        # -W host:port - Requests that standard input and output on the
+        # client be forwarded to host on port over the secure channel.
+        ssh_cmd += ['-W', 'localhost:22']
+
+        logger.info(
+            f'Starting SSH proxy with command: {" ".join(ssh_cmd)}')
+
+        proc = await asyncio.create_subprocess_exec(
+            *ssh_cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        assert proc.stderr is not None
+
+        stdin = proc.stdin
+        stdout = proc.stdout
+        stderr = proc.stderr
+
+        async def log_stderr():
+            while True:
+                line = await stderr.readline()
+                if not line:
+                    break
+                logger.debug(
+                    f'VM SSH proxy stderr: {line.decode().rstrip()}')
+
+        stderr_task = None
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            stderr_task = asyncio.create_task(log_stderr())
+
+        conn_gauge = metrics_utils.SKY_APISERVER_WEBSOCKET_CONNECTIONS.labels(
+            pid=os.getpid())
+        ssh_failed = False
+        try:
+            conn_gauge.inc()
+
+            async def write_and_drain(data: bytes) -> None:
+                stdin.write(data)
+                await stdin.drain()
+
+            async def close_stdin() -> None:
+                stdin.close()
+
+            ssh_failed = await _run_websocket_proxy(
+                websocket,
+                read_from_backend=lambda: stdout.read(4096),
+                write_to_backend=write_and_drain,
+                close_backend=close_stdin,
+                timestamps_supported=timestamps_supported,
+            )
+
+        finally:
+            conn_gauge.dec()
+            reason = ''
+            try:
+                logger.info('Terminating VM SSH proxy process')
+                proc.terminate()
+                # Wait for the process to actually exit to prevent zombies.
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        'VM SSH proxy process did not exit after '
+                        'terminate, sending SIGKILL')
+                    proc.kill()
+                    await proc.wait()
+            except ProcessLookupError:
+                stdout_data = await stdout.read()
+                logger.error(
+                    'VM SSH proxy process was terminated before the '
+                    'websocket connection was closed. Remaining '
+                    f'output: {str(stdout_data)}')
+                reason = 'SSHProcessExit'
+                metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+                    pid=os.getpid(), reason=reason).inc()
+            else:
+                if ssh_failed:
+                    reason = 'SSHToVMDisconnected'
+                else:
+                    reason = 'ClientClosed'
+
+            metrics_utils.SKY_APISERVER_WEBSOCKET_CLOSED_TOTAL.labels(
+                pid=os.getpid(), reason=reason).inc()
+
+            # Cancel the stderr logging task if it's still running
+            if stderr_task is not None and not stderr_task.done():
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except asyncio.CancelledError:
+                    pass
+    finally:
+        _vm_ssh_proxy_semaphore.release()
 
 
 @app.websocket('/ssh-interactive-auth')
