@@ -180,6 +180,7 @@ You can specify per-context configurations for any Kubernetes config field, incl
 * ``pod_config``: Custom `pod specifications <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.27/#pod-v1-core>`_ (labels, annotations, volume mounts, runtime class, etc.)
 * ``remote_identity``: Service account to use for the context
 * ``provision_timeout``: Timeout for provisioning pods if autoscaler is used
+* ``pricing``: Per-vCPU, per-GB, and per-accelerator hourly rates for cost estimation (see :ref:`config-yaml-kubernetes-pricing`)
 
 See :ref:`Kubernetes config<config-yaml-kubernetes>` for the list of all fields supported.
 
@@ -203,6 +204,11 @@ Example configuration:
               labels:
                 cluster-type: production
           remote_identity: h100-service-account # Use a custom service account for the cluster
+          pricing:
+            cpu: 0.08
+            memory: 0.02
+            accelerators:
+              H100: 5.00
         # Development cluster with different proxy settings and volume mounts
         dev-cluster:
           pod_config:

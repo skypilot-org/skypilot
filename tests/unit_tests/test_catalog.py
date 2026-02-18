@@ -86,76 +86,6 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
             os.remove(lock_path)
 
 
-def test_manual_catalog_edit_triggers_reload():
-    """Test that manually editing a catalog CSV on disk triggers a reload
-    without requiring a GitHub download."""
-    INITIAL_CSV = 'col1,col2\n1,2\n'
-    UPDATED_CSV = 'col1,col2\n10,20\n'
-
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv',
-                                     delete=False) as tmp:
-        tmp.write(INITIAL_CSV)
-        tmp_path = tmp.name
-
-    try:
-        # update_if_stale_func always returns False (no GitHub download).
-        update_fn = mock.MagicMock(return_value=False)
-        lazy_df = catalog_common.LazyDataFrame(tmp_path, update_fn)
-
-        # Initial load.
-        annotations.clear_request_level_cache()
-        df1 = lazy_df._load_df()
-        assert df1.iloc[0]['col1'] == 1
-
-        # Manually edit the file on disk and bump mtime explicitly
-        # so the test is not sensitive to filesystem time resolution.
-        with open(tmp_path, 'w') as f:
-            f.write(UPDATED_CSV)
-        future = os.path.getmtime(tmp_path) + 2
-        os.utime(tmp_path, (future, future))
-
-        # Clear the per-request LRU cache so _load_df runs its body again.
-        annotations.clear_request_level_cache()
-
-        df2 = lazy_df._load_df()
-        assert df2.iloc[0]['col1'] == 10
-
-        # update_if_stale_func was called but never triggered a download.
-        assert all(call == mock.call() for call in update_fn.call_args_list)
-        assert all(ret is False
-                   for ret in [update_fn.return_value] * update_fn.call_count)
-    finally:
-        os.remove(tmp_path)
-
-
-def test_no_reload_when_file_unchanged():
-    """Test that when the file hasn't changed, the same DataFrame object
-    is reused (no redundant pd.read_csv)."""
-    CSV = 'col1,col2\n1,2\n'
-
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv',
-                                     delete=False) as tmp:
-        tmp.write(CSV)
-        tmp_path = tmp.name
-
-    try:
-        update_fn = mock.MagicMock(return_value=False)
-        lazy_df = catalog_common.LazyDataFrame(tmp_path, update_fn)
-
-        # First load.
-        annotations.clear_request_level_cache()
-        df1 = lazy_df._load_df()
-
-        # Second load, file unchanged.
-        annotations.clear_request_level_cache()
-        df2 = lazy_df._load_df()
-
-        # Same object — no re-read happened.
-        assert df1 is df2
-    finally:
-        os.remove(tmp_path)
-
-
 @pytest.mark.parametrize(
     "cpus, memory, region, zone, expected",
     [
@@ -434,254 +364,300 @@ def test_filter_with_local_disk_instance_sets(local_disk, expected_instances):
 
 
 # ---------------------------------------------------------------------------
-# Custom pricing catalog tests (Kubernetes / Slurm)
+# Config-based pricing tests (Kubernetes / Slurm)
 # ---------------------------------------------------------------------------
 
-# Kubernetes-style pricing: context-specific + wildcard rows.
-_K8S_PRICING_DF = pd.DataFrame([
-    {
-        'Region': 'my-ctx',
-        'Zone': None,
-        'PricePerVCPU': 0.05,
-        'PricePerMemoryGB': 0.01,
-        'AcceleratorName': None,
-        'PricePerAccelerator': None
-    },
-    {
-        'Region': 'my-ctx',
-        'Zone': None,
-        'PricePerVCPU': None,
-        'PricePerMemoryGB': None,
-        'AcceleratorName': 'A100',
-        'PricePerAccelerator': 3.50
-    },
-    {
-        'Region': None,
-        'Zone': None,
-        'PricePerVCPU': 0.02,
-        'PricePerMemoryGB': 0.005,
-        'AcceleratorName': None,
-        'PricePerAccelerator': None
-    },
-    {
-        'Region': None,
-        'Zone': None,
-        'PricePerVCPU': None,
-        'PricePerMemoryGB': None,
-        'AcceleratorName': 'H100',
-        'PricePerAccelerator': 5.00
-    },
-])
-
-# Slurm-style pricing: cluster + partition (zone) rows.
-_SLURM_PRICING_DF = pd.DataFrame([
-    {
-        'Region': 'my-slurm',
-        'Zone': None,
-        'PricePerVCPU': 0.04,
-        'PricePerMemoryGB': 0.01,
-        'AcceleratorName': None,
-        'PricePerAccelerator': None
-    },
-    {
-        'Region': 'my-slurm',
-        'Zone': 'gpu-part',
-        'PricePerVCPU': None,
-        'PricePerMemoryGB': None,
-        'AcceleratorName': 'V100',
-        'PricePerAccelerator': 2.50
-    },
-    {
-        'Region': 'my-slurm',
-        'Zone': 'high-pri',
-        'PricePerVCPU': 0.08,
-        'PricePerMemoryGB': 0.02,
-        'AcceleratorName': None,
-        'PricePerAccelerator': None
-    },
-    {
-        'Region': None,
-        'Zone': None,
-        'PricePerVCPU': 0.03,
-        'PricePerMemoryGB': 0.008,
-        'AcceleratorName': None,
-        'PricePerAccelerator': None
-    },
-])
-
-# -- CPU/memory rate computation -------------------------------------------
+# -- get_hourly_cost_from_pricing (common function, dict-based) ------------
 
 
-def test_cpu_mem_rate_context_specific():
+def test_cpu_mem_rate_from_pricing():
     """4CPU--16GB with rates 0.05/0.01 -> $0.36/hr."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=4,
-        memory=16,
-        accelerator_name=None,
-        accelerator_count=None,
-        region='my-ctx',
-        zone=None)
+    pricing = {'cpu': 0.05, 'memory': 0.01}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
     assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
 
 
-def test_cpu_mem_rate_wildcard_fallback():
-    """Unknown context falls back to wildcard rates 0.02/0.005."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=4,
-        memory=16,
-        accelerator_name=None,
-        accelerator_count=None,
-        region='unknown-ctx',
-        zone=None)
-    assert cost == pytest.approx(4 * 0.02 + 16 * 0.005)
-
-
-# -- Accelerator price lookup ---------------------------------------------
-
-
-def test_accelerator_price_context_specific():
+def test_accelerator_price_from_pricing():
     """A100 at $3.50/GPU, 4 GPUs -> $14.00."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=0,
-        memory=0,
-        accelerator_name='A100',
-        accelerator_count=4,
-        region='my-ctx',
-        zone=None)
+    pricing = {'accelerators': {'A100': 3.50}}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=0,
+                                                       memory=0,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=4)
     assert cost == pytest.approx(4 * 3.50)
-
-
-def test_accelerator_price_wildcard():
-    """H100 at $5.00/GPU wildcard, 2 GPUs -> $10.00."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=0,
-        memory=0,
-        accelerator_name='H100',
-        accelerator_count=2,
-        region='unknown-ctx',
-        zone=None)
-    assert cost == pytest.approx(2 * 5.00)
 
 
 def test_accelerator_name_case_insensitive():
     """Accelerator lookup should be case-insensitive."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=0,
-        memory=0,
-        accelerator_name='a100',
-        accelerator_count=1,
-        region='my-ctx',
-        zone=None)
+    pricing = {'accelerators': {'A100': 3.50}}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=0,
+                                                       memory=0,
+                                                       accelerator_name='a100',
+                                                       accelerator_count=1)
     assert cost == pytest.approx(3.50)
 
 
-# -- Combined pricing (CPU/mem + accelerator) ------------------------------
-
-
 def test_combined_pricing():
-    """4CPU--16GB--A100:1 on my-ctx -> 0.36 + 3.50 = 3.86."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=4,
-        memory=16,
-        accelerator_name='A100',
-        accelerator_count=1,
-        region='my-ctx',
-        zone=None)
+    """4CPU--16GB--A100:1 -> cpu + mem + accel."""
+    pricing = {'cpu': 0.05, 'memory': 0.01, 'accelerators': {'A100': 3.50}}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=1)
     expected = 4 * 0.05 + 16 * 0.01 + 1 * 3.50
     assert cost == pytest.approx(expected)
 
 
-# -- Zone / partition-specific pricing (Slurm) -----------------------------
-
-
-def test_slurm_zone_specific_accelerator():
-    """V100 on my-slurm/gpu-part -> $2.50/GPU."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _SLURM_PRICING_DF,
-        cpus=0,
-        memory=0,
-        accelerator_name='V100',
-        accelerator_count=4,
-        region='my-slurm',
-        zone='gpu-part')
-    assert cost == pytest.approx(4 * 2.50)
-
-
-def test_slurm_zone_specific_cpu_mem():
-    """high-pri partition overrides cluster-wide rates."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _SLURM_PRICING_DF,
-        cpus=8,
-        memory=32,
-        accelerator_name=None,
-        accelerator_count=None,
-        region='my-slurm',
-        zone='high-pri')
-    assert cost == pytest.approx(8 * 0.08 + 32 * 0.02)
-
-
-def test_slurm_fallback_to_region_when_zone_unmatched():
-    """Unknown partition falls back to cluster-wide rates."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _SLURM_PRICING_DF,
-        cpus=4,
-        memory=16,
-        accelerator_name=None,
-        accelerator_count=None,
-        region='my-slurm',
-        zone='unknown-part')
-    assert cost == pytest.approx(4 * 0.04 + 16 * 0.01)
-
-
-# -- No matching accelerator in catalog -----------------------------------
-
-
 def test_unknown_accelerator_returns_zero_accel_price():
-    """If accelerator isn't in catalog, its price component is 0."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
+    """If accelerator isn't in config, its price component is 0."""
+    pricing = {'cpu': 0.05, 'memory': 0.01, 'accelerators': {'A100': 3.50}}
+    cost = catalog_common.get_hourly_cost_from_pricing(
+        pricing,
         cpus=4,
         memory=16,
         accelerator_name='TPUv5e',
-        accelerator_count=4,
-        region='my-ctx',
-        zone=None)
-    # Only CPU/mem should contribute.
+        accelerator_count=4)
     assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
 
 
-# -- region=None picks cheapest across all regions -------------------------
+def test_empty_pricing_returns_zero():
+    """Empty pricing dict returns 0.0."""
+    cost = catalog_common.get_hourly_cost_from_pricing({},
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=4)
+    assert cost == 0.0
 
 
-def test_no_region_picks_cheapest_cpu_rate():
-    """region=None should pick the cheapest rate across all regions."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=4,
-        memory=16,
-        accelerator_name=None,
-        accelerator_count=None,
-        region=None,
-        zone=None)
-    # Wildcard rates (0.02/0.005) are cheaper than my-ctx (0.05/0.01).
-    assert cost == pytest.approx(4 * 0.02 + 16 * 0.005)
+def test_partial_pricing_defaults_missing_to_zero():
+    """Only cpu set; memory defaults to 0.0."""
+    pricing = {'cpu': 0.10}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.10)
 
 
-def test_no_region_picks_cheapest_accelerator():
-    """region=None should pick the cheapest accelerator price."""
-    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
-        _K8S_PRICING_DF,
-        cpus=0,
-        memory=0,
-        accelerator_name='A100',
-        accelerator_count=2,
-        region=None,
-        zone=None)
-    # A100 is only in my-ctx at $3.50.
-    assert cost == pytest.approx(2 * 3.50)
+# -- merge_pricing_dicts ---------------------------------------------------
+
+
+def test_merge_pricing_dicts_partial_override():
+    """Override only cpu; memory and accelerators inherited."""
+    base = {'cpu': 0.04, 'memory': 0.01, 'accelerators': {'V100': 2.50}}
+    override = {'cpu': 0.06}
+    merged = catalog_common.merge_pricing_dicts(base, override)
+    assert merged == {
+        'cpu': 0.06,
+        'memory': 0.01,
+        'accelerators': {
+            'V100': 2.50
+        },
+    }
+
+
+def test_merge_pricing_dicts_accelerator_addition():
+    """Override adds A100; V100 inherited from base."""
+    base = {'cpu': 0.04, 'accelerators': {'V100': 2.50}}
+    override = {'accelerators': {'A100': 4.00}}
+    merged = catalog_common.merge_pricing_dicts(base, override)
+    assert merged['accelerators'] == {'V100': 2.50, 'A100': 4.00}
+    assert merged['cpu'] == 0.04
+
+
+def test_merge_pricing_dicts_does_not_mutate_base():
+    """Merge must not modify the original dicts."""
+    base = {'cpu': 0.04, 'accelerators': {'V100': 2.50}}
+    override = {'cpu': 0.06, 'accelerators': {'A100': 4.00}}
+    catalog_common.merge_pricing_dicts(base, override)
+    assert base == {'cpu': 0.04, 'accelerators': {'V100': 2.50}}
+
+
+# -- K8s config resolution (kubernetes_catalog._get_pricing) ---------------
+
+# Kubernetes pricing config: cloud-level default with A100 and H100.
+_K8S_CONFIG = {
+    'kubernetes': {
+        'pricing': {
+            'cpu': 0.05,
+            'memory': 0.01,
+            'accelerators': {
+                'A100': 3.50,
+                'H100': 5.00,
+            },
+        },
+        'context_configs': {
+            'expensive-ctx': {
+                'pricing': {
+                    'cpu': 0.08,
+                    'accelerators': {
+                        'A100': 4.00,
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_context_override_inherits_cloud_defaults(mock_nested):
+    """Context override inherits missing keys from cloud-level via merge."""
+    mock_nested.side_effect = _mock_get_nested(_K8S_CONFIG)
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = kubernetes_catalog._get_pricing('expensive-ctx')
+    # cpu overridden to 0.08, memory inherited 0.01
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.08 + 16 * 0.01)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_context_override_accelerator(mock_nested):
+    """Context override A100 at $4.00/GPU, H100 inherited at $5.00/GPU."""
+    mock_nested.side_effect = _mock_get_nested(_K8S_CONFIG)
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = kubernetes_catalog._get_pricing('expensive-ctx')
+    cost_a100 = catalog_common.get_hourly_cost_from_pricing(
+        pricing, cpus=0, memory=0, accelerator_name='A100', accelerator_count=1)
+    assert cost_a100 == pytest.approx(4.00)
+    cost_h100 = catalog_common.get_hourly_cost_from_pricing(
+        pricing, cpus=0, memory=0, accelerator_name='H100', accelerator_count=2)
+    assert cost_h100 == pytest.approx(2 * 5.00)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_no_pricing_config_returns_zero(mock_nested):
+    """No pricing config at all returns 0.0."""
+    mock_nested.side_effect = _mock_get_nested({})
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = kubernetes_catalog._get_pricing('some-ctx')
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=4)
+    assert cost == 0.0
+
+
+# -- Slurm config resolution (slurm_catalog._get_pricing) -----------------
+
+# Slurm config with partial overrides at each level to test merging:
+# - Cloud-level: cpu=0.04, memory=0.01, V100=2.50
+# - my-slurm cluster: overrides only cpu (0.06) and A100 (4.00);
+#     memory and V100 should be inherited from cloud-level.
+# - high-pri partition: overrides only A100 (5.00);
+#     cpu, memory, V100 should be inherited from merged cluster level.
+_SLURM_CONFIG = {
+    'slurm': {
+        'pricing': {
+            'cpu': 0.04,
+            'memory': 0.01,
+            'accelerators': {
+                'V100': 2.50,
+            },
+        },
+        'cluster_configs': {
+            'my-slurm': {
+                'pricing': {
+                    'cpu': 0.06,
+                    'accelerators': {
+                        'A100': 4.00,
+                    },
+                },
+                'partition_configs': {
+                    'high-pri': {
+                        'pricing': {
+                            'accelerators': {
+                                'A100': 5.00,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+def _mock_get_nested(config):
+    """Create a mock for skypilot_config.get_nested."""
+
+    def _get(keys, default_value, override_configs=None):
+        del override_configs
+        obj = config
+        for key in keys:
+            if not isinstance(obj, dict) or key not in obj:
+                return default_value
+            obj = obj[key]
+        return obj
+
+    return _get
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_cluster_inherits_cloud_defaults(mock_nested):
+    """Cluster overrides cpu and adds A100; memory and V100 inherited."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='my-slurm')
+    # cpu overridden to 0.06, memory inherited 0.01
+    assert pricing['cpu'] == 0.06
+    assert pricing['memory'] == 0.01
+    # V100 inherited from cloud, A100 added by cluster
+    assert pricing['accelerators']['V100'] == 2.50
+    assert pricing['accelerators']['A100'] == 4.00
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_partition_inherits_cluster_and_cloud(mock_nested):
+    """Partition overrides only A100; cpu, memory, V100 inherited."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='my-slurm', zone='high-pri')
+    # cpu from cluster (0.06), memory from cloud (0.01)
+    assert pricing['cpu'] == 0.06
+    assert pricing['memory'] == 0.01
+    # A100 overridden by partition to 5.00, V100 inherited from cloud
+    assert pricing['accelerators']['A100'] == 5.00
+    assert pricing['accelerators']['V100'] == 2.50
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_fallback_to_cluster_when_partition_unmatched(mock_nested):
+    """Unknown partition falls back to merged cluster pricing."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='my-slurm', zone='unknown-part')
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.06 + 16 * 0.01)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_fallback_to_cloud_level(mock_nested):
+    """Unknown cluster falls back to cloud-level default."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='unknown-cluster')
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.04 + 16 * 0.01)

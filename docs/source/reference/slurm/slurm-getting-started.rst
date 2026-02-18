@@ -263,6 +263,31 @@ To restrict which clusters SkyPilot can use, add the following to your ``~/.sky/
         - mycluster2
 
 
+Configuring pricing
+-------------------
+
+By default, Slurm virtual instance types report a cost of ``$0.00`` in
+``sky launch``, ``sky status``, and ``sky gpus list``. To display meaningful cost
+estimates, add per-vCPU, per-GB, and per-accelerator hourly rates in your
+``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+    slurm:
+      pricing:
+        cpu: 0.04        # $/vCPU/hr
+        memory: 0.01     # $/GB/hr
+        accelerators:
+          V100: 2.50     # $/accelerator/hr
+          A100: 3.50
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+For per-cluster or per-partition pricing overrides, see
+:ref:`slurm.cluster_configs <config-yaml-slurm-cluster-configs>` in the
+:ref:`advanced configuration reference <config-yaml>`.
+
+
 Current limitations
 -------------------
 

@@ -14,11 +14,6 @@ from sky.utils import resources_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_PULL_FREQUENCY_HOURS = 7
-
-_pricing_df = common.read_catalog('slurm/pricing.csv',
-                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-
 _DEFAULT_NUM_VCPUS = 2
 _DEFAULT_MEMORY_CPU_RATIO = 1
 
@@ -167,14 +162,13 @@ def list_accelerators_realtime(
         # Generate powers-of-2 GPU counts up to node_total_gpus,
         # plus the actual total if it is not a power of 2.
         if node_total_gpus > 0:
-            per_accel = common.get_hourly_cost_for_virtual_instance_type(
-                _pricing_df,
+            pricing = _get_pricing(region=slurm_cluster, zone=partition)
+            per_accel = common.get_hourly_cost_from_pricing(
+                pricing,
                 cpus=0,
                 memory=0,
                 accelerator_name=gpu_type,
                 accelerator_count=1,
-                region=slurm_cluster,
-                zone=partition,
             )
             counts = []
             count = 1
@@ -228,24 +222,43 @@ def list_accelerators_realtime(
     return final_qtys_map, dict(total_capacity), dict(total_available)
 
 
+def _get_pricing(region: Optional[str], zone: Optional[str] = None) -> Dict:
+    """Resolve the pricing dict for a Slurm cluster/partition from config.
+
+    Each level is deep-merged into the previous so that partial overrides
+    inherit unset keys from the parent level:
+
+        cloud-level  <  cluster-level  <  partition-level
+
+    For example, a cluster that only overrides ``accelerators.A100`` still
+    inherits ``cpu`` and ``memory`` rates from the cloud-level default.
+    """
+    paths: List[Tuple[str, ...]] = [('slurm', 'pricing')]
+    if region is not None:
+        paths.append(('slurm', 'cluster_configs', region, 'pricing'))
+    if region is not None and zone is not None:
+        paths.append(('slurm', 'cluster_configs', region, 'partition_configs',
+                      zone, 'pricing'))
+    return common.resolve_pricing_config(*paths)
+
+
 def get_hourly_cost(instance_type: str,
                     use_spot: bool,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the hourly cost for a Slurm virtual instance type.
 
-    Pricing is read from ``~/.sky/catalogs/<version>/slurm/pricing.csv``.
+    Pricing is read from the ``slurm.pricing`` section of
+    ``~/.sky/config.yaml``.
     """
     del use_spot  # Slurm has no spot pricing.
     instance = slurm_utils.SlurmInstanceType.from_instance_type(instance_type)
-    return common.get_hourly_cost_for_virtual_instance_type(
-        _pricing_df,
+    return common.get_hourly_cost_from_pricing(
+        _get_pricing(region, zone),
         cpus=instance.cpus,
         memory=instance.memory,
         accelerator_name=instance.accelerator_type,
         accelerator_count=instance.accelerator_count,
-        region=region,
-        zone=zone,
     )
 
 

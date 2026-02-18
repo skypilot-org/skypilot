@@ -30,9 +30,6 @@ _PULL_FREQUENCY_HOURS = 7
 # We keep pull_frequency_hours so we can remotely update the default image paths
 _image_df = common.read_catalog('kubernetes/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-_pricing_df = common.read_catalog('kubernetes/pricing.csv',
-                                  pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-
 # TODO(romilb): Refactor implementation of common service catalog functions from
 #   clouds/kubernetes.py to kubernetes_catalog.py
 
@@ -300,17 +297,17 @@ def _list_accelerators(
                             total_accelerators_available.get(
                                 accelerator_name, 0) + quantized_availability)
 
+    pricing = _get_pricing(context)
+
     result = []
     for accelerator_name, accelerator_count in accelerators_qtys:
         # CPU/memory cost excluded: instance type is unknown at listing time.
-        accel_price = common.get_hourly_cost_for_virtual_instance_type(
-            _pricing_df,
+        accel_price = common.get_hourly_cost_from_pricing(
+            pricing,
             cpus=0,
             memory=0,
             accelerator_name=accelerator_name,
             accelerator_count=int(accelerator_count),
-            region=context,
-            zone=None,
         )
         result.append(
             common.InstanceTypeInfo(cloud='Kubernetes',
@@ -337,25 +334,32 @@ def _list_accelerators(
     return qtys_map, total_accelerators_capacity, total_accelerators_available
 
 
+def _get_pricing(region: Optional[str]) -> Dict:
+    """Resolve the pricing dict for a Kubernetes context from config."""
+    paths: List[Tuple[str, ...]] = [('kubernetes', 'pricing')]
+    if region is not None:
+        paths.append(('kubernetes', 'context_configs', region, 'pricing'))
+    return common.resolve_pricing_config(*paths)
+
+
 def get_hourly_cost(instance_type: str,
                     use_spot: bool,
                     region: Optional[str] = None,
                     zone: Optional[str] = None) -> float:
     """Returns the hourly cost for a Kubernetes virtual instance type.
 
-    Pricing is read from ``~/.sky/catalogs/<version>/kubernetes/pricing.csv``.
+    Pricing is read from the ``kubernetes.pricing`` section of
+    ``~/.sky/config.yaml``.
     """
-    del use_spot  # K8s has no spot pricing; same price returned.
+    del use_spot, zone  # K8s has no spot/zone pricing.
     instance = kubernetes_utils.KubernetesInstanceType.from_instance_type(
         instance_type)
-    return common.get_hourly_cost_for_virtual_instance_type(
-        _pricing_df,
+    return common.get_hourly_cost_from_pricing(
+        _get_pricing(region),
         cpus=instance.cpus,
         memory=instance.memory,
         accelerator_name=instance.accelerator_type,
         accelerator_count=instance.accelerator_count,
-        region=region,
-        zone=zone,
     )
 
 
