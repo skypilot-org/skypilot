@@ -27,12 +27,12 @@ Why use SkyPilot on Slurm?
                 :text-align: center
 
                 Access multiple Slurm clusters through one interface - no need to juggle different login nodes or sbatch scripts.
-            
+
             .. grid-item-card::  🌍 Unified interface for all infra
                 :text-align: center
 
                 The same SkyPilot YAML works on Slurm, Kubernetes, and cloud VMs - switch between them seamlessly.
-            
+
             .. grid-item-card::  🚀 Easy job submission
                 :text-align: center
 
@@ -89,4 +89,4 @@ Table of contents
    :hidden:
 
    Getting Started <slurm-getting-started>
-
+   Configuring Pricing <slurm-pricing>
