@@ -889,11 +889,8 @@ def get_hourly_cost_from_pricing(
 
     if accelerator_name and accelerator_count:
         accels = pricing.get('accelerators', {})
-        accel_rate = 0.0
-        for name, rate in accels.items():
-            if name.lower() == accelerator_name.lower():
-                accel_rate = rate
-                break
+        accel_rate = next((rate for name, rate in accels.items()
+                           if name.lower() == accelerator_name.lower()), 0.0)
         cost += accelerator_count * accel_rate
 
     return cost
