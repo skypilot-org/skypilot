@@ -141,7 +141,7 @@ jobs:
       message: "nightly-build-pypi --aws"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--aws"}'
-      timeout_minutes: 60
+      timeout_minutes: 90  # Increased from 60 (actual: ~70min)
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -197,7 +197,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy"}'
-      timeout_minutes: 80
+      timeout_minutes: 180  # Increased from 80 (actual: ~163min with queue delays)
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -211,7 +211,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --no-resource-heavy --dependency"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --no-resource-heavy --dependency"}'
-      timeout_minutes: 80
+      timeout_minutes: 120  # Increased from 80 (actual: ~99min)
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -225,7 +225,7 @@ jobs:
       message: "nightly-build-pypi --remote-server --kubernetes"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--remote-server --kubernetes"}'
-      timeout_minutes: 80
+      timeout_minutes: 120  # Increased from 80 (actual: ~97min)
       sleep_seconds: 600  # 10 minute delay to reduce buildkite resource usage
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
@@ -240,7 +240,7 @@ jobs:
       message: "nightly-build-pypi --kubernetes --jobs-consolidation --no-resource-heavy"
       pipeline: "smoke-tests"
       build_env_vars: '{"ARGS": "--kubernetes --jobs-consolidation --no-resource-heavy"}'
-      timeout_minutes: 60
+      timeout_minutes: 90  # Increased from 60 (actual: ~79min)
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -253,7 +253,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi shared-gke-api-server with postgres tests"
       pipeline: "nightly-build-shared-gke-api-server"
-      timeout_minutes: 120
+      timeout_minutes: 180  # Increased from 120 to account for queue delays
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
