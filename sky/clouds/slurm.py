@@ -602,15 +602,15 @@ class Slurm(clouds.Cloud):
                 if fs_type is not None and fs_type not in cls._SHARED_FS_TYPES:
                     ctx2text[cluster] = (
                         f'{colorama.Fore.GREEN}enabled.'
-                        f'{colorama.Style.RESET_ALL}'
-                        f' {colorama.Fore.LIGHTYELLOW_EX}'
-                        f'Warning: Home directory (~) filesystem '
+                        f'{colorama.Style.RESET_ALL} '
+                        f'{colorama.Fore.LIGHTYELLOW_EX}'
+                        'Warning: Home directory (~) filesystem '
                         f'type is {fs_type!r}, not a shared '
-                        f'filesystem. SkyPilot requires ~ to be '
-                        f'on a shared filesystem (e.g., NFS) '
-                        f'visible to all nodes. Customizing the '
-                        f'home directory will be supported in a '
-                        f'future release.'
+                        'filesystem. SkyPilot requires ~ to be '
+                        'on a shared filesystem (e.g., NFS) '
+                        'visible to all nodes. Customizing the '
+                        'home directory will be supported in a '
+                        'future release.'
                         f'{colorama.Style.RESET_ALL}')
                 else:
                     ctx2text[cluster] = 'enabled'
