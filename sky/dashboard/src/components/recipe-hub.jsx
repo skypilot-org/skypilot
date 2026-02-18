@@ -112,7 +112,7 @@ function RecipeCard({ recipe, onPin }) {
   const slug = generateRecipeSlug(recipe.name);
 
   return (
-    <div className="relative">
+    <div className="relative max-w-[300px]">
       <Link href={`/recipes/${slug}`} className="block">
         <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
           <CardContent className="p-3">
@@ -225,7 +225,13 @@ function TemplateRow({
         <h2 className="text-base text-gray-700">{title}</h2>
         <span className="text-sm text-gray-500">({recipes.length})</span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      <div
+        className="grid gap-4"
+        style={{
+          gridTemplateColumns:
+            'repeat(auto-fill, minmax(min(300px, 100%), 1fr))',
+        }}
+      >
         {recipes.map((recipe) => (
           <RecipeCard key={recipe.name} recipe={recipe} onPin={onPin} />
         ))}
