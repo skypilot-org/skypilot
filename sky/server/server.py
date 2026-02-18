@@ -620,7 +620,9 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     # Start periodic version check task (runs daily)
-    asyncio.create_task(version_check.check_versions_periodically())
+    # Disabled: skypilot-mithril is a different package; the periodic check
+    # against PyPI's skypilot is not relevant for this fork.
+    # asyncio.create_task(version_check.check_versions_periodically())
     if metrics_utils.METRICS_ENABLED:
         # Start monitoring the event loop lag in each server worker
         # event loop (process).
