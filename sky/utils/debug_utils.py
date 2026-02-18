@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import pathlib
+import platform
 import shutil
 import time
 from typing import Any, Dict, List, Optional, Set, TypedDict
@@ -33,6 +34,16 @@ class DebugDumpContext(TypedDict):
     request_ids: Set[str]
     cluster_names: Set[str]
     managed_job_ids: Set[int]
+
+
+def _epoch_to_human(epoch: Optional[float]) -> Optional[str]:
+    """Convert epoch timestamp to human-readable ISO format."""
+    if epoch is None:
+        return None
+    try:
+        return datetime.datetime.fromtimestamp(epoch).isoformat()
+    except (OSError, ValueError, OverflowError):
+        return None
 
 
 def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
@@ -124,7 +135,7 @@ def _get_clusters_from_managed_jobs(
     """Get underlying cluster names from managed jobs."""
     # Import here to avoid circular imports
     # pylint: disable=import-outside-toplevel
-    from sky.jobs import state as managed_job_state
+    from sky.jobs.server import core as managed_jobs_core
 
     if not debug_dump_context['managed_job_ids']:
         return
@@ -139,20 +150,22 @@ def _get_clusters_from_managed_jobs(
         # JOB_CONTROLLER_NAME may not be initialized
         pass
 
-    # Get cluster info for each managed job
-    for job_id in debug_dump_context['managed_job_ids']:
-        try:
-            jobs = managed_job_state.get_managed_job_tasks(job_id)
-            for job in jobs:
-                current_cluster = job.get('current_cluster_name')
-                if current_cluster:
-                    debug_dump_context['cluster_names'].add(current_cluster)
-                # For consolidation mode, add pool cluster if available
-                pool = job.get('pool')
-                if pool:
-                    debug_dump_context['cluster_names'].add(pool)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get clusters for job {job_id}: {e}')
+    # Get cluster info for managed jobs via queue_v2 (handles remote
+    # controllers via gRPC/SSH, unlike direct DB access which only works
+    # in consolidation mode).
+    try:
+        jobs, _, _, _ = managed_jobs_core.queue_v2(
+            refresh=False, job_ids=list(debug_dump_context['managed_job_ids']))
+        for job in jobs:
+            current_cluster = job.get('current_cluster_name')
+            if current_cluster:
+                debug_dump_context['cluster_names'].add(current_cluster)
+            # For consolidation mode, add pool cluster if available
+            pool = job.get('pool')
+            if pool:
+                debug_dump_context['cluster_names'].add(pool)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to get clusters for managed jobs: {e}')
 
 
 def _populate_recent_context(debug_dump_context: DebugDumpContext,
@@ -160,7 +173,7 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     """Populate context with resources active within the given time window."""
     # Import here to avoid circular imports
     # pylint: disable=import-outside-toplevel
-    from sky.jobs import state as managed_job_state
+    from sky.jobs.server import core as managed_jobs_core
 
     logger.debug(f'Populating context with resources from last {hours} hours')
     cutoff_time = time.time() - (hours * 3600)
@@ -196,10 +209,11 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent clusters: {e}')
 
-    # Get recent managed jobs
+    # Get recent managed jobs via queue_v2 (handles remote controllers
+    # via gRPC/SSH, unlike direct DB access which only works in
+    # consolidation mode).
     try:
-        jobs, _ = managed_job_state.get_managed_jobs_with_filters(
-            fields=['job_id', 'submitted_at', 'end_at'])
+        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False)
         for job in jobs:
             submitted_at = job.get('submitted_at') or 0
             end_at = job.get('end_at') or time.time()
@@ -216,9 +230,10 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
                  f'from recent activity')
 
 
-def _dump_server_info(dump_dir: str) -> None:
+def _dump_server_info(dump_dir: str,
+                      errors: Optional[List[Dict[str, str]]] = None) -> None:
     """Collect server metadata."""
-    logger.debug('Dumping server info')
+    logger.debug('Entering _dump_server_info')
     # Import here to avoid circular imports
     # pylint: disable=import-outside-toplevel
     import sky
@@ -232,7 +247,27 @@ def _dump_server_info(dump_dir: str) -> None:
         'api_version': server_constants.API_VERSION,
         'dump_timestamp': time.time(),
         'dump_timestamp_human': datetime.datetime.now().isoformat(),
+        'python_version': platform.python_version(),
+        'os_platform': platform.platform(),
+        'db_backend':
+            ('postgresql'
+             if os.environ.get('SKYPILOT_DB_CONNECTION_URI') else 'sqlite'),
     }
+
+    # Add server uptime using the boot check request's created_at timestamp.
+    # This is shared across all uvicorn workers (stored in the DB), unlike
+    # a module-level variable which would be per-worker.
+    try:
+        boot_request = requests_lib.get_request('skypilot-server-on-boot-check',
+                                                fields=['created_at'])
+        if boot_request is not None and boot_request.created_at is not None:
+            server_info['server_start_time'] = boot_request.created_at
+            server_info['server_start_time_human'] = _epoch_to_human(
+                boot_request.created_at)
+            server_info['server_uptime_seconds'] = round(
+                time.time() - boot_request.created_at, 2)
+    except Exception as e:  # pylint: disable=broad-except
+        server_info['server_uptime_error'] = str(e)
 
     # Add config info
     try:
@@ -242,6 +277,12 @@ def _dump_server_info(dump_dir: str) -> None:
         }
     except Exception as e:  # pylint: disable=broad-except
         server_info['config_error'] = str(e)
+        if errors is not None:
+            errors.append({
+                'component': 'server_info',
+                'resource': 'config',
+                'error': str(e)
+            })
 
     # Add environment variables
     server_info['environment'] = {
@@ -262,18 +303,29 @@ def _dump_server_info(dump_dir: str) -> None:
         server_info['enabled_clouds'] = enabled_clouds
     except Exception as e:  # pylint: disable=broad-except
         server_info['cloud_status_error'] = str(e)
+        if errors is not None:
+            errors.append({
+                'component': 'server_info',
+                'resource': 'cloud_status',
+                'error': str(e)
+            })
 
     server_info_path = os.path.join(dump_dir, 'server_info.json')
     with open(server_info_path, 'w', encoding='utf-8') as f:
         json.dump(server_info, f, indent=2, default=str)
+    logger.debug('Exiting _dump_server_info')
 
 
-def _dump_request_id_info(request_ids: Set[str], dump_dir: str) -> None:
+def _dump_request_id_info(
+        request_ids: Set[str],
+        dump_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
     """Collect request logs and metadata."""
     if not request_ids:
         logger.debug('No requests to dump')
         return
-    logger.debug(f'Dumping info for {len(request_ids)} requests')
+    logger.debug(f'Entering _dump_request_id_info for '
+                 f'{len(request_ids)} requests')
 
     requests_dir = os.path.join(dump_dir, 'requests')
     os.makedirs(requests_dir, exist_ok=True)
@@ -291,7 +343,9 @@ def _dump_request_id_info(request_ids: Set[str], dump_dir: str) -> None:
                     'name': request.name,
                     'status': request.status.value if request.status else None,
                     'created_at': request.created_at,
+                    'created_at_human': _epoch_to_human(request.created_at),
                     'finished_at': request.finished_at,
+                    'finished_at_human': _epoch_to_human(request.finished_at),
                     'cluster_name': request.cluster_name,
                     'user_id': request.user_id,
                     'status_msg': request.status_msg,
@@ -317,6 +371,12 @@ def _dump_request_id_info(request_ids: Set[str], dump_dir: str) -> None:
                     json.dump(request_info, f, indent=2, default=str)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for request {request_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': request_id,
+                    'error': str(e)
+                })
 
         # Copy request log file
         try:
@@ -325,16 +385,31 @@ def _dump_request_id_info(request_ids: Set[str], dump_dir: str) -> None:
                         f'{request_id}.log')
             if log_path.exists():
                 shutil.copy2(log_path, os.path.join(request_dir, 'request.log'))
+                logger.debug(f'Copied request log for {request_id}')
+            else:
+                logger.debug(f'Request log not found for {request_id}: '
+                             f'{log_path}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to copy log for request {request_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': f'{request_id}/log',
+                    'error': str(e)
+                })
+
+    logger.debug('Exiting _dump_request_id_info')
 
 
-def _dump_cluster_info(cluster_names: Set[str], dump_dir: str) -> None:
+def _dump_cluster_info(cluster_names: Set[str],
+                       dump_dir: str,
+                       errors: Optional[List[Dict[str, str]]] = None) -> None:
     """Collect cluster state and events."""
     if not cluster_names:
         logger.debug('No clusters to dump')
         return
-    logger.debug(f'Dumping info for {len(cluster_names)} clusters')
+    logger.debug(f'Entering _dump_cluster_info for '
+                 f'{len(cluster_names)} clusters')
 
     clusters_dir = os.path.join(dump_dir, 'clusters')
     os.makedirs(clusters_dir, exist_ok=True)
@@ -364,16 +439,20 @@ def _dump_cluster_info(cluster_names: Set[str], dump_dir: str) -> None:
                             getattr(handle, 'launched_resources', None)),
                     }
 
+                launched_at = cluster_record.get('launched_at')
+                status_updated_at = cluster_record.get('status_updated_at')
                 cluster_info: Dict[str, Any] = {
                     'name': cluster_record.get('name'),
                     'cluster_hash': cluster_record.get('cluster_hash'),
                     'status': str(cluster_record.get('status')),
-                    'launched_at': cluster_record.get('launched_at'),
+                    'launched_at': launched_at,
+                    'launched_at_human': _epoch_to_human(launched_at),
                     'autostop': cluster_record.get('autostop'),
                     'to_down': cluster_record.get('to_down'),
                     'cluster_ever_up': cluster_record.get('cluster_ever_up'),
-                    'status_updated_at':
-                        cluster_record.get('status_updated_at'),
+                    'status_updated_at': status_updated_at,
+                    'status_updated_at_human':
+                        _epoch_to_human(status_updated_at),
                     'config_hash': cluster_record.get('config_hash'),
                     'workspace': cluster_record.get('workspace'),
                     'is_managed': cluster_record.get('is_managed'),
@@ -389,6 +468,12 @@ def _dump_cluster_info(cluster_names: Set[str], dump_dir: str) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for cluster '
                            f'{cluster_name}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': cluster_name,
+                    'error': str(e)
+                })
 
         # Get cluster events
         try:
@@ -416,9 +501,21 @@ def _dump_cluster_info(cluster_names: Set[str], dump_dir: str) -> None:
                         logger.warning(f'Failed to get {event_type.value} '
                                        f'events for cluster {cluster_name}: '
                                        f'{e}')
+                        if errors is not None:
+                            errors.append({
+                                'component': 'clusters',
+                                'resource': f'{cluster_name}/events_{event_type.value}',
+                                'error': str(e)
+                            })
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get events for cluster '
                            f'{cluster_name}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{cluster_name}/events',
+                    'error': str(e)
+                })
 
         # Get associated requests
         try:
@@ -431,6 +528,7 @@ def _dump_cluster_info(cluster_names: Set[str], dump_dir: str) -> None:
                 'name': r.name,
                 'status': r.status.value if r.status else None,
                 'created_at': r.created_at,
+                'created_at_human': _epoch_to_human(r.created_at),
             } for r in requests]
 
             assoc_path = os.path.join(cluster_dir, 'associated_requests.json')
@@ -439,19 +537,32 @@ def _dump_cluster_info(cluster_names: Set[str], dump_dir: str) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get associated requests for cluster '
                            f'{cluster_name}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'clusters',
+                    'resource': f'{cluster_name}/associated_requests',
+                    'error': str(e)
+                })
+
+    logger.debug('Exiting _dump_cluster_info')
 
 
-def _dump_managed_job_info(managed_job_ids: Set[int], dump_dir: str) -> None:
+def _dump_managed_job_info(
+        managed_job_ids: Set[int],
+        dump_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
     """Collect managed job state and logs."""
     # Import here to avoid circular imports
     # pylint: disable=import-outside-toplevel
     from sky.jobs import constants as job_constants
     from sky.jobs import state as managed_job_state
+    from sky.jobs.server import core as managed_jobs_core
 
     if not managed_job_ids:
         logger.debug('No managed jobs to dump')
         return
-    logger.debug(f'Dumping info for {len(managed_job_ids)} managed jobs')
+    logger.debug(f'Entering _dump_managed_job_info for '
+                 f'{len(managed_job_ids)} managed jobs')
 
     jobs_dir = os.path.join(dump_dir, 'managed_jobs')
     os.makedirs(jobs_dir, exist_ok=True)
@@ -460,33 +571,55 @@ def _dump_managed_job_info(managed_job_ids: Set[int], dump_dir: str) -> None:
         job_dir = os.path.join(jobs_dir, str(job_id))
         os.makedirs(job_dir, exist_ok=True)
 
-        # Get job info from DB
+        # Get job info via queue_v2 (handles remote controllers via
+        # gRPC/SSH, unlike direct DB access which only works in
+        # consolidation mode).
         try:
-            jobs = managed_job_state.get_managed_job_tasks(job_id)
+            jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                       job_ids=[job_id])
             if jobs:
-                job = jobs[0]
-                # Convert non-serializable fields
-                job_info = {
-                    k:
-                    (str(v) if not isinstance(v,
-                                              (str, int, float, bool,
-                                               type(None), list, dict)) else v)
-                    for k, v in job.items()
-                }
+                # Iterate over ALL returned tasks, not just the first one
+                for task_idx, job in enumerate(jobs):
+                    # Convert non-serializable fields
+                    job_info = {
+                        k: (str(v) if not isinstance(v,
+                                                     (str, int, float, bool,
+                                                      type(None), list, dict))
+                            else v) for k, v in job.items()
+                    }
 
-                job_info_path = os.path.join(job_dir, 'job_info.json')
-                with open(job_info_path, 'w', encoding='utf-8') as f:
-                    json.dump(job_info, f, indent=2, default=str)
+                    suffix = f'_task{task_idx}' if len(jobs) > 1 else ''
+                    job_info_path = os.path.join(job_dir,
+                                                 f'job_info{suffix}.json')
+                    with open(job_info_path, 'w', encoding='utf-8') as f:
+                        json.dump(job_info, f, indent=2, default=str)
 
-                # Copy job log file if available
-                local_log_file = job.get('local_log_file')
-                if local_log_file and os.path.exists(local_log_file):
-                    shutil.copy2(local_log_file,
-                                 os.path.join(job_dir, 'run.log'))
+                    # Copy job log file if available
+                    local_log_file = job.get('local_log_file')
+                    if local_log_file and os.path.exists(local_log_file):
+                        log_name = f'run{suffix}.log'
+                        shutil.copy2(local_log_file,
+                                     os.path.join(job_dir, log_name))
+                        logger.debug(f'Copied log file for job {job_id} task '
+                                     f'{task_idx}')
+                    else:
+                        logger.debug(
+                            f'Log file not found for job {job_id} task '
+                            f'{task_idx}: {local_log_file}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for job {job_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'managed_jobs',
+                    'resource': str(job_id),
+                    'error': str(e)
+                })
 
-        # Get job events
+        # Get job events (best-effort from local DB).
+        # Note: In non-consolidation mode, the spot_jobs DB lives on the
+        # remote controller VM, so events may be empty here. This is
+        # expected behavior - events are only available when running in
+        # consolidation mode where the DB is local.
         try:
             events = managed_job_state.get_job_events(job_id, limit=1000)
             if events:
@@ -498,6 +631,7 @@ def _dump_managed_job_info(managed_job_ids: Set[int], dump_dir: str) -> None:
                     'code': e.get('code'),
                     'reason': e.get('reason'),
                     'timestamp': str(e.get('timestamp')),
+                    'timestamp_human': _epoch_to_human(e.get('timestamp')),
                 } for e in events]
 
                 events_path = os.path.join(job_dir, 'job_events.json')
@@ -505,19 +639,46 @@ def _dump_managed_job_info(managed_job_ids: Set[int], dump_dir: str) -> None:
                     json.dump(serializable_events, f, indent=2, default=str)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get events for job {job_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'managed_jobs',
+                    'resource': f'{job_id}/events',
+                    'error': str(e)
+                })
 
         # Copy controller logs
         try:
             controller_logs_dir = pathlib.Path(
                 job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
             if controller_logs_dir.exists():
-                for log_file in controller_logs_dir.glob(f'{job_id}-*'):
+                copied_any = False
+                # Per-job controller log: {job_id}.log
+                for log_file in controller_logs_dir.glob(f'{job_id}.log'):
                     if log_file.is_file():
                         shutil.copy2(log_file,
                                      os.path.join(job_dir, log_file.name))
+                        logger.debug(f'Copied controller log: {log_file.name}')
+                        copied_any = True
+                # Controller system/process logs: controller_*.log
+                for log_file in controller_logs_dir.glob('controller_*.log'):
+                    if log_file.is_file():
+                        shutil.copy2(log_file,
+                                     os.path.join(job_dir, log_file.name))
+                        logger.debug(f'Copied controller log: {log_file.name}')
+                        copied_any = True
+                if not copied_any:
+                    logger.debug(f'No controller logs found for job {job_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to copy controller logs for job '
                            f'{job_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'managed_jobs',
+                    'resource': f'{job_id}/controller_logs',
+                    'error': str(e)
+                })
+
+    logger.debug('Exiting _dump_managed_job_info')
 
 
 def create_debug_dump(
@@ -546,6 +707,9 @@ def create_debug_dump(
                  f'cluster_names={cluster_names}, '
                  f'managed_job_ids={managed_job_ids}, '
                  f'recent_hours={recent_hours}')
+
+    # Error collector for surfacing issues in the dump
+    errors: List[Dict[str, str]] = []
 
     debug_dump_context = DebugDumpContext(
         request_ids=set(request_ids or []),
@@ -578,16 +742,31 @@ def create_debug_dump(
     dump_base_dir.mkdir(parents=True, exist_ok=True)
     logger.debug(f'Debug dump output directory: {dump_base_dir}')
 
+    # Clean up dumps older than 1 hour
+    for old_dump in dump_base_dir.glob('debug_dump_*.zip'):
+        try:
+            if old_dump.stat().st_mtime < time.time() - 3600:
+                old_dump.unlink(missing_ok=True)
+                logger.debug(f'Cleaned up old debug dump: {old_dump.name}')
+        except OSError:
+            pass
+
     # Use temp dir for building the dump, then zip to persistent location
     with tempstore.tempdir() as temp_dir:
         dump_dir = os.path.join(temp_dir, f'debug_dump_{timestamp}')
         os.makedirs(dump_dir)
         logger.debug(f'Building dump in temp directory: {dump_dir}')
 
-        _dump_server_info(dump_dir)
-        _dump_request_id_info(debug_dump_context['request_ids'], dump_dir)
-        _dump_cluster_info(debug_dump_context['cluster_names'], dump_dir)
-        _dump_managed_job_info(debug_dump_context['managed_job_ids'], dump_dir)
+        _dump_server_info(dump_dir, errors=errors)
+        _dump_request_id_info(debug_dump_context['request_ids'],
+                              dump_dir,
+                              errors=errors)
+        _dump_cluster_info(debug_dump_context['cluster_names'],
+                           dump_dir,
+                           errors=errors)
+        _dump_managed_job_info(debug_dump_context['managed_job_ids'],
+                               dump_dir,
+                               errors=errors)
 
         # Write client info if provided
         if client_info:
@@ -595,6 +774,11 @@ def create_debug_dump(
             client_info_path = os.path.join(dump_dir, 'client_info.json')
             with open(client_info_path, 'w', encoding='utf-8') as f:
                 json.dump(client_info, f, indent=2, default=str)
+
+        # Write errors file
+        errors_path = os.path.join(dump_dir, 'errors.json')
+        with open(errors_path, 'w', encoding='utf-8') as f:
+            json.dump(errors, f, indent=2, default=str)
 
         # Write summary file
         elapsed_time = time.time() - start_time
@@ -619,10 +803,17 @@ def create_debug_dump(
                 'elapsed_seconds': round(elapsed_time, 2),
                 'timestamp': timestamp,
             },
+            'warnings': errors,
         }
         summary_path = os.path.join(dump_dir, 'summary.json')
         with open(summary_path, 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2)
+
+        # Log total dump size before zipping
+        total_dump_size = sum(f.stat().st_size
+                              for f in pathlib.Path(dump_dir).rglob('*')
+                              if f.is_file())
+        logger.debug(f'Total dump size before zipping: {total_dump_size} bytes')
 
         # Create zip file in PERSISTENT location (outside temp dir)
         zip_filename = f'debug_dump_{timestamp}.zip'

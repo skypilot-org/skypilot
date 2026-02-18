@@ -2972,23 +2972,29 @@ def _build_client_info() -> Dict[str, Any]:
     """Build client-side info for debug dumps."""
     import sky  # pylint: disable=import-outside-toplevel
     from sky.server import constants as server_constants
+    from sky.utils import config_utils
 
-    def _sanitize_config(config: Dict[str, Any]) -> Dict[str, Any]:
-        """Sanitize config by redacting API server endpoints."""
-        config = dict(config)  # Shallow copy
-        if 'api_server' in config:
-            api_server = dict(config['api_server'])
-            if 'endpoint' in api_server:
-                api_server['endpoint'] = '<redacted>'
-            config['api_server'] = api_server
-        return config
+    # Sensitive config paths to redact, following the same pattern as
+    # provision/common.py:ProvisionConfig.get_redacted_config().
+    sensitive_fields = [
+        ('api_server', 'endpoint'),
+    ]
+
+    def _redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        config_copy = config_utils.Config(config)
+        for field_path in sensitive_fields:
+            val = config_copy.get_nested(field_path, default_value=None)
+            if val is not None:
+                config_copy.set_nested(field_path, '<redacted>')
+        return dict(**config_copy)
 
     # Get configs
     user_config: Dict[str, Any] = {}
     merged_config: Dict[str, Any] = {}
     try:
-        user_config = _sanitize_config(dict(skypilot_config.get_user_config()))
-        merged_config = _sanitize_config(dict(skypilot_config.to_dict()))
+        user_config = _redact_config(
+            dict(skypilot_config.get_user_config()))
+        merged_config = _redact_config(dict(skypilot_config.to_dict()))
     except Exception:  # pylint: disable=broad-except
         pass  # Config may not be available
 

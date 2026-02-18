@@ -2565,7 +2565,7 @@ async def create_debug_dump(
         request_name=request_names.RequestName.CREATE_DEBUG_DUMP,
         request_body=create_debug_dump_body,
         func=core.create_debug_dump,
-        schedule_type=requests_lib.ScheduleType.SHORT,
+        schedule_type=requests_lib.ScheduleType.LONG,
     )
 
 
