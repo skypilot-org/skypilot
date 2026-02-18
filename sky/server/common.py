@@ -822,6 +822,13 @@ def check_server_healthy(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ApiServerConnectionError(endpoint)
 
+    # Ensure the remote API version is set in the current thread's context.
+    # get_api_server_status() may return a cached result (TTLCache), in which
+    # case request_without_retry() was never called in this thread and the
+    # context variable would still be None.
+    if api_server_info.version is not None:
+        versions.set_remote_version(api_server_info.version)
+
     # If the user ran pip upgrade, but the server wasn't restarted, warn them.
     # We check this using the info from /api/health, rather than in the
     # executor, because the executor could be started after the main server
