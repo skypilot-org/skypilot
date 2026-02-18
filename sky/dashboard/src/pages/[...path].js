@@ -4,7 +4,14 @@ import { useRouter } from 'next/router';
 import { CircularProgress } from '@mui/material';
 import { usePluginRoute } from '@/plugins/PluginProvider';
 
-function normalizeSlug(slug) {
+/**
+ * Catch-all page that handles plugin routes without the /plugins/ prefix.
+ * e.g. /dashboard/cron renders the plugin registered at /cron (or /plugins/cron).
+ * Specific pages (clusters.js, jobs.js, etc.) take routing priority over this.
+ */
+
+function derivePathname(router) {
+  const slug = router?.query?.path;
   if (!slug) {
     return null;
   }
@@ -13,53 +20,21 @@ function normalizeSlug(slug) {
   if (!filtered.length) {
     return null;
   }
-  return `/plugins/${filtered.join('/')}`;
+  return `/${filtered.join('/')}`;
 }
 
-function stripBasePath(pathname = '', basePath = '') {
-  if (!basePath) {
-    return pathname;
-  }
-  if (pathname === basePath) {
-    return '/';
-  }
-  if (pathname.startsWith(basePath)) {
-    const stripped = pathname.slice(basePath.length);
-    return stripped.startsWith('/') ? stripped : `/${stripped}`;
-  }
-  return pathname;
-}
-
-function derivePathname(router) {
-  const slugPath = normalizeSlug(router?.query?.slug);
-  if (slugPath) {
-    return slugPath;
-  }
-  const asPath = router?.asPath;
-  if (!asPath || typeof asPath !== 'string') {
-    return null;
-  }
-  const withoutQuery = asPath.split('?')[0];
-  const normalized = stripBasePath(withoutQuery, router?.basePath || '');
-  if (normalized && normalized.startsWith('/plugins')) {
-    return normalized;
-  }
-  return null;
-}
-
-export default function PluginRoutePage() {
+export default function PluginCatchAllPage() {
   const router = useRouter();
   const containerRef = useRef(null);
   const [mountError, setMountError] = useState(null);
   const pathname = derivePathname(router);
-  // Try with /plugins/ prefix first (legacy), then without for new-style routes
-  const prefixedRoute = usePluginRoute(pathname);
-  const strippedPath =
-    pathname && pathname.startsWith('/plugins/')
-      ? pathname.slice('/plugins'.length)
-      : null;
-  const strippedRoute = usePluginRoute(strippedPath);
-  const route = prefixedRoute || strippedRoute;
+  // Try the path directly first (e.g. /cron), then with /plugins/ prefix for
+  // backward compatibility with plugins that still register under /plugins/.
+  const directRoute = usePluginRoute(pathname);
+  const prefixedRoute = usePluginRoute(
+    pathname ? `/plugins${pathname}` : null
+  );
+  const route = directRoute || prefixedRoute;
 
   useEffect(() => {
     const container = containerRef.current;

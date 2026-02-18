@@ -323,27 +323,38 @@ export function TopBar() {
     if (typeof href !== 'string') {
       return href;
     }
-    const route = pluginRoutes.find((entry) => entry.path === href);
-    if (!route || !route.path.startsWith('/plugins')) {
+    // Find the matching route — try the href directly, then with /plugins/ prefix
+    const route = pluginRoutes.find(
+      (entry) => entry.path === href || entry.path === `/plugins${href}`
+    );
+    if (!route) {
       return href;
     }
-    const slugSegments = route.path
+    // Generate a clean URL without /plugins/ prefix
+    // Strip /plugins prefix from route path if present for the URL segments
+    const cleanPath = route.path.startsWith('/plugins/')
+      ? route.path.slice('/plugins'.length)
+      : route.path;
+    const segments = cleanPath
       .replace(/^\/+/, '')
       .split('/')
-      .slice(1)
       .filter(Boolean);
     return {
-      pathname: '/plugins/[...slug]',
-      query: slugSegments.length ? { slug: slugSegments } : {},
+      pathname: '/[...path]',
+      query: segments.length ? { path: segments } : {},
     };
   };
 
   // Render a plugin nav link for the sidebar (desktop + mobile)
   const renderSidebarPluginNavLink = (link, onClick, sidebarCollapsed = false) => {
-    // Plugin hrefs are raw paths like "/plugins/credentials". The router.asPath
-    // includes the basePath prefix (e.g. "/dashboard/plugins/credentials"), so
-    // check if asPath ends with or contains the plugin href.
-    const isActive = router.asPath.includes(link.href);
+    // Check if the current path matches the plugin href.
+    // Handles both clean URLs (/cron) and legacy URLs (/plugins/cron).
+    const cleanHref = link.href.startsWith('/plugins/')
+      ? link.href.slice('/plugins'.length)
+      : link.href;
+    const isActive =
+      router.asPath.includes(link.href) ||
+      router.asPath.includes(cleanHref);
     const content = (
       <>
         {link.icon && (
