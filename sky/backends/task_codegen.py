@@ -5,6 +5,7 @@ import inspect
 import json
 import math
 import os
+import shlex
 import textwrap
 from typing import Dict, List, Optional, Tuple
 
@@ -130,7 +131,8 @@ class TaskCodeGen:
             CANCELLED_RETURN_CODE = 137
             """))
 
-    def _get_rclone_flush_script(self) -> str:
+    @staticmethod
+    def get_rclone_flush_script() -> str:
         """Generate rclone flush script for cached storage mounts.
 
         This script blocks job completion until all storage mounted with
@@ -612,7 +614,7 @@ class RayCodeGen(TaskCodeGen):
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
-        rclone_flush_script = self._get_rclone_flush_script()
+        rclone_flush_script = self.get_rclone_flush_script()
         unset_ray_env_vars = ' && '.join(
             [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
         self._code += [
@@ -664,14 +666,20 @@ class RayCodeGen(TaskCodeGen):
 class SlurmCodeGen(TaskCodeGen):
     """Code generator for task execution on Slurm using native srun."""
 
-    def __init__(self, slurm_job_id: str):
-        """Initialize SlurmCodeGen
+    def __init__(
+        self,
+        slurm_job_id: str,
+        container_name: Optional[str],
+    ):
+        """Initialize SlurmCodeGen.
 
         Args:
             slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
+            container_name: pyxis container name, or None
         """
         super().__init__()
         self._slurm_job_id = slurm_job_id
+        self._container_name = container_name
 
     def add_prologue(self, job_id: int) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
@@ -805,9 +813,17 @@ class SlurmCodeGen(TaskCodeGen):
                                          for k, v in env_vars.items())
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
-        rclone_flush_script = self._get_rclone_flush_script()
+        rclone_flush_script = self.get_rclone_flush_script()
         streaming_msg = self._get_job_started_msg()
         has_setup_cmd = self._setup_cmd is not None
+
+        container_flags = ''
+        if self._container_name is not None:
+            # --container-remap-root must be passed on every srun to get
+            # correct $HOME
+            container_flags = (
+                ' --container-remap-root'
+                f' --container-name={shlex.quote(self._container_name)}:exec')
 
         self._code += [
             sky_env_vars_dict_str,
@@ -886,19 +902,36 @@ class SlurmCodeGen(TaskCodeGen):
                     # allocation. See:
                     # https://support.schedmd.com/show_bug.cgi?id=14298
                     # https://github.com/huggingface/datatrove/issues/248
+                    cmd_parts = []
+                    # Only unset SKY_RUNTIME_DIR for container runs. For non-container
+                    # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
+                    # SlurmCommandRunner to avoid SQLite WAL issues on shared filesystems.
+                    if {True if container_flags else False}:
+                        cmd_parts.append('unset SKY_RUNTIME_DIR;')
+                    cmd_parts.extend([
+                        constants.SKY_SLURM_PYTHON_CMD,
+                        '-m sky.skylet.executor.slurm',
+                        runner_args,
+                    ])
+                    bash_cmd = shlex.quote(' '.join(cmd_parts))
                     srun_cmd = (
                         "unset $(env | awk -F= '/^SLURM_/ {{print $1}}') && "
                         f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid={self._slurm_job_id} '
-                        f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1 {{extra_flags}} '
-                        f'{{constants.SKY_SLURM_PYTHON_CMD}} -m sky.skylet.executor.slurm {{runner_args}}'
+                        f'--job-name=sky-{self.job_id}{{job_suffix}} --ntasks-per-node=1{container_flags} {{extra_flags}} '
+                        f'/bin/bash -c {{bash_cmd}}'
                     )
-                    return srun_cmd, script_path
+
+                    def cleanup():
+                        if script_path is not None:
+                            os.remove(script_path)
+
+                    return srun_cmd, cleanup
 
                 def run_thread_func():
                     # This blocks until Slurm allocates resources (--exclusive)
                     # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
                     run_flags = f'--nodes={num_nodes} --cpus-per-task={task_cpu_demand} --mem=0 {{gpu_arg}} --exclusive'
-                    srun_cmd, task_script_path = build_task_runner_cmd(
+                    srun_cmd, cleanup = build_task_runner_cmd(
                         script, run_flags, {log_dir!r}, sky_env_vars_dict,
                         task_name={task_name!r},
                         alloc_signal=alloc_signal_file,
@@ -913,8 +946,7 @@ class SlurmCodeGen(TaskCodeGen):
                         print(line, end='', flush=True)
                     proc.wait()
 
-                    if task_script_path is not None:
-                        os.remove(task_script_path)
+                    cleanup()
                     return {{'return_code': proc.returncode, 'pid': proc.pid}}
 
                 run_thread_result = {{'result': None}}
@@ -955,7 +987,7 @@ class SlurmCodeGen(TaskCodeGen):
                     # --overlap as we have already secured allocation with the srun for the run section,
                     # and otherwise this srun would get blocked and deadlock.
                     setup_flags = f'--overlap --nodes={self._setup_num_nodes}'
-                    setup_srun, setup_script_path = build_task_runner_cmd(
+                    setup_srun, setup_cleanup = build_task_runner_cmd(
                         {self._setup_cmd!r}, setup_flags, {self._setup_log_dir!r}, {self._setup_envs!r},
                         is_setup=True
                     )
@@ -969,8 +1001,7 @@ class SlurmCodeGen(TaskCodeGen):
                         print(line, end='', flush=True)
                     setup_proc.wait()
 
-                    if setup_script_path is not None:
-                        os.remove(setup_script_path)
+                    setup_cleanup()
 
                     setup_returncode = setup_proc.returncode
                     if setup_returncode != 0:

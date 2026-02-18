@@ -343,15 +343,18 @@ Following tabs describe how to configure credentials for different clouds on the
 
         **Option 2: Multiple profiles (for multiple workspaces)**
 
-        Use this if you need different AWS profiles for different workspaces. Create a Kubernetes secret from your AWS credentials file:
+        Use this if you need different AWS profiles for different workspaces. Create a Kubernetes secret from your AWS credentials and config files:
 
         .. code-block:: bash
 
             kubectl create secret generic aws-credentials \
               --namespace $NAMESPACE \
-              --from-file=credentials=$HOME/.aws/credentials
+              --from-file=credentials=$HOME/.aws
 
         Enable it by setting ``awsCredentials.enabled=true`` and ``awsCredentials.useCredentialsFile=true`` in the Helm values file.
+
+        Please note that any non-default profiles that are referenced in the AWS credentials file must additionally be declared in the config file.
+        More information about the format of these files can be found in the `AWS documentation <https://docs.aws.amazon.com/cli/v1/userguide/cli-configure-files.html#cli-configure-files-format>`_ .
 
         .. code-block:: bash
 
@@ -373,7 +376,7 @@ Following tabs describe how to configure credentials for different clouds on the
                   kubectl delete secret aws-credentials
                   kubectl create secret generic aws-credentials \
                     --namespace $NAMESPACE \
-                    --from-file=credentials=$HOME/.aws/credentials
+                    --from-file=credentials=$HOME/.aws
 
            2. Then it will take tens of seconds to take effect on the API server. You can verify the updated credentials in the API server pod:
 
@@ -381,7 +384,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
                   # The NAMESPACE and RELEASE_NAME should be consistent with the API server deployment
                   API_SERVER_POD_NAME=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
-                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.aws/credentials
+                  kubectl exec $API_SERVER_POD_NAME -n $NAMESPACE -- cat /root/.aws/*
 
         .. dropdown:: Use existing AWS credentials
 
@@ -1320,7 +1323,7 @@ To enable debug logging for all requests on server side, set
       --set-string 'apiService.extraEnvs[0].value=true'
 
 
-Debug level logs for each request are saved to ``~/.sky/logs/request_debug/<request_id>.log`` on the API server.
+Debug level logs for each request are saved to ``~/sky_logs/request_debug/<request_id>.log`` on the API server.
 Server-side debug logging does not affect output seen by the clients.
 
 Upgrade the API server

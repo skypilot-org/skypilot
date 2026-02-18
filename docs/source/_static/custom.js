@@ -35,8 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'External Logging Storage' },
-        { selector: '.toctree-l1 > a', text: 'Volumes' },
         { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
         { selector: '.toctree-l1 > a', text: 'High Availability Controller' },
         { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
@@ -44,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Using a Pool of Workers' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot Recipes' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

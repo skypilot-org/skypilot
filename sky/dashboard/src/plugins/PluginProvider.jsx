@@ -255,7 +255,10 @@ function normalizeNavLink(link) {
       link.external ??
       (/^(https?:)?\/\//.test(String(link.href)) || link.target === '_blank'),
     badge: typeof link.badge === 'string' ? link.badge : null,
-    icon: typeof link.icon === 'string' ? link.icon : null,
+    icon:
+      typeof link.icon === 'string' || React.isValidElement(link.icon)
+        ? link.icon
+        : null,
     description:
       typeof link.description === 'string' ? link.description : undefined,
   };
@@ -607,6 +610,12 @@ function createPluginApi(dispatch) {
         // Provide URL normalization utility for plugins
         normalizeUrl: normalizeUrlForHistory,
       };
+    },
+    getComponents() {
+      // Lazy import to avoid circular dependencies.
+      // This dynamically provides all components from the ui directory.
+      // eslint-disable-next-line no-undef
+      return require('@/components/ui');
     },
     registerDataProvider(config) {
       if (!config?.id) {

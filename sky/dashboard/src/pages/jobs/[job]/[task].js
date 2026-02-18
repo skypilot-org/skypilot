@@ -28,6 +28,8 @@ import { NonCapitalizedTooltip } from '@/components/utils';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import dashboardCache from '@/lib/cache';
 import { useLogStreamer } from '@/hooks/useLogStreamer';
+import { checkGrafanaAvailability } from '@/utils/grafana';
+import { GPUMetricsSection } from '@/components/GPUMetricsSection';
 
 function TaskDetails() {
   const router = useRouter();
@@ -41,6 +43,10 @@ function TaskDetails() {
   const [refreshLogsFlag, setRefreshLogsFlag] = useState(0);
   const [isLogsExpanded, setIsLogsExpanded] = useState(true);
   const isMobile = useMobile();
+
+  // GPU metrics state
+  const [isGrafanaAvailable, setIsGrafanaAvailable] = useState(false);
+  const [gpuMetricsRefreshTrigger, setGpuMetricsRefreshTrigger] = useState(0);
 
   // Update isInitialLoad when data is first loaded
   React.useEffect(() => {
@@ -63,12 +69,22 @@ function TaskDetails() {
     fetchPoolsData();
   }, []);
 
+  // Check Grafana availability on mount
+  useEffect(() => {
+    const checkGrafana = async () => {
+      const available = await checkGrafanaAvailability();
+      setIsGrafanaAvailable(available);
+    };
+    checkGrafana();
+  }, []);
+
   // Handle manual refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
       setRefreshTrigger((prev) => prev + 1);
       setRefreshLogsFlag((prev) => prev + 1);
+      setGpuMetricsRefreshTrigger((prev) => prev + 1);
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -166,6 +182,19 @@ function TaskDetails() {
                 </div>
               </Card>
             </div>
+
+            {/* GPU Metrics Section - Show for Kubernetes tasks with cluster_name_on_cloud */}
+            {isGrafanaAvailable &&
+              taskData.full_infra?.includes('Kubernetes') &&
+              !taskData.pool &&
+              taskData.cluster_name_on_cloud && (
+                <GPUMetricsSection
+                  clusterNameOnCloud={taskData.cluster_name_on_cloud}
+                  displayName={taskData.task || `Task ${taskIndex}`}
+                  refreshTrigger={gpuMetricsRefreshTrigger}
+                  storageKey="skypilot-task-gpu-metrics-expanded"
+                />
+              )}
 
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
@@ -372,7 +401,7 @@ function TaskLogsContent({
   const logStreamArgs = React.useMemo(
     () => ({
       jobId: taskData.id,
-      task: String(taskIndex),
+      task: taskIndex,
       controller: false,
     }),
     [taskData.id, taskIndex]

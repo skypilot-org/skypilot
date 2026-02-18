@@ -425,6 +425,16 @@ class InvalidClusterNameError(Exception):
     pass
 
 
+class InvalidRecipeNameError(Exception):
+    """Raised when the recipe name is invalid."""
+    pass
+
+
+class RecipeAlreadyExistsError(Exception):
+    """Raised when attempting to create a recipe with an existing name."""
+    pass
+
+
 class CloudUserIdentityError(Exception):
     """Raised when the cloud identity is invalid."""
     pass
@@ -628,6 +638,11 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class VolumeNotReadyError(Exception):
+    """Raised when a volume is not ready."""
     pass
 
 

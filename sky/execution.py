@@ -523,6 +523,7 @@ def _execute_dag(
                                      hook=hook,
                                      hook_timeout=hook_timeout)
 
+        job_id = None
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())

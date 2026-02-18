@@ -84,6 +84,7 @@ user_table = sqlalchemy.Table(
     sqlalchemy.Column('name', sqlalchemy.Text),
     sqlalchemy.Column('password', sqlalchemy.Text),
     sqlalchemy.Column('created_at', sqlalchemy.Integer),
+    sqlalchemy.Column('type', sqlalchemy.Text, server_default=None),
 )
 
 cluster_table = sqlalchemy.Table(
@@ -461,10 +462,13 @@ def add_or_update_user(
 
             # First try INSERT OR IGNORE - this won't fail if user exists
             insert_stmnt = insert_func(user_table).prefix_with(
-                'OR IGNORE').values(id=user.id,
-                                    name=user.name,
-                                    password=user.password,
-                                    created_at=created_at)
+                'OR IGNORE').values(
+                    id=user.id,
+                    name=user.name,
+                    password=user.password,
+                    created_at=created_at,
+                    type=user.user_type,
+                )
             use_returning = return_user and _sqlite_supports_returning()
             if use_returning:
                 insert_stmnt = insert_stmnt.returning(
@@ -472,6 +476,7 @@ def add_or_update_user(
                     user_table.c.name,
                     user_table.c.password,
                     user_table.c.created_at,
+                    user_table.c.type,
                 )
             result = session.execute(insert_stmnt)
 
@@ -489,13 +494,19 @@ def add_or_update_user(
                 update_values = {user_table.c.name: user.name}
                 if user.password:
                     update_values[user_table.c.password] = user.password
+                if user.user_type:
+                    update_values[user_table.c.type] = user.user_type
 
                 update_stmnt = sqlalchemy.update(user_table).where(
                     user_table.c.id == user.id).values(update_values)
                 if use_returning:
                     update_stmnt = update_stmnt.returning(
-                        user_table.c.id, user_table.c.name,
-                        user_table.c.password, user_table.c.created_at)
+                        user_table.c.id,
+                        user_table.c.name,
+                        user_table.c.password,
+                        user_table.c.created_at,
+                        user_table.c.type,
+                    )
 
                 result = session.execute(update_stmnt)
                 if use_returning:
@@ -509,10 +520,13 @@ def add_or_update_user(
                     # so we need to do a separate query
                     row = session.query(user_table).filter_by(
                         id=user.id).first()
-                updated_user = models.User(id=row.id,
-                                           name=row.name,
-                                           password=row.password,
-                                           created_at=row.created_at)
+                updated_user = models.User(
+                    id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at,
+                    user_type=row.type,
+                )
                 return was_inserted, updated_user
             else:
                 return was_inserted
@@ -527,7 +541,9 @@ def add_or_update_user(
                 id=user.id,
                 name=user.name,
                 password=user.password,
-                created_at=created_at)
+                created_at=created_at,
+                type=user.user_type,
+            )
 
             # Use a sentinel in the RETURNING clause to detect insert vs update
             if user.password:
@@ -537,12 +553,15 @@ def add_or_update_user(
                 }
             else:
                 set_ = {user_table.c.name: user.name}
+            if user.user_type:
+                set_[user_table.c.type] = user.user_type
             upsert_stmnt = insert_stmnt.on_conflict_do_update(
                 index_elements=[user_table.c.id], set_=set_).returning(
                     user_table.c.id,
                     user_table.c.name,
                     user_table.c.password,
                     user_table.c.created_at,
+                    user_table.c.type,
                     # This will be True for INSERT, False for UPDATE
                     sqlalchemy.literal_column('(xmax = 0)').label('was_inserted'
                                                                  ))
@@ -554,10 +573,13 @@ def add_or_update_user(
             session.commit()
 
             if return_user:
-                updated_user = models.User(id=row.id,
-                                           name=row.name,
-                                           password=row.password,
-                                           created_at=row.created_at)
+                updated_user = models.User(
+                    id=row.id,
+                    name=row.name,
+                    password=row.password,
+                    created_at=row.created_at,
+                    user_type=row.type,
+                )
                 return was_inserted, updated_user
             else:
                 return was_inserted
@@ -573,10 +595,13 @@ def get_user(user_id: str) -> Optional[models.User]:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
         return None
-    return models.User(id=row.id,
-                       name=row.name,
-                       password=row.password,
-                       created_at=row.created_at)
+    return models.User(
+        id=row.id,
+        name=row.name,
+        password=row.password,
+        created_at=row.created_at,
+        user_type=row.type,
+    )
 
 
 @_init_db
@@ -587,10 +612,13 @@ def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
         rows = session.query(user_table).filter(
             user_table.c.id.in_(user_ids)).all()
     return {
-        row.id: models.User(id=row.id,
-                            name=row.name,
-                            password=row.password,
-                            created_at=row.created_at) for row in rows
+        row.id: models.User(
+            id=row.id,
+            name=row.name,
+            password=row.password,
+            created_at=row.created_at,
+            user_type=row.type,
+        ) for row in rows
     }
 
 
@@ -602,10 +630,13 @@ def get_user_by_name(username: str) -> List[models.User]:
     if len(rows) == 0:
         return []
     return [
-        models.User(id=row.id,
-                    name=row.name,
-                    password=row.password,
-                    created_at=row.created_at) for row in rows
+        models.User(
+            id=row.id,
+            name=row.name,
+            password=row.password,
+            created_at=row.created_at,
+            user_type=row.type,
+        ) for row in rows
     ]
 
 
@@ -616,8 +647,12 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
         rows = session.query(user_table).filter(
             user_table.c.name.like(f'%{username_match}%')).all()
     return [
-        models.User(id=row.id, name=row.name, created_at=row.created_at)
-        for row in rows
+        models.User(
+            id=row.id,
+            name=row.name,
+            created_at=row.created_at,
+            user_type=row.type,
+        ) for row in rows
     ]
 
 
@@ -636,10 +671,13 @@ def get_all_users() -> List[models.User]:
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         rows = session.query(user_table).all()
     return [
-        models.User(id=row.id,
-                    name=row.name,
-                    password=row.password,
-                    created_at=row.created_at) for row in rows
+        models.User(
+            id=row.id,
+            name=row.name,
+            password=row.password,
+            created_at=row.created_at,
+            user_type=row.type,
+        ) for row in rows
     ]
 
 

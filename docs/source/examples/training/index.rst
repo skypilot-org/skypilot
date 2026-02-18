@@ -8,6 +8,7 @@ Training
    DeepSpeed <deepspeed.md>
    Distributed PyTorch <distributed-pytorch.md>
    Distributed TensorFlow <distributed-tensorflow.md>
+   Fairseq2 <fairseq2.md>
    Finetuning GPT-OSS <gpt-oss-finetuning.md>
    Finetuning Llama 4 <llama-4-finetuning.md>
    Finetuning Llama 3 <llama-3_1-finetuning.md>
@@ -15,6 +16,7 @@ Training
    nanochat <nanochat.md>
    NeMo <nemo.md>
    NeMo RL <nemorl.md>
+   PyTorch Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
    Ray <ray.md>
    TorchTitan <torchtitan.md>
    Training on TPUs <tpu.md>

@@ -260,6 +260,28 @@ auth:
     # @schema type: [boolean, null]
     enabled: null
 
+  # Proxy authentication configuration.
+  # Use this when deploying behind an external authentication proxy
+  # (e.g., AWS ALB with Cognito, Azure Front Door, custom ingress auth).
+  # When enabled, the API server trusts the identity header from the proxy.
+  # This is mutually exclusive with auth.oauth and ingress.oauth2-proxy.
+  # @schema type: [object, null]
+  externalProxy:
+    # Enable proxy authentication.
+    # @schema type: [boolean]
+    enabled: false
+    # Header name containing the user identity.
+    # @schema type: [string]
+    headerName: 'X-Auth-Request-Email'
+    # Header format: 'plaintext' or 'jwt'.
+    # Use 'jwt' for headers that contain JWT tokens.
+    # Use 'plaintext' for headers that contain plain identity strings.
+    # @schema type: [string]
+    headerFormat: 'plaintext'
+    # JWT claim to extract identity from (only used when headerFormat is 'jwt').
+    # @schema type: [string]
+    jwtIdentityClaim: 'sub'
+
 storage:
   # Enable/disable persistent storage
   # With this enabled, SkyPilot will use a PV to persist the internal data like states, logs, lock files, catalog, etc.
@@ -492,10 +514,11 @@ kubernetesCredentials:
 
 awsCredentials:
   enabled: false
-  # Name of the secret containing the aws credentials. Only used if enabled is true.
+  # Name of the secret containing the aws config and credentials. Only used if enabled is true.
   awsSecretName: aws-credentials
 
-  # Set to true to mount a complete AWS credentials file with multiple profiles.
+  # Set to true to mount a complete AWS config directory, including the config and the credentials file with multiple profiles.
+  # Credentials should be defined in the `credentials` file. If a non-default profile is used, the profile must be additionally be declared in the `config` file.
   # This is required for using different AWS profiles with different workspaces.
   useCredentialsFile: false
 
@@ -724,6 +747,7 @@ grafana:
     # Enable datasources discovery in grafana sidecar.
     datasources:
       enabled: true
+      initDatasources: true
     # Enable dashboards discovery in grafana sidecar.
     dashboards:
       enabled: true

@@ -274,10 +274,17 @@ def safe_logger():
 
 
 class RichSafeStreamHandler(logging.StreamHandler):
+    """A logging handler that safely handles Rich status spinners."""
 
     def emit(self, record: logging.LogRecord) -> None:
         with safe_logger():
-            return super().emit(record)
+            try:
+                return super().emit(record)
+            except ValueError as e:
+                # Ignore "I/O operation on closed file" errors that occur
+                # when pytest-xdist workers close stdout during parallel tests
+                if str(e) != 'I/O operation on closed file':
+                    raise
 
 
 def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:

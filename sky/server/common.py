@@ -672,6 +672,13 @@ def _start_api_server(deploy: bool = False,
             _set_metrics_env_var(os.environ, metrics, deploy)
             if enable_basic_auth:
                 os.environ[constants.ENV_VAR_ENABLE_BASIC_AUTH] = 'true'
+            # Raise the websockets library header limits before the server
+            # process starts (env vars are read at import time).
+            os.environ.setdefault(
+                'WEBSOCKETS_MAX_LINE_LENGTH',
+                server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
+            os.environ.setdefault('WEBSOCKETS_MAX_NUM_HEADERS',
+                                  server_constants.WEBSOCKETS_MAX_NUM_HEADERS)
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
@@ -680,6 +687,13 @@ def _start_api_server(deploy: bool = False,
         # For spawn mode, copy the environ to avoid polluting the SDK process.
         server_env = os.environ.copy()
         server_env[constants.ENV_VAR_IS_SKYPILOT_SERVER] = 'true'
+        # Raise the websockets library header limits before the server
+        # process starts (env vars are read at import time).
+        server_env.setdefault(
+            'WEBSOCKETS_MAX_LINE_LENGTH',
+            server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
+        server_env.setdefault('WEBSOCKETS_MAX_NUM_HEADERS',
+                              server_constants.WEBSOCKETS_MAX_NUM_HEADERS)
         # Start the API server process in the background and don't wait for it.
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
@@ -911,6 +925,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         The translated task as a single-task dag.
     """
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
+
+    versions.check_recipe_client_version(task)
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
 

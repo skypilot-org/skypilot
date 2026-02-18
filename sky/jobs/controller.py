@@ -15,6 +15,7 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 import dotenv
+import filelock
 
 import sky
 from sky import core
@@ -170,6 +171,7 @@ class JobController:
         starting_lock: asyncio.Lock,
         starting_signal: asyncio.Condition,
         pool: Optional[str] = None,
+        rank: Optional[int] = None,
     ) -> None:
         """Initialize a ``JobsController``.
 
@@ -184,6 +186,8 @@ class JobController:
             pool: Optional pool name. When provided, the job is
                 submitted to the pool rather than launching a dedicated
                 cluster.
+            rank: Optional rank of the job that can be used to partition
+                workloads.
         """
 
         self.starting = starting
@@ -199,6 +203,8 @@ class JobController:
 
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
         self._pool = pool
+        self._rank = rank
+        logger.info(f'Rank for job {self._job_id}: {self._rank}')
 
         # pylint: disable=line-too-long
         # Add a unique identifier to the task environment variables, so that
@@ -230,6 +236,12 @@ class JobController:
             task_envs[constants.TASK_ID_ENV_VAR] = job_id_env_vars[i]
             task_envs[constants.TASK_ID_LIST_ENV_VAR] = '\n'.join(
                 job_id_env_vars)
+            # Add SKYPILOT_JOB_RANK if it's set in the context or os.environ
+            # (os.environ may be hijacked to use ContextualEnviron which includes context overrides)
+            if self._rank is not None:
+                task_envs['SKYPILOT_JOB_RANK'] = str(self._rank)
+            else:
+                task_envs['SKYPILOT_JOB_RANK'] = '0'
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
@@ -732,6 +744,7 @@ class JobController:
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
+            cluster_event_reason = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -742,6 +755,35 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
+
+                # Fetch and log cluster events to provide context on why the
+                # cluster entered INIT/non-UP state.
+                try:
+                    events = await asyncio.to_thread(
+                        global_user_state.get_cluster_events,
+                        cluster_name=cluster_name,
+                        cluster_hash=None,
+                        event_type=global_user_state.ClusterEventType.
+                        STATUS_CHANGE,
+                        include_timestamps=True,
+                        limit=5)
+                    if events:
+                        event_strs = []
+                        for event in events:
+                            # Need cast due to dictionary semantics
+                            transitioned_at = int(event['transitioned_at'])
+                            timestamp = time.strftime(
+                                '%Y-%m-%d %H:%M:%S',
+                                time.localtime(transitioned_at))
+                            event_strs.append(
+                                f'  {timestamp}: {event["reason"]}')
+                        events_str = '\n'.join(event_strs)
+                        logger.info(f'Recent cluster events:\n{events_str}')
+                        cluster_event_reason = events[-1]['reason']
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to fetch cluster events: '
+                                 f'{common_utils.format_exception(e)}')
+
                 if ExternalFailureSource.is_registered():
                     cluster_failures = await asyncio.to_thread(
                         ExternalFailureSource.get, cluster_name=cluster_name)
@@ -924,6 +966,7 @@ class JobController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func,
                 external_failures=external_failures,
+                cluster_event_reason=cluster_event_reason,
             )
 
             recovered_time = await executor.recover()
@@ -1634,10 +1677,19 @@ class ControllerManager:
         # launch).
         self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
+        # Store graceful cancel info per job, keyed by job_id.
+        # Populated by cancel_job() and consumed by run_job().
+        self._cancel_info: Dict[int, Tuple[bool, Optional[int]]] = {}
+        self._cancel_info_lock = asyncio.Lock()
+
         self._pid = os.getpid()
         self._pid_started_at = psutil.Process(self._pid).create_time()
 
-    async def _cleanup(self, job_id: int, pool: Optional[str] = None):
+    async def _cleanup(self,
+                       job_id: int,
+                       pool: Optional[str] = None,
+                       graceful: bool = False,
+                       graceful_timeout: Optional[int] = None):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -1662,7 +1714,10 @@ class ControllerManager:
                     cluster_name = (
                         managed_job_utils.generate_managed_job_cluster_name(
                             task.name, job_id))
-                    managed_job_utils.terminate_cluster(cluster_name)
+                    managed_job_utils.terminate_cluster(
+                        cluster_name,
+                        graceful=graceful,
+                        graceful_timeout=graceful_timeout)
                     status = core.status(cluster_names=[cluster_name],
                                          all_users=True)
                     assert (len(status) == 0 or
@@ -1759,6 +1814,7 @@ class ControllerManager:
         logger.info(f'From controller {self._controller_uuid}')
         logger.info(f'  pid={self._pid}')
 
+        job_rank = None
         env_content = file_content_utils.get_job_env_content(job_id)
         if env_content:
             try:
@@ -1776,6 +1832,25 @@ class ControllerManager:
                     file_content_utils.restore_job_config_file(job_id)
 
                     skypilot_config.reload_config()
+
+                    # Set SKYPILOT_JOB_RANK from job_id_to_rank mapping if
+                    # available
+                    if ('SKYPILOT_JOB_ID_TO_RANK' in env_vars and
+                            env_vars['SKYPILOT_JOB_ID_TO_RANK']):
+                        try:
+                            job_id_to_rank = (json.loads(
+                                env_vars['SKYPILOT_JOB_ID_TO_RANK']))
+                            logger.debug(
+                                f'Loaded job_id_to_rank map: {job_id_to_rank}')
+                            job_rank = job_id_to_rank.get(str(job_id))
+                        except json.JSONDecodeError as e:
+                            logger.warning(
+                                'Failed to parse SKYPILOT_JOB_ID_TO_RANK for '
+                                'job %s: %s', job_id, e)
+                    else:
+                        logger.debug(
+                            'SKYPILOT_JOB_ID_TO_RANK not found in environment '
+                            'variables')
                 else:  # pragma: no cover - defensive
                     logger.error('Context is None, cannot set environment '
                                  'variables')
@@ -1785,10 +1860,11 @@ class ControllerManager:
                     '%s', job_id, e)
 
         cancelling = False
+        graceful, graceful_timeout = False, None
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
-                                       self._starting_signal, pool)
+                                       self._starting_signal, pool, job_rank)
 
             async with self._job_tasks_lock:
                 if job_id in self.job_tasks:
@@ -1803,6 +1879,14 @@ class ControllerManager:
             await task
         except asyncio.CancelledError:
             logger.info(f'Job {job_id} was cancelled')
+
+            async with self._cancel_info_lock:
+                cancel_info = self._cancel_info.pop(job_id, None)
+            if cancel_info is not None:
+                graceful, graceful_timeout = cancel_info
+                logger.debug(f'Job {job_id} graceful cancel: '
+                             f'graceful={graceful}, timeout={graceful_timeout}')
+
             dag = _get_dag(job_id)
             task_id, _ = await (
                 managed_job_state.get_latest_task_id_status_async(job_id))
@@ -1821,7 +1905,10 @@ class ControllerManager:
             raise
         finally:
             try:
-                await self._cleanup(job_id, pool=pool)
+                await self._cleanup(job_id,
+                                    pool=pool,
+                                    graceful=graceful,
+                                    graceful_timeout=graceful_timeout)
                 logger.info(
                     f'Cluster of managed job {job_id} has been cleaned up.')
             except Exception as e:  # pylint: disable=broad-except
@@ -1908,6 +1995,14 @@ class ControllerManager:
         while True:
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
+                if not cancel.isdigit():
+                    # There maybe unexpected files that are written to the
+                    # signal directory. We for sure write filelocks to the
+                    # directory, so we need to skip.
+                    if not cancel.endswith('.lock'):
+                        logger.debug('Detected unexpected file in signal '
+                                     f'directory: {cancel}. Skipping...')
+                    continue
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
                     if job_id in self.job_tasks:
@@ -1915,13 +2010,30 @@ class ControllerManager:
 
                         task = self.job_tasks[job_id]
 
-                        # Run the cancellation in the background, so we can
-                        # return immediately.
+                        signal_path = os.path.join(
+                            jobs_constants.CONSOLIDATED_SIGNAL_PATH, cancel)
+                        with filelock.FileLock(signal_path + '.lock'):
+                            try:
+                                content = pathlib.Path(signal_path).read_text(
+                                    encoding='utf-8').strip()
+                            except Exception as e:  # pylint: disable=broad-except
+                                content = ''
+                                logger.debug(
+                                    'Problem occurred when reading '
+                                    f'{signal_path}: '
+                                    f'{common_utils.format_exception(e)}')
+                            finally:
+                                os.remove(signal_path)
+
+                        # Parse and store graceful cancel info before
+                        # cancelling the task.
+                        graceful, graceful_timeout = managed_job_utils.parse_job_cancel_file(  # pylint: disable=line-too-long
+                            content)
+                        async with self._cancel_info_lock:
+                            self._cancel_info[job_id] = (graceful,
+                                                         graceful_timeout)
                         task.cancel()
                         logger.info(f'Job {job_id} cancelled successfully')
-
-                        os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
-                                  f'{job_id}')
             await asyncio.sleep(15)
 
     async def monitor_loop(self):
