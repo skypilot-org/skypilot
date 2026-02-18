@@ -12,6 +12,7 @@ import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -608,6 +609,10 @@ function createPluginApi(dispatch) {
         grafanaUtils: {
           checkGrafanaAvailability,
           getGrafanaUrl,
+        },
+        gpuUtils: {
+          canonicalizeGpuName,
+          CANONICAL_GPU_NAMES,
         },
         // Provide URL normalization utility for plugins
         normalizeUrl: normalizeUrlForHistory,
