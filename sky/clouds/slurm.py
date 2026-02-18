@@ -61,19 +61,18 @@ class Slurm(clouds.Cloud):
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
     _INDENT_PREFIX = '    '
-    # Known shared filesystem types that work with SkyPilot's multi-node
-    # coordination. Names as returned by `stat -f -c %T`.
+    # Known shared filesystem types that SkyPilot requires for Slurm.
+    # Names as returned by `stat -f -c %T`.
     _SHARED_FS_TYPES = frozenset({
         'nfs',
+        'nfs4',
         'lustre',
         'gpfs',
         'beegfs',
-        'fhgfs',
         'ceph',
+        'fuse.ceph',
         'glusterfs',
-        'panfs',
-        'pvfs2',
-        'afs',
+        'fuse.glusterfs',
     })
 
     # Same as Kubernetes.
