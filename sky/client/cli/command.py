@@ -238,6 +238,22 @@ def _get_cluster_records_and_set_ssh_config(
                              f'{handle.cluster_name} '
                              f'slurm-job-ssh-proxy %w')
             credentials['ssh_proxy_command'] = proxy_command
+        elif not server_common.is_api_server_local():
+            # For cloud VMs (AWS, GCP, Azure, etc.) when using a remote API
+            # server, set up the SSH proxy through the API server.
+            # This allows clients outside the API server's network to SSH
+            # into VMs that are only accessible from the API server.
+            escaped_executable_path = shlex.quote(sys.executable)
+            escaped_websocket_proxy_path = shlex.quote(
+                f'{directory_utils.get_sky_dir()}/templates/websocket_proxy.py')
+            # %w is a placeholder for the node index, substituted per-node
+            # in cluster_utils.SSHConfigHelper.add_cluster().
+            proxy_command = (f'{escaped_executable_path} '
+                             f'{escaped_websocket_proxy_path} '
+                             f'{server_common.get_server_url()} '
+                             f'{handle.cluster_name} '
+                             f'vm-ssh-proxy %w')
+            credentials['ssh_proxy_command'] = proxy_command
 
         cluster_utils.SSHConfigHelper.add_cluster(
             handle.cluster_name,
