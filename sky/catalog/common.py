@@ -138,12 +138,25 @@ class LazyDataFrame:
         self._filename = filename
         self._df: Optional['pd.DataFrame'] = None
         self._update_if_stale_func = update_if_stale_func
+        self._last_read_mtime: Optional[float] = None
+
+    def _has_file_changed(self) -> bool:
+        """Check if the file on disk has changed since last read."""
+        if self._last_read_mtime is None:
+            return True
+        try:
+            current_mtime = os.path.getmtime(self._filename)
+        except OSError:
+            # File deleted/inaccessible; _update_if_stale_func handles it.
+            return False
+        return current_mtime != self._last_read_mtime
 
     @annotations.lru_cache(scope='request')
     def _load_df(self) -> 'pd.DataFrame':
-        if self._update_if_stale_func() or self._df is None:
+        if self._update_if_stale_func() or self._has_file_changed():
             try:
                 self._df = pd.read_csv(self._filename)
+                self._last_read_mtime = os.path.getmtime(self._filename)
             except Exception as e:  # pylint: disable=broad-except
                 # As users can manually modify the catalog, read_csv can fail.
                 logger.error(f'Failed to read {self._filename}. '
@@ -810,3 +823,141 @@ def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
     df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
     return not df.empty
+
+
+# ---------------------------------------------------------------------------
+# User-provided pricing for virtual instance types (Kubernetes, Slurm, SSH)
+# ---------------------------------------------------------------------------
+
+_PRICING_WILDCARD = object()  # column must be NaN (wildcard row)
+_PRICING_ANY = object()  # no filter on this column
+
+
+def _find_cheapest_price(
+    df: 'pd.DataFrame',
+    region: Optional[str],
+    zone: Optional[str],
+    key_column: str,
+    accelerator_name: Optional[str] = None,
+) -> float:
+    """Return the cheapest rate from a pricing catalog.
+
+    When ``region`` or ``zone`` is specified the lookup prefers
+    more-specific rows (exact match > wildcard).  When a dimension is
+    ``None`` it is unconstrained — all rows are eligible on that
+    dimension and the cheapest wins.
+
+    Priority when both region and zone are specified:
+        1. Exact Region + exact Zone
+        2. Exact Region + wildcard Zone
+        3. Wildcard Region + exact Zone
+        4. Wildcard Region + wildcard Zone
+
+    When only one is specified, the other dimension is unconstrained.
+    When neither is specified, all rows compete and the cheapest wins.
+
+    Within each priority level the row with the lowest ``key_column``
+    value (cheapest rate) is returned.  Returns 0.0 when nothing
+    matches.
+
+    Args:
+        df: Pricing catalog DataFrame with columns Region, Zone,
+            PricePerVCPU, PricePerMemoryGB, AcceleratorName,
+            PricePerAccelerator.
+        region: K8s context / Slurm cluster name (may be None).
+        zone: Slurm partition (may be None; always None for K8s).
+        key_column: Column that must be non-NaN for a row to be
+            considered (e.g. ``'PricePerVCPU'`` or
+            ``'PricePerAccelerator'``).
+        accelerator_name: If given, only rows whose AcceleratorName
+            matches (case-insensitive) are considered.
+    """
+    mask = df[key_column].notna()
+    if accelerator_name is not None:
+        mask = mask & df['AcceleratorName'].notna() & (
+            df['AcceleratorName'].str.lower() == accelerator_name.lower())
+    candidates = df[mask]
+    if candidates.empty:
+        return 0.0
+
+    priorities: List[Tuple] = []
+    if region is not None and zone is not None:
+        priorities.append((region, zone))
+        priorities.append((region, _PRICING_WILDCARD))
+        priorities.append((_PRICING_WILDCARD, zone))
+        priorities.append((_PRICING_WILDCARD, _PRICING_WILDCARD))
+    elif region is not None:
+        priorities.append((region, _PRICING_ANY))
+        priorities.append((_PRICING_WILDCARD, _PRICING_ANY))
+    elif zone is not None:
+        priorities.append((_PRICING_ANY, zone))
+        priorities.append((_PRICING_ANY, _PRICING_WILDCARD))
+    else:
+        priorities.append((_PRICING_ANY, _PRICING_ANY))
+
+    all_true = pd.Series(True, index=candidates.index)
+
+    for r, z in priorities:
+        if r is _PRICING_ANY:
+            r_mask = all_true
+        elif r is _PRICING_WILDCARD:
+            r_mask = candidates['Region'].isna()
+        else:
+            r_mask = candidates['Region'] == r
+
+        if z is _PRICING_ANY:
+            z_mask = all_true
+        elif z is _PRICING_WILDCARD:
+            z_mask = candidates['Zone'].isna()
+        else:
+            z_mask = candidates['Zone'] == z
+
+        match = candidates[r_mask & z_mask]
+        if not match.empty:
+            return float(match[key_column].min())
+
+    return 0.0
+
+
+def get_hourly_cost_for_virtual_instance_type(
+    df: 'pd.DataFrame',
+    cpus: float,
+    memory: float,
+    accelerator_name: Optional[str],
+    accelerator_count: Optional[int],
+    region: Optional[str],
+    zone: Optional[str],
+) -> float:
+    """Compute hourly cost for a virtual instance type from a pricing catalog.
+
+    Kubernetes, SSH, and Slurm all use virtual instance types of the form
+    ``4CPU--16GB--A100:1``.  Users can place a pricing CSV at
+    ``~/.sky/catalogs/<version>/<cloud>/pricing.csv`` with the columns::
+
+        Region,Zone,PricePerVCPU,PricePerMemoryGB,AcceleratorName,
+        PricePerAccelerator
+
+    The cost is::
+
+        cpus * PricePerVCPU  +  memory * PricePerMemoryGB
+            +  accelerator_count * PricePerAccelerator
+
+    CPU, memory, and accelerator lookups each walk the priority
+    chain independently.
+
+    Refer to get_hourly_cost in kubernetes_catalog.py / slurm_catalog.py
+    for usage.
+    """
+    cpu_rate = _find_cheapest_price(df, region, zone, 'PricePerVCPU')
+    mem_rate = _find_cheapest_price(df, region, zone, 'PricePerMemoryGB')
+    cost = cpus * cpu_rate + memory * mem_rate
+
+    if accelerator_name and accelerator_count:
+        accel_rate = _find_cheapest_price(df,
+                                          region,
+                                          zone,
+                                          'PricePerAccelerator',
+                                          accelerator_name=accelerator_name)
+        cost += accelerator_count * accel_rate
+
+    return cost

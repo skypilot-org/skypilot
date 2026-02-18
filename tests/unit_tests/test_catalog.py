@@ -86,6 +86,76 @@ def test_read_catalog_triggers_update_on_stale_file(mock_get):
             os.remove(lock_path)
 
 
+def test_manual_catalog_edit_triggers_reload():
+    """Test that manually editing a catalog CSV on disk triggers a reload
+    without requiring a GitHub download."""
+    INITIAL_CSV = 'col1,col2\n1,2\n'
+    UPDATED_CSV = 'col1,col2\n10,20\n'
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv',
+                                     delete=False) as tmp:
+        tmp.write(INITIAL_CSV)
+        tmp_path = tmp.name
+
+    try:
+        # update_if_stale_func always returns False (no GitHub download).
+        update_fn = mock.MagicMock(return_value=False)
+        lazy_df = catalog_common.LazyDataFrame(tmp_path, update_fn)
+
+        # Initial load.
+        annotations.clear_request_level_cache()
+        df1 = lazy_df._load_df()
+        assert df1.iloc[0]['col1'] == 1
+
+        # Manually edit the file on disk and bump mtime explicitly
+        # so the test is not sensitive to filesystem time resolution.
+        with open(tmp_path, 'w') as f:
+            f.write(UPDATED_CSV)
+        future = os.path.getmtime(tmp_path) + 2
+        os.utime(tmp_path, (future, future))
+
+        # Clear the per-request LRU cache so _load_df runs its body again.
+        annotations.clear_request_level_cache()
+
+        df2 = lazy_df._load_df()
+        assert df2.iloc[0]['col1'] == 10
+
+        # update_if_stale_func was called but never triggered a download.
+        assert all(call == mock.call() for call in update_fn.call_args_list)
+        assert all(ret is False
+                   for ret in [update_fn.return_value] * update_fn.call_count)
+    finally:
+        os.remove(tmp_path)
+
+
+def test_no_reload_when_file_unchanged():
+    """Test that when the file hasn't changed, the same DataFrame object
+    is reused (no redundant pd.read_csv)."""
+    CSV = 'col1,col2\n1,2\n'
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv',
+                                     delete=False) as tmp:
+        tmp.write(CSV)
+        tmp_path = tmp.name
+
+    try:
+        update_fn = mock.MagicMock(return_value=False)
+        lazy_df = catalog_common.LazyDataFrame(tmp_path, update_fn)
+
+        # First load.
+        annotations.clear_request_level_cache()
+        df1 = lazy_df._load_df()
+
+        # Second load, file unchanged.
+        annotations.clear_request_level_cache()
+        df2 = lazy_df._load_df()
+
+        # Same object — no re-read happened.
+        assert df1 is df2
+    finally:
+        os.remove(tmp_path)
+
+
 @pytest.mark.parametrize(
     "cpus, memory, region, zone, expected",
     [
@@ -361,3 +431,257 @@ def test_filter_with_local_disk_instance_sets(local_disk, expected_instances):
                                                      local_disk)
     assert sorted(
         filtered['InstanceType'].tolist()) == sorted(expected_instances)
+
+
+# ---------------------------------------------------------------------------
+# Custom pricing catalog tests (Kubernetes / Slurm)
+# ---------------------------------------------------------------------------
+
+# Kubernetes-style pricing: context-specific + wildcard rows.
+_K8S_PRICING_DF = pd.DataFrame([
+    {
+        'Region': 'my-ctx',
+        'Zone': None,
+        'PricePerVCPU': 0.05,
+        'PricePerMemoryGB': 0.01,
+        'AcceleratorName': None,
+        'PricePerAccelerator': None
+    },
+    {
+        'Region': 'my-ctx',
+        'Zone': None,
+        'PricePerVCPU': None,
+        'PricePerMemoryGB': None,
+        'AcceleratorName': 'A100',
+        'PricePerAccelerator': 3.50
+    },
+    {
+        'Region': None,
+        'Zone': None,
+        'PricePerVCPU': 0.02,
+        'PricePerMemoryGB': 0.005,
+        'AcceleratorName': None,
+        'PricePerAccelerator': None
+    },
+    {
+        'Region': None,
+        'Zone': None,
+        'PricePerVCPU': None,
+        'PricePerMemoryGB': None,
+        'AcceleratorName': 'H100',
+        'PricePerAccelerator': 5.00
+    },
+])
+
+# Slurm-style pricing: cluster + partition (zone) rows.
+_SLURM_PRICING_DF = pd.DataFrame([
+    {
+        'Region': 'my-slurm',
+        'Zone': None,
+        'PricePerVCPU': 0.04,
+        'PricePerMemoryGB': 0.01,
+        'AcceleratorName': None,
+        'PricePerAccelerator': None
+    },
+    {
+        'Region': 'my-slurm',
+        'Zone': 'gpu-part',
+        'PricePerVCPU': None,
+        'PricePerMemoryGB': None,
+        'AcceleratorName': 'V100',
+        'PricePerAccelerator': 2.50
+    },
+    {
+        'Region': 'my-slurm',
+        'Zone': 'high-pri',
+        'PricePerVCPU': 0.08,
+        'PricePerMemoryGB': 0.02,
+        'AcceleratorName': None,
+        'PricePerAccelerator': None
+    },
+    {
+        'Region': None,
+        'Zone': None,
+        'PricePerVCPU': 0.03,
+        'PricePerMemoryGB': 0.008,
+        'AcceleratorName': None,
+        'PricePerAccelerator': None
+    },
+])
+
+# -- CPU/memory rate computation -------------------------------------------
+
+
+def test_cpu_mem_rate_context_specific():
+    """4CPU--16GB with rates 0.05/0.01 -> $0.36/hr."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=4,
+        memory=16,
+        accelerator_name=None,
+        accelerator_count=None,
+        region='my-ctx',
+        zone=None)
+    assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
+
+
+def test_cpu_mem_rate_wildcard_fallback():
+    """Unknown context falls back to wildcard rates 0.02/0.005."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=4,
+        memory=16,
+        accelerator_name=None,
+        accelerator_count=None,
+        region='unknown-ctx',
+        zone=None)
+    assert cost == pytest.approx(4 * 0.02 + 16 * 0.005)
+
+
+# -- Accelerator price lookup ---------------------------------------------
+
+
+def test_accelerator_price_context_specific():
+    """A100 at $3.50/GPU, 4 GPUs -> $14.00."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=0,
+        memory=0,
+        accelerator_name='A100',
+        accelerator_count=4,
+        region='my-ctx',
+        zone=None)
+    assert cost == pytest.approx(4 * 3.50)
+
+
+def test_accelerator_price_wildcard():
+    """H100 at $5.00/GPU wildcard, 2 GPUs -> $10.00."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=0,
+        memory=0,
+        accelerator_name='H100',
+        accelerator_count=2,
+        region='unknown-ctx',
+        zone=None)
+    assert cost == pytest.approx(2 * 5.00)
+
+
+def test_accelerator_name_case_insensitive():
+    """Accelerator lookup should be case-insensitive."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=0,
+        memory=0,
+        accelerator_name='a100',
+        accelerator_count=1,
+        region='my-ctx',
+        zone=None)
+    assert cost == pytest.approx(3.50)
+
+
+# -- Combined pricing (CPU/mem + accelerator) ------------------------------
+
+
+def test_combined_pricing():
+    """4CPU--16GB--A100:1 on my-ctx -> 0.36 + 3.50 = 3.86."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=4,
+        memory=16,
+        accelerator_name='A100',
+        accelerator_count=1,
+        region='my-ctx',
+        zone=None)
+    expected = 4 * 0.05 + 16 * 0.01 + 1 * 3.50
+    assert cost == pytest.approx(expected)
+
+
+# -- Zone / partition-specific pricing (Slurm) -----------------------------
+
+
+def test_slurm_zone_specific_accelerator():
+    """V100 on my-slurm/gpu-part -> $2.50/GPU."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _SLURM_PRICING_DF,
+        cpus=0,
+        memory=0,
+        accelerator_name='V100',
+        accelerator_count=4,
+        region='my-slurm',
+        zone='gpu-part')
+    assert cost == pytest.approx(4 * 2.50)
+
+
+def test_slurm_zone_specific_cpu_mem():
+    """high-pri partition overrides cluster-wide rates."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _SLURM_PRICING_DF,
+        cpus=8,
+        memory=32,
+        accelerator_name=None,
+        accelerator_count=None,
+        region='my-slurm',
+        zone='high-pri')
+    assert cost == pytest.approx(8 * 0.08 + 32 * 0.02)
+
+
+def test_slurm_fallback_to_region_when_zone_unmatched():
+    """Unknown partition falls back to cluster-wide rates."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _SLURM_PRICING_DF,
+        cpus=4,
+        memory=16,
+        accelerator_name=None,
+        accelerator_count=None,
+        region='my-slurm',
+        zone='unknown-part')
+    assert cost == pytest.approx(4 * 0.04 + 16 * 0.01)
+
+
+# -- No matching accelerator in catalog -----------------------------------
+
+
+def test_unknown_accelerator_returns_zero_accel_price():
+    """If accelerator isn't in catalog, its price component is 0."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=4,
+        memory=16,
+        accelerator_name='TPUv5e',
+        accelerator_count=4,
+        region='my-ctx',
+        zone=None)
+    # Only CPU/mem should contribute.
+    assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
+
+
+# -- region=None picks cheapest across all regions -------------------------
+
+
+def test_no_region_picks_cheapest_cpu_rate():
+    """region=None should pick the cheapest rate across all regions."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=4,
+        memory=16,
+        accelerator_name=None,
+        accelerator_count=None,
+        region=None,
+        zone=None)
+    # Wildcard rates (0.02/0.005) are cheaper than my-ctx (0.05/0.01).
+    assert cost == pytest.approx(4 * 0.02 + 16 * 0.005)
+
+
+def test_no_region_picks_cheapest_accelerator():
+    """region=None should pick the cheapest accelerator price."""
+    cost = catalog_common.get_hourly_cost_for_virtual_instance_type(
+        _K8S_PRICING_DF,
+        cpus=0,
+        memory=0,
+        accelerator_name='A100',
+        accelerator_count=2,
+        region=None,
+        zone=None)
+    # A100 is only in my-ctx at $3.50.
+    assert cost == pytest.approx(2 * 3.50)
