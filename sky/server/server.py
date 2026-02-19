@@ -589,7 +589,7 @@ async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
 async def schedule_on_boot_check_async():
     try:
         await executor.schedule_request_async(
-            request_id='skypilot-server-on-boot-check',
+            request_id=server_constants.ON_BOOT_CHECK_REQUEST_ID,
             request_name=request_names.RequestName.CHECK,
             request_body=payloads.CheckBody(),
             func=sky_check.check,
@@ -599,7 +599,8 @@ async def schedule_on_boot_check_async():
     except exceptions.RequestAlreadyExistsError:
         # Lifespan will be executed in each uvicorn worker process, we
         # can safely ignore the error if the task is already scheduled.
-        logger.debug('Request skypilot-server-on-boot-check already exists.')
+        logger.debug(f'Request {server_constants.ON_BOOT_CHECK_REQUEST_ID} '
+                     'already exists.')
 
 
 @contextlib.asynccontextmanager

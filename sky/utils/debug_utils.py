@@ -11,6 +11,8 @@ import zipfile
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.utils import common
@@ -21,12 +23,11 @@ logger = sky_logging.init_logger(__name__)
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
-# System daemon request IDs to always include in debug dumps
-SYSTEM_REQUEST_IDS = [
-    'skypilot-status-refresh-daemon',
-    'skypilot-volume-status-refresh-daemon',
-    'skypilot-server-on-boot-check',
-]
+# System daemon request IDs to always include in debug dumps.
+# Built from INTERNAL_REQUEST_DAEMONS (background refresh daemons) plus the
+# on-boot check request.
+SYSTEM_REQUEST_IDS = [d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
+                     ] + [server_constants.ON_BOOT_CHECK_REQUEST_ID]
 
 
 class DebugDumpContext(TypedDict):
@@ -239,7 +240,6 @@ def _dump_server_info(dump_dir: str,
     import sky
     from sky import check as sky_check
     from sky import skypilot_config
-    from sky.server import constants as server_constants
 
     server_info: Dict[str, Any] = {
         'skypilot_version': sky.__version__,
@@ -258,8 +258,8 @@ def _dump_server_info(dump_dir: str,
     # This is shared across all uvicorn workers (stored in the DB), unlike
     # a module-level variable which would be per-worker.
     try:
-        boot_request = requests_lib.get_request('skypilot-server-on-boot-check',
-                                                fields=['created_at'])
+        boot_request = requests_lib.get_request(
+            server_constants.ON_BOOT_CHECK_REQUEST_ID, fields=['created_at'])
         if boot_request is not None and boot_request.created_at is not None:
             server_info['server_start_time'] = boot_request.created_at
             server_info['server_start_time_human'] = _epoch_to_human(

@@ -908,7 +908,12 @@ class TestSystemRequestIds:
 
     def test_known_system_ids(self):
         """Known system daemon IDs should be present."""
-        assert 'skypilot-status-refresh-daemon' in \
-            debug_utils.SYSTEM_REQUEST_IDS
-        assert 'skypilot-server-on-boot-check' in \
+        from sky.server import constants as server_constants
+        from sky.server import daemons
+
+        # All internal daemon IDs should be present
+        for daemon in daemons.INTERNAL_REQUEST_DAEMONS:
+            assert daemon.id in debug_utils.SYSTEM_REQUEST_IDS
+        # On-boot check should be present
+        assert server_constants.ON_BOOT_CHECK_REQUEST_ID in \
             debug_utils.SYSTEM_REQUEST_IDS
