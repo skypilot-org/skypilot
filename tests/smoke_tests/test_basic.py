@@ -2368,7 +2368,7 @@ def test_cancel_job_reliability(generic_cloud: str):
         """
         return (
             f'for i in $(seq 1 {timeout}); do '
-            f'  s=$(ssh {name} "ps aux | grep \'sleep 10000\' | grep -v srun" 2>/dev/null); '
+            f'  s=$(ssh {name} "ps aux | grep \'sleep 10000\'" 2>/dev/null); '
             f'  count=$(echo "$s" | wc -l || echo 0); '
             f'  if [ "$count" -eq {expected_lines} ]; then '
             f'    echo "Found {expected_lines} line(s) as expected"; '
