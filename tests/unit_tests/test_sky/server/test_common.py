@@ -118,7 +118,7 @@ def test_check_server_healthy_or_start_rechecks_status(
     assert mock_cache_clear.call_count == 1
     assert mock_make_request.call_count == 2
     mock_start_server.assert_not_called()
-    common.get_api_server_status.cache_clear()
+    common.get_api_server_status_response.cache_clear()
 
 
 @mock.patch('sky.server.common.get_api_server_status')
