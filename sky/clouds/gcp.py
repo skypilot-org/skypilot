@@ -67,11 +67,18 @@ _GCLOUD_VERSION = '424.0.0'
 # Need to be run with /bin/bash
 # We factor out the installation logic to keep it align in both spot
 # controller and cloud stores.
+# On multi-node Slurm with shared FS, multiple nodes run this
+# concurrently. We use flock to serialize installs, and the inner check uses
+# the full path (~/google-cloud-sdk/bin/gcloud) because the flock subshell
+# (bash -c) has no PATH to gcloud. Without the full path, every node would
+# re-install (rm -rf + mv) and corrupt the SDK for nodes already using it.
+# After the flock, we source path.bash.inc in the outer shell so gsutil is
+# in PATH for the subsequent commands.
 GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     {{ gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
     flock ~/.sky/gcloud_install.lock bash -c \' \
-    gcloud --help > /dev/null 2>&1 || \
+    ~/google-cloud-sdk/bin/gcloud --help > /dev/null 2>&1 || \
     {{ \
     ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
