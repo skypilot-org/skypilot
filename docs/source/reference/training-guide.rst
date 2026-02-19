@@ -24,86 +24,54 @@ Best practices
 Use high-performance networking
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. tab-set::
+Use ``network_tier: best`` to automatically enable high-performance networking (InfiniBand, EFA, GPUDirect, etc.) for your clusters and jobs:
 
-    .. tab-item:: Nebius with InfiniBand
-        :sync: nebius-infiniband-tab
+.. code-block:: yaml
+  :emphasize-lines: 3
 
-        InfiniBand is a high-throughput, low-latency networking standard. To accelerate ML, AI and high-performance computing (HPC) workloads that you run in your Managed Service for Kubernetes clusters or Nebius VMs, you can interconnect the GPUs using InfiniBand.
+  resources:
+    accelerators: H100:8
+    network_tier: best
 
-        Use ``resources.network_tier: best`` to automatically enable InfiniBand for your clusters and jobs.
+  num_nodes: 2
 
-        On Nebius managed Kubernetes clusters:
+SkyPilot will automatically configure the appropriate high-performance networking based on the cloud/infrastructure:
 
-        .. code-block:: yaml
-          :emphasize-lines: 4
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
 
-          resources:
-            infra: k8s
-            accelerators: H100:8
-            network_tier: best
+   * - Cloud/Infra
+     - Network Technology
+     - Notes
+   * - AWS (VMs)
+     - `EFA <https://aws.amazon.com/hpc/efa/>`_
+     - Supported on EFA-enabled instances (p4d, p5, g5, etc.). See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_.
+   * - AWS (EKS/HyperPod)
+     - `EFA <https://aws.amazon.com/hpc/efa/>`_
+     - Requires EFA device plugin configured on the cluster.
+   * - Nebius (VMs)
+     - `InfiniBand <https://nebius.com/docs/compute/concepts/network#infiniband>`_
+     - Supported on H100/H200 GPU VMs. See `Nebius example <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_.
+   * - Nebius (K8s)
+     - `InfiniBand <https://nebius.com/docs/compute/concepts/network#infiniband>`_
+     - Supported on managed Kubernetes clusters with InfiniBand.
+   * - CoreWeave (K8s)
+     - `InfiniBand <https://docs.coreweave.com/coreweave-kubernetes/networking/hpc-interconnect>`_
+     - Supported on CoreWeave Kubernetes clusters.
+   * - GCP (VMs)
+     - `GPUDirect-TCPX <https://cloud.google.com/compute/docs/gpus/gpudirect>`_
+     - Requires additional config (see below). Supported on a3-highgpu-8g or a3-edgegpu-8g.
 
-          num_nodes: 2
+**GCP GPUDirect-TCPX**: For GCP VMs, you also need to enable GPUDirect in your config:
 
-        On Nebius VMs:
+.. code-block:: yaml
 
-        .. code-block:: yaml
-          :emphasize-lines: 4
+  config:
+    gcp:
+      enable_gpu_direct: true
 
-          resources:
-            infra: nebius
-            accelerators: H100:8
-            network_tier: best
-
-          num_nodes: 2
-
-        See more details in the `Nebius example <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_.
-
-    .. tab-item:: AWS EFA
-        :sync: aws-efa-tab
-
-        AWS Elastic Fabric Adapter (EFA) is a network interface similar to Nvidia InfiniBand that enables users to run applications requiring high levels of inter-node communications at scale on AWS. You can enable EFA on AWS HyperPod/EKS clusters or AWS VMs with ``resources.network_tier: best``.
-
-        On AWS HyperPod/EKS clusters:
-
-        .. code-block:: yaml
-          :emphasize-lines: 4
-
-          resources:
-            infra: k8s
-            accelerators: A100:8
-            network_tier: best
-
-          num_nodes: 2
-
-        On AWS VMs:
-
-        .. code-block:: yaml
-          :emphasize-lines: 4
-
-          resources:
-            infra: aws
-            instance_type: p4d.24xlarge
-            network_tier: best
-
-          num_nodes: 2
-
-        See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
-
-    .. tab-item:: GCP GPUDirect-TCPX
-        :sync: gcp-gpu-direct-tcpx-tab
-
-        `GPUDirect-TCPX <https://cloud.google.com/compute/docs/gpus/gpudirect>`_ is a high-performance networking technology that enables direct communication between GPUs and network interfaces for `a3-highgpu-8g` or `a3-edgegpu-8g` VMs. You can enable it with the following additional setting in your SkyPilot YAML.
-
-        Example configuration:
-
-        .. code-block:: yaml
-
-          config:
-            gcp:
-              enable_gpu_direct: true
-
-        See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
 
 
 Using Ray with SkyPilot
