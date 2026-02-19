@@ -1227,14 +1227,14 @@ def merge_node_names_lineage(
     for i, name in enumerate(current_names):
         if i < len(existing) and isinstance(existing[i], list):
             lineage = list(existing[i])
-            # Only append if different from last entry
-            if not lineage or lineage[-1] != name:
+            # Only append if name is valid and different from last entry
+            if name and (not lineage or lineage[-1] != name):
                 lineage.append(name)
             # Cap at max lineage length
             if len(lineage) > constants.MAX_NODE_NAME_LINEAGE:
                 lineage = lineage[-constants.MAX_NODE_NAME_LINEAGE:]
         else:
-            lineage = [name]
+            lineage = [name] if name else []
         result.append(lineage)
 
     return json.dumps(result) if result else None
