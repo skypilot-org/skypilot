@@ -518,15 +518,6 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     if response is None:
         return ApiServerInfo(status=ApiServerStatus.UNHEALTHY)
 
-    # Set the remote api server version explicitly.
-    remote_api_version = response.headers.get(
-        server_constants.API_VERSION_HEADER)
-    remote_version = response.headers.get(server_constants.VERSION_HEADER)
-    if remote_api_version is not None:
-        versions.set_remote_api_version(int(remote_api_version))
-    if remote_version is not None:
-        versions.set_remote_version(remote_version)
-
     logger.debug(f'Health check status: {response.status_code}')
 
     if response.status_code != 200:
@@ -569,6 +560,12 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                     local_version=versions.get_local_readable_version(),
                     min_version=server_constants.MIN_COMPATIBLE_VERSION,
                     command=versions.install_version_command(version, commit)))
+        # Set the SkyPilot version and api server explicitly because returned
+        # response may have been cached.
+        # Refer to https://github.com/skypilot-org/skypilot/issues/8879
+        versions.set_remote_api_version(version_info.api_version)
+        versions.set_remote_version(version_info.version)
+
         if version_info.error is not None:
             return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
                                  error=version_info.error)
