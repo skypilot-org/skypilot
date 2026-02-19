@@ -452,102 +452,23 @@ class TestGetClustersFromRequests:
 # ---------------------------------------------------------------------------
 class TestGetClustersFromManagedJobs:
 
-    @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.common.JOB_CONTROLLER_NAME',
                 'sky-jobs-controller-abc123')
-    def test_always_adds_jobs_controller(self, mock_queue_v2):
-        """Should always add the jobs controller cluster name."""
-        mock_queue_v2.return_value = ([], 0, {}, 0)
+    def test_adds_jobs_controller(self):
+        """Should add the jobs controller cluster name."""
         ctx = _make_context(managed_job_ids={1})
 
         debug_utils._get_clusters_from_managed_jobs(ctx)
 
         assert 'sky-jobs-controller-abc123' in ctx['cluster_names']
 
-    @mock.patch('sky.jobs.server.core.queue_v2')
-    @mock.patch('sky.utils.debug_utils.common.JOB_CONTROLLER_NAME',
-                'sky-jobs-controller-abc123')
-    def test_finds_current_cluster_name(self, mock_queue_v2):
-        """Should collect current_cluster_name from job data."""
-        mock_queue_v2.return_value = ([{
-            'current_cluster_name': 'worker-cluster-1',
-            'pool': None,
-        }], 1, {}, 1)
-        ctx = _make_context(managed_job_ids={1})
-
-        debug_utils._get_clusters_from_managed_jobs(ctx)
-
-        assert 'worker-cluster-1' in ctx['cluster_names']
-        assert 'sky-jobs-controller-abc123' in ctx['cluster_names']
-
-    @mock.patch('sky.jobs.server.core.queue_v2')
-    @mock.patch('sky.utils.debug_utils.common.JOB_CONTROLLER_NAME',
-                'sky-jobs-controller-abc123')
-    def test_finds_pool_cluster(self, mock_queue_v2):
-        """Should collect pool name from job data."""
-        mock_queue_v2.return_value = ([{
-            'current_cluster_name': None,
-            'pool': 'my-pool',
-        }], 1, {}, 1)
-        ctx = _make_context(managed_job_ids={1})
-
-        debug_utils._get_clusters_from_managed_jobs(ctx)
-
-        assert 'my-pool' in ctx['cluster_names']
-
-    @mock.patch('sky.jobs.server.core.queue_v2')
-    @mock.patch('sky.utils.debug_utils.common.JOB_CONTROLLER_NAME',
-                'sky-jobs-controller-abc123')
-    def test_empty_job_ids_is_noop(self, mock_queue_v2):
-        """Empty managed_job_ids should not query jobs (the function
-        returns early before adding controller)."""
+    def test_empty_job_ids_is_noop(self):
+        """Empty managed_job_ids should not add anything."""
         ctx = _make_context(managed_job_ids=set())
 
         debug_utils._get_clusters_from_managed_jobs(ctx)
 
-        mock_queue_v2.assert_not_called()
-        # The function returns early before adding controller
         assert ctx['cluster_names'] == set()
-
-    @mock.patch('sky.jobs.server.core.queue_v2')
-    @mock.patch('sky.utils.debug_utils.common.JOB_CONTROLLER_NAME',
-                'sky-jobs-controller-abc123')
-    def test_db_failure_logs_warning(self, mock_queue_v2):
-        """DB failure should log warning but not crash."""
-        mock_queue_v2.side_effect = RuntimeError('DB error')
-        ctx = _make_context(managed_job_ids={1})
-
-        # Should not raise
-        debug_utils._get_clusters_from_managed_jobs(ctx)
-
-        # Controller should still be added before the job queries
-        assert 'sky-jobs-controller-abc123' in ctx['cluster_names']
-
-    @mock.patch('sky.jobs.server.core.queue_v2')
-    @mock.patch('sky.utils.debug_utils.common.JOB_CONTROLLER_NAME',
-                'sky-jobs-controller-abc123')
-    def test_multiple_jobs(self, mock_queue_v2):
-        """Multiple job IDs should have their clusters collected.
-        Note: queue_v2 is called once with all job_ids, returning all results.
-        """
-        mock_queue_v2.return_value = ([
-            {
-                'current_cluster_name': 'cluster-x',
-                'pool': None,
-            },
-            {
-                'current_cluster_name': 'cluster-y',
-                'pool': 'pool-z',
-            },
-        ], 2, {}, 2)
-        ctx = _make_context(managed_job_ids={1, 2})
-
-        debug_utils._get_clusters_from_managed_jobs(ctx)
-
-        assert 'cluster-x' in ctx['cluster_names']
-        assert 'cluster-y' in ctx['cluster_names']
-        assert 'pool-z' in ctx['cluster_names']
-        assert 'sky-jobs-controller-abc123' in ctx['cluster_names']
 
 
 # ---------------------------------------------------------------------------
@@ -560,16 +481,13 @@ class TestPopulateRecentContext:
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
     def test_includes_recent_requests(self, mock_get_tasks, mock_get_clusters,
                                       mock_queue_v2):
-        """Requests within the time window should be included."""
+        """Requests within the time window should be included.
+        Cluster names are handled by _get_clusters_from_requests."""
         now = time.time()
         recent_request = _make_request(request_id='req-recent',
-                                       created_at=now - 1800,
-                                       finished_at=now - 900,
-                                       cluster_name='cluster-recent')
+                                       finished_at=now - 900)
         old_request = _make_request(request_id='req-old',
-                                    created_at=now - 100000,
-                                    finished_at=now - 90000,
-                                    cluster_name='cluster-old')
+                                    finished_at=now - 90000)
         mock_get_tasks.return_value = [recent_request, old_request]
         mock_get_clusters.return_value = []
         mock_queue_v2.return_value = ([], 0, {}, 0)
@@ -579,8 +497,6 @@ class TestPopulateRecentContext:
 
         assert 'req-recent' in ctx['request_ids']
         assert 'req-old' not in ctx['request_ids']
-        assert 'cluster-recent' in ctx['cluster_names']
-        assert 'cluster-old' not in ctx['cluster_names']
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
@@ -644,12 +560,9 @@ class TestPopulateRecentContext:
     def test_still_running_requests_included(self, mock_get_tasks,
                                              mock_get_clusters, mock_queue_v2):
         """Requests without finished_at (still running) should be included
-        if their effective finish time (now) is within the window."""
-        now = time.time()
+        since their effective finish time (now) is within the window."""
         running_request = _make_request(request_id='req-running',
-                                        created_at=now - 7200,
-                                        finished_at=None,
-                                        cluster_name='running-cluster')
+                                        finished_at=None)
         mock_get_tasks.return_value = [running_request]
         mock_get_clusters.return_value = []
         mock_queue_v2.return_value = ([], 0, {}, 0)

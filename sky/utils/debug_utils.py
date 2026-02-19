@@ -140,8 +140,7 @@ def _get_requests_from_managed_jobs(
                     if cancel_user and cancel_user in job_user_hashes:
                         matched = True
                 if matched:
-                    debug_dump_context['request_ids'].add(
-                        request.request_id)
+                    debug_dump_context['request_ids'].add(request.request_id)
             except Exception:  # pylint: disable=broad-except
                 logger.warning(f'Failed to parse request '
                                f'{request.request_id}')
@@ -169,40 +168,15 @@ def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
 
 def _get_clusters_from_managed_jobs(
         debug_dump_context: DebugDumpContext) -> None:
-    """Get underlying cluster names from managed jobs."""
-    # Import here to avoid circular imports
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs.server import core as managed_jobs_core
+    """Get underlying cluster names from managed jobs.
 
+    In non-consolidation mode, the actual job clusters live on the remote
+    controller and aren't available on the API server. We just include the
+    jobs controller itself; _dump_managed_job_info handles per-job details.
+    """
     if not debug_dump_context['managed_job_ids']:
         return
-    logger.debug(
-        f'Getting clusters for {len(debug_dump_context["managed_job_ids"])} '
-        f'managed jobs')
-
-    # Always include the jobs controller
-    try:
-        debug_dump_context['cluster_names'].add(common.JOB_CONTROLLER_NAME)
-    except Exception:  # pylint: disable=broad-except
-        # JOB_CONTROLLER_NAME may not be initialized
-        pass
-
-    # Get cluster info for managed jobs via queue_v2 (handles remote
-    # controllers via gRPC/SSH, unlike direct DB access which only works
-    # in consolidation mode).
-    try:
-        jobs, _, _, _ = managed_jobs_core.queue_v2(
-            refresh=False, job_ids=list(debug_dump_context['managed_job_ids']))
-        for job in jobs:
-            current_cluster = job.get('current_cluster_name')
-            if current_cluster:
-                debug_dump_context['cluster_names'].add(current_cluster)
-            # For consolidation mode, add pool cluster if available
-            pool = job.get('pool')
-            if pool:
-                debug_dump_context['cluster_names'].add(pool)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to get clusters for managed jobs: {e}')
+    debug_dump_context['cluster_names'].add(common.JOB_CONTROLLER_NAME)
 
 
 def _populate_recent_context(debug_dump_context: DebugDumpContext,
@@ -215,21 +189,16 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     logger.debug(f'Populating context with resources from last {hours} hours')
     cutoff_time = time.time() - (hours * 3600)
 
-    # Get recent requests
+    # Get recent requests (cluster names are handled by
+    # _get_clusters_from_requests during cross-linking)
     try:
         requests = requests_lib.get_request_tasks(
-            requests_lib.RequestTaskFilter(fields=[
-                'request_id', 'created_at', 'finished_at', 'cluster_name'
-            ]))
+            requests_lib.RequestTaskFilter(
+                fields=['request_id', 'finished_at']))
         for request in requests:
-            created_at = request.created_at or 0
             finished_at = request.finished_at or time.time()
-            # Include if active within the time window
-            if created_at >= cutoff_time or finished_at >= cutoff_time:
+            if finished_at >= cutoff_time:
                 debug_dump_context['request_ids'].add(request.request_id)
-                if request.cluster_name:
-                    debug_dump_context['cluster_names'].add(
-                        request.cluster_name)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent requests: {e}')
 
