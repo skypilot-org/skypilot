@@ -158,7 +158,9 @@ function RecipeCard({ recipe, onPin }) {
               </div>
 
               {/* Last updated info - always render line for consistent height */}
-              <div className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}>
+              <div
+                className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+              >
                 Updated by{' '}
                 <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
                 <TimestampWithTooltip
@@ -221,9 +223,7 @@ function TemplateRow({
         <h2 className="text-base text-gray-700">{title}</h2>
         <span className="text-sm text-gray-500">({recipes.length})</span>
       </div>
-      <div
-        className="flex flex-wrap gap-3"
-      >
+      <div className="flex flex-wrap gap-3">
         {recipes.map((recipe) => (
           <RecipeCard key={recipe.name} recipe={recipe} onPin={onPin} />
         ))}
