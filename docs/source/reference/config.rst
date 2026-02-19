@@ -45,6 +45,8 @@ Below is the configuration syntax and some example values. See detailed explanat
         infra: gcp/us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
+      :ref:`high_availability <config-yaml-jobs-controller-high-availability>`: true
+      :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>`: true
       :ref:`autostop <config-yaml-jobs-controller-autostop>`:
         idle_minutes: 10
         down: false  # use with caution!
@@ -366,12 +368,40 @@ Example:
     force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-high-availability:
+
+``jobs.controller.high_availability``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable high availability mode for the managed jobs controller. When enabled, the controller is deployed as a Kubernetes Deployment with persistent storage, allowing automatic recovery from pod failures and node issues.
+
+.. note::
+    High availability mode requires Kubernetes as the cloud provider for the controller. See :ref:`high-availability-controller` for detailed setup instructions, prerequisites, and how it works.
+
+.. note::
+    If you are using a remote API server with :ref:`consolidation mode <config-yaml-jobs-controller-consolidation-mode>` enabled, the controller inherits high availability from the API server deployment, and this field is not needed.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      resources:
+        cloud: kubernetes  # Required for high availability mode
+      high_availability: true
+
 .. _config-yaml-jobs-controller-consolidation-mode:
 
 ``jobs.controller.consolidation_mode``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+
+.. note::
+    When consolidation mode is enabled, the controller runs within the API server process and inherits the API server's high availability configuration. In this case, the ``high_availability`` field under ``jobs.controller`` is not needed and will be ignored.
 
 Default: ``false``.
 

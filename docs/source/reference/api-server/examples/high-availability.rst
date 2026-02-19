@@ -79,6 +79,9 @@ To enable high availability for the controller, set the ``high_availability`` fl
 .. note::
     While the controller requires Kubernetes for high availability mode, worker cluster for managed jobs and service replicas can still use any cloud or infrastructure supported by SkyPilot.
 
+.. note::
+    **Using a remote API server with consolidation mode?** When :ref:`consolidation mode <config-yaml-jobs-controller-consolidation-mode>` is enabled, the controller runs within the API server process and inherits the API server's high availability configuration. In this case, you do not need to set the ``high_availability`` field under ``[jobs,serve].controller``.
+
 How it works
 ------------
 When ``high_availability: true`` is set, SkyPilot modifies how the controller is deployed on Kubernetes:
@@ -228,7 +231,7 @@ This example demonstrates the automatic recovery capability of the high availabi
       # Should see the default HTML output from http.server
 
 5.  **Simulate Controller Failure** (Manually Delete Pod):
-    
+
     * Find the name of the controller pod. Controller pods typically contain "sky-serve-controller" and have the label ``skypilot-head-node=1``.
 
       .. code-block:: bash
