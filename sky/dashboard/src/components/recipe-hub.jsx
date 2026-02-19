@@ -112,7 +112,7 @@ function RecipeCard({ recipe, onPin }) {
   const slug = generateRecipeSlug(recipe.name);
 
   return (
-    <div className="relative max-w-[300px]">
+    <div className="relative w-[300px]">
       <Link href={`/recipes/${slug}`} className="block">
         <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
           <CardContent className="p-3">
@@ -138,20 +138,18 @@ function RecipeCard({ recipe, onPin }) {
               </div>
             </div>
 
-            {/* Bottom info section with even spacing */}
+            {/* Bottom info section with even spacing - always render all 5 lines for consistent height */}
             <div className="space-y-1.5">
               {/* Type */}
               <div className="text-sm text-gray-500">{typeInfo.label}</div>
 
-              {/* Description */}
-              {recipe.description && (
-                <p
-                  className="text-sm text-gray-600 truncate"
-                  title={recipe.description}
-                >
-                  {recipe.description}
-                </p>
-              )}
+              {/* Description - always render line, use invisible placeholder if empty */}
+              <p
+                className={`text-sm truncate ${recipe.description ? 'text-gray-600' : 'invisible'}`}
+                title={recipe.description || ''}
+              >
+                {recipe.description || '\u00A0'}
+              </p>
 
               {/* Authored by */}
               <div className="text-sm text-gray-500 truncate">
@@ -159,20 +157,20 @@ function RecipeCard({ recipe, onPin }) {
                 <UserName name={recipe.user_name || recipe.user_id} />
               </div>
 
-              {/* Last updated info - only show for editable recipes */}
-              {recipe.is_editable && recipe.user_name !== 'local' && (
-                <div className="text-sm text-gray-500 truncate">
-                  Updated by{' '}
-                  <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
-                  <TimestampWithTooltip
-                    date={
-                      recipe.updated_at
-                        ? new Date(recipe.updated_at * 1000)
-                        : null
-                    }
-                  />
-                </div>
-              )}
+              {/* Last updated info - always render line for consistent height */}
+              <div
+                className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+              >
+                Updated by{' '}
+                <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
+                <TimestampWithTooltip
+                  date={
+                    recipe.updated_at
+                      ? new Date(recipe.updated_at * 1000)
+                      : null
+                  }
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -225,13 +223,7 @@ function TemplateRow({
         <h2 className="text-base text-gray-700">{title}</h2>
         <span className="text-sm text-gray-500">({recipes.length})</span>
       </div>
-      <div
-        className="grid gap-4"
-        style={{
-          gridTemplateColumns:
-            'repeat(auto-fill, minmax(min(300px, 100%), 1fr))',
-        }}
-      >
+      <div className="flex flex-wrap gap-3">
         {recipes.map((recipe) => (
           <RecipeCard key={recipe.name} recipe={recipe} onPin={onPin} />
         ))}
