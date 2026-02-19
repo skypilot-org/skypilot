@@ -5,7 +5,7 @@ Getting Started on Slurm
 
 .. note::
 
-    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    Slurm support is under active development. We'd love to hear from you —
     please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
