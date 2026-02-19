@@ -15,6 +15,7 @@ from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
+from sky.skylet import constants as skylet_constants
 from sky.utils import common
 from sky.utils import tempstore
 
@@ -70,17 +71,35 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
 def _get_requests_from_managed_jobs(
         debug_dump_context: DebugDumpContext) -> None:
     """Parse request database to find requests related to managed jobs."""
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs.server import core as managed_jobs_core
+
     if not debug_dump_context['managed_job_ids']:
         return
     logger.debug(
         f'Getting requests for {len(debug_dump_context["managed_job_ids"])} '
         f'managed jobs')
 
-    # Request names related to managed jobs
+    # Fetch job details to enable matching by name and user
+    job_names: Set[str] = set()
+    job_user_hashes: Set[str] = set()
+    try:
+        jobs, _, _, _ = managed_jobs_core.queue_v2(
+            refresh=False, job_ids=list(debug_dump_context['managed_job_ids']))
+        for job in jobs:
+            name = job.get('job_name')
+            if name:
+                job_names.add(name)
+            user_hash = job.get('user_hash')
+            if user_hash:
+                job_user_hashes.add(user_hash)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to fetch managed job details: {e}')
+
+    # Request names related to managed jobs (excludes read-only queue)
     managed_job_request_names = [
         request_names.RequestName.JOBS_LAUNCH.value,
         request_names.RequestName.JOBS_CANCEL.value,
-        request_names.RequestName.JOBS_QUEUE.value,
         request_names.RequestName.JOBS_LOGS.value,
     ]
 
@@ -94,21 +113,38 @@ def _get_requests_from_managed_jobs(
         for request in requests:
             try:
                 body = request.request_body
-                # Check if request body contains any of the target job IDs
-                if body is not None:
-                    job_id = getattr(body, 'job_id', None)
-                    job_ids = getattr(body, 'job_ids', None)
-                    if job_id is not None and job_id in debug_dump_context[
-                            'managed_job_ids']:
-                        debug_dump_context['request_ids'].add(
-                            request.request_id)
-                    elif job_ids is not None:
-                        if any(jid in debug_dump_context['managed_job_ids']
-                               for jid in job_ids):
-                            debug_dump_context['request_ids'].add(
-                                request.request_id)
+                if body is None:
+                    continue
+                matched = False
+                # Match by direct job ID
+                job_id = getattr(body, 'job_id', None)
+                job_ids = getattr(body, 'job_ids', None)
+                if (job_id is not None and
+                        job_id in debug_dump_context['managed_job_ids']):
+                    matched = True
+                elif (job_ids is not None and
+                      any(jid in debug_dump_context['managed_job_ids']
+                          for jid in job_ids)):
+                    matched = True
+                # Match cancel-by-name
+                elif getattr(body, 'name', None) in job_names:
+                    matched = True
+                # Match cancel-all-users (affects all jobs)
+                elif getattr(body, 'all_users', False):
+                    matched = True
+                # Match cancel-all (affects only the requesting
+                # user's jobs, so include if user owns a target job)
+                elif getattr(body, 'all', False):
+                    cancel_user = getattr(body, 'env_vars', {}).get(
+                        skylet_constants.USER_ID_ENV_VAR)
+                    if cancel_user and cancel_user in job_user_hashes:
+                        matched = True
+                if matched:
+                    debug_dump_context['request_ids'].add(
+                        request.request_id)
             except Exception:  # pylint: disable=broad-except
-                pass  # Skip malformed requests
+                logger.warning(f'Failed to parse request '
+                               f'{request.request_id}')
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get requests for managed jobs: {e}')
 

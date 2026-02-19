@@ -163,8 +163,11 @@ class TestGetRequestsFromClusters:
 # ---------------------------------------------------------------------------
 class TestGetRequestsFromManagedJobs:
 
+    MOCK_QUEUE_V2 = 'sky.jobs.server.core.queue_v2'
+
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_finds_requests_by_job_id(self, mock_get_tasks):
+    def test_finds_requests_by_job_id(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has a matching job_id."""
         body_with_job_id = SimpleNamespace(job_id=42, job_ids=None)
         mock_get_tasks.return_value = [
@@ -178,8 +181,9 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j1' in ctx['request_ids']
 
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_finds_requests_by_job_ids_list(self, mock_get_tasks):
+    def test_finds_requests_by_job_ids_list(self, mock_get_tasks, _mock_queue):
         """Should find requests whose body has matching job_ids list."""
         body_with_job_ids = SimpleNamespace(job_id=None, job_ids=[10, 20, 30])
         mock_get_tasks.return_value = [
@@ -193,8 +197,9 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-j2' in ctx['request_ids']
 
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_skips_non_matching_job_ids(self, mock_get_tasks):
+    def test_skips_non_matching_job_ids(self, mock_get_tasks, _mock_queue):
         """Requests with unrelated job IDs should not be collected."""
         body = SimpleNamespace(job_id=99, job_ids=None)
         mock_get_tasks.return_value = [
@@ -218,8 +223,9 @@ class TestGetRequestsFromManagedJobs:
         mock_get_tasks.assert_not_called()
         assert ctx['request_ids'] == set()
 
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_none_body_is_skipped(self, mock_get_tasks):
+    def test_none_body_is_skipped(self, mock_get_tasks, _mock_queue):
         """Requests with None body should be silently skipped."""
         mock_get_tasks.return_value = [
             _make_request(request_id='req-j4',
@@ -232,8 +238,9 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_db_failure_logs_warning(self, mock_get_tasks):
+    def test_db_failure_logs_warning(self, mock_get_tasks, _mock_queue):
         """DB failure should log warning but not crash."""
         mock_get_tasks.side_effect = RuntimeError('DB error')
         ctx = _make_context(managed_job_ids={42})
@@ -243,8 +250,10 @@ class TestGetRequestsFromManagedJobs:
 
         assert ctx['request_ids'] == set()
 
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
-    def test_filters_by_managed_job_request_names(self, mock_get_tasks):
+    def test_filters_by_managed_job_request_names(self, mock_get_tasks,
+                                                  _mock_queue):
         """Should query with managed job-related request names."""
         mock_get_tasks.return_value = []
         ctx = _make_context(managed_job_ids={1})
@@ -256,8 +265,111 @@ class TestGetRequestsFromManagedJobs:
         assert task_filter.include_request_names is not None
         assert 'jobs.launch' in task_filter.include_request_names
         assert 'jobs.cancel' in task_filter.include_request_names
-        assert 'jobs.queue' in task_filter.include_request_names
         assert 'jobs.logs' in task_filter.include_request_names
+        # Queue is read-only, should not be included
+        assert 'jobs.queue' not in task_filter.include_request_names
+
+    @mock.patch(MOCK_QUEUE_V2)
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_matches_cancel_by_name(self, mock_get_tasks, mock_queue):
+        """Should match cancel requests that target a job by name."""
+        mock_queue.return_value = ([{
+            'job_id': 42,
+            'job_name': 'my-training',
+            'user_hash': 'user-abc'
+        }], 1, {}, 1)
+        body = SimpleNamespace(job_id=None,
+                               job_ids=None,
+                               name='my-training',
+                               all=False,
+                               all_users=False)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-cancel-name',
+                          request_body=body,
+                          name='jobs.cancel'),
+        ]
+        ctx = _make_context(managed_job_ids={42})
+
+        debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-cancel-name' in ctx['request_ids']
+
+    @mock.patch(MOCK_QUEUE_V2)
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_matches_cancel_all_users(self, mock_get_tasks, mock_queue):
+        """Should match cancel-all-users requests."""
+        mock_queue.return_value = ([{
+            'job_id': 42,
+            'job_name': 'my-job',
+            'user_hash': 'user-abc'
+        }], 1, {}, 1)
+        body = SimpleNamespace(job_id=None,
+                               job_ids=None,
+                               name=None,
+                               all=False,
+                               all_users=True)
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-cancel-all-users',
+                          request_body=body,
+                          name='jobs.cancel'),
+        ]
+        ctx = _make_context(managed_job_ids={42})
+
+        debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-cancel-all-users' in ctx['request_ids']
+
+    @mock.patch(MOCK_QUEUE_V2)
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_matches_cancel_all_same_user(self, mock_get_tasks, mock_queue):
+        """Should match cancel-all if the user owns a target job."""
+        mock_queue.return_value = ([{
+            'job_id': 42,
+            'job_name': 'my-job',
+            'user_hash': 'user-abc'
+        }], 1, {}, 1)
+        body = SimpleNamespace(job_id=None,
+                               job_ids=None,
+                               name=None,
+                               all=True,
+                               all_users=False,
+                               env_vars={'SKYPILOT_USER_ID': 'user-abc'})
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-cancel-all',
+                          request_body=body,
+                          name='jobs.cancel'),
+        ]
+        ctx = _make_context(managed_job_ids={42})
+
+        debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-cancel-all' in ctx['request_ids']
+
+    @mock.patch(MOCK_QUEUE_V2)
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_skips_cancel_all_different_user(self, mock_get_tasks, mock_queue):
+        """Should NOT match cancel-all from a different user."""
+        mock_queue.return_value = ([{
+            'job_id': 42,
+            'job_name': 'my-job',
+            'user_hash': 'user-abc'
+        }], 1, {}, 1)
+        body = SimpleNamespace(job_id=None,
+                               job_ids=None,
+                               name=None,
+                               all=True,
+                               all_users=False,
+                               env_vars={'SKYPILOT_USER_ID': 'user-xyz'})
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-cancel-other',
+                          request_body=body,
+                          name='jobs.cancel'),
+        ]
+        ctx = _make_context(managed_job_ids={42})
+
+        debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-cancel-other' not in ctx['request_ids']
 
 
 # ---------------------------------------------------------------------------
