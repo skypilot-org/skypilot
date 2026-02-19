@@ -363,13 +363,13 @@ def test_kubernetes_runner_adds_container_flag_to_kubectl_exec() -> None:
     with mock.patch.object(command_runner.log_lib,
                            'run_with_log',
                            side_effect=fake_run_with_log):
-        runner = command_runner.KubernetesCommandRunner((('ns', 'ctx'), 'pod'),
-                                                        container='ray-node')
+        runner = command_runner.KubernetesCommandRunner(
+            (('ns', 'ctx'), 'pod'), container='skypilot-node')
         runner.run('echo hello', require_outputs=True, stream_logs=False)
 
     assert 'kubectl exec' in captured['command']
     assert 'pod/pod' in captured['command']
-    assert '-c ray-node' in captured['command']
+    assert '-c skypilot-node' in captured['command']
 
 
 def test_kubernetes_runner_rsync_sets_exec_container_envvar() -> None:
@@ -413,7 +413,7 @@ def test_get_pod_primary_container_prefers_ray_node() -> None:
     sidecar = mock.MagicMock()
     sidecar.name = 'sidecar'
     primary = mock.MagicMock()
-    primary.name = 'ray-node'
+    primary.name = 'skypilot-node'
 
     pod = mock.MagicMock()
     pod.metadata.name = 'p'
@@ -426,9 +426,9 @@ def test_get_pod_primary_container_falls_back_to_first_container() -> None:
     from sky.provision.kubernetes import utils as kubernetes_utils
 
     c0 = mock.MagicMock()
-    c0.name = 'not-ray-node'
+    c0.name = 'not-skypilot-node'
     c1 = mock.MagicMock()
-    c1.name = 'also-not-ray-node'
+    c1.name = 'also-not-skypilot-node'
 
     pod = mock.MagicMock()
     pod.metadata.name = 'p'

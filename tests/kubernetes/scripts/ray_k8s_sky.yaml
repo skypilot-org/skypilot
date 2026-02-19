@@ -136,7 +136,7 @@ available_node_types:
           emptyDir:
             medium: Memory
         containers:
-        - name: ray-node
+        - name: skypilot-node
           imagePullPolicy: Never
           image: skypilot:latest
           command: ["/bin/bash", "-c", "--"]
@@ -199,7 +199,7 @@ available_node_types:
           emptyDir:
             medium: Memory
         containers:
-        - name: ray-node
+        - name: skypilot-node
           imagePullPolicy: Never
           image: skypilot:latest
           # Do not change this command - it keeps the pod alive until it is

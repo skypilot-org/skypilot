@@ -505,7 +505,7 @@ available_node_types:
             path: /home/kubernetes/bin/gib
         {% endif %}
         containers:
-        - name: ray-node
+        - name: skypilot-node
           imagePullPolicy: Always
           image: {{image_id}}
           env:
@@ -516,12 +516,12 @@ available_node_types:
             - name: SKYPILOT_POD_CPU_CORE_LIMIT
               valueFrom:
                 resourceFieldRef:
-                  containerName: ray-node
+                  containerName: skypilot-node
                   resource: requests.cpu
             - name: SKYPILOT_POD_MEMORY_BYTES_LIMIT
               valueFrom:
                 resourceFieldRef:
-                  containerName: ray-node
+                  containerName: skypilot-node
                   resource: requests.memory
             # Disable Ray memory monitor to prevent Ray's memory manager
             # from interfering with kubernetes resource manager.

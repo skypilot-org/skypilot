@@ -31,7 +31,7 @@ echo "namespace: $namespace" >&2
 context=$(echo $namespace_context | grep '+' >/dev/null && echo $namespace_context | cut -d+ -f2- || echo "")
 echo "context: $context" >&2
 context_lower=$(echo "$context" | tr '[:upper:]' '[:lower:]')
-container="${SKYPILOT_K8S_EXEC_CONTAINER:-ray-node}"
+container="${SKYPILOT_K8S_EXEC_CONTAINER:-skypilot-node}"
 echo "container: $container" >&2
 
 # Check if the resource is a pod or a deployment (or other type)

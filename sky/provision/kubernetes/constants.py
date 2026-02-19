@@ -72,7 +72,9 @@ TAG_POD_INITIALIZED = 'skypilot-initialized'
 TAG_SKYPILOT_DEPLOYMENT_NAME = 'skypilot-deployment-name'
 
 # Default name of the primary workload container in SkyPilot Ray pods.
-RAY_NODE_CONTAINER_NAME = 'ray-node'
+SKYPILOT_NODE_CONTAINER_NAME = 'skypilot-node'
+# TODO (kyuds): remove legacy container name and backwards compat code v0.13.0.
+LEGACY_NODE_CONTAINER_NAME = 'ray-node'
 
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']

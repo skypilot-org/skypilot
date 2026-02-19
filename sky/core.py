@@ -249,8 +249,13 @@ all_clusters, unmanaged_clusters, all_jobs, context
                 status_message += f's ({i + 1}/{len(jobs_controllers)})'
             spinner.update(f'{status_message}[/]')
             try:
+                primary_container = kubernetes_utils.get_pod_primary_container(
+                    pod)
+                primary_container_name = getattr(primary_container, 'name',
+                                                 None)
                 job_list = managed_jobs_core.queue_from_kubernetes_pod(
-                    pod.metadata.name)
+                    pod.metadata.name,
+                    primary_container_name=primary_container_name)
             except RuntimeError as e:
                 logger.warning('Failed to get managed jobs from controller '
                                f'{pod.metadata.name}: {str(e)}')

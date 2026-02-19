@@ -427,7 +427,7 @@ def test_pod_termination_reason_start_error(monkeypatch):
 
     # Container with StartError
     container_status = mock.MagicMock()
-    container_status.name = 'ray-node'
+    container_status.name = 'skypilot-node'
     container_status.state.terminated = mock.MagicMock()
     container_status.state.terminated.exit_code = 128
     container_status.state.terminated.reason = 'StartError'
@@ -464,7 +464,7 @@ def test_pod_termination_reason_kueue_preemption(monkeypatch):
     ready_condition = mock.MagicMock()
     ready_condition.type = 'Ready'
     ready_condition.reason = 'ContainersNotReady'
-    ready_condition.message = 'containers with unready status: [ray-node]'
+    ready_condition.message = 'containers with unready status: [skypilot-node]'
     ready_condition.last_transition_time = now
 
     # Taken from an actual Pod that got preempted by Kueue.
@@ -489,7 +489,7 @@ def test_pod_termination_reason_kueue_preemption(monkeypatch):
     expected = (
         'Preempted by Kueue: WorkloadEvictedDueToPodsReadyTimeout '
         '(Exceeded the PodsReady timeout default/test-pod).\n'
-        'Last known state: ContainersNotReady (containers with unready status: [ray-node]).'
+        'Last known state: ContainersNotReady (containers with unready status: [skypilot-node]).'
     )
     assert reason == expected
 
@@ -522,7 +522,7 @@ def test_pod_termination_reason_null_finished_at(monkeypatch):
 
     # Container with terminated state but null finished_at
     container_status = mock.MagicMock()
-    container_status.name = 'ray-node'
+    container_status.name = 'skypilot-node'
     container_status.state.terminated = mock.MagicMock()
     container_status.state.terminated.exit_code = 137
     container_status.state.terminated.reason = 'Unknown'
