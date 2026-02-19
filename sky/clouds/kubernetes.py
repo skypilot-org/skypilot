@@ -1134,6 +1134,47 @@ class Kubernetes(clouds.Cloud):
         return identities
 
     @classmethod
+    def get_active_user_identity(cls,
+                                 region: Optional[str] = None
+                                ) -> Optional[List[str]]:
+        """Returns the identity for the specified context (region).
+
+        For Kubernetes, the region is the context name. If a specific context
+        is provided, returns the identity for that context. Otherwise, falls
+        back to the current context (default behavior).
+
+        This is important for multi-context setups where clusters should be
+        associated with the context they're deployed to, not the current
+        default context.
+
+        Args:
+            region: The Kubernetes context name. If None, uses current context.
+
+        Returns:
+            The identity for the specified context, or None if not found.
+        """
+        k8s = kubernetes.kubernetes
+        try:
+            all_contexts, current_context = (
+                kubernetes.list_kube_config_contexts())
+        except k8s.config.config_exception.ConfigException:
+            return None
+
+        # If no specific region/context requested, use current context
+        if region is None:
+            return [cls.get_identity_from_context(current_context)]
+
+        # Find the context matching the requested region
+        for context in all_contexts:
+            if context['name'] == region:
+                return [cls.get_identity_from_context(context)]
+
+        # If context not found, fall back to current context with a warning
+        logger.warning(f'Kubernetes context {region!r} not found in '
+                       f'kubeconfig. Using current context instead.')
+        return [cls.get_identity_from_context(current_context)]
+
+    @classmethod
     def is_volume_name_valid(cls,
                              volume_name: str) -> Tuple[bool, Optional[str]]:
         """Validates that the volume name is valid for this cloud.

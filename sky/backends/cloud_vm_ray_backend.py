@@ -1711,7 +1711,10 @@ class RetryingVmProvisioner(object):
                 if dryrun:
                     cloud_user = None
                 else:
-                    cloud_user = to_provision.cloud.get_active_user_identity()
+                    # Pass the target region so that Kubernetes can use the
+                    # correct context identity instead of the current context.
+                    cloud_user = to_provision.cloud.get_active_user_identity(
+                        region=to_provision.region)
 
                 requested_features = self._requested_features.copy()
                 # Skip stop feature for Kubernetes and RunPod controllers.

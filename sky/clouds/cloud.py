@@ -637,15 +637,24 @@ class Cloud:
         return ', '.join(user_identity)
 
     @classmethod
-    def get_active_user_identity(cls) -> Optional[List[str]]:
-        """Returns currently active user identity of this cloud
+    def get_active_user_identity(cls,
+                                 region: Optional[str] = None
+                                ) -> Optional[List[str]]:
+        """Returns currently active user identity of this cloud.
 
         See get_user_identities for definition of user identity.
 
+        Args:
+            region: Optional region/context to get identity for. For most
+                clouds this is ignored (identity is global). For Kubernetes,
+                this specifies which context to get the identity from.
+
         Returns:
             None if the cloud does not have a concept of user identity;
-            otherwise the current active identity.
+            otherwise the current active identity (or identity for the
+            specified region if applicable).
         """
+        del region  # Unused in base class; identity is typically global
         identities = cls.get_user_identities()
         return identities[0] if identities is not None else None
 

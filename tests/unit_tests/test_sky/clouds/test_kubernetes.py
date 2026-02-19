@@ -360,6 +360,106 @@ class TestKubernetesExistingAllowedContexts(unittest.TestCase):
             mock_log.assert_called_once_with(('nonexistent-cluster',))
 
 
+class TestKubernetesGetActiveUserIdentity(unittest.TestCase):
+    """Test cases for Kubernetes.get_active_user_identity method.
+
+    This tests the fix for SKY-4623 where cluster identity was incorrectly
+    using the current context instead of the launched context.
+    """
+
+    def _make_context(self, name, cluster, user, namespace=None):
+        """Helper to create a mock context dict."""
+        context = {'name': name, 'context': {'cluster': cluster, 'user': user}}
+        if namespace:
+            context['context']['namespace'] = namespace
+        return context
+
+    @patch('sky.adaptors.kubernetes.list_kube_config_contexts')
+    def test_returns_current_context_when_no_region_specified(
+            self, mock_list_contexts):
+        """Test that current context identity is returned when no region given."""
+        current_ctx = self._make_context('current-ctx', 'cluster-a', 'user-a')
+        other_ctx = self._make_context('other-ctx', 'cluster-b', 'user-b')
+        mock_list_contexts.return_value = ([current_ctx,
+                                            other_ctx], current_ctx)
+
+        result = kubernetes.Kubernetes.get_active_user_identity()
+
+        self.assertEqual(result, ['cluster-a_user-a_default'])
+
+    @patch('sky.adaptors.kubernetes.list_kube_config_contexts')
+    def test_returns_specified_context_identity_when_region_given(
+            self, mock_list_contexts):
+        """Test that specified context identity is returned when region given."""
+        current_ctx = self._make_context('current-ctx', 'cluster-a', 'user-a')
+        target_ctx = self._make_context('target-ctx', 'cluster-b', 'user-b')
+        mock_list_contexts.return_value = ([current_ctx,
+                                            target_ctx], current_ctx)
+
+        result = kubernetes.Kubernetes.get_active_user_identity(
+            region='target-ctx')
+
+        # Should return target context identity, not current context
+        self.assertEqual(result, ['cluster-b_user-b_default'])
+
+    @patch('sky.adaptors.kubernetes.list_kube_config_contexts')
+    def test_returns_current_context_when_region_not_found(
+            self, mock_list_contexts):
+        """Test fallback to current context when specified region not found."""
+        current_ctx = self._make_context('current-ctx', 'cluster-a', 'user-a')
+        mock_list_contexts.return_value = ([current_ctx], current_ctx)
+
+        with patch.object(kubernetes.logger, 'warning') as mock_warning:
+            result = kubernetes.Kubernetes.get_active_user_identity(
+                region='nonexistent-ctx')
+
+        # Should fall back to current context
+        self.assertEqual(result, ['cluster-a_user-a_default'])
+        # Should log a warning
+        mock_warning.assert_called_once()
+        self.assertIn('nonexistent-ctx', mock_warning.call_args[0][0])
+
+    @patch('sky.adaptors.kubernetes.list_kube_config_contexts')
+    def test_includes_namespace_in_identity(self, mock_list_contexts):
+        """Test that namespace is included in identity string."""
+        ctx_with_ns = self._make_context('ctx-with-ns',
+                                         'cluster-a',
+                                         'user-a',
+                                         namespace='custom-ns')
+        mock_list_contexts.return_value = ([ctx_with_ns], ctx_with_ns)
+
+        result = kubernetes.Kubernetes.get_active_user_identity(
+            region='ctx-with-ns')
+
+        self.assertEqual(result, ['cluster-a_user-a_custom-ns'])
+
+    @patch('sky.adaptors.kubernetes.list_kube_config_contexts')
+    def test_returns_none_on_config_exception(self, mock_list_contexts):
+        """Test that None is returned when kubeconfig cannot be loaded."""
+        from sky.adaptors import kubernetes as k8s_adaptor
+        k8s = k8s_adaptor.kubernetes
+        mock_list_contexts.side_effect = k8s.config.config_exception.ConfigException(
+            'Config error')
+
+        result = kubernetes.Kubernetes.get_active_user_identity()
+
+        self.assertIsNone(result)
+
+    @patch('sky.adaptors.kubernetes.list_kube_config_contexts')
+    def test_multiple_contexts_returns_correct_one(self, mock_list_contexts):
+        """Test correct context is returned when multiple contexts exist."""
+        ctx1 = self._make_context('ctx1', 'cluster-1', 'user-1')
+        ctx2 = self._make_context('ctx2', 'cluster-2', 'user-2')
+        ctx3 = self._make_context('ctx3', 'cluster-3', 'user-3')
+        # Current context is ctx1, but we want ctx2
+        mock_list_contexts.return_value = ([ctx1, ctx2, ctx3], ctx1)
+
+        result = kubernetes.Kubernetes.get_active_user_identity(region='ctx2')
+
+        # Should return ctx2's identity, not ctx1's
+        self.assertEqual(result, ['cluster-2_user-2_default'])
+
+
 class TestKubernetesSecurityContextMerging(unittest.TestCase):
     """Test cases for merging user-specified securityContext with IPC_LOCK capability."""
 
