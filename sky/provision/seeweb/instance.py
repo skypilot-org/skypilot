@@ -416,9 +416,7 @@ class SeewebNodeProvider:
                 'user_customize']
 
         # Build the request object expected by ecsapi
-        server_create_request_cls = (
-            seeweb_adaptor.ecsapi.ServerCreateRequest  # type: ignore
-        )
+        server_create_request_cls = (seeweb_adaptor.ecsapi.ServerCreateRequest)
         create_request = server_create_request_cls(**payload)
 
         logger.info('Creating Seeweb server %s', payload)

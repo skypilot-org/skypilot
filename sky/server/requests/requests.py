@@ -217,7 +217,7 @@ class Request:
         return payloads.RequestPayload(
             request_id=self.request_id,
             name=self.name,
-            entrypoint=self.entrypoint.__name__,
+            entrypoint=getattr(self.entrypoint, '__name__', ''),
             request_body=self.request_body.model_dump_json(),
             status=self.status.value,
             return_value=orjson.dumps(None).decode('utf-8'),
@@ -335,7 +335,7 @@ def encode_requests(requests: List[Request]) -> List[payloads.RequestPayload]:
         payload = payloads.RequestPayload(
             request_id=request.request_id,
             name=request.name,
-            entrypoint=request.entrypoint.__name__
+            entrypoint=getattr(request.entrypoint, '__name__', '')
             if request.entrypoint is not None else '',
             request_body=request.request_body.model_dump_json()
             if request.request_body is not None else

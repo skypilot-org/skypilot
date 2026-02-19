@@ -317,7 +317,8 @@ class JobController:
                                 request))
 
                     return list(
-                        response.exit_codes) if response.exit_codes else None
+                        response.exit_codes  # type: ignore[attr-defined]
+                    ) if response.exit_codes else None  # type: ignore
                 except exceptions.SkyletMethodNotImplementedError:
                     pass  # Fall back to legacy SSH-based method
 
@@ -1210,7 +1211,7 @@ class JobController:
             for task_id, task in enumerate(tasks):
                 if is_terminal(task_id):
                     cluster_names.append(None)
-                    strategy_executors.append(None)  # type: ignore[arg-type]
+                    strategy_executors.append(None)
                     continue
 
                 # Get list of other job names (excluding current task)

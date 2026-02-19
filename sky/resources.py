@@ -1670,7 +1670,7 @@ class Resources:
                 'but ignored for Kubernetes: '
                 f'{" ".join(docker_run_options)}'
                 f'{colorama.Style.RESET_ALL}')
-        return dict(
+        return dict(  # type: ignore[return-value]
             cloud_specific_variables,
             **{
                 # Docker config
@@ -2154,13 +2154,11 @@ class Resources:
             memory_parsed = memory_parsed[:-1]
         memory_gb = int(memory_parsed)
 
-        accelerators = [
-            (f'{device}:{count}', False)
-            for device in accelerator_registry.get_devices_by_memory(
-                memory_gb, plus, manufacturer=manufacturer)
-        ]
+        result = [(f'{device}:{count}', False)
+                  for device in accelerator_registry.get_devices_by_memory(
+                      memory_gb, plus, manufacturer=manufacturer)]
 
-        return accelerators
+        return result
 
     @classmethod
     def from_yaml_config(
@@ -2369,7 +2367,7 @@ class Resources:
         if resources_fields['memory'] is not None:
             resources_fields['memory'] = str(resources_fields['memory'])
         if resources_fields['accelerator_args'] is not None:
-            resources_fields['accelerator_args'] = dict(
+            resources_fields['accelerator_args'] = dict(  # type: ignore
                 resources_fields['accelerator_args'])
         if resources_fields['disk_size'] is not None:
             # although it will end up being an int, we don't know at this point

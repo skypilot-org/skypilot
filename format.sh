@@ -28,7 +28,7 @@ if ! command -v pip >/dev/null 2>&1; then
     PIP_LIST_CMD="uv pip list"
 fi
 PYLINT_QUOTES_VERSION=$($PIP_LIST_CMD | awk '/pylint-quotes/ {print $2}')
-MYPY_VERSION=$(mypy --version | awk '{print $2}')
+TY_VERSION=$(ty version 2>&1 | awk '{print $2}')
 BLACK_VERSION=$(black --version | head -n 1 | awk '{print $2}')
 
 # # params: tool name, tool version, required version
@@ -42,7 +42,7 @@ tool_version_check() {
 tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
-tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "ty" "$TY_VERSION" "$(grep "ty==" requirements-dev.txt | cut -d'=' -f3)"
 tool_version_check "black" "$BLACK_VERSION" "$(grep black requirements-dev.txt | cut -d'=' -f3)"
 
 YAPF_FLAGS=(
@@ -125,11 +125,9 @@ isort sky tests examples llm docs "${ISORT_YAPF_EXCLUDES[@]}"
 isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
 
 
-# Run mypy
-# TODO(zhwu): When more of the codebase is typed properly, the mypy flags
-# should be set to do a more stringent check.
-echo 'SkyPilot mypy:'
-mypy $(cat tests/mypy_files.txt)
+# Run ty, will use the pyproject.toml configuration automatically.
+echo 'SkyPilot ty:'
+ty check
 
 # Run Pylint
 echo 'Sky Pylint:'

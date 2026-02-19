@@ -545,7 +545,7 @@ def shared_controller_vars_to_fill(
         local_user_config_path = temp_file.name
 
     vars_to_fill: Dict[str, Any] = controller_only_vars_to_fill(controller)
-    vars_to_fill.update({
+    vars_to_fill.update({  # type: ignore[arg-type]
         'sky_activate_python_env': constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
         'sky_python_cmd': constants.SKY_PYTHON_CMD,
         'local_user_config_path': local_user_config_path,
@@ -564,7 +564,7 @@ def shared_controller_vars_to_fill(
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
             skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = remote_user_config_path
-    vars_to_fill['controller_envs'].update(env_vars)
+    vars_to_fill['controller_envs'].update(env_vars)  # type: ignore[union-attr]
     return vars_to_fill
 
 

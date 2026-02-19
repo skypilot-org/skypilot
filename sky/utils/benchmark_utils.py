@@ -40,7 +40,7 @@ def log_execution_time(func: Optional[Callable] = None,
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
             nonlocal name
-            name = name or f.__name__
+            name = name or getattr(f, '__name__', '<unknown>')
             start_time = time.perf_counter()
             try:
                 result = f(*args, **kwargs)

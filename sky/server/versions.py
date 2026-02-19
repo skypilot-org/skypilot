@@ -260,7 +260,8 @@ def minimal_api_version(min_version: int) -> Callable:
                             f'Upgrade the remote server to {sky.__version__} '
                             'and re-run the command.')
                     raise exceptions.APINotSupportedError(
-                        f'Function {func.__name__} is introduced after the '
+                        f'Function {getattr(func, "__name__", "<unknown>")} is '
+                        'introduced after the '
                         f'remote server version {get_remote_version()!r} is '
                         f'released. {hint}')
             return func(*args, **kwargs)

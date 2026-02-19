@@ -164,8 +164,8 @@ def init_logger(name: str) -> logging.Logger:
 
 
 @contextlib.contextmanager
-def set_logging_level(logger: str, level: int):
-    logger = logging.getLogger(logger)
+def set_logging_level(logger_name: str, level: int):
+    logger = logging.getLogger(logger_name)
     original_level = logger.level
     logger.setLevel(level)
     try:

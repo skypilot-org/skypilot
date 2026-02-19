@@ -58,8 +58,7 @@ class Event:
         })
         event_begin['args'] = {'stack': '\n'.join(traceback.format_stack())}
         if self._message is not None:
-            event_begin['args'][
-                'message'] = self._message  # type: ignore[index]
+            event_begin['args']['message'] = self._message
         _events.append(event_begin)
 
     def end(self):

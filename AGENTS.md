@@ -96,7 +96,7 @@ The script runs:
 1. **Black** - IBM-specific code only (`sky/skylet/providers/ibm/`)
 2. **YAPF** - Google style for all other Python code
 3. **isort** - Import sorting (Google profile)
-4. **mypy** - Type checking
+4. **ty** - Type checking (Astral's fast type checker)
 5. **pylint** - Linting with custom rules
 
 ### Tool Versions (must match exactly)
@@ -105,7 +105,7 @@ From `requirements-dev.txt`:
 - yapf==0.32.0
 - pylint==2.14.5
 - black==22.10.0
-- mypy==1.19.1
+- ty==0.0.15
 - isort==5.12.0
 - pylint-quotes==0.2.3
 

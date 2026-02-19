@@ -30,5 +30,5 @@ def get_unverified_session():
     """
     session = requests.session()
     session.verify = False
-    requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
+    requests.packages.urllib3.disable_warnings()
     return session

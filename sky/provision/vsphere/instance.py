@@ -290,10 +290,10 @@ def _create_instances(
         # the 64bitMMIOSizeGB will be x * 16 *2  where x the is number
         # of GPU, here is will be 1
         if spec.memoryMB >= 16 * 1024:
-            use64mmio = vsphere_adaptor.get_vim().OptionValue()  # type: ignore
+            use64mmio = vsphere_adaptor.get_vim().OptionValue()
             use64mmio.key = 'pciPassthru.use64bitMMIO'
             use64mmio.value = 'TRUE'
-            mmiosizegb = vsphere_adaptor.get_vim().OptionValue()  # type: ignore
+            mmiosizegb = vsphere_adaptor.get_vim().OptionValue()
             mmiosizegb.key = 'pciPassthru.64bitMMIOSizeGB'
             mmiosizegb.value = int(spec.memoryMB * 2 / 1024)
             spec.extraConfig = [use64mmio, mmiosizegb]

@@ -554,7 +554,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     ctx.exit()
 
 
-def _add_click_options(options: List[click.Option]):
+def _add_click_options(options: List):  # List of click option decorators
     """A decorator for adding a list of click option decorators."""
 
     def _add_options(func):
@@ -863,7 +863,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
 
     is_yaml, _ = _check_yaml(entrypoint)
 
-    entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
         click.secho('YAML to run: ', fg='cyan', nl=False)

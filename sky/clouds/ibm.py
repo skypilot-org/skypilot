@@ -391,7 +391,7 @@ class IBM(clouds.Cloud):
         try:
             image_data = client.get_image(image_id).get_result()
         # pylint: disable=line-too-long
-        except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
+        except ibm.ibm_cloud_sdk_core.ApiException as e:
             logger.error(e.message)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(

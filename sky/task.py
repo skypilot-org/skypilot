@@ -384,7 +384,7 @@ class Task:
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self._num_nodes = 1
-        self.num_nodes = num_nodes  # type: ignore
+        self.num_nodes = num_nodes
 
         self.inputs: Optional[str] = None
         self.outputs: Optional[str] = None

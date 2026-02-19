@@ -18,7 +18,9 @@ def handle_boto_error(exc: Exception, msg: str) -> None:
     error_info = None
     # todo: not sure if these exceptions always have response
     if hasattr(exc, 'response'):
-        error_info = exc.response.get('Error', None)
+        response = getattr(exc, 'response', None)
+        if isinstance(response, dict):
+            error_info = response.get('Error', None)
     if error_info is not None:
         error_code = error_info.get('Code', None)
 

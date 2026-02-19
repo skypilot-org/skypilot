@@ -2865,7 +2865,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     NAME = 'cloudvmray'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = CloudVmRayResourceHandle  # type: ignore
+    ResourceHandle = CloudVmRayResourceHandle
 
     def __init__(self):
         self.run_timestamp = sky_logging.get_run_timestamp()
@@ -3166,8 +3166,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     retry_provisioner = RetryingVmProvisioner(
                         self.log_dir,
-                        self._dag,  # type: ignore[arg-type]
-                        self._optimize_target,  # type: ignore[arg-type]
+                        self._dag,
+                        self._optimize_target,
                         self._requested_features,
                         local_wheel_path,
                         wheel_hash,
@@ -3306,6 +3306,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
+            config_hash = config_dict.get('config_hash', None)
 
             ip_list = handle.external_ips()
             ssh_port_list = handle.external_ssh_ports()
@@ -3521,11 +3522,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         def _sync_git_workdir_node(
                 runner: command_runner.CommandRunner) -> None:
-            # Type assertion to help mypy understand the type
-            assert hasattr(
-                runner, 'git_clone'
-            ), f'CommandRunner should have git_clone method, ' \
-                f'got {type(runner)}'
             runner.git_clone(
                 target_dir=SKY_REMOTE_WORKDIR,
                 log_path=log_path,
@@ -4563,7 +4559,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
-            final = e.code
+            final = e.code if isinstance(e.code, (int, tuple)) else 1
         return final
 
     def tail_autostop_logs(self,
@@ -4611,7 +4607,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
-            returncode = e.code
+            returncode = e.code if isinstance(e.code, int) else 1
         return returncode
 
     def tail_managed_job_logs(self,
@@ -4644,7 +4640,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
-            returncode = e.code
+            returncode = e.code if isinstance(e.code, int) else 1
         return returncode
 
     def sync_down_managed_job_logs(

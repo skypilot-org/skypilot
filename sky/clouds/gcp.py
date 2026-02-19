@@ -489,7 +489,7 @@ class GCP(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         assert zones is not None, (region, zones)
 
         region_name = region.name
@@ -860,7 +860,7 @@ class GCP(clouds.Cloud):
         try:
             # pylint: disable=import-outside-toplevel,unused-import
             # Check google-api-python-client installation.
-            from google import auth  # type: ignore
+            from google import auth
             import googleapiclient
 
             # Check the installation of google-cloud-sdk.
@@ -1113,7 +1113,7 @@ class GCP(clouds.Cloud):
         if dryrun:
             return 'dryrun-project-id'
         # pylint: disable=import-outside-toplevel
-        from google import auth  # type: ignore
+        from google import auth
         config_project_id = skypilot_config.get_workspace_cloud('gcp').get(
             'project_id', None)
         if config_project_id:
@@ -1126,9 +1126,9 @@ class GCP(clouds.Cloud):
                 'gcloud auth application-default login')
         return project_id
 
-    @staticmethod
+    @classmethod
     def _check_instance_type_accelerators_combination(
-            resources: 'resources.Resources') -> None:
+            cls, resources: 'resources.Resources') -> None:
         resources = resources.assert_launchable()
         catalog.check_accelerator_attachable_to_host(resources.instance_type,
                                                      resources.accelerators,
@@ -1200,7 +1200,7 @@ class GCP(clouds.Cloud):
 
         # Series specific handling
         if series == 'n2':
-            num_cpus = int(instance_type.split('-')[2])  # type: ignore
+            num_cpus = int(instance_type.split('-')[2])
             if num_cpus < 64:
                 # n2 series with less than 64 vCPUs doesn't support pd-extreme, use pd-ssd for ULTRA.
                 _propagate_disk_type(

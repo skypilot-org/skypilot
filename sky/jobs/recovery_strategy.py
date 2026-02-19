@@ -489,10 +489,11 @@ class StrategyExecutor:
                                 )
                                 logger.debug('sdk.exec request ID: '
                                              f'{request_id}')
-                                job_id_on_pool_cluster, _ = (await
-                                                             asyncio.to_thread(
-                                                                 sdk.get,
-                                                                 request_id))
+                                result = await asyncio.to_thread(
+                                    sdk.get, request_id)
+                                job_id_on_pool_cluster, _ = (
+                                    result  # type: ignore[misc]
+                                )
                             except asyncio.CancelledError:
                                 if request_id:
                                     req = await asyncio.to_thread(

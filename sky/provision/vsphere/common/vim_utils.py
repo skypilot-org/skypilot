@@ -356,14 +356,13 @@ def wait_for_tasks(content, tasks):
 
         # Loop looking for updates till the state moves to a completed state.
         while len(task_list):
-            update = content.propertyCollector.WaitForUpdates(
-                version)  # type: ignore
+            update = content.propertyCollector.WaitForUpdates(version)
             for filter_set in update.filterSet:
                 for obj_set in filter_set.objectSet:
                     task = obj_set.obj
                     for change in obj_set.changeSet:
                         if change.name == 'info':
-                            state = change.val.state  # type: ignore
+                            state = change.val.state
                         elif change.name == 'info.state':
                             state = change.val
                         else:

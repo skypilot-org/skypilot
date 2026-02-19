@@ -354,7 +354,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
 
                 # Emit the error message without logging prefixes for better UX.
                 tmp_handler = sky_logging.EnvAwareHandler(sys.stdout)
-                tmp_handler.flush = sys.stdout.flush  # type: ignore
+                tmp_handler.flush = sys.stdout.flush
                 tmp_handler.setFormatter(sky_logging.NO_PREFIX_FORMATTER)
                 tmp_handler.setLevel(sky_logging.ERROR)
                 prev_propagate = logger.propagate

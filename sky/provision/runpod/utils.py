@@ -393,7 +393,7 @@ def launch(
     else:
         new_instance = runpod_commands.create_spot_pod(
             bid_per_gpu=bid_per_gpu,
-            **params,  # type: ignore[arg-type]
+            **params,
         )
 
     return new_instance['id']

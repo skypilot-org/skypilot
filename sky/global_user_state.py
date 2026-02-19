@@ -730,9 +730,12 @@ def add_or_update_cluster(cluster_name: str,
     if hasattr(cluster_handle, 'launched_resources'):
         lr = cluster_handle.launched_resources
         if lr is not None:
-            cloud = str(lr.cloud) if getattr(lr, 'cloud', None) else None
-            region = str(lr.region) if getattr(lr, 'region', None) else None
-            zone = str(lr.zone) if getattr(lr, 'zone', None) else None
+            lr_cloud = getattr(lr, 'cloud', None)
+            lr_region = getattr(lr, 'region', None)
+            lr_zone = getattr(lr, 'zone', None)
+            cloud = str(lr_cloud) if lr_cloud is not None else None
+            region = str(lr_region) if lr_region is not None else None
+            zone = str(lr_zone) if lr_zone is not None else None
 
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).

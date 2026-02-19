@@ -75,7 +75,7 @@ async def run_websocket_proxy(websocket: ClientConnection,
         protocol = asyncio.StreamReaderProtocol(stdin_reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
         transport, protocol = await loop.connect_write_pipe(
-            asyncio.streams.FlowControlMixin, sys.stdout)  # type: ignore
+            asyncio.streams.FlowControlMixin, sys.stdout)
         stdout_writer = asyncio.StreamWriter(transport, protocol, None, loop)
         # Dictionary to store last ping time for latency measurement
         last_ping_time_dict: Optional[Dict[int, float]] = None

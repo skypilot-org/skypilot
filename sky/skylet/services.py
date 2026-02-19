@@ -35,10 +35,10 @@ DEFAULT_LOG_CHUNK_FLUSH_INTERVAL = 0.05
 class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
     """Implementation of the AutostopService gRPC service."""
 
-    def SetAutostop(  # type: ignore[return]
-            self, request: autostopv1_pb2.SetAutostopRequest,
-            context: grpc.ServicerContext
-    ) -> autostopv1_pb2.SetAutostopResponse:
+    def SetAutostop(
+        self, request: autostopv1_pb2.SetAutostopRequest,
+        context: grpc.ServicerContext
+    ) -> autostopv1_pb2.SetAutostopResponse:  # type: ignore
         """Sets autostop configuration for the cluster."""
         try:
             wait_for = autostop_lib.AutostopWaitFor.from_protobuf(
@@ -58,10 +58,10 @@ class AutostopServiceImpl(autostopv1_pb2_grpc.AutostopServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def IsAutostopping(  # type: ignore[return]
-            self, request: autostopv1_pb2.IsAutostoppingRequest,
-            context: grpc.ServicerContext
-    ) -> autostopv1_pb2.IsAutostoppingResponse:
+    def IsAutostopping(
+        self, request: autostopv1_pb2.IsAutostoppingRequest,
+        context: grpc.ServicerContext
+    ) -> autostopv1_pb2.IsAutostoppingResponse:  # type: ignore
         """Checks if the cluster is currently autostopping."""
         try:
             is_autostopping = autostop_lib.get_is_autostopping()
@@ -79,10 +79,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
     # Therefore, we removed some SERVE_VERSION checks
     # present in the original codegen.
 
-    def GetServiceStatus(  # type: ignore[return]
-            self, request: servev1_pb2.GetServiceStatusRequest,
-            context: grpc.ServicerContext
-    ) -> servev1_pb2.GetServiceStatusResponse:
+    def GetServiceStatus(
+        self, request: servev1_pb2.GetServiceStatusRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.GetServiceStatusResponse:  # type: ignore
         """Gets serve status."""
         try:
             service_names, pool = (
@@ -94,9 +94,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def AddVersion(  # type: ignore[return]
-            self, request: servev1_pb2.AddVersionRequest,
-            context: grpc.ServicerContext) -> servev1_pb2.AddVersionResponse:
+    def AddVersion(
+        self, request: servev1_pb2.AddVersionRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.AddVersionResponse:  # type: ignore
         """Adds serve version"""
         try:
             service_name = request.service_name
@@ -105,10 +106,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def TerminateServices(  # type: ignore[return]
-            self, request: servev1_pb2.TerminateServicesRequest,
-            context: grpc.ServicerContext
-    ) -> servev1_pb2.TerminateServicesResponse:
+    def TerminateServices(
+        self, request: servev1_pb2.TerminateServicesRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.TerminateServicesResponse:  # type: ignore
         """Terminates serve"""
         try:
             service_names, purge, pool = (
@@ -118,10 +119,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def TerminateReplica(  # type: ignore[return]
-            self, request: servev1_pb2.TerminateReplicaRequest,
-            context: grpc.ServicerContext
-    ) -> servev1_pb2.TerminateReplicaResponse:
+    def TerminateReplica(
+        self, request: servev1_pb2.TerminateReplicaRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.TerminateReplicaResponse:  # type: ignore
         """Terminate replica"""
         try:
             service_name = request.service_name
@@ -133,10 +134,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def WaitServiceRegistration(  # type: ignore[return]
+    def WaitServiceRegistration(
         self, request: servev1_pb2.WaitServiceRegistrationRequest,
         context: grpc.ServicerContext
-    ) -> servev1_pb2.WaitServiceRegistrationResponse:
+    ) -> servev1_pb2.WaitServiceRegistrationResponse:  # type: ignore
         """Wait for service to be registered"""
         try:
             service_name = request.service_name
@@ -149,9 +150,10 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def UpdateService(  # type: ignore[return]
-            self, request: servev1_pb2.UpdateServiceRequest,
-            context: grpc.ServicerContext) -> servev1_pb2.UpdateServiceResponse:
+    def UpdateService(
+        self, request: servev1_pb2.UpdateServiceRequest,
+        context: grpc.ServicerContext
+    ) -> servev1_pb2.UpdateServiceResponse:  # type: ignore
         """Update service"""
         try:
             service_name = request.service_name
@@ -168,9 +170,9 @@ class ServeServiceImpl(servev1_pb2_grpc.ServeServiceServicer):
 class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
     """Implementation of the JobsService gRPC service."""
 
-    def AddJob(  # type: ignore[return]
-            self, request: jobsv1_pb2.AddJobRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.AddJobResponse:
+    def AddJob(
+        self, request: jobsv1_pb2.AddJobRequest, context: grpc.ServicerContext
+    ) -> jobsv1_pb2.AddJobResponse:  # type: ignore
         try:
             job_name = request.job_name if request.HasField('job_name') else '-'
             job_id, log_dir = job_lib.add_job(job_name, request.username,
@@ -181,9 +183,9 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def QueueJob(  # type: ignore[return]
-            self, request: jobsv1_pb2.QueueJobRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.QueueJobResponse:
+    def QueueJob(
+        self, request: jobsv1_pb2.QueueJobRequest, context: grpc.ServicerContext
+    ) -> jobsv1_pb2.QueueJobResponse:  # type: ignore
         try:
             job_id = request.job_id
             # Create log directory and file
@@ -215,10 +217,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def SetJobInfoWithoutJobId(  # type: ignore[return]
+    def SetJobInfoWithoutJobId(
         self, request: jobsv1_pb2.SetJobInfoWithoutJobIdRequest,
         context: grpc.ServicerContext
-    ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:
+    ) -> jobsv1_pb2.SetJobInfoWithoutJobIdResponse:  # type: ignore
         try:
             pool = request.pool if request.HasField('pool') else None
             pool_hash = request.pool_hash if request.HasField(
@@ -250,18 +252,20 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def UpdateStatus(  # type: ignore[return]
-            self, request: jobsv1_pb2.UpdateStatusRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.UpdateStatusResponse:
+    def UpdateStatus(
+        self, request: jobsv1_pb2.UpdateStatusRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.UpdateStatusResponse:  # type: ignore
         try:
             job_lib.update_status()
             return jobsv1_pb2.UpdateStatusResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetJobQueue(  # type: ignore[return]
-            self, request: jobsv1_pb2.GetJobQueueRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.GetJobQueueResponse:
+    def GetJobQueue(
+        self, request: jobsv1_pb2.GetJobQueueRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetJobQueueResponse:  # type: ignore
         try:
             user_hash = request.user_hash if request.HasField(
                 'user_hash') else None
@@ -272,9 +276,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def CancelJobs(  # type: ignore[return]
-            self, request: jobsv1_pb2.CancelJobsRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.CancelJobsResponse:
+    def CancelJobs(
+        self, request: jobsv1_pb2.CancelJobsRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.CancelJobsResponse:  # type: ignore
         try:
             job_ids = list(request.job_ids) if request.job_ids else []
             user_hash = request.user_hash if request.HasField(
@@ -286,20 +291,18 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def FailAllInProgressJobs(  # type: ignore[return]
+    def FailAllInProgressJobs(
         self, _: jobsv1_pb2.FailAllInProgressJobsRequest,
         context: grpc.ServicerContext
-    ) -> jobsv1_pb2.FailAllInProgressJobsResponse:
+    ) -> jobsv1_pb2.FailAllInProgressJobsResponse:  # type: ignore
         try:
             job_lib.fail_all_jobs_in_progress()
             return jobsv1_pb2.FailAllInProgressJobsResponse()
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def TailLogs(
-            self,
-            request: jobsv1_pb2.TailLogsRequest,  # type: ignore[return]
-            context: grpc.ServicerContext):
+    def TailLogs(self, request: jobsv1_pb2.TailLogsRequest,
+                 context: grpc.ServicerContext):
         buffer = log_lib.LogBuffer()
         try:
             job_id = request.job_id if request.HasField(
@@ -334,9 +337,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         finally:
             buffer.close()
 
-    def GetJobStatus(  # type: ignore[return]
-            self, request: jobsv1_pb2.GetJobStatusRequest,
-            context: grpc.ServicerContext) -> jobsv1_pb2.GetJobStatusResponse:
+    def GetJobStatus(
+        self, request: jobsv1_pb2.GetJobStatusRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetJobStatusResponse:  # type: ignore
         try:
             if request.job_ids:
                 job_ids = list(request.job_ids)
@@ -351,10 +355,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetJobSubmittedTimestamp(  # type: ignore[return]
+    def GetJobSubmittedTimestamp(
         self, request: jobsv1_pb2.GetJobSubmittedTimestampRequest,
         context: grpc.ServicerContext
-    ) -> jobsv1_pb2.GetJobSubmittedTimestampResponse:
+    ) -> jobsv1_pb2.GetJobSubmittedTimestampResponse:  # type: ignore
         try:
             job_id = request.job_id if request.HasField(
                 'job_id') else job_lib.get_latest_job_id()
@@ -368,10 +372,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetJobEndedTimestamp(  # type: ignore[return]
+    def GetJobEndedTimestamp(
         self, request: jobsv1_pb2.GetJobEndedTimestampRequest,
         context: grpc.ServicerContext
-    ) -> jobsv1_pb2.GetJobEndedTimestampResponse:
+    ) -> jobsv1_pb2.GetJobEndedTimestampResponse:  # type: ignore
         try:
             job_id = request.job_id if request.HasField(
                 'job_id') else job_lib.get_latest_job_id()
@@ -384,10 +388,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetLogDirsForJobs(  # type: ignore[return]
-            self, request: jobsv1_pb2.GetLogDirsForJobsRequest,
-            context: grpc.ServicerContext
-    ) -> jobsv1_pb2.GetLogDirsForJobsResponse:
+    def GetLogDirsForJobs(
+        self, request: jobsv1_pb2.GetLogDirsForJobsRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetLogDirsForJobsResponse:  # type: ignore
         try:
             if request.job_ids:
                 job_ids = list(request.job_ids)
@@ -400,10 +404,10 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetJobExitCodes(  # type: ignore[return]
-            self, request: jobsv1_pb2.GetJobExitCodesRequest,
-            context: grpc.ServicerContext
-    ) -> jobsv1_pb2.GetJobExitCodesResponse:
+    def GetJobExitCodes(
+        self, request: jobsv1_pb2.GetJobExitCodesRequest,
+        context: grpc.ServicerContext
+    ) -> jobsv1_pb2.GetJobExitCodesResponse:  # type: ignore
         try:
             job_id = request.job_id if request.HasField(
                 'job_id') else job_lib.get_latest_job_id()
@@ -420,20 +424,20 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                             ):
     """Implementation of the ManagedJobsService gRPC service."""
 
-    def GetVersion(  # type: ignore[return]
-            self, request: managed_jobsv1_pb2.GetVersionRequest,
-            context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.GetVersionResponse:
+    def GetVersion(
+        self, request: managed_jobsv1_pb2.GetVersionRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.GetVersionResponse:  # type: ignore
         try:
             return managed_jobsv1_pb2.GetVersionResponse(
                 controller_version=constants.SKYLET_VERSION)
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetJobTable(  # type: ignore[return]
+    def GetJobTable(
         self, request: managed_jobsv1_pb2.GetJobTableRequest,
         context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.GetJobTableResponse:
+    ) -> managed_jobsv1_pb2.GetJobTableResponse:  # type: ignore
         try:
             accessible_workspaces = (
                 list(request.accessible_workspaces.workspaces)
@@ -535,10 +539,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             logger.error(e, exc_info=True)
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def GetAllJobIdsByName(  # type: ignore[return]
+    def GetAllJobIdsByName(
         self, request: managed_jobsv1_pb2.GetAllJobIdsByNameRequest,
         context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.GetAllJobIdsByNameResponse:
+    ) -> managed_jobsv1_pb2.GetAllJobIdsByNameResponse:  # type: ignore
         try:
             job_name = request.job_name if request.HasField(
                 'job_name') else None
@@ -548,10 +552,10 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def CancelJobs(  # type: ignore[return]
-            self, request: managed_jobsv1_pb2.CancelJobsRequest,
-            context: grpc.ServicerContext
-    ) -> managed_jobsv1_pb2.CancelJobsResponse:
+    def CancelJobs(
+        self, request: managed_jobsv1_pb2.CancelJobsRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.CancelJobsResponse:  # type: ignore
         try:
             cancellation_criteria = request.WhichOneof('cancellation_criteria')
             if cancellation_criteria is None:
@@ -604,11 +608,8 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         except Exception as e:  # pylint: disable=broad-except
             context.abort(grpc.StatusCode.INTERNAL, str(e))
 
-    def StreamLogs(
-            self,
-            request: managed_jobsv1_pb2.
-        StreamLogsRequest,  # type: ignore[return]
-            context: grpc.ServicerContext):
+    def StreamLogs(self, request: managed_jobsv1_pb2.StreamLogsRequest,
+                   context: grpc.ServicerContext):
         # TODO(kevin): implement this
         context.abort(grpc.StatusCode.UNIMPLEMENTED,
                       'StreamLogs is not implemented')

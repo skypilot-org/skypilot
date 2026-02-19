@@ -41,7 +41,7 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from google.cloud import storage  # type: ignore
+    from google.cloud import storage
     import mypy_boto3_s3
 
 logger = sky_logging.init_logger(__name__)
@@ -2912,8 +2912,7 @@ class AzureBlobStore(AbstractStore):
             # TODO(cooperc): fix the types for mypy 1.16
             # Azure store expects a string path; metadata.source may be a Path
             # or List[Path].
-            source=override_args.get('source',
-                                     metadata.source),  # type: ignore[arg-type]
+            source=override_args.get('source', metadata.source),
             region=override_args.get('region', metadata.region),
             is_sky_managed=override_args.get('is_sky_managed',
                                              metadata.is_sky_managed),
@@ -4042,8 +4041,7 @@ class IBMCosStore(AbstractStore):
                     f' To debug, consider running `{command}`.') from e
 
         try:
-            uri_region = data_utils.split_cos_path(
-                self.source)[2]  # type: ignore
+            uri_region = data_utils.split_cos_path(self.source)[2]
         except ValueError:
             # source isn't a cos uri
             uri_region = ''
@@ -4069,7 +4067,7 @@ class IBMCosStore(AbstractStore):
         data_utils.Rclone.store_rclone_config(
             self.name,
             data_utils.Rclone.RcloneStores.IBM,
-            self.region,  # type: ignore
+            self.region,
         )
 
         if not bucket_region and self.sync_on_reconstruction:
@@ -4110,16 +4108,14 @@ class IBMCosStore(AbstractStore):
         # install rclone if not installed.
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
-            rclone_profile_name=self.rclone_profile_name,
-            region=self.region)  # type: ignore
-        mount_cmd = (
-            mounting_utils.get_cos_mount_cmd(
-                rclone_config,
-                self.rclone_profile_name,
-                self.bucket.name,
-                mount_path,
-                self._bucket_sub_path,  # type: ignore
-            ))
+            rclone_profile_name=self.rclone_profile_name, region=self.region)
+        mount_cmd = (mounting_utils.get_cos_mount_cmd(
+            rclone_config,
+            self.rclone_profile_name,
+            self.bucket.name,
+            mount_path,
+            self._bucket_sub_path,
+        ))
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -4146,7 +4142,7 @@ class IBMCosStore(AbstractStore):
                         f'{colorama.Style.RESET_ALL}')
             self.bucket = self.s3_resource.Bucket(bucket_name)
 
-        except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr]  # pylint: disable=line-too-long
+        except ibm.ibm_botocore.exceptions.ClientError as e:  # pylint: disable=line-too-long
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Failed to create bucket: '

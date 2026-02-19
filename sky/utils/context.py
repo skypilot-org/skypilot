@@ -303,7 +303,8 @@ class ContextualEnviron(MutableMapping[str, str]):
                     copied[key] = ctx.env_overrides[key]
         return copied
 
-    def setdefault(self, key: str, default: str) -> str:
+    def setdefault(  # type: ignore[override]
+            self, key: str, default: str) -> str:
         return self._environ.setdefault(key, default)
 
     def __ior__(self, other):
@@ -335,8 +336,7 @@ class Popen(subprocess.Popen):
             # Pass a copy of current context.environ to avoid race condition
             # when the context is updated after the Popen is created.
             env = os.environ.copy()
-        super().__init__(*args, env=env,
-                         **kwargs)  # type: ignore[call-overload]
+        super().__init__(*args, env=env, **kwargs)
 
 
 P = ParamSpec('P')

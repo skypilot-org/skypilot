@@ -196,7 +196,7 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
         response = client.describe_instance_types(
             # TODO(cooperc): fix the types for mypy 1.16
             # Boto3 type stubs expect Literal instance types; using str list here.
-            InstanceTypes=[instance_type],  # type: ignore
+            InstanceTypes=[instance_type],
             Filters=[{
                 'Name': 'network-info.efa-supported',
                 'Values': ['true']

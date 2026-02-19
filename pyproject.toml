@@ -19,12 +19,27 @@ env = [
 addopts = "-s -n 16 -q --tb=short --dist loadgroup --disable-warnings"
 asyncio_default_fixture_loop_scope = "function"
 
-[tool.mypy]
-python_version = "3.9"
-follow_imports = "skip"
-ignore_missing_imports = true
-allow_redefinition = true
-check_untyped_defs = true
+# ty configuration
+[tool.ty.environment]
+python-version = "3.9"
+[tool.ty.rules]
+# Inherit from mypy
+unresolved-import = "ignore"
+# Ignore the following rules for now, since mypy doesn't raise these errors.
+# We will fix these issues by batch, and then enable these rules in the future.
+missing-argument = "ignore"
+invalid-assignment = "ignore"
+invalid-argument-type = "ignore"
+possibly-missing-attribute = "ignore"
+[tool.ty.src]
+exclude = [
+    "sky/backends/monkey_patches",
+    "examples/admin_policy/example_policy/build",
+]
+include = [
+    "sky",
+    "examples/admin_policy/example_policy",
+]
 
 [tool.isort]
 profile = "google"

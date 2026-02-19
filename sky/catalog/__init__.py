@@ -27,7 +27,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
             clouds.remove('kubernetes')
     single = isinstance(clouds, str)
     if single:
-        clouds = [clouds]  # type: ignore
+        clouds = [clouds]
 
     def _execute_catalog_method(cloud: str):
         try:

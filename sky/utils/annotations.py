@@ -41,7 +41,8 @@ def _register_functions_need_reload_cache(func: Callable) -> Callable:
 
     The function will be registered as a weak reference to avoid blocking GC.
     """
-    assert hasattr(func, 'cache_clear'), f'{func.__name__} is not cacheable'
+    assert hasattr(func, 'cache_clear'), (
+        f'{getattr(func, "__name__", "<unknown>")} is not cacheable')
     wrapped_fn = func
     try:
         func_ref = weakref.ref(func)

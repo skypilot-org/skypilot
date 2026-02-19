@@ -206,7 +206,8 @@ def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_spot_price_history')
     response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
-                                           StartTime=datetime.datetime.utcnow())
+                                           StartTime=datetime.datetime.now(
+                                               datetime.timezone.utc))
     ret: List['ec2_type_defs.SpotPriceTypeDef'] = []
     for response in response_iterator:
         # response['SpotPriceHistory'] is a list of dicts, each dict is like:

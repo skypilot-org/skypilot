@@ -121,7 +121,7 @@ def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     vpc_client = ibm.client(region=region)
     try:
         vpc_client.get_image(tag)
-    except ibm.ibm_cloud_sdk_core.ApiException as e:  # type: ignore[union-attr]
+    except ibm.ibm_cloud_sdk_core.ApiException as e:
         logger.error(e.message)
         return False
     return True

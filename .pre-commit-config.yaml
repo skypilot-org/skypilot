@@ -33,30 +33,6 @@ repos:
           - "-m=3"
         files: "^sky/skylet/providers/ibm/.*"  # Only match IBM-specific directory
 
--   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1  # Match the version from requirements
-    hooks:
-    -   id: mypy
-        args:            # Match tests/mypy_files.txt - check sky and examples/admin_policy/example_policy
-            - "sky"
-            - "examples/admin_policy/example_policy"
-            - "--exclude"
-            - "sky/backends/monkey_patches"
-            - "--exclude"
-            - "examples/admin_policy/example_policy/build"
-            - "--check-untyped-defs"
-        pass_filenames: false
-        additional_dependencies:
-            - types-aiofiles
-            - types-PyYAML
-            - types-requests<2.31  # Match the condition in requirements.txt
-            - types-setuptools<80.9  # Match the condition in requirements-dev.txt
-            - types-cachetools
-            - types-pyvmomi
-            - types-paramiko
-            - types-protobuf
-            - types-python-dateutil
-
 -   repo: https://github.com/google/yapf
     rev: v0.32.0  # Match the version from requirements
     hooks:
@@ -102,3 +78,25 @@ repos:
         language_version: 24.12.0
         files: ^sky/dashboard/
         pass_filenames: false
+
+    # ty doesn't support pre-commit out of the box right now
+    # https://github.com/astral-sh/ty/issues/269
+    -   id: ty
+        name: ty check (mypy alternative)
+        entry: ty check
+        pass_filenames: false
+        # only install ty and `types-` dependencies from requirements-dev.txt
+        # We should separate ty dependencies as group in pyproject.toml in the future
+        additional_dependencies:
+            - ty==0.0.15
+            # types packages for type checking
+            - types-PyYAML
+            - types-paramiko
+            - types-requests<2.31
+            - types-setuptools<80.9
+            - types-cachetools
+            - types-pyvmomi
+            - types-aiofiles
+            - types-protobuf
+            - types-python-dateutil
+        language: python

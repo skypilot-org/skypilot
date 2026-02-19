@@ -101,16 +101,13 @@ def get_accelerators_from_instance_type(
             acc_count) or acc_name == '' or acc_count == '':
         return None
 
-    # Convert accelerator count to int/float
+    # Convert accelerator count to int
     try:
-        if int(acc_count) == acc_count:
-            acc_count = int(acc_count)
-        else:
-            acc_count = float(acc_count)
+        acc_count_int = int(acc_count)
     except (ValueError, TypeError):
         return None
 
-    result = {acc_name: acc_count}
+    result: Dict[str, int] = {str(acc_name): acc_count_int}
     return result
 
 

@@ -511,7 +511,7 @@ class Kubernetes(clouds.Cloud):
         num_nodes: int,
         dryrun: bool = False,
         volume_mounts: Optional[List['volume_lib.VolumeMount']] = None,
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Any]:
         del cluster_name, zones, dryrun  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()

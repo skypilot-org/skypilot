@@ -404,7 +404,7 @@ def _get_ibm_cos_bucket_region(region, bucket_name):
         tmp_client = ibm.get_cos_client(region)
         tmp_client.head_bucket(Bucket=bucket_name)
         return region
-    except ibm.ibm_botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long
+    except ibm.ibm_botocore.exceptions.ClientError as e:  # pylint: disable=line-too-long
         if e.response['Error']['Code'] == '404':
             logger.debug(f'bucket {bucket_name} was not found '
                          f'in {region}')
@@ -982,7 +982,7 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
                     f'{retry_count} retries ({retry_count * 5} seconds)')
             return True
 
-        except coreweave.botocore.exceptions.ClientError as e:  # type: ignore[union-attr] # pylint: disable=line-too-long:
+        except coreweave.botocore.exceptions.ClientError as e:  # pylint: disable=line-too-long:
             error_code = e.response['Error']['Code']
             if error_code == '403':
                 logger.error(f'Access denied to bucket {name}')

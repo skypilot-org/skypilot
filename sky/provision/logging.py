@@ -42,7 +42,7 @@ def setup_provision_logging(log_dir: str):
         # set up for sky root logger.
         provision_logger.propagate = False
         stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.flush = sys.stdout.flush  # type: ignore
+        stream_handler.flush = sys.stdout.flush
         stream_handler.setFormatter(sky_logging.DIM_FORMATTER)
         stream_handler.setLevel(logging.WARNING)
         provision_logger.addHandler(fh)

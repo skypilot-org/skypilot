@@ -73,7 +73,7 @@ def add_timestamp_prefix_for_server_logs() -> None:
         stream_handler.setLevel(logging.DEBUG)
     else:
         stream_handler.setLevel(logging.INFO)
-    stream_handler.flush = sys.stdout.flush  # type: ignore
+    stream_handler.flush = sys.stdout.flush
     stream_handler.setFormatter(sky_logging.FORMATTER)
     server_logger.addHandler(stream_handler)
     # Add date prefix to the log message printed by uvicorn.

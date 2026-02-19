@@ -192,6 +192,7 @@ def check_capabilities(
                 if specified_capabilities:
                     # filter the capabilities to only the ones passed
                     # in as argument to this function
+                    assert capabilities is not None
                     workspace_cloud_capabilities[cloud] = [
                         enabled_capability
                         for enabled_capability in specified_capabilities

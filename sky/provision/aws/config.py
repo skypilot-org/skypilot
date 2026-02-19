@@ -65,8 +65,8 @@ def bootstrap_instances(
     node_cfg = config.node_config
     aws_credentials = config.provider_config.get('aws_credentials', {})
 
-    subnet_ids = node_cfg.get('SubnetIds')  # type: ignore
-    security_group_ids = node_cfg.get('SecurityGroupIds')  # type: ignore
+    subnet_ids = node_cfg.get('SubnetIds')
+    security_group_ids = node_cfg.get('SecurityGroupIds')
     assert 'NetworkInterfaces' not in node_cfg, (
         'SkyPilot: NetworkInterfaces is not supported in '
         'node config')
@@ -484,14 +484,15 @@ def _usable_subnets(
             f'usable: {_get_pruned_subnets(subnets)}')
 
     if azs is not None:
-        azs = [az.strip() for az in azs.split(',')]  # type: ignore
+        azs_list = [az.strip() for az in azs.split(',')]
+        # Iterate over AZs first to maintain the ordering
         subnets = [
-            s for az in azs  # Iterate over AZs first to maintain the ordering
-            for s in subnets if s.availability_zone == az
+            s for az in azs_list for s in subnets if s.availability_zone == az
         ]
         if not subnets:
             _skypilot_log_error_and_exit_for_failover(
-                f'No usable subnets matching availability zone {azs} found. '
+                f'No usable subnets matching availability zone {azs_list} '
+                'found. '
                 'Choose a different availability zone or try manually '
                 'creating an instance in your specified region to populate '
                 'the list of subnets and trying this again. If you have set '
@@ -503,7 +504,7 @@ def _usable_subnets(
             _skypilot_log_error_and_exit_for_failover(
                 f'MISMATCH between specified subnets and Availability Zones! '
                 'The following Availability Zones were specified in the '
-                f'`provider section`: {azs}. The following subnets '
+                f'`provider section`: {azs_list}. The following subnets '
                 f'have no matching availability zone: '
                 f'{list(_get_pruned_subnets(subnets))}.')
 

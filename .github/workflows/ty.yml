@@ -1,4 +1,4 @@
-name: mypy
+name: ty
 
 on:
   # Trigger the workflow on push or pull request,
@@ -13,8 +13,11 @@ on:
       - 'releases/**'
   merge_group:
 
+permissions:
+  contents: read
+
 jobs:
-  mypy:
+  ty:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,9 +33,9 @@ jobs:
       run: |
         uv venv --seed ~/test-env
         source ~/test-env/bin/activate
-        uv pip install mypy==$(grep mypy requirements-dev.txt | cut -d'=' -f3)
-        uv pip install $(grep types- requirements-dev.txt | tr '\n' ' ')
-    - name: Running mypy
+        uv pip install ty==$(grep "ty==" requirements-dev.txt | cut -d'=' -f3)
+        uv pip install $(grep "types-" requirements-dev.txt | cut -d'=' -f1)
+    - name: Running ty
       run: |
         source ~/test-env/bin/activate
-        mypy $(cat tests/mypy_files.txt)
+        ty check

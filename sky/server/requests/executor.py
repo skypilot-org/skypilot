@@ -134,7 +134,7 @@ class RequestQueue:
         Args:
             request: A tuple of request_id, ignore_return_value, and retryable.
         """
-        self.queue.put(request)  # type: ignore
+        self.queue.put(request)
 
     def get(self) -> Optional[Tuple[str, bool, bool]]:
         """Get a request from the queue.

@@ -326,7 +326,7 @@ def _convert_requests_cookies_to_aiohttp(
     cookies = {}
     for cookie in cookie_jar:
         cookies[cookie.name] = cookie.value
-    return cookies  # type: ignore
+    return cookies
 
 
 def make_authenticated_request(method: str,
@@ -726,7 +726,7 @@ def _start_api_server(deploy: bool = False,
                         f'View logs at: {constants.API_SERVER_LOGS}')
             try:
                 # Clear the cache to ensure fresh checks during startup
-                get_api_server_status.cache_clear()  # type: ignore
+                get_api_server_status.cache_clear()
                 check_server_healthy()
             except exceptions.APIVersionMismatchError:
                 raise
@@ -888,7 +888,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may
             # have started the server while we were waiting for the lock.
-            get_api_server_status.cache_clear()  # type: ignore[attr-defined]
+            get_api_server_status.cache_clear()
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
                 _start_api_server(deploy, host, foreground, metrics,

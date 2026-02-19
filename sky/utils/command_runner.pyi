@@ -202,6 +202,18 @@ class CommandRunner:
     def close_cached_connection(self) -> None:
         ...
 
+    def git_clone(
+        self,
+        target_dir: str,
+        *,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        connect_timeout: Optional[int] = ...,
+        max_retry: int = ...,
+        envs_and_secrets: Optional[Any] = ...,
+    ) -> None:
+        ...
+
 
 class SSHCommandRunner(CommandRunner):
     ip: str

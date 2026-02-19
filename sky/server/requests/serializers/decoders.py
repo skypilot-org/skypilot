@@ -136,8 +136,8 @@ def decode_jobs_queue_v2(
         status_counts: Dict[str, int] = return_value.get('status_counts', {})
         for job in jobs:
             job['status'] = managed_jobs.ManagedJobStatus(job['status'])
-        jobs = [responses.ManagedJobRecord(**job) for job in jobs]
-        return jobs, total, status_counts, total_no_filter
+        decoded_jobs = [responses.ManagedJobRecord(**job) for job in jobs]
+        return decoded_jobs, total, status_counts, total_no_filter
     else:
         # Case 2: legacy list
         jobs = return_value

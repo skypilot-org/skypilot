@@ -102,9 +102,9 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
                 super().write_line_break()
 
     if isinstance(config, list):
-        dump_func = yaml.dump_all  # type: ignore
+        dump_func = yaml.dump_all
     else:
-        dump_func = yaml.dump  # type: ignore
+        dump_func = yaml.dump
     return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
