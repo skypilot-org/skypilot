@@ -1767,7 +1767,8 @@ def test_managed_jobs_logs_gc(generic_cloud: str):
         # Stop the API server so that it doesn't refer to the deleted config
         # file after the test exits
         teardown=f'sky jobs cancel -y -n {name}; sky api stop',
-        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV
+        if not smoke_tests_utils.server_side_is_consolidation_mode() else None,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)

@@ -70,6 +70,9 @@ _GCLOUD_VERSION = '424.0.0'
 GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     {{ gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
+    flock ~/.sky/gcloud_install.lock bash -c \' \
+    gcloud --help > /dev/null 2>&1 || \
+    {{ \
     ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
         echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
@@ -88,7 +91,8 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
-    source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }}; }} && \
+    source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; \
+    }}\'; }}; }} && \
     popd &>/dev/null'
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.

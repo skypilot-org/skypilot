@@ -662,6 +662,7 @@ def test_autostopping_behaviors(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+@pytest.mark.no_slurm  # Slurm does not support stopping instances
 def test_start_preserves_autostop(generic_cloud: str):
     """Test that sky start preserves the autostop setting from the database."""
     name = smoke_tests_utils.get_cluster_name()
@@ -2367,7 +2368,7 @@ def test_cancel_job_reliability(generic_cloud: str):
         """
         return (
             f'for i in $(seq 1 {timeout}); do '
-            f'  s=$(ssh {name} "ps aux | grep \'sleep 10000\'" 2>/dev/null); '
+            f'  s=$(ssh {name} "ps aux | grep \'sleep 10000\' | grep -v srun" 2>/dev/null); '
             f'  count=$(echo "$s" | wc -l || echo 0); '
             f'  if [ "$count" -eq {expected_lines} ]; then '
             f'    echo "Found {expected_lines} line(s) as expected"; '

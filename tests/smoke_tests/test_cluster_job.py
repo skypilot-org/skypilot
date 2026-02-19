@@ -99,6 +99,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
 @pytest.mark.no_hyperbolic  # Doesn't support Hyperbolic for now
 @pytest.mark.no_seeweb  # Seeweb does not support Docker images
+@pytest.mark.no_slurm  # Slurm does not support allocating fractional GPUs in a job. Run test_job_queue_with_docker_multi_gpu instead
 @pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -325,6 +326,42 @@ def test_job_queue_multi_gpu(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.slurm
+def test_job_queue_with_docker_multi_gpu(generic_cloud: str):
+    accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud,
+                                                       count=4)
+    if not accelerator:
+        pytest.skip(f'No available GPUs for {generic_cloud}')
+    name = smoke_tests_utils.get_cluster_name()
+    image_id = 'docker:ubuntu'
+    test = smoke_tests_utils.Test(
+        'job_queue_with_docker_multi_gpu',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} --cpus 16 --gpus {accelerator}:4 --image-id {image_id} examples/job_queue/cluster_docker.yaml',
+            # Submit job 1 with 1 GPU
+            f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:1 --image-id {image_id} "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 1 ]] || exit 1; sleep 30"',
+            # Submit job 2 with 2 GPUs
+            f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:2 --image-id {image_id} "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 2 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 2 ]] || exit 1; sleep 30"',
+            # Submit job 3 with 4 GPUs - should be blocked until the first two jobs complete
+            f'sky exec {name} -n {name}-3 -d --gpus {accelerator}:4 --image-id {image_id} "[[ \\$SKYPILOT_NUM_GPUS_PER_NODE -eq 4 ]] || exit 1; num_devices=\\$(echo \\$CUDA_VISIBLE_DEVICES | tr \',\' \'\\n\' | wc -l); [[ \\$num_devices -eq 4 ]] || exit 1"',
+            # First two jobs should be running, and job 3 should be pending.
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
+            'sleep 60',
+            # Verify GPU visibility in container
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep -i "{accelerator}"',
+            f'sky logs {name} 4 --status',
+            # Verify all jobs succeed.
+            f'sky logs {name} 1 --status && sky logs {name} 1',
+            f'sky logs {name} 2 --status && sky logs {name} 2',
+            f'sky logs {name} 3 --status && sky logs {name} 3',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
@@ -532,6 +569,7 @@ def test_docker_preinstalled_package_slurm_sqsh(generic_cloud: str):
 @pytest.mark.no_nebius  # Nebius does not have T4 gpus
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not have T4 gpus
+@pytest.mark.no_slurm  # Slurm does not support fractional GPUs (0.1)
 @pytest.mark.resource_heavy
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()

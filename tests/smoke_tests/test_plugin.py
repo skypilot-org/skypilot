@@ -48,6 +48,8 @@ def test_plugin(generic_cloud: str):
 @pytest.mark.no_dependency
 @pytest.mark.no_remote_server  # Restart required so API picks up plugin upload config
 def test_plugin_upload_to_jobs_controller(generic_cloud: str):
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('No separate controller VM in consolidation mode')
     """Smoke test that plugin wheels are uploaded and installed on the jobs controller.
 
     With remote_plugins.yaml and controller_wheel_path in plugins.yaml set,

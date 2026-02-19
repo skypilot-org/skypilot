@@ -299,7 +299,7 @@ def wait_for_message_in_pool_logs(pool_name: str,
                                   timeout: int = 300,
                                   time_between_checks: int = 10):
     """Wait for a specific message to appear in pool logs.
-    
+
     Args:
         pool_name: Name of the pool to check logs for.
         message: The message to search for in the logs (case-insensitive).
@@ -327,7 +327,7 @@ def wait_for_message_in_pool_logs(pool_name: str,
                                   timeout: int = 300,
                                   time_between_checks: int = 10):
     """Wait for a specific message to appear in pool logs.
-    
+
     Args:
         pool_name: Name of the pool to check logs for.
         message: The message to search for in the logs (case-insensitive).
@@ -1334,12 +1334,18 @@ def test_pools_heterogeneous_any_of(generic_cloud: str):
     pool_name = f'{name}-pool'
     job_name = f'{name}-job'
     # Use any_of with cheaper GPUs (T4 and V100 are commonly available)
-    one_config = unified_conf(
-        num_workers=1,
-        infra=generic_cloud,
-        resource_string="accelerators: {'T4:1', 'V100:1'}",
-        setup_cmd='echo "setup message"; nvidia-smi',
-        run_cmd='echo "Heterogeneous job"; nvidia-smi')
+    if generic_cloud == 'slurm':
+        gpu = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
+        if not gpu:
+            pytest.skip(f'No available GPUs for {generic_cloud}')
+        resource_string = f"accelerators: {{'{gpu}:1', 'V100:1'}}"
+    else:
+        resource_string = "accelerators: {'T4:1', 'V100:1'}"
+    one_config = unified_conf(num_workers=1,
+                              infra=generic_cloud,
+                              resource_string=resource_string,
+                              setup_cmd='echo "setup message"; nvidia-smi',
+                              run_cmd='echo "Heterogeneous job"; nvidia-smi')
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     with tempfile.NamedTemporaryFile(delete=True) as one_config_yaml:
         write_yaml(one_config_yaml, one_config)
@@ -2407,7 +2413,7 @@ def autoscaling_pool_conf(
     setup_cmd: str = 'echo "setup message"',
 ):
     """Create a pool config with autoscaling enabled.
-    
+
     Args:
         num_workers: Initial number of workers (also used as min if min_workers not set)
         max_workers: Maximum number of workers for autoscaling
@@ -2463,7 +2469,7 @@ def check_workers_do_not_exceed(pool_name: str,
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_up(generic_cloud: str):
     """Test that pool autoscales up when jobs are queued.
-    
+
     This test:
     1. Creates a pool with workers=1, max_workers=3 (2 higher than initial)
     2. Launches multiple jobs that will queue up
@@ -2525,7 +2531,7 @@ def test_pool_autoscaling_scale_up(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
     """Test that pool does not scale above workers when max_workers == workers.
-    
+
     This test:
     1. Creates a pool with workers=2, max_workers=2 (same as workers)
     2. Launches multiple jobs that will queue up
@@ -2589,7 +2595,7 @@ def test_pool_autoscaling_no_scale_when_max_equals_workers(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
     """Test that pool autoscales down to zero when no jobs and min_workers=0.
-    
+
     This test:
     1. Creates a pool with workers=1, max_workers=2, min_workers=0
     2. Launches a job that completes quickly
@@ -2644,7 +2650,7 @@ def test_pool_autoscaling_scale_down_to_zero(generic_cloud: str):
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_autoscaling_scale_up_to_max_then_down_to_zero(generic_cloud: str):
     """Test that pool autoscales up to max_workers then down to zero.
-    
+
     This test:
     1. Creates a pool with workers=0, max_workers=3, min_workers=0
     2. Queues up enough quick jobs (echo hi) to trigger scaling to 3 workers
