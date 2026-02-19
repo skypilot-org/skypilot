@@ -239,6 +239,29 @@ def _download_from_gcs(bucket: str, key: str, local_path: str) -> None:
     blob.download_to_filename(local_path)
 
 
+def download_file_from_cloud(cloud_path: str, local_path: str) -> None:
+    """Download a file from cloud storage.
+
+    Args:
+        cloud_path: Cloud storage path to download from.
+        local_path: Local destination path.
+    """
+    provider, bucket, key = parse_cloud_path(cloud_path)
+
+    if provider == 's3':
+        from sky.adaptors import aws
+        s3 = aws.client('s3')
+        s3.download_file(bucket, key, local_path)
+    elif provider == 'gs':
+        from sky.adaptors import gcp
+        client = gcp.storage_client()
+        bucket_obj = client.bucket(bucket)
+        blob = bucket_obj.blob(key)
+        blob.download_to_filename(local_path)
+    else:
+        raise ValueError(f'Unsupported provider: {provider}')
+
+
 def upload_file_to_cloud(local_path: str, cloud_path: str) -> None:
     """Upload a file to cloud storage.
 
@@ -270,6 +293,51 @@ def _upload_to_gcs(local_path: str, bucket: str, key: str) -> None:
     bucket_obj = client.bucket(bucket)
     blob = bucket_obj.blob(key)
     blob.upload_from_filename(local_path)
+
+
+def upload_bytes_to_cloud(data: bytes, cloud_path: str) -> None:
+    """Upload raw bytes to cloud storage.
+
+    Args:
+        data: Bytes to upload.
+        cloud_path: Cloud storage destination path.
+    """
+    provider, bucket, key = parse_cloud_path(cloud_path)
+
+    if provider == 's3':
+        from sky.adaptors import aws
+        s3 = aws.client('s3')
+        s3.put_object(Bucket=bucket, Key=key, Body=data)
+    elif provider == 'gs':
+        from sky.adaptors import gcp
+        client = gcp.storage_client()
+        bucket_obj = client.bucket(bucket)
+        blob = bucket_obj.blob(key)
+        blob.upload_from_string(data, content_type='application/octet-stream')
+    else:
+        raise ValueError(f'Unsupported provider: {provider}')
+
+
+def get_output_format(output_path: str):
+    """Detect the output format from the output path.
+
+    Returns:
+        A DatasetFormat instance suitable for writing results.
+
+    Rules:
+        - Path ending with ``.jsonl`` → JSONL format (default).
+        - Path ending with ``/`` → Image directory format.
+    """
+    if output_path.rstrip('/').endswith('.jsonl'):
+        from sky.batch.formats.jsonl import JSONLDataset
+        return JSONLDataset()
+    elif output_path.endswith('/'):
+        from sky.batch.formats.image_dir import ImageDirOutput
+        return ImageDirOutput()
+    else:
+        # Default to JSONL for backward compatibility.
+        from sky.batch.formats.jsonl import JSONLDataset
+        return JSONLDataset()
 
 
 def _load_jsonl_file(path: str) -> List[Dict[str, Any]]:

@@ -5,14 +5,14 @@ processing. It takes a JSONL file where each line has a "text" field,
 and outputs a JSONL file where each line has an "output" field containing
 the doubled text.
 
-Usage:
+Usage (from project root):
     1. Prepare your dataset (a JSONL file with "text" fields):
        $ echo '{"text": "hello"}' > /tmp/test.jsonl
        $ echo '{"text": "world"}' >> /tmp/test.jsonl
        $ aws s3 cp /tmp/test.jsonl s3://my-bucket/test.jsonl
 
     2. Run this script:
-       $ python double_text.py
+       $ python examples/batch/simple/double_text.py
 
     3. Check the output:
        $ aws s3 cp s3://my-bucket/output.jsonl /tmp/output.jsonl
@@ -69,9 +69,14 @@ def ensure_pool(pool_name: str, pool_yaml: str) -> None:
 
 
 def main():
-    # Configuration - update these paths for your setup
-    input_path = 's3://sky-batch-test-2026/test.jsonl'
-    output_path = 's3://sky-batch-test-2026/output.jsonl'
+    # Configuration — set SKY_BATCH_BUCKET env var or use the default.
+    default_bucket = f'sky-batch-simple-{os.environ.get("USER", "default")}'
+    bucket = os.environ.get('SKY_BATCH_BUCKET', default_bucket)
+    print(f'Using bucket: s3://{bucket}  '
+          f'(override with SKY_BATCH_BUCKET env var)')
+
+    input_path = f's3://{bucket}/test.jsonl'
+    output_path = f's3://{bucket}/output.jsonl'
     pool_name = 'test-batch-pool'
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 

@@ -193,6 +193,7 @@ class Dataset:
             pool_name: str,
             batch_size: int,
             output_path: str,
+            activate_env: Optional[str] = None,
             job_id: Optional[str] = None) -> None:
         """Distribute workload across pool workers using the mapper function.
 
@@ -208,6 +209,11 @@ class Dataset:
             pool_name: Name of the worker pool to use.
             batch_size: Number of items per batch sent to each worker.
             output_path: Cloud storage path for output results.
+            activate_env: Optional shell command to activate the Python
+                          environment before running the mapper function.
+                          This should match the environment set up by the
+                          pool's ``setup`` command.
+                          Example: ``'source .venv/bin/activate'``
             job_id: Optional job ID for tracking. If not provided, a UUID
                     will be generated.
 
@@ -258,6 +264,7 @@ class Dataset:
             'batch_size': batch_size,
             'output_path': output_path,
             'serialized_fn': serialized_fn,
+            'activate_env': activate_env or '',
         }
         resp = requests.post(submit_url, json=payload, timeout=60)
         resp.raise_for_status()

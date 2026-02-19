@@ -54,7 +54,8 @@ _current_batch_lock = threading.Lock()
 
 _output_path: Optional[str] = None
 _job_id: Optional[str] = None
-_dataset_format: Optional[Any] = None  # DatasetFormat instance
+_dataset_format: Optional[Any] = None  # DatasetFormat instance (input)
+_output_format: Optional[Any] = None  # DatasetFormat instance (output)
 
 # ---------------------------------------------------------------------------
 # HTTP handler (localhost only)
@@ -203,10 +204,11 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
     from sky.batch import api
     from sky.batch import utils
 
-    global _output_path, _job_id, _dataset_format
+    global _output_path, _job_id, _dataset_format, _output_format
     _output_path = output_path
     _job_id = job_id
     _dataset_format = _get_dataset_format(dataset_path)
+    _output_format = utils.get_output_format(output_path)
 
     # Start HTTP server.
     server = HTTPServer(('127.0.0.1', constants.WORKER_SERVICE_PORT),

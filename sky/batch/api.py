@@ -111,13 +111,13 @@ def save_results(results: List[Dict[str, Any]]) -> None:
             f'({len(batch_item.data)}). Results must have one entry per '
             'input item.')
 
-    # Upload results using format-specific logic
-    dataset_format = worker._dataset_format
-    assert dataset_format is not None, 'Worker not initialized'
-    chunk_path = dataset_format.upload_chunk(results, _output_path,
-                                             batch_item.batch_idx,
-                                             batch_item.start_idx,
-                                             batch_item.end_idx, _job_id)
+    # Upload results using the output format (may differ from input format).
+    output_format = worker._output_format
+    assert output_format is not None, 'Worker not initialized'
+    chunk_path = output_format.upload_chunk(results, _output_path,
+                                            batch_item.batch_idx,
+                                            batch_item.start_idx,
+                                            batch_item.end_idx, _job_id)
     logger.info('Saved results to %s', chunk_path)
 
     # Signal completion — unblocks the HTTP handler in worker.py.

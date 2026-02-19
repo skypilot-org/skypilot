@@ -58,6 +58,7 @@ class BatchJob:
     batch_size: int
     output_path: str
     serialized_fn: str
+    activate_env: str = ''  # Shell command to activate user's venv
     status: str = 'pending'  # pending | running | completed | failed
 
     # Batch metadata: List of [start_idx, end_idx] tuples.
@@ -141,6 +142,33 @@ class BatchController:
         return [info.cluster_name for info in replicas]
 
     # ------------------------------------------------------------------
+    # Pool resource detection
+    # ------------------------------------------------------------------
+
+    def _get_pool_resources(self) -> Optional['sky.Resources']:
+        """Return the ``sky.Resources`` configured for this pool's workers.
+
+        This is used to set matching resources on ``sky.exec()`` tasks so
+        that Ray allocates GPUs (and other accelerators) to the worker
+        processes.
+        """
+        try:
+            service = serve_state.get_service_from_name(self.pool_name)
+            if service is None:
+                return None
+            yaml_content = serve_state.get_yaml_content(
+                self.pool_name, service['version'])
+            if yaml_content is None:
+                return None
+            task = sky.Task.from_yaml_str(yaml_content)
+            # Return the first resource spec (pools don't use ordered resources).
+            for r in task.resources:
+                return r
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Failed to get pool resources: %s', e)
+        return None
+
+    # ------------------------------------------------------------------
     # Dataset format detection
     # ------------------------------------------------------------------
 
@@ -170,6 +198,18 @@ class BatchController:
 
         This runs as a separate SkyPilot job that blocks in the mapper function.
         """
+        # Build the activation preamble.  When activate_env is provided
+        # (e.g. "source .venv/bin/activate") it runs before every shell
+        # snippet so that ``python`` and ``pip`` resolve to the user's
+        # virtual-env — the same one configured in the pool's ``setup``.
+        activate = job.activate_env.strip()
+        activate_line = f'{activate} &&' if activate else ''
+
+        # SkyPilot runtime env contains the dev sky package.  We add its
+        # site-packages to PYTHONPATH so the user's python can import
+        # sky.batch without installing skypilot separately.
+        sky_runtime = skylet_constants.SKY_REMOTE_PYTHON_ENV
+
         return textwrap.dedent(f"""\
             set -e
             export SKY_BATCH_SERIALIZED_FN='{job.serialized_fn}'
@@ -177,12 +217,17 @@ class BatchController:
             export SKY_BATCH_JOB_ID='{job.job_id}'
             export SKY_BATCH_DATASET_PATH='{job.dataset_path}'
 
-            # Ensure boto3 is available
-            {skylet_constants.SKY_UV_PIP_CMD} list 2>/dev/null | grep boto3 > /dev/null 2>&1 || \\
-                {skylet_constants.SKY_UV_PIP_CMD} install boto3
+            # Make sky.batch visible to the user's python by adding the
+            # SkyPilot runtime site-packages to PYTHONPATH.
+            SKY_SITE=$({sky_runtime}/bin/python -c \
+              "import site; print(site.getsitepackages()[0])")
+            export PYTHONPATH="${{SKY_SITE}}:${{PYTHONPATH}}"
 
-            # Start worker service (blocks in mapper function)
-            {skylet_constants.SKY_PYTHON_CMD} -u -c '
+            # Ensure boto3 is available in the user env.
+            {activate_line} pip install boto3 2>/dev/null
+
+            # Start worker service in the activated environment.
+            {activate_line} python -u -c '
             import os
             from sky.batch.worker import start_worker
             start_worker(
@@ -224,9 +269,13 @@ class BatchController:
             The SkyPilot job ID of the worker service.
         """
 
-        # Submit worker startup job
+        # Submit worker startup job with the pool's resources so that
+        # Ray allocates accelerators (GPUs) to the worker process.
         startup_code = self._generate_worker_startup_code(job)
         task = sky.Task(name=f'batch-worker-{job.job_id}', run=startup_code)
+        pool_resources = self._get_pool_resources()
+        if pool_resources is not None:
+            task.set_resources(pool_resources)
         request_id = sdk.exec(task, cluster_name=cluster_name)
         worker_job_id, _ = sdk.get(request_id)
         assert worker_job_id is not None, 'Failed to get worker job ID'
@@ -389,8 +438,9 @@ class BatchController:
             # Keep status as 'pending' until workers are ready
             # (dataset loading and worker discovery happen in 'pending' phase)
 
-            # 1. Detect dataset format and get handler
+            # 1. Detect input and output format handlers.
             dataset_format = self._get_dataset_format(job.dataset_path)
+            output_format = utils.get_output_format(job.output_path)
 
             # 2. Count total items (format-specific, may download for counting)
             logger.info(f'[{job.job_id}] Counting items in {job.dataset_path}')
@@ -485,10 +535,10 @@ class BatchController:
                     f'Expected {len(job.batches)} completed batches, '
                     f'got {job.completed_count}')
 
-            # 9. Merge results (uses dataset format abstraction)
+            # 9. Merge results (uses output format abstraction).
             job.status = 'merging'
             logger.info(f'[{job.job_id}] Merging results...')
-            dataset_format.merge_results(job.output_path, job.job_id)
+            output_format.merge_results(job.output_path, job.job_id)
             logger.info(f'[{job.job_id}] Results written to {job.output_path}')
 
             job.status = 'completed'
@@ -524,6 +574,7 @@ class BatchController:
             batch_size: int
             output_path: str
             serialized_fn: str
+            activate_env: str = ''
 
         # ---- Endpoints ----
 
@@ -536,6 +587,7 @@ class BatchController:
                 batch_size=req.batch_size,
                 output_path=req.output_path,
                 serialized_fn=req.serialized_fn,
+                activate_env=req.activate_env,
             )
             with self._jobs_lock:
                 self._jobs[job.job_id] = job

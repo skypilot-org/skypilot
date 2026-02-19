@@ -25,6 +25,8 @@ Output:
 
 ## Steps
 
+All commands are run from the **project root**.
+
 ### 1. Prepare your dataset
 
 Create a simple JSONL test file:
@@ -39,13 +41,13 @@ echo '{"text": "batch"}' >> /tmp/test.jsonl
 Upload to S3:
 
 ```bash
-aws s3 cp /tmp/test.jsonl s3://sky-batch-test-2026/test.jsonl
+aws s3 cp /tmp/test.jsonl s3://sky-batch-test-20260212/test.jsonl
 ```
 
 ### 2. Create the pool
 
 ```bash
-sky jobs pool apply pool.yaml --pool sky-pool-cca0 -y
+sky jobs pool apply examples/batch/simple/pool.yaml --pool sky-pool-cca0 -y
 ```
 
 Wait for the pool to be ready:
@@ -59,14 +61,14 @@ sky jobs pool status sky-pool-cca0
 Edit `double_text.py` and update the S3 paths:
 
 ```python
-input_path = 's3://sky-batch-test-2026/test.jsonl'
-output_path = 's3://sky-batch-test-2026/output.jsonl'
+input_path = 's3://sky-batch-test-20260212/test.jsonl'
+output_path = 's3://sky-batch-test-20260212/output.jsonl'
 ```
 
 ### 4. Run the example
 
 ```bash
-python double_text.py
+python examples/batch/simple/double_text.py
 ```
 
 This will:
@@ -79,7 +81,7 @@ This will:
 ### 5. Check the output
 
 ```bash
-aws s3 cp s3://sky-batch-test-2026/output.jsonl /tmp/output.jsonl
+aws s3 cp s3://sky-batch-test-20260212/output.jsonl /tmp/output.jsonl
 cat /tmp/output.jsonl
 ```
 
