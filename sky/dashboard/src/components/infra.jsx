@@ -341,8 +341,7 @@ export function InfrastructureSection({
                         if (gpus.length === 0) return null;
                         const typeCounts = gpus.reduce((acc, gpu) => {
                           const name = canonicalizeGpuName(gpu.gpu_name);
-                          acc[name] =
-                            (acc[name] || 0) + (gpu.gpu_total || 0);
+                          acc[name] = (acc[name] || 0) + (gpu.gpu_total || 0);
                           return acc;
                         }, {});
 
@@ -523,7 +522,11 @@ export function InfrastructureSection({
                           ? Object.values(groupedPerContextGPUs)
                               .flat()
                               .filter((g) => {
-                                if (canonicalizeGpuName(g.gpu_name) !== gpu.gpu_name) return false;
+                                if (
+                                  canonicalizeGpuName(g.gpu_name) !==
+                                  gpu.gpu_name
+                                )
+                                  return false;
                                 if (isSlurm) return true; // For Slurm, include all
                                 // For Kubernetes/SSH, filter by context type
                                 const contextKey = g.context || g.cluster;

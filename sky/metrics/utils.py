@@ -244,6 +244,7 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     # env var was modified after os.environ was last copied.
     # Import lazily to avoid circular import (metrics -> provision -> clouds
     # -> metrics).
+    # pylint: disable=import-outside-toplevel
     from sky.adaptors import kubernetes as kubernetes_adaptors
     from sky.provision.kubernetes import utils as kubernetes_utils
     kubeconfig_paths = kubernetes_utils.get_kubeconfig_paths()

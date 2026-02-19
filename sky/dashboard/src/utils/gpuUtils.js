@@ -13,12 +13,37 @@
  * Keep in sync with sky/provision/kubernetes/constants.py.
  */
 export const CANONICAL_GPU_NAMES = [
-  'GB300', 'GB200', 'B300', 'B200', 'B100',
-  'GH200', 'H200', 'H100-MEGA', 'H100',
-  'A100', 'A10G', 'A10', 'A16', 'A30', 'A40',
-  'RTX6000-Ada', 'L40S', 'L40', 'L4',
-  'A6000', 'A5000', 'A4000',
-  'V100', 'P100', 'P40', 'P4000', 'P4', 'T4g', 'T4', 'K80', 'M60',
+  'GB300',
+  'GB200',
+  'B300',
+  'B200',
+  'B100',
+  'GH200',
+  'H200',
+  'H100-MEGA',
+  'H100',
+  'A100',
+  'A10G',
+  'A10',
+  'A16',
+  'A30',
+  'A40',
+  'RTX6000-Ada',
+  'L40S',
+  'L40',
+  'L4',
+  'A6000',
+  'A5000',
+  'A4000',
+  'V100',
+  'P100',
+  'P40',
+  'P4000',
+  'P4',
+  'T4g',
+  'T4',
+  'K80',
+  'M60',
 ];
 
 /**
@@ -36,7 +61,7 @@ export function canonicalizeGpuName(rawName) {
     // Word-boundary matching to prevent substring matches (e.g. L4 vs L40)
     const re = new RegExp(
       `\\b${canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
-      'i',
+      'i'
     );
     if (re.test(value)) {
       return canonical;

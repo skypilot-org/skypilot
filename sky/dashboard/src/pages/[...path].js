@@ -31,9 +31,7 @@ export default function PluginCatchAllPage() {
   // Try the path directly first (e.g. /cron), then with /plugins/ prefix for
   // backward compatibility with plugins that still register under /plugins/.
   const directRoute = usePluginRoute(pathname);
-  const prefixedRoute = usePluginRoute(
-    pathname ? `/plugins${pathname}` : null
-  );
+  const prefixedRoute = usePluginRoute(pathname ? `/plugins${pathname}` : null);
   const route = directRoute || prefixedRoute;
 
   useEffect(() => {
