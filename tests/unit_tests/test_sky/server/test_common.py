@@ -109,7 +109,7 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
 
-    with mock.patch.object(common.get_api_server_status,
+    with mock.patch.object(common.get_api_server_status_response,
                            'cache_clear',
                            wraps=common.get_api_server_status_response.
                            cache_clear) as mock_cache_clear:
