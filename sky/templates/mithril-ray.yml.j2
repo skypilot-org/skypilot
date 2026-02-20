@@ -211,6 +211,7 @@ setup_commands:
     import os
     import time
 
+    DEFAULT_AUTO_RESTART_JOB = {{ 'True' if auto_restart_job else 'False' }}
     MAX_REQUEUE_ATTEMPTS = 12
     REQUEUE_RETRY_INTERVAL_SECONDS = 10
 
@@ -234,34 +235,40 @@ setup_commands:
         job_lib.scheduler.schedule_step(force_update_jobs=False)
         exit(0)
 
-    def _metadata_auto_restart_enabled(record):
+    def _auto_restart_enabled(record):
         metadata = record.get('metadata') or {}
-        enabled = metadata.get('mithril_auto_restart_job', False)
+        enabled = metadata.get('mithril_auto_restart_job')
+        source = '_metadata.mithril_auto_restart_job'
+        if enabled is None:
+            enabled = DEFAULT_AUTO_RESTART_JOB
+            source = 'config.mithril.auto_restart_job (fallback)'
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in (
                 '1', 'true', 'yes', 'y', 'on')
-        return bool(enabled)
+        return bool(enabled), source
 
-    resumable_records = [
-        record for record in started_records
-        if _metadata_auto_restart_enabled(record)
-    ]
+    resumable_records = []
+    for record in started_records:
+        enabled, source = _auto_restart_enabled(record)
+        if enabled:
+            resumable_records.append((record, source))
     if not resumable_records:
         latest_started_job = max(started_records,
                                  key=lambda record: record['start_at'])['job_id']
         print(
-            'No started RUNNING/FAILED_DRIVER job has '
-            '_metadata.mithril_auto_restart_job=true; '
+            'No started RUNNING/FAILED_DRIVER job opted into auto-resume '
+            '(via _metadata.mithril_auto_restart_job or '
+            'config.mithril.auto_restart_job fallback); '
             f'skipping auto-resume (latest started job: {latest_started_job}).')
         job_lib.scheduler.schedule_step(force_update_jobs=False)
         exit(0)
 
-    stale_job = max(resumable_records, key=lambda record: record['start_at'])
+    stale_job, resume_source = max(
+        resumable_records, key=lambda item: item[0]['start_at'])
     old_job_id = stale_job['job_id']
     script_path = os.path.expanduser(f'~/.sky/sky_app/sky_job_{old_job_id}')
     print(
-        f'Auto-resume enabled via _metadata.mithril_auto_restart_job '
-        f'for job {old_job_id}.')
+        f'Auto-resume enabled via {resume_source} for job {old_job_id}.')
 
     # _get_jobs() records do not include log_dir, so fetch canonical path
     # from the jobs table for this job id.
