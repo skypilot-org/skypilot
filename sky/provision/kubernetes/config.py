@@ -542,13 +542,21 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     root_dir = os.path.dirname(os.path.dirname(__file__))
 
     # Load and create the DaemonSet
-    # TODO(aylei): support customize and upgrade the fusermount-server image
     logger.info('_configure_fuse_mounting: Creating daemonset.')
     daemonset_path = os.path.join(
         root_dir, 'kubernetes/manifests/fusermount-server-daemonset.yaml')
     with open(daemonset_path, 'r', encoding='utf-8') as file:
         daemonset = yaml_utils.safe_load(file)
     kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
+
+    # Override fusermount-server image if configured
+    fuse_device_manager_config = provider_config.get('fuse_device_manager', {})
+    custom_image = fuse_device_manager_config.get('image')
+    if custom_image:
+        daemonset['spec']['template']['spec']['containers'][0][
+            'image'] = custom_image
+        logger.info('_configure_fuse_mounting: Using custom fusermount-server '
+                    f'image: {custom_image}')
     try:
         kubernetes.apps_api(context).create_namespaced_daemon_set(
             fuse_proxy_namespace, daemonset)
