@@ -113,7 +113,6 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {{ ssh_max_sessions_config }}
-    {%- if auto_restart_job %}
     # SkyPilot bootstrap script and systemd service (runs on every boot after preemption/relocation)
     sudo tee /usr/local/sbin/skypilot-bootstrap.sh > /dev/null << 'SKYPILOT_BOOTSTRAP_END'
     #!/usr/bin/env bash
@@ -235,9 +234,34 @@ setup_commands:
         job_lib.scheduler.schedule_step(force_update_jobs=False)
         exit(0)
 
-    stale_job = max(started_records, key=lambda record: record['start_at'])
+    def _metadata_auto_restart_enabled(record):
+        metadata = record.get('metadata') or {}
+        enabled = metadata.get('mithril_auto_restart_job', False)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in (
+                '1', 'true', 'yes', 'y', 'on')
+        return bool(enabled)
+
+    resumable_records = [
+        record for record in started_records
+        if _metadata_auto_restart_enabled(record)
+    ]
+    if not resumable_records:
+        latest_started_job = max(started_records,
+                                 key=lambda record: record['start_at'])['job_id']
+        print(
+            'No started RUNNING/FAILED_DRIVER job has '
+            '_metadata.mithril_auto_restart_job=true; '
+            f'skipping auto-resume (latest started job: {latest_started_job}).')
+        job_lib.scheduler.schedule_step(force_update_jobs=False)
+        exit(0)
+
+    stale_job = max(resumable_records, key=lambda record: record['start_at'])
     old_job_id = stale_job['job_id']
     script_path = os.path.expanduser(f'~/.sky/sky_app/sky_job_{old_job_id}')
+    print(
+        f'Auto-resume enabled via _metadata.mithril_auto_restart_job '
+        f'for job {old_job_id}.')
 
     # _get_jobs() records do not include log_dir, so fetch canonical path
     # from the jobs table for this job id.
@@ -313,14 +337,6 @@ setup_commands:
     SKYPILOT_SVC_END
     sudo systemctl daemon-reload
     sudo systemctl enable skypilot-bootstrap.service
-    {%- else %}
-    # Config set to false: disable and remove bootstrap service so it does not run on next boot
-    sudo systemctl stop skypilot-bootstrap.service 2>/dev/null || true;
-    sudo systemctl disable skypilot-bootstrap.service 2>/dev/null || true;
-    sudo rm -f /etc/systemd/system/skypilot-bootstrap.service;
-    sudo rm -f /usr/local/sbin/skypilot-bootstrap.sh;
-    sudo systemctl daemon-reload;
-    {%- endif %}
     {%- if volume_mounts and volume_mounts|length > 0 %}
     {%- for vm in volume_mounts %}
     {%- if vm.volume_type == 'mithril-block' %}
