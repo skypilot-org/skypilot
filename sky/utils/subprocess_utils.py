@@ -215,8 +215,7 @@ GenericProcess = Union[multiprocessing.Process, psutil.Process,
                        subprocess.Popen]
 
 
-def _wait_non_child_process(proc: 'psutil.Process',
-                            grace_period: int) -> None:
+def _wait_non_child_process(proc: 'psutil.Process', grace_period: int) -> None:
     """Wait for a non-child process to exit by polling its status.
 
     psutil.Process.wait() internally polls kill(pid, 0) for non-children,
