@@ -373,6 +373,21 @@ The following three ways are valid for specifying accelerators for a cluster:
 
   Example: ``{'L4:1', 'H100:1', 'A100:1'}``
 
+- To specify accelerators by GPU memory (select any GPU that meets the memory requirement):
+
+  Format: ``<memory>`` or ``<memory>:<count>`` or ``<manufacturer>:<memory>`` or ``<manufacturer>:<memory>:<count>``
+
+  The memory can include a ``+`` suffix to indicate "at least" this amount of memory.
+
+  Examples:
+
+  - ``40GB`` - Any GPU with exactly 40GB memory
+  - ``40GB+`` - Any GPU with 40GB or more memory
+  - ``80GB:8`` - 8 GPUs with exactly 80GB memory each
+  - ``40GB+:4`` - 4 GPUs with 40GB or more memory each
+  - ``NVIDIA:40GB+`` - Any NVIDIA GPU with 40GB or more memory
+  - ``NVIDIA:80GB:8`` - 8 NVIDIA GPUs with exactly 80GB memory each
+
 .. code-block:: yaml
 
   resources:
@@ -393,6 +408,22 @@ OR
 
   resources:
     accelerators: {A100:1, V100:1}
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    # Request any GPU with at least 40GB memory
+    accelerators: 40GB+
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    # Request 8 NVIDIA GPUs with at least 80GB memory each
+    accelerators: NVIDIA:80GB+:8
 
 
 .. _yaml-spec-resources-accelerator-args:
