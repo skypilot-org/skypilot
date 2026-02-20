@@ -550,6 +550,12 @@
                         "null"
                     ]
                 },
+                "kubeconfigPath": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
                 "kubeconfigSecretName": {
                     "type": "string"
                 },

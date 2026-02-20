@@ -508,6 +508,12 @@ kubernetesCredentials:
   useKubeconfig: false
   # Name of the secret containing the kubeconfig file. Only used if useKubeconfig is true.
   kubeconfigSecretName: kube-credentials
+  # Optional path for KUBECONFIG env var. When set (e.g. for Teleport tbot certificate rotation),
+  # the API server uses this path and will retry on SSL/cert errors after rotation.
+  # Example: /var/lib/tbot/kubeconfig/kubeconfig.yaml — mount the Teleport tbot output via
+  # apiService.extraVolumeMounts and apiService.extraVolumes.
+  # @schema type: [string, null]
+  kubeconfigPath: null
   # Namespace to use for in-cluster resources
   # @schema type: [string, null]
   inclusterNamespace: null

@@ -4,11 +4,18 @@ Thread safety notes:
 
 The API functions (core_api, batch_api, etc.) return cached clients that are
 created with context-specific ApiClient instances.
+
+Teleport tbot certificate rotation: When using Teleport's tbot for short-lived
+kubeconfig certificates, SSL errors can occur after rotation. The adaptor
+retries API calls once on SSL-related errors after clearing client caches so
+that a new client is built from the updated kubeconfig (e.g. from
+KUBECONFIG=/var/lib/tbot/kubeconfig/kubeconfig.yaml).
 """
 import functools
 import logging
 import os
 import platform
+import ssl
 import typing
 from typing import Any, Callable, Optional, Set
 
@@ -29,6 +36,11 @@ else:
                                    import_error_message=_IMPORT_ERROR_MESSAGE)
     urllib3 = common.LazyImport('urllib3',
                                 import_error_message=_IMPORT_ERROR_MESSAGE)
+
+# Default path for Teleport tbot kubeconfig (used when KUBECONFIG is not set
+# and API server runs with Teleport). Set KUBECONFIG to this path to enable
+# automatic cert rotation.
+TELEPORT_TBOT_KUBECONFIG_PATH = '/var/lib/tbot/kubeconfig/kubeconfig.yaml'
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -89,9 +101,23 @@ def _api_logging_decorator(logger_src: str, level: int):
 
 def _get_config_file() -> str:
     # Kubernetes load the kubeconfig from the KUBECONFIG env var on
-    # package initialization. So we have to reload the KUBECOFNIG env var
-    # everytime in case the KUBECONFIG env var is changed.
-    return os.environ.get('KUBECONFIG', '~/.kube/config')
+    # package initialization. So we have to reload the KUBECONFIG env var
+    # every time in case the KUBECONFIG env var is changed.
+    return os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
+
+
+def _is_ssl_related_error(exc: BaseException) -> bool:
+    """True if the exception is an SSL/certificate error (e.g. after cert rotation)."""
+    if isinstance(exc, ssl.SSLError):
+        return True
+    if hasattr(urllib3.exceptions, 'SSLError') and isinstance(
+            exc, urllib3.exceptions.SSLError):
+        return True
+    if hasattr(urllib3.exceptions, 'MaxRetryError') and isinstance(
+            exc, urllib3.exceptions.MaxRetryError):
+        reason = getattr(exc, 'reason', None)
+        return reason is not None and _is_ssl_related_error(reason)
+    return False
 
 
 def _get_api_client(context: Optional[str] = None) -> Any:
@@ -239,6 +265,49 @@ class ClientWrapper:
                 logger.debug(f'Error closing Kubernetes client: {e}')
 
 
+class RetryableClientWrapper:
+    """Wraps a Kubernetes API client to retry once on SSL/cert errors.
+
+    When a method call raises an SSL-related error (e.g. after Teleport tbot
+    certificate rotation), clears client caches and retries the call so a new
+    client is built from the updated kubeconfig.
+    """
+
+    def __init__(self, client: Any, getter: Callable, getter_args: tuple,
+                 getter_kwargs: dict):
+        self._client = client
+        self._getter = getter
+        self._getter_args = getter_args
+        self._getter_kwargs = getter_kwargs
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._client, name)
+        if not callable(attr):
+            return attr
+
+        def with_retry(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            except Exception as e:  # pylint: disable=broad-except
+                if not _is_ssl_related_error(e):
+                    raise
+                logger.debug('Kubernetes SSL/cert error, clearing caches and '
+                             'retrying once: %s', e)
+                _clear_kubernetes_client_caches()
+                new_client = self._getter(*self._getter_args,
+                                          **self._getter_kwargs)
+                new_attr = getattr(new_client, name)
+                return new_attr(*args, **kwargs)
+
+        return with_retry
+
+
+def _make_retryable(client: Any, getter: Callable, *args: Any,
+                    **kwargs: Any) -> RetryableClientWrapper:
+    """Wrap a Kubernetes client so one retry is done on SSL/cert errors."""
+    return RetryableClientWrapper(client, getter, args, kwargs)
+
+
 def wrap_kubernetes_client(func):
     """Wraps kubernetes API clients for proper cleanup."""
 
@@ -252,85 +321,105 @@ def wrap_kubernetes_client(func):
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def core_api(context: Optional[str] = None):
-    return kubernetes.client.CoreV1Api(api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.CoreV1Api(api_client=_get_api_client(context)))
+    return _make_retryable(client, core_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def storage_api(context: Optional[str] = None):
-    return kubernetes.client.StorageV1Api(api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.StorageV1Api(
+            api_client=_get_api_client(context)))
+    return _make_retryable(client, storage_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def auth_api(context: Optional[str] = None):
-    return kubernetes.client.RbacAuthorizationV1Api(
-        api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.RbacAuthorizationV1Api(
+            api_client=_get_api_client(context)))
+    return _make_retryable(client, auth_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def networking_api(context: Optional[str] = None):
-    return kubernetes.client.NetworkingV1Api(
-        api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.NetworkingV1Api(
+            api_client=_get_api_client(context)))
+    return _make_retryable(client, networking_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def custom_objects_api(context: Optional[str] = None):
-    return kubernetes.client.CustomObjectsApi(
-        api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.CustomObjectsApi(
+            api_client=_get_api_client(context)))
+    return _make_retryable(client, custom_objects_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='global')
-@wrap_kubernetes_client
 def node_api(context: Optional[str] = None):
-    return kubernetes.client.NodeV1Api(api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.NodeV1Api(api_client=_get_api_client(context)))
+    return _make_retryable(client, node_api, context)
+
+
+def _clear_kubernetes_client_caches() -> None:
+    """Clear Kubernetes API client caches so the next call rebuilds from kubeconfig.
+
+    Used after SSL/cert errors (e.g. Teleport tbot rotation) so clients are
+    recreated with updated certificates.
+    """
+    annotations.clear_request_level_cache()
+    # node_api uses scope='global', so clear it explicitly.
+    node_api.cache_clear()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def apps_api(context: Optional[str] = None):
-    return kubernetes.client.AppsV1Api(api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.AppsV1Api(api_client=_get_api_client(context)))
+    return _make_retryable(client, apps_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def batch_api(context: Optional[str] = None):
-    return kubernetes.client.BatchV1Api(api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.BatchV1Api(api_client=_get_api_client(context)))
+    return _make_retryable(client, batch_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def api_client(context: Optional[str] = None):
-    return _get_api_client(context)
+    client = ClientWrapper(_get_api_client(context))
+    return _make_retryable(client, api_client, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def custom_resources_api(context: Optional[str] = None):
-    return kubernetes.client.CustomObjectsApi(
-        api_client=_get_api_client(context))
+    client = ClientWrapper(
+        kubernetes.client.CustomObjectsApi(
+            api_client=_get_api_client(context)))
+    return _make_retryable(client, custom_resources_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
-@wrap_kubernetes_client
 def watch(context: Optional[str] = None):
     w = kubernetes.watch.Watch()
     w._api_client = _get_api_client(context)  # pylint: disable=protected-access
-    return w
+    return _make_retryable(ClientWrapper(w), watch, context)
 
 
 def api_exception():

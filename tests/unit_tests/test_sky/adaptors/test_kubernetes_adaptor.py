@@ -3,8 +3,8 @@
 import concurrent.futures
 import gc
 import os
+import ssl
 import tempfile
-import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -204,3 +204,34 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
                     f'got {actual_host}. Race condition detected.')
     finally:
         os.unlink(config_file)
+
+
+def test_ssl_retry_on_cert_rotation(monkeypatch):
+    """Verify one retry on SSL/cert errors (e.g. Teleport tbot rotation)."""
+    creation_count = [0]
+
+    def fake_core_v1_api(api_client=None):
+        creation_count[0] += 1
+        if creation_count[0] == 1:
+            return SimpleNamespace(
+                list_node=MagicMock(side_effect=ssl.SSLError(
+                    'certificate verify failed')))
+        return SimpleNamespace(
+            list_node=MagicMock(
+                return_value=SimpleNamespace(items=[MagicMock()])))
+
+    monkeypatch.setattr(kubernetes, '_get_api_client',
+                        lambda context=None: MagicMock())
+    monkeypatch.setattr(kubernetes.kubernetes.client, 'CoreV1Api',
+                        fake_core_v1_api)
+
+    annotations.clear_request_level_cache()
+    kubernetes.node_api.cache_clear()
+
+    api = kubernetes.core_api()
+    result = api.list_node()
+
+    assert creation_count[0] == 2, (
+        'Expected CoreV1Api to be constructed twice (initial + retry)')
+    assert result.items is not None
+    assert len(result.items) == 1
