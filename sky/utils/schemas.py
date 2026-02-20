@@ -1288,7 +1288,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
-    'fuse_mounting': {
+    'fusermount_server': {
         'type': 'object',
         'required': [],
         'additionalProperties': False,
