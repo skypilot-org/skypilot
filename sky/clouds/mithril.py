@@ -1,5 +1,6 @@
 """Mithril Cloud provider implementation for SkyPilot."""
 
+import math
 import os
 import re
 import typing
@@ -9,6 +10,7 @@ from sky import catalog
 from sky import clouds
 from sky import skypilot_config
 from sky.provision.mithril import utils as mithril_utils
+from sky.utils import accelerator_registry
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils.resources_utils import DiskTier
@@ -291,6 +293,19 @@ class Mithril(clouds.Cloud):
             resources.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
+        ray_bootstrap_resource_options = ''
+        if custom_resources is not None:
+            ray_bootstrap_resource_options = (
+                f' --resources=\'{custom_resources}\'')
+            assert acc_dict is not None, resources.instance_type
+            assert len(acc_dict) == 1, acc_dict
+            acc_name, acc_count = list(acc_dict.items())[0]
+            if not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    acc_name):
+                # Keep bootstrap behavior aligned with instance_setup.py so Ray
+                # advertises GPU capacity even when auto-detection is flaky.
+                ray_bootstrap_resource_options += (
+                    f' --num-gpus={math.ceil(acc_count)}')
 
         # Get current Mithril profile and project for storing in cluster YAML.
         # These are persisted so that status queries use the correct API server
@@ -302,14 +317,21 @@ class Mithril(clouds.Cloud):
             default_value=None,
             override_configs=resources.cluster_config_overrides,
         )
+        auto_restart_job = skypilot_config.get_nested(
+            ('mithril', 'auto_restart_job'),
+            default_value=False,
+            override_configs=resources.cluster_config_overrides,
+        )
 
         resources_vars: Dict[str, Any] = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
+            'ray_bootstrap_resource_options': ray_bootstrap_resource_options,
             'region': region.name,
             'mithril_profile': profile or '',
             'mithril_project_id': config['project_id'],
             'limit_price': limit_price,
+            'auto_restart_job': auto_restart_job,
         }
 
         docker_run_options = []

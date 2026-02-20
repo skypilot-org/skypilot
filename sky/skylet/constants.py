@@ -491,6 +491,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
     ('mithril', 'limit_price'),
+    ('mithril', 'auto_restart_job'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,

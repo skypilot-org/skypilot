@@ -1563,6 +1563,9 @@ def get_config_schema():
                     'type': 'number',
                     'minimum': 0,
                 },
+                'auto_restart_job': {
+                    'type': 'boolean',
+                },
             }
         },
         'nebius': {

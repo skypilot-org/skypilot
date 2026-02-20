@@ -92,9 +92,10 @@ setup_commands:
   # Install patch utility for Ray
   # Install conda and Ray
   # Set system limits for Ray performance (nofile and TasksMax)
-  - {%- for initial_setup_command in initial_setup_commands %}
+  - |
+    {% for initial_setup_command in initial_setup_commands %}
     {{ initial_setup_command }}
-    {%- endfor %}
+    {% endfor %}
     sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
@@ -112,6 +113,214 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {{ ssh_max_sessions_config }}
+    {%- if auto_restart_job %}
+    # SkyPilot bootstrap script and systemd service (runs on every boot after preemption/relocation)
+    sudo tee /usr/local/sbin/skypilot-bootstrap.sh > /dev/null << 'SKYPILOT_BOOTSTRAP_END'
+    #!/usr/bin/env bash
+    set -e
+
+    source ~/skypilot-runtime/bin/activate
+
+    SKY_PYTHON=$([ -s ~/.sky/python_path ] && cat ~/.sky/python_path 2>/dev/null || which python3)
+    SKY_RAY_BIN=$([ -s ~/.sky/ray_path ] && cat ~/.sky/ray_path 2>/dev/null || which ray)
+    SKY_RAY_CMD="$SKY_PYTHON $SKY_RAY_BIN"
+
+    # SkyPilot Ray ports (sky/skylet/constants.py)
+    RAY_PORT=6380
+    DASHBOARD_PORT=8266
+    OBJECT_MANAGER_PORT=8076
+
+    # Get cluster layout from /etc/hosts (non-127 IPs + hostnames)
+    instance_hosts="$(awk '/^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/ && !/^127\./ {print $1, $2}' /etc/hosts)"
+    head_line="$(echo "$instance_hosts" | tail -1)"
+    head_node_ip="$(awk '{print $1}' <<<"$head_line")"
+    # Match by IP, not hostname: /etc/hosts names may differ from hostname.
+    local_ips="$(hostname -I 2>/dev/null || true)"
+    if [ -z "$local_ips" ]; then
+      local_ips="$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1)"
+    fi
+
+    if echo "$local_ips" | tr ' ' '\n' | grep -Fxq "$head_node_ip"; then
+      IS_HEAD_NODE=1
+    else
+      IS_HEAD_NODE=0
+      echo "[skypilot-bootstrap] Head detection mismatch: local node did not match detected head IP."
+      echo "[skypilot-bootstrap] hostname=$(hostname -s)"
+      echo "[skypilot-bootstrap] local_ips='${local_ips}'"
+      echo "[skypilot-bootstrap] head_node_ip='${head_node_ip}'"
+      echo "[skypilot-bootstrap] head_line='${head_line}'"
+    fi
+
+    $SKY_RAY_CMD stop 2>/dev/null || true
+
+    if [ "$IS_HEAD_NODE" -eq 1 ]; then
+      RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 \
+        $SKY_RAY_CMD start --head --port="${RAY_PORT}" --disable-usage-stats \
+        --dashboard-port="${DASHBOARD_PORT}" --object-manager-port="${OBJECT_MANAGER_PORT}" \
+        --temp-dir=/tmp/ray_skypilot{{ ray_bootstrap_resource_options }}
+    else
+      if [ -z "$head_node_ip" ]; then
+        echo "Failed to determine head node IP from /etc/hosts."
+        exit 1
+      fi
+
+      # Wait for head ray cluster to become reachable before joining.
+      # This avoids boot races where workers start earlier than the head.
+      WAIT_INTERVAL_SECONDS=5
+      MAX_HEAD_WAIT_SECONDS=86400
+      elapsed=0
+      while ! RAY_ADDRESS="${head_node_ip}:${RAY_PORT}" $SKY_RAY_CMD status >/dev/null 2>&1; do
+        if [ "$elapsed" -ge "$MAX_HEAD_WAIT_SECONDS" ]; then
+          echo "Timed out waiting for head Ray at ${head_node_ip}:${RAY_PORT}."
+          exit 1
+        fi
+        sleep "$WAIT_INTERVAL_SECONDS"
+        elapsed=$((elapsed + WAIT_INTERVAL_SECONDS))
+      done
+
+      # Retry joining the worker to handle transient failures right after head
+      # startup.
+      MAX_WORKER_START_RETRIES=6
+      attempt=1
+      while true; do
+        if RAY_SCHEDULER_EVENTS=0 RAY_DEDUP_LOGS=0 \
+            $SKY_RAY_CMD start --address="${head_node_ip}:${RAY_PORT}" --disable-usage-stats \
+            --object-manager-port="${OBJECT_MANAGER_PORT}" --temp-dir=/tmp/ray_skypilot{{ ray_bootstrap_resource_options }}; then
+          break
+        fi
+        if [ "$attempt" -ge "$MAX_WORKER_START_RETRIES" ]; then
+          echo "Failed to start worker Ray after ${MAX_WORKER_START_RETRIES} attempts."
+          exit 1
+        fi
+        attempt=$((attempt + 1))
+        sleep "$WAIT_INTERVAL_SECONDS"
+      done
+    fi
+
+    # Bump open-file limits for raylet (head and worker)
+    # See _RAY_PRLIMIT in instance_setup.py for explanation.
+    which prlimit > /dev/null 2>&1 && \
+        for id in $(pgrep -f raylet/raylet); do
+            sudo prlimit --nofile=1048576:1048576 --pid=$id 2>/dev/null || true
+        done
+
+    if [ "$IS_HEAD_NODE" -eq 1 ]; then
+      $SKY_PYTHON -m sky.skylet.attempt_skylet
+
+      $SKY_PYTHON -c "
+    from sky.skylet import job_lib, constants
+    import os
+    import time
+
+    MAX_REQUEUE_ATTEMPTS = 12
+    REQUEUE_RETRY_INTERVAL_SECONDS = 10
+
+    # Reconcile stale statuses/pending rows first so recovery candidate
+    # selection reflects post-reboot reality.
+    job_lib.scheduler.schedule_step(force_update_jobs=True)
+
+    records = job_lib._get_jobs(
+        user_hash=None,
+        status_list=[
+            job_lib.JobStatus.RUNNING,
+            job_lib.JobStatus.FAILED_DRIVER,
+        ],
+    )
+    # Only recover jobs that had actually started before interruption.
+    # This avoids selecting stale pre-boot pending jobs that may later
+    # reconcile to FAILED_DRIVER.
+    started_records = [record for record in records if record.get('start_at')]
+    if not started_records:
+        print('No started RUNNING/FAILED_DRIVER job to resume; scheduling pending jobs.')
+        job_lib.scheduler.schedule_step(force_update_jobs=False)
+        exit(0)
+
+    stale_job = max(started_records, key=lambda record: record['start_at'])
+    old_job_id = stale_job['job_id']
+    script_path = os.path.expanduser(f'~/.sky/sky_app/sky_job_{old_job_id}')
+
+    # _get_jobs() records do not include log_dir, so fetch canonical path
+    # from the jobs table for this job id.
+    log_dir = job_lib.get_log_dir_for_job(old_job_id)
+    if log_dir is None:
+        print(
+            f'No log_dir found in jobs table for job {old_job_id}; '
+            'skipping auto-resume for this boot.')
+        exit(0)
+    log_dir = os.path.expanduser(log_dir)
+    # Ensure wrapper log append does not fail on missing directory.
+    os.makedirs(log_dir, exist_ok=True)
+    remote_log_path = os.path.join(log_dir, 'run.log')
+
+    job_submit_cmd = (
+        f'{job_lib.JOB_CMD_IDENTIFIER.format(old_job_id)} && '
+        f'echo ===== Job auto-requeued after instance restart at $(date -u -Iseconds) ===== >> {remote_log_path} && '
+        f'{constants.SKY_PYTHON_CMD} -u {script_path}'
+        f' >> {remote_log_path} 2>&1'
+    )
+    # Reuse the original job_id for recovery instead of creating a new job:
+    # SkyPilot tracks status/logs/cancel operations by job_id, and the job
+    # script/log paths are keyed by this id. A new id would orphan the
+    # interrupted record and break continuity for the existing submission.
+    # Retry if the newly requeued driver exits immediately during early boot.
+    for attempt in range(1, MAX_REQUEUE_ATTEMPTS + 1):
+        job_lib.scheduler.remove_job_no_lock(old_job_id)
+        job_lib.scheduler.queue(old_job_id, job_submit_cmd)
+
+        time.sleep(2)
+        # queue() launches the driver asynchronously. If we force reconciliation
+        # immediately, the liveness check can run before the new process is
+        # visible in psutil (PID/cmdline), and it gets mislabeled FAILED_DRIVER.
+        # Sleep first, then reconcile.
+        job_lib.scheduler.schedule_step(force_update_jobs=True)
+        latest = job_lib._get_jobs_by_ids([old_job_id])[0]
+        latest_status = latest['status']
+        latest_pid = latest['pid']
+
+        if latest_status == job_lib.JobStatus.RUNNING:
+            print(f'Re-queued job {old_job_id} -> {script_path} (running)')
+            exit(0)
+
+        if job_lib._is_job_driver_process_running(latest_pid, old_job_id):
+            print(f'Re-queued job {old_job_id} -> {script_path} (pid={latest_pid}, status={latest_status})')
+            exit(0)
+
+        if attempt < MAX_REQUEUE_ATTEMPTS:
+            print(f'Requeue attempt {attempt} failed for job {old_job_id}; retrying...')
+            time.sleep(REQUEUE_RETRY_INTERVAL_SECONDS)
+
+    print(
+        f'Failed to resume job {old_job_id} after {MAX_REQUEUE_ATTEMPTS} attempts; '
+        'continuing bootstrap and leaving job state for skylet reconciliation.')
+    "
+    fi
+    SKYPILOT_BOOTSTRAP_END
+    sudo chmod +x /usr/local/sbin/skypilot-bootstrap.sh
+    sudo tee /etc/systemd/system/skypilot-bootstrap.service > /dev/null << 'SKYPILOT_SVC_END'
+    [Unit]
+    Description=SkyPilot bootstrap (Ray + Skylet + job re-queue on boot)
+    [Service]
+    Type=oneshot
+    RemainAfterExit=yes
+    # Bootstrap launches Ray as daemonized child processes. Do not kill the
+    # whole cgroup when the oneshot script exits, or Ray will be terminated.
+    KillMode=process
+    User=ubuntu
+    Group=ubuntu
+    ExecStart=/usr/local/sbin/skypilot-bootstrap.sh
+    [Install]
+    WantedBy=multi-user.target
+    SKYPILOT_SVC_END
+    sudo systemctl daemon-reload
+    sudo systemctl enable skypilot-bootstrap.service
+    {%- else %}
+    # Config set to false: disable and remove bootstrap service so it does not run on next boot
+    sudo systemctl stop skypilot-bootstrap.service 2>/dev/null || true;
+    sudo systemctl disable skypilot-bootstrap.service 2>/dev/null || true;
+    sudo rm -f /etc/systemd/system/skypilot-bootstrap.service;
+    sudo rm -f /usr/local/sbin/skypilot-bootstrap.sh;
+    sudo systemctl daemon-reload;
+    {%- endif %}
     {%- if volume_mounts and volume_mounts|length > 0 %}
     {%- for vm in volume_mounts %}
     {%- if vm.volume_type == 'mithril-block' %}
