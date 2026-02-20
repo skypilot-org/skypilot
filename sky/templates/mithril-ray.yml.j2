@@ -113,8 +113,8 @@ setup_commands:
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;
     {{ ssh_max_sessions_config }}
-    # SkyPilot bootstrap script and systemd service (runs on every boot after preemption/relocation)
-    sudo tee /usr/local/sbin/skypilot-bootstrap.sh > /dev/null << 'SKYPILOT_BOOTSTRAP_END'
+    # SkyPilot Mithril recovery script and systemd service (runs on every boot after preemption/relocation)
+    sudo tee /usr/local/sbin/skypilot-mithril-recover.sh > /dev/null << 'SKYPILOT_RECOVER_END'
     #!/usr/bin/env bash
     set -e
 
@@ -143,11 +143,11 @@ setup_commands:
       IS_HEAD_NODE=1
     else
       IS_HEAD_NODE=0
-      echo "[skypilot-bootstrap] Head detection mismatch: local node did not match detected head IP."
-      echo "[skypilot-bootstrap] hostname=$(hostname -s)"
-      echo "[skypilot-bootstrap] local_ips='${local_ips}'"
-      echo "[skypilot-bootstrap] head_node_ip='${head_node_ip}'"
-      echo "[skypilot-bootstrap] head_line='${head_line}'"
+      echo "[skypilot-mithril-recover] Head detection mismatch: local node did not match detected head IP."
+      echo "[skypilot-mithril-recover] hostname=$(hostname -s)"
+      echo "[skypilot-mithril-recover] local_ips='${local_ips}'"
+      echo "[skypilot-mithril-recover] head_node_ip='${head_node_ip}'"
+      echo "[skypilot-mithril-recover] head_line='${head_line}'"
     fi
 
     $SKY_RAY_CMD stop 2>/dev/null || true
@@ -315,28 +315,28 @@ setup_commands:
 
     print(
         f'Failed to resume job {old_job_id} after {MAX_REQUEUE_ATTEMPTS} attempts; '
-        'continuing bootstrap and leaving job state for skylet reconciliation.')
+        'continuing recovery and leaving job state for skylet reconciliation.')
     "
     fi
-    SKYPILOT_BOOTSTRAP_END
-    sudo chmod +x /usr/local/sbin/skypilot-bootstrap.sh
-    sudo tee /etc/systemd/system/skypilot-bootstrap.service > /dev/null << 'SKYPILOT_SVC_END'
+    SKYPILOT_RECOVER_END
+    sudo chmod +x /usr/local/sbin/skypilot-mithril-recover.sh
+    sudo tee /etc/systemd/system/skypilot-mithril-recover.service > /dev/null << 'SKYPILOT_SVC_END'
     [Unit]
-    Description=SkyPilot bootstrap (Ray + Skylet + job re-queue on boot)
+    Description=SkyPilot Mithril recovery (Ray + Skylet + job re-queue on boot)
     [Service]
     Type=oneshot
     RemainAfterExit=yes
-    # Bootstrap launches Ray as daemonized child processes. Do not kill the
+    # Recovery script launches Ray as daemonized child processes. Do not kill the
     # whole cgroup when the oneshot script exits, or Ray will be terminated.
     KillMode=process
     User=ubuntu
     Group=ubuntu
-    ExecStart=/usr/local/sbin/skypilot-bootstrap.sh
+    ExecStart=/usr/local/sbin/skypilot-mithril-recover.sh
     [Install]
     WantedBy=multi-user.target
     SKYPILOT_SVC_END
     sudo systemctl daemon-reload
-    sudo systemctl enable skypilot-bootstrap.service
+    sudo systemctl enable skypilot-mithril-recover.service
     {%- if volume_mounts and volume_mounts|length > 0 %}
     {%- for vm in volume_mounts %}
     {%- if vm.volume_type == 'mithril-block' %}
