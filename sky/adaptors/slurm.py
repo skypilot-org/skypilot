@@ -649,6 +649,40 @@ class SlurmClient:
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
 
+    def check_fuse_enabled(self) -> bool:
+        """Check if FUSE is available on the cluster.
+
+        FUSE is required for mounting object stores (e.g., via goofys or
+        rclone). We check for /dev/fuse which is the device node that FUSE
+        requires.
+
+        We first try to check on a compute node via srun, since that is
+        where mounts actually happen. If srun cannot allocate resources
+        (cluster is full, etc.), we fall back to checking the login node.
+
+        Returns:
+            True if FUSE is available, False otherwise.
+        """
+        # Try checking on a compute node first. We use a wrapper that
+        # prints a marker so we can distinguish "command ran and /dev/fuse
+        # is missing" from "srun itself failed to allocate".
+        srun_cmd = ('srun --immediate=10 --time=00:00:30 '
+                    'bash -c \'test -e /dev/fuse '
+                    '&& echo FUSE_OK || echo FUSE_MISSING\'')
+        rc, stdout, _ = self._run_slurm_cmd(srun_cmd)
+        stdout = stdout.strip()
+        if rc == 0 and 'FUSE_OK' in stdout:
+            return True
+        if rc == 0 and 'FUSE_MISSING' in stdout:
+            return False
+
+        # srun failed (no resources, misconfigured, etc.).
+        # Fall back to checking the login node.
+        logger.debug('srun FUSE check failed, falling back to login node')
+        cmd = 'test -e /dev/fuse'
+        rc, _, _ = self._run_slurm_cmd(cmd)
+        return rc == 0
+
     def check_homedir_shared_fs(self) -> Optional[str]:
         """Check the filesystem type of the home directory.
 

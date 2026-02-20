@@ -57,6 +57,16 @@ class Slurm(clouds.Cloud):
             'the Pyxis plugin is not installed. Please ask your cluster '
             'administrator to install Pyxis '
             '(https://github.com/NVIDIA/pyxis).',
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            'Storage mounting is not supported on this Slurm cluster '
+            'because FUSE is not enabled (/dev/fuse not found). '
+            'Please ask your cluster administrator to enable FUSE.',
+    }
+    # Features that are checked dynamically per cluster (e.g., via SSH).
+    # Used for early exit in _unsupported_features_for_resources().
+    _DYNAMICALLY_CHECKED_FEATURES = {
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -95,12 +105,11 @@ class Slurm(clouds.Cloud):
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
-        # Docker image support requires the Pyxis SPANK plugin.
-        # When region is None, we check all clusters and mark Docker as
-        # supported if ANY cluster has Pyxis. This is intentionally
+        # When region is None, we check all clusters and mark a feature as
+        # supported if ANY cluster supports it. This is intentionally
         # permissive -- per-cluster filtering happens in
         # regions_with_offering(), which calls check_features_are_supported()
-        # with a specific region to filter out non-Pyxis clusters.
+        # with a specific region to filter out unsupported clusters.
         cluster = region if region is not None else resources.region
         if cluster is None:
             clusters = cls.existing_allowed_clusters()
@@ -108,13 +117,22 @@ class Slurm(clouds.Cloud):
             clusters = [cluster]
         for c in clusters:
             try:
+                # Docker image support requires the Pyxis SPANK plugin.
                 if slurm_utils.check_pyxis_enabled(c):
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
-                    break
+                # Storage mounting requires FUSE (/dev/fuse).
+                if slurm_utils.check_fuse_enabled(c):
+                    unsupported.pop(
+                        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
+                        None)
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to check Pyxis on cluster {c}: '
+                logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
+            # Stop early if all dynamically checked features are resolved.
+            if not any(f in unsupported
+                       for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+                break
         return unsupported
 
     @classmethod
