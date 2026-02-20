@@ -201,19 +201,17 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
     return mount_cmd
 
 
-def get_tigris_mount_cmd(bucket_name: str,
-                         mount_path: str,
+def get_tigris_mount_cmd(tigris_credentials_path: str,
+                         tigris_profile_name: str,
+                         bucket_name: str,
                          endpoint_url: str,
+                         mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount Tigris bucket using s3fs/rclone.
 
-    Tigris credentials are read from ~/.aws/credentials using the profile
-    specified by TIGRIS_PROFILE env var (default: 'tigris').
+    Tigris credentials are read from the dedicated credentials file
+    at ~/.tigris/credentials using the 'tigris' profile.
     """
-    # pylint: disable=import-outside-toplevel
-    from sky.adaptors import tigris
-    tigris_profile = tigris.get_tigris_profile()
-
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
@@ -224,17 +222,20 @@ def get_tigris_mount_cmd(bucket_name: str,
     rclone_mount = (
         f'{FUSE3_INSTALL_CMD} && '
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
-        f'AWS_PROFILE={tigris_profile} '
+        f'AWS_SHARED_CREDENTIALS_FILE={tigris_credentials_path} '
+        f'AWS_PROFILE={tigris_profile_name} '
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-force-path-style=false '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (f'AWS_PROFILE={tigris_profile} {_GOOFYS_WRAPPER} '
-                    '-o allow_other '
-                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                    f'--subdomain '
-                    f'--endpoint {endpoint_url} '
-                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
+    goofys_mount = (
+        f'AWS_SHARED_CREDENTIALS_FILE={tigris_credentials_path} '
+        f'AWS_PROFILE={tigris_profile_name} {_GOOFYS_WRAPPER} '
+        '-o allow_other '
+        f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+        f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+        f'--subdomain '
+        f'--endpoint {endpoint_url} '
+        f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
     mount_cmd = (f'{arch_check}'
                  f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '

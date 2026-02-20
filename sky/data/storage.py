@@ -4801,8 +4801,8 @@ class TigrisStore(S3CompatibleStore):
             verify_bucket=data_utils.verify_tigris_bucket,
             aws_profile=tigris.TIGRIS_PROFILE_NAME,
             get_endpoint_url=lambda: tigris.ENDPOINT_URL,
-            credentials_file='~/.aws/credentials',
-            config_file=None,
+            credentials_file=tigris.TIGRIS_CREDENTIALS_PATH,
+            config_file=tigris.TIGRIS_CONFIG_PATH,
             cloud_name=tigris.NAME,
             default_region=tigris.DEFAULT_REGION,
             mount_cmd_factory=cls._get_tigris_mount_cmd,
@@ -4812,6 +4812,11 @@ class TigrisStore(S3CompatibleStore):
     def _get_tigris_mount_cmd(cls, bucket_name: str, mount_path: str,
                               bucket_sub_path: Optional[str]) -> str:
         """Factory method for Tigris mount command."""
-        return mounting_utils.get_tigris_mount_cmd(bucket_name, mount_path,
-                                                   tigris.ENDPOINT_URL,
-                                                   bucket_sub_path)
+        return mounting_utils.get_tigris_mount_cmd(
+            tigris.TIGRIS_CREDENTIALS_PATH,
+            tigris.TIGRIS_PROFILE_NAME,
+            bucket_name,
+            tigris.ENDPOINT_URL,
+            mount_path,
+            bucket_sub_path,
+        )

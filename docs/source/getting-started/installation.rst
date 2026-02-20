@@ -1601,6 +1601,8 @@ If you already use the `Tigris Storage SDK <https://www.tigrisdata.com/docs/sdks
 
 When prompted for credentials (Option 1), enter your Tigris Access Key ID (starts with ``tid_``) and Secret Access Key (starts with ``tsec_``). See `Tigris documentation <https://www.tigrisdata.com/docs/iam/manage-access-key/>`_ to generate credentials. For the region, enter :code:`auto`.
 
+After configuring credentials, run ``sky check`` to verify. SkyPilot will automatically write the credentials to ``~/.tigris/credentials`` and propagate them to remote clusters, regardless of which configuration method you use.
+
 To use Tigris in your SkyPilot YAML, use the ``tigris://`` URL scheme:
 
 .. code-block:: yaml
