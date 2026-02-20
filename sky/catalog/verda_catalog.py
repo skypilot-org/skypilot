@@ -68,9 +68,11 @@ def get_instance_type_for_accelerator(
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         use_spot: bool = False,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types that have the given accelerator."""
+    del local_disk  # Verda Cloud does not support local disk.
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
