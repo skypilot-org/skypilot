@@ -317,8 +317,8 @@ class Mithril(clouds.Cloud):
             default_value=None,
             override_configs=resources.cluster_config_overrides,
         )
-        auto_restart_job = skypilot_config.get_nested(
-            ('mithril', 'auto_restart_job'),
+        restart_job_after_interruption = skypilot_config.get_nested(
+            ('mithril', 'restart_job_after_interruption'),
             default_value=False,
             override_configs=resources.cluster_config_overrides,
         )
@@ -331,7 +331,7 @@ class Mithril(clouds.Cloud):
             'mithril_profile': profile or '',
             'mithril_project_id': config['project_id'],
             'limit_price': limit_price,
-            'auto_restart_job': auto_restart_job,
+            'restart_job_after_interruption': restart_job_after_interruption,
         }
 
         docker_run_options = []

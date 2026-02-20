@@ -1563,7 +1563,7 @@ def get_config_schema():
                     'type': 'number',
                     'minimum': 0,
                 },
-                'auto_restart_job': {
+                'restart_job_after_interruption': {
                     'type': 'boolean',
                 },
             }

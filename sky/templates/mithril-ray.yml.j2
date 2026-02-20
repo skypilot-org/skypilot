@@ -211,7 +211,7 @@ setup_commands:
     import os
     import time
 
-    DEFAULT_AUTO_RESTART_JOB = {{ 'True' if auto_restart_job else 'False' }}
+    DEFAULT_RESTART_JOB_AFTER_INTERRUPTION = {{ 'True' if restart_job_after_interruption else 'False' }}
     MAX_REQUEUE_ATTEMPTS = 12
     REQUEUE_RETRY_INTERVAL_SECONDS = 10
 
@@ -237,11 +237,11 @@ setup_commands:
 
     def _auto_restart_enabled(record):
         metadata = record.get('metadata') or {}
-        enabled = metadata.get('mithril_auto_restart_job')
-        source = '_metadata.mithril_auto_restart_job'
+        enabled = metadata.get('mithril_restart_job_after_interruption')
+        source = '_metadata.mithril_restart_job_after_interruption'
         if enabled is None:
-            enabled = DEFAULT_AUTO_RESTART_JOB
-            source = 'config.mithril.auto_restart_job (fallback)'
+            enabled = DEFAULT_RESTART_JOB_AFTER_INTERRUPTION
+            source = 'config.mithril.restart_job_after_interruption (fallback)'
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in (
                 '1', 'true', 'yes', 'y', 'on')
@@ -257,8 +257,8 @@ setup_commands:
                                  key=lambda record: record['start_at'])['job_id']
         print(
             'No started RUNNING/FAILED_DRIVER job opted into auto-resume '
-            '(via _metadata.mithril_auto_restart_job or '
-            'config.mithril.auto_restart_job fallback); '
+            '(via _metadata.mithril_restart_job_after_interruption or '
+            'config.mithril.restart_job_after_interruption fallback); '
             f'skipping auto-resume (latest started job: {latest_started_job}).')
         job_lib.scheduler.schedule_step(force_update_jobs=False)
         exit(0)
