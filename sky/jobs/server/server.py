@@ -268,3 +268,18 @@ async def events(request: fastapi.Request,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
         auth_user=request.state.auth_user,
     )
+
+
+@router.post('/batch_progress')
+async def batch_progress(request: fastapi.Request,
+                         body: payloads.SetBatchProgressBody) -> None:
+    """Update batch progress for dashboard display."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_BATCH_PROGRESS,
+        request_body=body,
+        func=core.set_batch_progress,
+        schedule_type=api_requests.ScheduleType.SHORT,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
+    )

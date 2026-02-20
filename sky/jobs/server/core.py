@@ -1495,3 +1495,14 @@ def get_job_events(
     return managed_job_state.get_job_events(job_id=job_id,
                                             task_id=task_id,
                                             limit=limit)
+
+
+def set_batch_progress(job_id: int, total: int, completed: int) -> None:
+    """Update batch progress for dashboard display.
+
+    Args:
+        job_id: The managed job ID.
+        total: Total number of batches.
+        completed: Number of completed batches.
+    """
+    managed_job_state.set_batch_progress(job_id, total, completed)

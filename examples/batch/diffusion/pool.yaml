@@ -13,4 +13,3 @@ setup: |
   source .venv/bin/activate
   uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
   uv pip install diffusers transformers accelerate safetensors huggingface_hub
-  huggingface-cli download stable-diffusion-v1-5/stable-diffusion-v1-5

@@ -166,6 +166,13 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
+    # Batch progress columns (for sky.batch dashboard display)
+    sqlalchemy.Column('batch_total_batches',
+                      sqlalchemy.Integer,
+                      server_default=None),
+    sqlalchemy.Column('batch_completed_batches',
+                      sqlalchemy.Integer,
+                      server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -430,6 +437,9 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'cloud': r.get('cloud'),
         'region': r.get('region'),
         'zone': r.get('zone'),
+        # Batch progress columns
+        'batch_total_batches': r.get('batch_total_batches'),
+        'batch_completed_batches': r.get('batch_completed_batches'),
     }
 
 
@@ -1894,6 +1904,19 @@ def set_job_infra(job_id: int,
             session.query(job_info_table).filter(
                 job_info_table.c.spot_job_id == job_id).update(update_values)
             session.commit()
+
+
+@_init_db
+def set_batch_progress(job_id: int, total: int, completed: int) -> None:
+    """Update batch progress for dashboard display."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(job_info_table).filter(
+            job_info_table.c.spot_job_id == job_id).update({
+                job_info_table.c.batch_total_batches: total,
+                job_info_table.c.batch_completed_batches: completed,
+            })
+        session.commit()
 
 
 @_init_db

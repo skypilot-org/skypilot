@@ -32,8 +32,8 @@ def generate_images():
     The model is loaded once per worker and reused across all batches.
     Each prompt produces one PNG image.
     """
-    import torch
     from diffusers import StableDiffusionPipeline
+    import torch
 
     # Load model once (amortized across all batches on this worker).
     # Using SD v1.5 (public, no HuggingFace auth required).
@@ -121,8 +121,7 @@ def main():
     print('RESULTS:')
     print('=' * 60)
     try:
-        manifest = utils.load_jsonl_from_cloud(
-            f'{output_path}manifest.jsonl')
+        manifest = utils.load_jsonl_from_cloud(f'{output_path}manifest.jsonl')
 
         # Download images locally
         tmpdir = tempfile.mkdtemp(prefix='sky_batch_diffusion_')

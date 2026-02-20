@@ -61,6 +61,8 @@ const DEFAULT_FIELDS = [
   'execution',
   'is_primary_in_job_group',
   'links',
+  'batch_total_batches',
+  'batch_completed_batches',
 ];
 
 /**
@@ -298,6 +300,9 @@ export async function getManagedJobs(options = {}) {
         is_job_group: job.is_job_group,
         execution: job.execution,
         is_primary_in_job_group: job.is_primary_in_job_group,
+        // Batch progress
+        batch_total_batches: job.batch_total_batches,
+        batch_completed_batches: job.batch_completed_batches,
       };
     });
 

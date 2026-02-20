@@ -1306,6 +1306,39 @@ export function ManagedJobsTable({
         },
       },
       {
+        id: 'batch_progress',
+        order: 5.5,
+        renderHeader: () => <TableHead className="whitespace-nowrap">Progress</TableHead>,
+        renderCell: (item) => {
+          if (item.batch_total_batches == null) {
+            const isBatchJob = item.name && item.name.startsWith('sky-batch-');
+            if (isBatchJob && item.status === 'RUNNING') {
+              return <TableCell><span className="text-xs text-gray-400">Loading...</span></TableCell>;
+            }
+            return <TableCell>-</TableCell>;
+          }
+          const completed = item.batch_completed_batches || 0;
+          const total = item.batch_total_batches;
+          const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+          return (
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <div className="w-24 bg-gray-200 rounded-full h-2">
+                  <div
+                    className={`${barColor} h-2 rounded-full transition-all`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-600">
+                  {completed}/{total}
+                </span>
+              </div>
+            </TableCell>
+          );
+        },
+      },
+      {
         id: 'infra',
         order: 6,
         renderHeader: () => (

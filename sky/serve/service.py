@@ -20,7 +20,6 @@ from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.batch import constants as batch_constants
-from sky.batch import controller as batch_controller_module
 from sky.data import data_utils
 from sky.serve import constants
 from sky.serve import controller
@@ -350,39 +349,40 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
             controller_addr = f'http://{controller_host}:{controller_port}'
 
-            # Start the load balancer.
-            lb_port_start = (constants.LOAD_BALANCER_PORT_START
-                             if not service_spec.pool else
-                             batch_constants.BATCH_CONTROLLER_PORT_START)
-            load_balancer_port = (
-                common_utils.find_free_port(lb_port_start) if not is_recovery
-                else serve_state.get_service_load_balancer_port(service_name))
-            load_balancer_log_file = os.path.expanduser(
-                serve_utils.generate_remote_load_balancer_log_file_name(
-                    service_name) if not service_spec.pool else serve_utils.
-                generate_remote_batch_controller_log_file_name(service_name))
+            # Start the load balancer (not needed for pools — batch
+            # coordination now runs as a managed job).
+            if not service_spec.pool:
+                lb_port_start = constants.LOAD_BALANCER_PORT_START
+                load_balancer_port = (
+                    common_utils.find_free_port(lb_port_start)
+                    if not is_recovery else
+                    serve_state.get_service_load_balancer_port(service_name))
+                load_balancer_log_file = os.path.expanduser(
+                    serve_utils.generate_remote_load_balancer_log_file_name(
+                        service_name))
 
-            # TODO(tian): Probably we could enable multiple ports specified in
-            # service spec and we could start multiple load balancers.
-            # After that, we will have a mapping from replica port to endpoint.
-            # NOTE(tian): For pool, we run the batch controller instead.
-            func = (load_balancer.run_load_balancer if not service_spec.pool
-                    else batch_controller_module.run_batch_controller)
-            lb_args = ((controller_addr, load_balancer_port,
-                        service_spec.load_balancing_policy,
-                        service_spec.tls_credential,
-                        service_spec.target_qps_per_replica)
-                       if not service_spec.pool else
-                       (service_name, '0.0.0.0', load_balancer_port))
-            load_balancer_process = multiprocessing.Process(
-                target=ux_utils.RedirectOutputForProcess(
-                    func, load_balancer_log_file).run,
-                args=lb_args)
-            load_balancer_process.start()
+                # TODO(tian): Probably we could enable multiple ports
+                # specified in service spec and we could start multiple
+                # load balancers.
+                load_balancer_process = multiprocessing.Process(
+                    target=ux_utils.RedirectOutputForProcess(
+                        load_balancer.run_load_balancer,
+                        load_balancer_log_file).run,
+                    args=(controller_addr, load_balancer_port,
+                          service_spec.load_balancing_policy,
+                          service_spec.tls_credential,
+                          service_spec.target_qps_per_replica))
+                load_balancer_process.start()
 
-            if not is_recovery:
-                serve_state.set_service_load_balancer_port(
-                    service_name, load_balancer_port)
+                if not is_recovery:
+                    serve_state.set_service_load_balancer_port(
+                        service_name, load_balancer_port)
+            else:
+                # Pools don't need a load balancer — batch coordination
+                # runs as a managed job.  Set a dummy port so
+                # wait_service_registration() can detect registration.
+                if not is_recovery:
+                    serve_state.set_service_load_balancer_port(service_name, 0)
 
         while True:
             _handle_signal(service_name)

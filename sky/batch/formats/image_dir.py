@@ -112,7 +112,7 @@ class ImageDirOutput(DatasetFormat):
         utils.save_jsonl_to_cloud(metadata_results, chunk_path)
 
         logger.info('Uploaded %d images and metadata chunk for batch %d',
-                     len(results), batch_idx)
+                    len(results), batch_idx)
         return chunk_path
 
     def merge_results(self, output_path: str, job_id: str) -> None:

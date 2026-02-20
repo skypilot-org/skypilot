@@ -33,10 +33,58 @@ cat > "${TMPFILE}" << 'EOF'
 {"text": "world"}
 {"text": "sky"}
 {"text": "batch"}
+{"text": "cloud"}
+{"text": "compute"}
+{"text": "cluster"}
+{"text": "deploy"}
+{"text": "launch"}
+{"text": "scale"}
+{"text": "optimize"}
+{"text": "schedule"}
+{"text": "provision"}
+{"text": "automate"}
+{"text": "pipeline"}
+{"text": "training"}
+{"text": "inference"}
+{"text": "serving"}
+{"text": "checkpoint"}
+{"text": "distributed"}
+{"text": "parallel"}
+{"text": "accelerate"}
+{"text": "finetune"}
+{"text": "preempt"}
+{"text": "recover"}
+{"text": "replicate"}
+{"text": "shard"}
+{"text": "tokenize"}
+{"text": "embedding"}
+{"text": "attention"}
+{"text": "transformer"}
+{"text": "gradient"}
+{"text": "optimizer"}
+{"text": "scheduler"}
+{"text": "benchmark"}
+{"text": "throughput"}
+{"text": "latency"}
+{"text": "bandwidth"}
+{"text": "memory"}
+{"text": "storage"}
+{"text": "network"}
+{"text": "container"}
+{"text": "orchestrate"}
+{"text": "kubernetes"}
+{"text": "autoscale"}
+{"text": "loadbalance"}
+{"text": "failover"}
+{"text": "redundancy"}
+{"text": "snapshot"}
+{"text": "migrate"}
+{"text": "replicate"}
+{"text": "stream"}
 EOF
 aws s3 cp "${TMPFILE}" "s3://${BUCKET}/test.jsonl"
 rm -f "${TMPFILE}"
-echo "  Uploaded 4 items to s3://${BUCKET}/test.jsonl"
+echo "  Uploaded 50 items to s3://${BUCKET}/test.jsonl"
 
 # ---- 3. Clean up previous output ----------------------------------------
 echo "[3/4] Cleaning up previous output..."

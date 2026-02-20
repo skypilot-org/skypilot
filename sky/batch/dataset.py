@@ -1,66 +1,71 @@
 """Dataset class for Sky Batch.
 
 Provides a simple interface for loading JSONL data from cloud storage
-and distributing workloads across a pool of workers.
+and distributing workloads across a pool of workers via managed jobs.
 """
 import datetime
 import logging
+import textwrap
 import time
 from typing import Callable, Optional
 import uuid
 
-import requests
-
-from sky.batch import constants
+import sky
 from sky.batch import remote
 from sky.batch import utils
-import sky.client.sdk as sdk
-import sky.jobs
+from sky.client import sdk
+from sky.jobs import state as managed_job_state
+from sky.server import common as server_common
 
 logger = logging.getLogger(__name__)
 
+# Addresses that only resolve to the local machine and are
+# unreachable from a remote cluster / K8s pod.
+_LOCAL_HOSTS = ('127.0.0.1', 'localhost', '0.0.0.0')
 
-def _get_batch_controller_url(pool_name: str) -> str:
-    """Get the public batch controller URL for *pool_name*.
 
-    Queries pool status to find the endpoint (stored in the
-    ``load_balancer_port`` field, resolved to a public address by
-    ``sky/serve/server/impl.py``).
+def _get_coordinator_api_endpoint() -> str:
+    """Return an API server URL reachable from the coordinator cluster.
+
+    When the API server is local (localhost / 0.0.0.0), remote pods
+    cannot reach it directly.  We try ``host.docker.internal`` which
+    Docker Desktop (macOS / Windows) and kind map to the host.  For
+    remote API servers the URL is returned as-is.
     """
-    request_id = sky.jobs.pool_status([pool_name])
-    pool_statuses = sdk.stream_and_get(request_id)
-    if not pool_statuses:
-        raise RuntimeError(f'Pool {pool_name!r} not found. '
-                           f'Create it first with sky jobs pool apply.')
+    # pylint: disable=import-outside-toplevel
+    from urllib.parse import urlparse
+    from urllib.parse import urlunparse
 
-    pool_record = pool_statuses[0]
-    endpoint = pool_record.get('endpoint')
-    if endpoint:
-        return endpoint
-
-    # Fallback: try to construct from load_balancer_port (for local testing)
-    lb_port = pool_record.get('load_balancer_port')
-    if lb_port is not None:
-        return f'http://localhost:{lb_port}'
-
-    raise RuntimeError(
-        f'Could not determine batch controller URL for pool {pool_name!r}. '
-        'Ensure the pool is up and running.')
+    endpoint = server_common.get_server_url()
+    parsed = urlparse(endpoint)
+    if parsed.hostname in _LOCAL_HOSTS:
+        # Replace the hostname but keep scheme, port, path, etc.
+        host_port = f'host.docker.internal:{parsed.port or 46580}'
+        replaced = parsed._replace(netloc=host_port)
+        return urlunparse(replaced)
+    return endpoint
 
 
-def _wait_for_job_completion(controller_url: str,
-                             job_id: str,
-                             poll_interval: float = 2.0) -> None:
-    """Poll the batch controller until the job is complete."""
-    status_url = (f'{controller_url}{constants.ENDPOINT_JOB_STATUS}'
-                  f'?job_id={job_id}')
+def _get_managed_job_record(managed_job_id: int):
+    """Get the current record of a managed job."""
+    request_id = sky.jobs.queue_v2(
+        refresh=False,
+        job_ids=[managed_job_id],
+        fields=['status', 'batch_total_batches', 'batch_completed_batches'])
+    records, _, _, _ = sdk.stream_and_get(request_id)
+    if not records:
+        raise RuntimeError(f'Managed job {managed_job_id} not found')
+    return records[0]
 
+
+def _wait_for_managed_job_completion(managed_job_id: int) -> None:
+    """Poll managed job status and report progress from the DB."""
     start_time = time.time()
     last_completed = 0
     last_message_time = time.time()
+    poll_interval = 2.0
 
     def _timestamp() -> str:
-        """Return formatted timestamp with elapsed time."""
         elapsed = int(time.time() - start_time)
         mins, secs = divmod(elapsed, 60)
         now = datetime.datetime.now().strftime('%H:%M:%S')
@@ -68,78 +73,49 @@ def _wait_for_job_completion(controller_url: str,
 
     while True:
         try:
-            resp = requests.get(status_url, timeout=30)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            logger.warning(f'{_timestamp()} Failed to poll job status: {e}')
+            record = _get_managed_job_record(managed_job_id)
+        except Exception as e:
+            # Transient API errors (e.g. request purged before read).
+            # Log and retry on the next poll cycle.
+            logger.debug(f'Transient error polling job {managed_job_id}: {e}')
             time.sleep(poll_interval)
             continue
+        status = record.status
+        if status is None:
+            raise RuntimeError(f'Managed job {managed_job_id} has no status')
 
-        status = data.get('status', 'unknown')
-        completed = data.get('completed', 0)
-        total = data.get('total_batches', 0)
-        workers_ready = data.get('workers_ready', 0)
-        workers_expected = data.get('workers_expected', 0)
+        if status.is_terminal():
+            if status == managed_job_state.ManagedJobStatus.SUCCEEDED:
+                elapsed = time.time() - start_time
+                logger.info(f'{_timestamp()} Managed job '
+                            f'{managed_job_id} completed successfully '
+                            f'in {elapsed:.1f}s')
+                return
+            raise RuntimeError(f'{_timestamp()} Managed job {managed_job_id} '
+                               f'failed with status: {status.value}')
 
-        if status == 'completed':
+        # Read progress from DB (pushed by coordinator via API).
+        completed = record.batch_completed_batches or 0
+        total = record.batch_total_batches or 0
+
+        if completed > last_completed:
+            percent = (completed / total * 100) if total > 0 else 0
             elapsed = time.time() - start_time
-            logger.info(f'{_timestamp()} Job {job_id} completed successfully! '
-                        f'Processed {total} batches in {elapsed:.1f}s')
-            return
-
-        if status == 'failed':
-            error = data.get('error', 'unknown error')
-            raise RuntimeError(f'{_timestamp()} Job {job_id} failed: {error}')
-
-        # Determine phase and show informative message
-        if status == 'pending':
-            if total == 0:
-                # Loading dataset and creating batches
-                logger.info(f'{_timestamp()} Job {job_id}: Loading dataset and '
-                            f'preparing batches...')
+            rate = completed / elapsed if elapsed > 0 else 0
+            eta = (total - completed) / rate if rate > 0 else 0
+            logger.info(f'{_timestamp()} Job {managed_job_id}: '
+                        f'{completed}/{total} batches ({percent:.1f}%) | '
+                        f'Rate: {rate:.2f} batches/s | ETA: {eta:.0f}s')
+            last_completed = completed
+            last_message_time = time.time()
+        elif time.time() - last_message_time >= 10:
+            if total > 0:
+                logger.info(f'{_timestamp()} Job {managed_job_id}: '
+                            f'{status.value} ({completed}/{total} batches)')
             else:
-                # Batches created, waiting for workers to be ready
-                if workers_expected > 0:
-                    logger.info(f'{_timestamp()} Job {job_id}: Waiting for '
-                                f'workers to be ready ({workers_ready}/'
-                                f'{workers_expected} ready)...')
-                else:
-                    logger.info(f'{_timestamp()} Job {job_id}: Waiting for '
-                                f'workers to be ready...')
-        elif status == 'running':
-            if completed == 0:
-                # Workers are ready, launching services
-                # and processing first batch.
-                if time.time() - last_message_time >= 10:  # Log every 10s
-                    logger.info(
-                        f'{_timestamp()} Job {job_id}: Launching worker '
-                        f'service and processing first batch... '
-                        f'(0/{total} batches complete)')
-                    last_message_time = time.time()
-            elif completed > last_completed:
-                # Progress made - show it immediately
-                percent = (completed / total * 100) if total > 0 else 0
-                rate = completed / (time.time() - start_time)
-                eta = (total - completed) / rate if rate > 0 else 0
-                logger.info(
-                    f'{_timestamp()} Job {job_id}: Processing batches... '
-                    f'{completed}/{total} complete ({percent:.1f}%) | '
-                    f'Rate: {rate:.2f} batches/s | ETA: {eta:.0f}s')
-                last_completed = completed
-            else:
-                # No progress, but still running - log less frequently
-                if time.time() - last_message_time >= 10:  # Log every 10s
-                    logger.info(
-                        f'{_timestamp()} Job {job_id}: Processing batch... '
-                        f'({completed}/{total} complete)')
-                    last_message_time = time.time()
-        elif status == 'merging':
-            logger.info(f'{_timestamp()} Job {job_id}: Merging output results '
-                        f'from {total} batches...')
-        else:
-            logger.info(f'{_timestamp()} Job {job_id}: {status} '
-                        f'({completed}/{total} batches complete)')
+                logger.info(f'{_timestamp()} Job {managed_job_id}: '
+                            f'{status.value}')
+            last_message_time = time.time()
 
         time.sleep(poll_interval)
 
@@ -193,12 +169,8 @@ class Dataset:
             pool_name: str,
             batch_size: int,
             output_path: str,
-            activate_env: Optional[str] = None,
-            job_id: Optional[str] = None) -> None:
-        """Distribute workload across pool workers using the mapper function.
-
-        Submits the job to the pool's BatchController via HTTP and polls
-        for completion.
+            activate_env: Optional[str] = None) -> int:
+        """Submit batch job as a managed job. Blocks until completion.
 
         The mapper function should be decorated with @sky.batch.remote_function
         and use sky.batch.load() and sky.batch.save_results() inside.
@@ -211,26 +183,24 @@ class Dataset:
             output_path: Cloud storage path for output results.
             activate_env: Optional shell command to activate the Python
                           environment before running the mapper function.
-                          This should match the environment set up by the
-                          pool's ``setup`` command.
                           Example: ``'source .venv/bin/activate'``
-            job_id: Optional job ID for tracking. If not provided, a UUID
-                    will be generated.
+
+        Returns:
+            The managed job ID.
 
         Raises:
             ValueError: If mapper_fn is not a remote function or if
                         parameters are invalid.
+            RuntimeError: If the batch job fails.
         """
         # Validate mapper function
         if not remote.is_remote_function(mapper_fn):
             raise ValueError('Mapper function must be decorated with '
                              '@sky.batch.remote_function')
 
-        # Validate batch_size
         if batch_size <= 0:
             raise ValueError(f'batch_size must be positive, got: {batch_size}')
 
-        # Validate output_path
         if not output_path:
             raise ValueError('output_path cannot be empty')
 
@@ -244,34 +214,66 @@ class Dataset:
                                    f'Operation cancelled by user.')
             logger.info(f'Overwriting existing output file: {output_path}')
 
-        # Generate job ID if not provided
-        if job_id is None:
-            job_id = str(uuid.uuid4())[:8]
+        # Short random suffix for unique task name.
+        short_id = uuid.uuid4().hex[:4]
+        task_name = f'sky-batch-{short_id}'
 
-        # Serialize the mapper function
         serialized_fn = utils.serialize_function(mapper_fn)
 
-        # Get the batch controller URL for this pool.
-        controller_url = _get_batch_controller_url(pool_name)
-        logger.info(f'Submitting job {job_id} to batch controller at '
-                    f'{controller_url}')
+        # Build inline run script with all config hardcoded.
+        # Use the SkyPilot runtime Python env (which has sky installed).
+        # Write a temp .py file to avoid shell quoting issues and
+        # ensure the exit code propagates correctly.
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet import constants as skylet_constants
+        activate_sky = skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV
 
-        # Submit job via HTTP.
-        submit_url = f'{controller_url}{constants.ENDPOINT_SUBMIT_JOB}'
-        payload = {
-            'job_id': job_id,
-            'dataset_path': self.path,
-            'batch_size': batch_size,
-            'output_path': output_path,
-            'serialized_fn': serialized_fn,
-            'activate_env': activate_env or '',
-        }
-        resp = requests.post(submit_url, json=payload, timeout=60)
-        resp.raise_for_status()
-        logger.info(f'Job {job_id} submitted successfully.')
+        # The coordinator needs to reach the user's API server to
+        # discover pool workers and dispatch batches via sky.exec().
+        # Pass the endpoint so the remote cluster doesn't start its
+        # own (empty) API server.
+        api_server_endpoint = _get_coordinator_api_endpoint()
+        env_var_name = skylet_constants.SKY_API_SERVER_URL_ENV_VAR
 
-        # Poll for completion.
-        _wait_for_job_completion(controller_url, job_id)
+        run_script = textwrap.dedent(f"""\
+            set -e
+            {activate_sky}
+            export {env_var_name}={api_server_endpoint}
+            cat > /tmp/sky_batch_coordinator.py << 'SKY_BATCH_EOF'
+            from sky.batch.coordinator import BatchCoordinator
+            BatchCoordinator(
+                dataset_path={self.path!r},
+                output_path={output_path!r},
+                batch_size={batch_size},
+                pool_name={pool_name!r},
+                serialized_fn={serialized_fn!r},
+                activate_env={(activate_env or "")!r},
+            ).run()
+            SKY_BATCH_EOF
+            python /tmp/sky_batch_coordinator.py
+        """)
+
+        # Install cloud storage dependencies in the SkyPilot runtime
+        # env so the coordinator can access cloud storage.
+        setup_script = textwrap.dedent(f"""\
+            {activate_sky}
+            pip install boto3 google-cloud-storage 2>/dev/null || true
+        """)
+
+        task = sky.Task(name=task_name, setup=setup_script, run=run_script)
+        task.set_resources(sky.Resources(cpus='2+'))
+
+        # Submit as regular managed job
+        request_id = sky.jobs.launch(task)
+        result = sdk.stream_and_get(request_id)
+        job_ids, _ = result
+        if not job_ids:
+            raise RuntimeError('Failed to launch batch managed job')
+        managed_job_id = job_ids[0]
+
+        logger.info(f'Batch job submitted as managed job {managed_job_id}')
+        _wait_for_managed_job_completion(managed_job_id)
+        return managed_job_id
 
     def __repr__(self) -> str:
         return f'Dataset(path={self.path!r})'

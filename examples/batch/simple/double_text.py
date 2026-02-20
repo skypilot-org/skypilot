@@ -6,10 +6,8 @@ and outputs a JSONL file where each line has an "output" field containing
 the doubled text.
 
 Usage (from project root):
-    1. Prepare your dataset (a JSONL file with "text" fields):
-       $ echo '{"text": "hello"}' > /tmp/test.jsonl
-       $ echo '{"text": "world"}' >> /tmp/test.jsonl
-       $ aws s3 cp /tmp/test.jsonl s3://my-bucket/test.jsonl
+    1. Prepare your dataset (run.sh creates 50 items automatically):
+       $ bash examples/batch/simple/run.sh
 
     2. Run this script:
        $ python examples/batch/simple/double_text.py

@@ -1,11 +1,10 @@
 """Constants for Sky Batch."""
 
-# Port for controller batch manager API
+# Port for controller batch manager API (used by sky/serve for port setup)
 CONTROLLER_BATCH_PORT = 8280
 
 # Port range for batch controllers (analogous to LOAD_BALANCER_PORT_RANGE
-# in sky/serve/constants.py). Opened on the controller cluster so external
-# clients can reach the BatchController.
+# in sky/serve/constants.py). Referenced by sky/serve for port configuration.
 BATCH_CONTROLLER_PORT_START = 8280
 BATCH_CONTROLLER_PORT_RANGE = '8280-8300'
 
@@ -37,9 +36,3 @@ TEMP_DIR_NAME = '.sky_batch_tmp'
 
 # Manifest filename for image directory output
 IMAGE_DIR_MANIFEST_FILENAME = 'manifest.jsonl'
-
-# HTTP endpoints — controller (user-facing only)
-ENDPOINT_STATUS = '/status'
-ENDPOINT_SHUTDOWN = '/shutdown'
-ENDPOINT_SUBMIT_JOB = '/submit_job'
-ENDPOINT_JOB_STATUS = '/job_status'
