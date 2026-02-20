@@ -1106,6 +1106,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['metadata']['labels'] = tags
     pod_spec['metadata']['labels'].update(
         {constants.TAG_SKYPILOT_CLUSTER_NAME: cluster_name_on_cloud})
+    # Add the active workspace as a label for filtering and cost allocation
+    active_workspace = skypilot_config.get_active_workspace()
+    if active_workspace:
+        pod_spec['metadata']['labels'][constants.TAG_SKYPILOT_WORKSPACE] = (
+            active_workspace)
     # Add the cluster name as an annotation to the pod spec.
     # We cannot use a label because label values have both
     # a length limit and charset limit (i.e no special chars).

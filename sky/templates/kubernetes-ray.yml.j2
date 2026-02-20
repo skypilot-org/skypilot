@@ -285,6 +285,7 @@ available_node_types:
             # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
+            skypilot-workspace: {{ workspace | default('default') }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
