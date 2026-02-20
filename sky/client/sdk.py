@@ -352,6 +352,40 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(34)
+@annotations.client_api
+def kubernetes_label_gpus(
+    context: Optional[str] = None,
+    cleanup_only: bool = False,
+    wait_for_completion: bool = True,
+) -> server_common.RequestId[Dict[str, Any]]:
+    """Labels GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    Note: Currently only supports NVIDIA GPUs. AMD GPUs must be labeled
+    manually.
+
+    Args:
+        context: Kubernetes context to use. If None, uses current context.
+        cleanup_only: If True, only cleanup existing labeling resources.
+        wait_for_completion: If True, wait for labeling jobs to complete.
+
+    Returns:
+        RequestId for the labeling operation.
+    """
+    body = payloads.KubernetesLabelGpusBody(
+        context=context,
+        cleanup_only=cleanup_only,
+        wait_for_completion=wait_for_completion,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/kubernetes_label_gpus',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def optimize(
     dag: 'sky.Dag',
@@ -428,9 +462,21 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
+
+    def _omit(version: int) -> bool:
+        return remote_api_version is None or remote_api_version < version
+
     # TODO(kevin): remove this in v0.13.0
-    omit_user_specified_yaml = (remote_api_version is None or
-                                remote_api_version < 15)
+    omit_user_specified_yaml = _omit(15)
+    # TODO (kyuds): remove this in v0.13.0
+    omit_local_disk = _omit(35)
+    omit_mount_cached_config = _omit(37)
+    if omit_local_disk:
+        logger.debug('`local_disk` is ignored because the server does '
+                     'not support it yet.')
+    if omit_mount_cached_config:
+        logger.debug('`mount_cached_config` is ignored because the server '
+                     'does not support it yet.')
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -438,6 +484,14 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
+        if omit_local_disk:
+            for resource in task.resources:
+                # pylint: disable=protected-access
+                resource._set_local_disk(None)
+        if omit_mount_cached_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_cached_config = None
+
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
@@ -1195,8 +1249,12 @@ def start(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def down(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+def down(
+    cluster_name: str,
+    purge: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+) -> server_common.RequestId[None]:
     """Tears down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -1211,6 +1269,10 @@ def down(cluster_name: str,
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Returns:
         The request ID of the down request.
@@ -1226,9 +1288,15 @@ def down(cluster_name: str,
             jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/down', json=json.loads(body.model_dump_json()), timeout=5)
@@ -1238,8 +1306,12 @@ def down(cluster_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stop(cluster_name: str,
-         purge: bool = False) -> server_common.RequestId[None]:
+def stop(
+    cluster_name: str,
+    purge: bool = False,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
+) -> server_common.RequestId[None]:
     """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -1272,9 +1344,15 @@ def stop(cluster_name: str,
             cluster, or a TPU VM Pod cluster, or the managed jobs controller.
 
     """
+    version = versions.get_remote_api_version()
+    if graceful and version is not None and version < 32:
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
         purge=purge,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST', '/stop', json=json.loads(body.model_dump_json()), timeout=5)
@@ -2263,6 +2341,7 @@ def api_status(
     all_status: bool = False,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    cluster_name: Optional[str] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2273,6 +2352,8 @@ def api_status(
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
         fields: The fields to get. If None, get all fields.
+        cluster_name: Filter requests by cluster name.
+            If None, show all requests.
 
     Returns:
         A list of request payloads.
@@ -2281,11 +2362,18 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
+    # Backward compatibility check for the new flag cluster_name
+    version = versions.get_remote_api_version()
+    if (cluster_name is not None) and (version is None or version < 38):
+        logger.warning(
+            'The flag is ignored because the server does not support it yet.')
+
     body = payloads.RequestStatusBody(
         request_ids=request_ids,
         all_status=all_status,
         limit=limit,
         fields=fields,
+        cluster_name=cluster_name,
     )
     response = server_common.make_authenticated_request(
         'GET',

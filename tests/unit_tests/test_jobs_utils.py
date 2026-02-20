@@ -28,9 +28,9 @@ def test_terminate_cluster_retry_on_value_error(mock_set_internal,
     # Verify sky.down was called 3 times
     assert mock_sky_down.call_count == 3
     mock_sky_down.assert_has_calls([
-        mock.call('test-cluster'),
-        mock.call('test-cluster'),
-        mock.call('test-cluster'),
+        mock.call('test-cluster', graceful=False, graceful_timeout=None),
+        mock.call('test-cluster', graceful=False, graceful_timeout=None),
+        mock.call('test-cluster', graceful=False, graceful_timeout=None),
     ])
 
     # Verify usage.set_internal was called before each sky.down
@@ -49,7 +49,9 @@ def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,
 
     # Verify sky.down was called once
     assert mock_sky_down.call_count == 1
-    mock_sky_down.assert_called_once_with('test-cluster')
+    mock_sky_down.assert_called_once_with('test-cluster',
+                                          graceful=False,
+                                          graceful_timeout=None)
 
     # Verify usage.set_internal was called once
     assert mock_set_internal.call_count == 1
@@ -188,3 +190,243 @@ def test_job_recovery_skips_autostopping():
     assert up_status in recovery_skip_statuses
     assert autostopping_status in recovery_skip_statuses
     assert stopped_status not in recovery_skip_statuses
+
+
+# ======== Graceful cancel tests ========
+
+
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_graceful(mock_set_internal, mock_sky_down) -> None:
+    """Test terminate_cluster passes graceful params to core.down."""
+    utils.terminate_cluster('test-cluster', graceful=True, graceful_timeout=120)
+
+    mock_sky_down.assert_called_once_with('test-cluster',
+                                          graceful=True,
+                                          graceful_timeout=120)
+    assert mock_set_internal.call_count == 1
+
+
+@mock.patch('sky.core.down')
+@mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
+def test_terminate_cluster_graceful_no_timeout(mock_set_internal,
+                                               mock_sky_down) -> None:
+    """Test terminate_cluster with graceful=True but no timeout."""
+    utils.terminate_cluster('test-cluster', graceful=True)
+
+    mock_sky_down.assert_called_once_with('test-cluster',
+                                          graceful=True,
+                                          graceful_timeout=None)
+
+
+def test_cancel_signal_file_no_graceful():
+    """Test that cancel_jobs_by_id writes an empty signal file (touch)
+    for non-graceful cancels on the new controller."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir):
+            with mock.patch(
+                    'sky.jobs.state.is_legacy_controller_process',
+                    return_value=False), \
+                 mock.patch(
+                    'sky.jobs.state.get_status',
+                    return_value=mock.MagicMock(
+                        is_terminal=mock.MagicMock(return_value=False),
+                        __eq__=mock.MagicMock(return_value=False))), \
+                 mock.patch(
+                    'sky.jobs.utils.update_managed_jobs_statuses'), \
+                 mock.patch(
+                    'sky.jobs.state.get_workspace',
+                    return_value='default'):
+                utils.cancel_jobs_by_id(job_ids=[42],
+                                        current_workspace='default',
+                                        graceful=False)
+
+                signal_file = pathlib.Path(tmpdir) / '42'
+                assert signal_file.exists()
+                content = signal_file.read_text(encoding='utf-8')
+                assert content == '', (
+                    f'Expected empty file for non-graceful, got: {content!r}')
+
+
+def test_cancel_signal_file_graceful():
+    """Test that cancel_jobs_by_id writes 'graceful' to signal file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir):
+            with mock.patch(
+                    'sky.jobs.state.is_legacy_controller_process',
+                    return_value=False), \
+                 mock.patch(
+                    'sky.jobs.state.get_status',
+                    return_value=mock.MagicMock(
+                        is_terminal=mock.MagicMock(return_value=False),
+                        __eq__=mock.MagicMock(return_value=False))), \
+                 mock.patch(
+                    'sky.jobs.utils.update_managed_jobs_statuses'), \
+                 mock.patch(
+                    'sky.jobs.state.get_workspace',
+                    return_value='default'):
+                utils.cancel_jobs_by_id(job_ids=[42],
+                                        current_workspace='default',
+                                        graceful=True)
+
+                signal_file = pathlib.Path(tmpdir) / '42'
+                assert signal_file.exists()
+                content = signal_file.read_text(encoding='utf-8')
+                assert content == 'graceful'
+
+
+def test_cancel_signal_file_graceful_with_timeout():
+    """Test that cancel_jobs_by_id writes 'graceful:<timeout>' to signal
+    file."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with mock.patch('sky.jobs.constants.CONSOLIDATED_SIGNAL_PATH', tmpdir):
+            with mock.patch(
+                    'sky.jobs.state.is_legacy_controller_process',
+                    return_value=False), \
+                 mock.patch(
+                    'sky.jobs.state.get_status',
+                    return_value=mock.MagicMock(
+                        is_terminal=mock.MagicMock(return_value=False),
+                        __eq__=mock.MagicMock(return_value=False))), \
+                 mock.patch(
+                    'sky.jobs.utils.update_managed_jobs_statuses'), \
+                 mock.patch(
+                    'sky.jobs.state.get_workspace',
+                    return_value='default'):
+                utils.cancel_jobs_by_id(job_ids=[42],
+                                        current_workspace='default',
+                                        graceful=True,
+                                        graceful_timeout=300)
+
+                signal_file = pathlib.Path(tmpdir) / '42'
+                assert signal_file.exists()
+                content = signal_file.read_text(encoding='utf-8')
+                assert content == 'graceful:300'
+
+
+@mock.patch('sky.utils.subprocess_utils.run_in_parallel')
+@mock.patch('sky.backends.task_codegen.TaskCodeGen.get_rclone_flush_script')
+def test_graceful_job_cancel_calls_flush(mock_flush_script, mock_run_parallel):
+    """Test _graceful_job_cancel cancels jobs then flushes on all nodes."""
+    from sky import core as sky_core
+
+    mock_flush_script.return_value = 'echo flush'
+
+    mock_runner = mock.MagicMock()
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_handle.get_command_runners.return_value = [mock_runner]
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    # Simulate successful flush
+    mock_run_parallel.return_value = [(0, 0, '', '')]
+
+    sky_core._graceful_job_cancel(mock_handle, mock_backend, 'test-cluster')
+
+    # Verify jobs were cancelled
+    mock_backend.cancel_jobs.assert_called_once_with(mock_handle,
+                                                     jobs=None,
+                                                     cancel_all=True)
+
+    # Verify flush was run in parallel
+    mock_run_parallel.assert_called_once()
+    _, kwargs = mock_run_parallel.call_args
+    assert kwargs['num_threads'] == 1
+
+
+@mock.patch('sky.utils.subprocess_utils.run_in_parallel')
+@mock.patch('sky.backends.task_codegen.TaskCodeGen.get_rclone_flush_script')
+def test_graceful_job_cancel_with_timeout(mock_flush_script, mock_run_parallel):
+    """Test _graceful_job_cancel wraps flush script with timeout."""
+    from sky import core as sky_core
+
+    mock_flush_script.return_value = 'echo flush'
+
+    mock_runner = mock.MagicMock()
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_handle.get_command_runners.return_value = [mock_runner]
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    mock_run_parallel.return_value = [(0, 0, '', '')]
+
+    sky_core._graceful_job_cancel(mock_handle,
+                                  mock_backend,
+                                  'test-cluster',
+                                  timeout=60)
+
+    # The flush function passed to run_in_parallel should wrap with timeout.
+    # We verify by checking the call was made (the timeout wrapping happens
+    # inside the closure).
+    mock_run_parallel.assert_called_once()
+    mock_flush_script.assert_called_once()
+
+
+@mock.patch('sky.utils.subprocess_utils.run_in_parallel')
+@mock.patch('sky.backends.task_codegen.TaskCodeGen.get_rclone_flush_script')
+def test_graceful_job_cancel_wrong_backend_skips(mock_flush_script,
+                                                 mock_run_parallel):
+    """Test _graceful_job_cancel skips for non-CloudVmRay backends."""
+    from sky import core as sky_core
+
+    mock_handle = mock.MagicMock()  # not CloudVmRayResourceHandle
+    mock_backend = mock.MagicMock()  # not CloudVmRayBackend
+
+    sky_core._graceful_job_cancel(mock_handle, mock_backend, 'test-cluster')
+
+    # Should not attempt flush
+    mock_flush_script.assert_not_called()
+    mock_run_parallel.assert_not_called()
+
+
+@mock.patch('sky.utils.subprocess_utils.run_in_parallel')
+@mock.patch('sky.backends.task_codegen.TaskCodeGen.get_rclone_flush_script')
+def test_graceful_job_cancel_handles_flush_timeout(mock_flush_script,
+                                                   mock_run_parallel):
+    """Test _graceful_job_cancel handles timeout exit code (124)."""
+    from sky import core as sky_core
+
+    mock_flush_script.return_value = 'echo flush'
+
+    mock_runner = mock.MagicMock()
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_handle.get_command_runners.return_value = [mock_runner]
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    # Simulate timeout on flush (exit code 124)
+    mock_run_parallel.return_value = [(0, 124, '', 'timed out')]
+
+    # Should not raise - graceful cancel handles errors
+    sky_core._graceful_job_cancel(mock_handle,
+                                  mock_backend,
+                                  'test-cluster',
+                                  timeout=10)
+
+    mock_backend.cancel_jobs.assert_called_once()
+
+
+@mock.patch('sky.utils.subprocess_utils.run_in_parallel')
+@mock.patch('sky.backends.task_codegen.TaskCodeGen.get_rclone_flush_script')
+def test_graceful_job_cancel_multi_node(mock_flush_script, mock_run_parallel):
+    """Test _graceful_job_cancel flushes on all nodes in parallel."""
+    from sky import core as sky_core
+
+    mock_flush_script.return_value = 'echo flush'
+
+    runners = [mock.MagicMock() for _ in range(3)]
+    mock_handle = mock.MagicMock(
+        spec=cloud_vm_ray_backend.CloudVmRayResourceHandle)
+    mock_handle.get_command_runners.return_value = runners
+    mock_backend = mock.MagicMock(spec=cloud_vm_ray_backend.CloudVmRayBackend)
+
+    mock_run_parallel.return_value = [
+        (0, 0, '', ''),
+        (1, 0, '', ''),
+        (2, 0, '', ''),
+    ]
+
+    sky_core._graceful_job_cancel(mock_handle, mock_backend, 'test-cluster')
+
+    _, kwargs = mock_run_parallel.call_args
+    assert kwargs['num_threads'] == 3

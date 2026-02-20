@@ -19,7 +19,7 @@ logger = sky_logging.init_logger(__name__)
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
 GLOBAL_USER_STATE_DB_NAME = 'state_db'
-GLOBAL_USER_STATE_VERSION = '013'  # add cloud/region/zone columns to clusters
+GLOBAL_USER_STATE_VERSION = '014'  # add type column to users table
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
@@ -37,6 +37,10 @@ SKYPILOT_CONFIG_LOCK_PATH = f'~/.sky/locks/.{SKYPILOT_CONFIG_DB_NAME}.lock'
 KV_CACHE_DB_NAME = 'kv_cache_db'
 KV_CACHE_VERSION = '001'  # initial kv_cache table for AWS AMIs
 KV_CACHE_LOCK_PATH = f'~/.sky/locks/.{KV_CACHE_DB_NAME}.lock'
+
+RECIPES_DB_NAME = 'recipes_db'
+RECIPES_VERSION = '001'
+RECIPES_LOCK_PATH = f'~/.sky/locks/.{RECIPES_DB_NAME}.lock'
 
 
 @contextlib.contextmanager

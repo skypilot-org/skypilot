@@ -86,6 +86,8 @@ class APIHealthResponse(ResponseBaseModel):
     ingress_basic_auth_enabled: bool = False
     # Latest version info (if available)
     latest_version: Optional[str] = None
+    # Whether external proxy auth is enabled
+    external_proxy_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
@@ -204,6 +206,7 @@ class ManagedJobRecord(ResponseBaseModel):
     pool: Optional[str] = None
     pool_hash: Optional[str] = None
     current_cluster_name: Optional[str] = None
+    cluster_name_on_cloud: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
     labels: Optional[Dict[str, str]] = None

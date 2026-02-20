@@ -144,6 +144,10 @@ spec:
         - name: SKY_API_SERVER_METRICS_ENABLED
           value: "true"
         {{- end }}
+        {{- if .Values.auth.disableBasicAuthMiddleware }}
+        - name: SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE
+          value: "true"
+        {{- end }}
         {{- if .Values.auth.oauth.enabled }}
         - name: SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED
           value: "true"
@@ -290,6 +294,12 @@ spec:
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config
+        {{- if or .Values.auth.externalProxy.enabled (eq (include "skypilot.ingressOAuthEnabled" .) "true") }}
+        - name: skypilot-server-config
+          mountPath: /root/.sky/.server.yaml
+          subPath: server.yaml
+          readOnly: true
+        {{- end }}
         {{- if .Values.apiService.sshNodePools }}
         - name: skypilot-ssh-node-pools
           mountPath: /var/skypilot/ssh_node_pool
@@ -304,10 +314,9 @@ spec:
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         {{- if .Values.awsCredentials.useCredentialsFile }}
-        # Mount the credentials file directly from secret
-        - name: aws-credentials-file
-          mountPath: /root/.aws/credentials
-          subPath: credentials
+          # Mount the config and credentials files directly from secret
+        - name: aws-config-files
+          mountPath: /root/.aws
           readOnly: true
         {{- else }}
         # Mount emptyDir that will be populated by initContainer
@@ -706,8 +715,8 @@ spec:
       {{- end }}
       {{- if .Values.awsCredentials.enabled }}
       {{- if .Values.awsCredentials.useCredentialsFile }}
-      # Mount the credentials file directly from secret
-      - name: aws-credentials-file
+      # Mount the config and credentials files directly from secret
+      - name: aws-config-files
         secret:
           secretName: {{ .Values.awsCredentials.awsSecretName }}
       {{- else }}
@@ -759,6 +768,11 @@ spec:
       - name: skypilot-config
         configMap:
           name: {{ $fullName }}-config
+      {{- if or .Values.auth.externalProxy.enabled (eq (include "skypilot.ingressOAuthEnabled" .) "true") }}
+      - name: skypilot-server-config
+        configMap:
+          name: {{ $fullName }}-server-config
+      {{- end }}
       {{- if .Values.apiService.sshNodePools }}
       - name: skypilot-ssh-node-pools
         secret:

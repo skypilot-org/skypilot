@@ -17,6 +17,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -477,6 +478,34 @@ def _filter_with_mem(df: 'pd.DataFrame',
         return df[df['MemoryGiB'] == memory]
 
 
+def filter_with_local_disk(df: 'pd.DataFrame',
+                           local_disk: Optional[str]) -> 'pd.DataFrame':
+    if local_disk is None:
+        return df
+
+    local_disk = local_disk.lower()
+    mode, size, at_least = resources_utils.parse_local_disk_str(local_disk)
+
+    # Disk Type
+    if mode not in ('nvme', 'ssd'):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Local disk should be either nvme or ssd. '
+                             f'Got {local_disk}.')
+    df = df[df['LocalDiskType'] == 'ssd']  # SSD is always required.
+    if mode == 'nvme':
+        df = df[df['NVMeSupported'] == True]  # pylint: disable=singleton-comparison
+
+    # Disk Size
+    total_disk = df['LocalDiskSize'].fillna(0) * df['LocalDiskCount'].fillna(0)
+
+    if at_least:
+        df = df[total_disk >= size]
+    else:
+        df = df[abs(total_disk - size) < 1.0]
+
+    return df
+
+
 def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
                         zone: Optional[str]) -> 'pd.DataFrame':
     if region is not None:
@@ -554,6 +583,36 @@ def get_arch_from_instance_type_impl(
         return None
 
     return arch
+
+
+def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
+                                           instance_type: str) -> Optional[str]:
+    df = _get_instance_type(df, instance_type, None)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
+    row = df.iloc[0]
+
+    if 'LocalDiskType' not in row or pd.isna(row['LocalDiskType']):
+        return None
+
+    mode = row['LocalDiskType']
+    if mode != 'ssd':
+        return None  # We don't support HDDs right now.
+
+    if pd.isna(row.get('LocalDiskSize')) or pd.isna(row.get('LocalDiskCount')):
+        # Should we raise error instead?
+        return None
+
+    total_size = float(row['LocalDiskSize']) * float(row['LocalDiskCount'])
+
+    nvme_supported = row.get('NVMeSupported', False)
+    if pd.isna(nvme_supported):
+        nvme_supported = False
+    if nvme_supported:
+        mode = 'nvme'
+
+    return f'{mode}:{int(total_size)}'
 
 
 def get_instance_type_for_accelerator_impl(

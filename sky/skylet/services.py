@@ -519,7 +519,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     pool_hash=job.get('pool_hash'),
                     links=job.get('links'),
                     # Primary/auxiliary task support (None for non-job-groups)
-                    is_primary_in_job_group=job.get('is_primary_in_job_group'))
+                    is_primary_in_job_group=job.get('is_primary_in_job_group'),
+                    # Fields populated from cluster handle
+                    zone=job.get('zone'),
+                    labels=job.get('labels'),
+                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(
@@ -555,6 +559,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     grpc.StatusCode.INVALID_ARGUMENT,
                     'exactly one cancellation criteria must be specified.')
 
+            graceful = (request.graceful
+                        if request.HasField('graceful') else False)
+            graceful_timeout = (request.graceful_timeout if
+                                request.HasField('graceful_timeout') else None)
+
             if cancellation_criteria == 'all_users':
                 user_hash = request.user_hash if request.HasField(
                     'user_hash') else None
@@ -567,16 +576,22 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     job_ids=None,
                     all_users=all_users,
                     current_workspace=request.current_workspace,
-                    user_hash=user_hash)
+                    user_hash=user_hash,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif cancellation_criteria == 'job_ids':
                 job_ids = list(request.job_ids.ids)
                 message = managed_job_utils.cancel_jobs_by_id(
                     job_ids=job_ids,
-                    current_workspace=request.current_workspace)
+                    current_workspace=request.current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif cancellation_criteria == 'job_name':
                 message = managed_job_utils.cancel_job_by_name(
                     job_name=request.job_name,
-                    current_workspace=request.current_workspace)
+                    current_workspace=request.current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif cancellation_criteria == 'pool_name':
                 message = managed_job_utils.cancel_jobs_by_pool(
                     pool_name=request.pool_name,

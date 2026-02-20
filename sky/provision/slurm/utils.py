@@ -31,6 +31,10 @@ _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
                                re.IGNORECASE)
 
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
+# Proctrack type is highly unlikely to change.
+_SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
+# Pyxis plugin availability is unlikely to change frequently.
+_SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -61,6 +65,23 @@ def get_slurm_ssh_config() -> SSHConfig:
     return slurm_config
 
 
+def get_identity_file(ssh_config_dict: Dict[str, Any]) -> Optional[str]:
+    """Get the first identity file from SSH config, or None if not specified."""
+    identity_files = ssh_config_dict.get('identityfile')
+    if identity_files:
+        return identity_files[0]
+    return None
+
+
+def get_identities_only(ssh_config_dict: Dict[str, Any]) -> bool:
+    """Check if IdentitiesOnly is set to yes in SSH config.
+
+    Returns True if IdentitiesOnly is explicitly set to 'yes', False otherwise.
+    """
+    identities_only = ssh_config_dict.get('identitiesonly', '')
+    return identities_only.lower() == 'yes'
+
+
 @annotations.lru_cache(scope='request')
 def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
     cache_key = f'slurm:nodes_info:{cluster}'
@@ -75,9 +96,10 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
     nodes_info = client.info_nodes()
 
@@ -95,6 +117,76 @@ def _get_slurm_nodes_info(cluster: str) -> List[slurm.NodeInfo]:
                      f'{common_utils.format_exception(e)}')
 
     return nodes_info
+
+
+def get_proctrack_type(cluster: str) -> Optional[str]:
+    """Get the ProctrackType setting from Slurm configuration."""
+    cache_key = f'slurm:proctrack_type:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm proctrack type found in cache ({cache_key})')
+        return cached
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    proctrack_type = client.get_proctrack_type()
+
+    if proctrack_type is not None:
+        try:
+            kv_cache.add_or_update_cache_entry(
+                cache_key, proctrack_type,
+                time.time() + _SLURM_PROCTRACK_TYPE_CACHE_TTL)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to cache slurm proctrack type for {cluster}: '
+                         f'{common_utils.format_exception(e)}')
+
+    return proctrack_type
+
+
+def check_pyxis_enabled(cluster: str) -> bool:
+    """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
+
+    Pyxis is required for Docker container support on Slurm. This function
+    caches the result per cluster since the plugin availability is unlikely
+    to change frequently.
+    """
+    cache_key = f'slurm:pyxis_enabled:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm pyxis check found in cache ({cache_key})')
+        return cached == 'true'
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    enabled = client.check_pyxis_enabled()
+
+    try:
+        kv_cache.add_or_update_cache_entry(
+            cache_key, 'true' if enabled else 'false',
+            time.time() + _SLURM_PYXIS_CHECK_CACHE_TTL)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to cache slurm pyxis check for {cluster}: '
+                     f'{common_utils.format_exception(e)}')
+
+    return enabled
 
 
 class SlurmInstanceType:
@@ -279,9 +371,10 @@ def get_cluster_default_partition(cluster_name: str) -> Optional[str]:
         ssh_config_dict['hostname'],
         int(ssh_config_dict.get('port', 22)),
         ssh_config_dict['user'],
-        ssh_config_dict['identityfile'][0],
+        get_identity_file(ssh_config_dict),
         ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
     )
 
     return client.get_default_partition()
@@ -460,9 +553,10 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
             ssh_config_dict['hostname'],
             int(ssh_config_dict.get('port', 22)),
             ssh_config_dict['user'],
-            ssh_config_dict['identityfile'][0],
+            get_identity_file(ssh_config_dict),
             ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
             ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(ssh_config_dict),
         )
 
         nodes = client.info_nodes()
@@ -508,9 +602,10 @@ def _get_slurm_node_info_list(
         slurm_config_dict['hostname'],
         int(slurm_config_dict.get('port', 22)),
         slurm_config_dict['user'],
-        slurm_config_dict['identityfile'][0],
+        get_identity_file(slurm_config_dict),
         ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
         ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(slurm_config_dict),
     )
     node_infos = slurm_client.info_nodes()
 
@@ -656,9 +751,10 @@ def get_partition_infos(cluster_name: str) -> Dict[str, slurm.SlurmPartition]:
             slurm_config_dict['hostname'],
             int(slurm_config_dict.get('port', 22)),
             slurm_config_dict['user'],
-            slurm_config_dict['identityfile'][0],
+            get_identity_file(slurm_config_dict),
             ssh_proxy_command=slurm_config_dict.get('proxycommand', None),
             ssh_proxy_jump=slurm_config_dict.get('proxyjump', None),
+            identities_only=get_identities_only(slurm_config_dict),
         )
 
         partitions_info = client.get_partitions_info()
@@ -701,7 +797,7 @@ def srun_sshd_command(
     job_id: str,
     target_node: str,
     unix_user: str,
-    cluster_name_on_cloud: str,  # pylint: disable=unused-argument
+    cluster_name_on_cloud: str,
     is_container_image: bool,
 ) -> str:
     """Build srun command for launching sshd -i inside a Slurm job.
@@ -723,10 +819,56 @@ def srun_sshd_command(
     # because we override the home directory in SlurmCommandRunner.run.
     user_home_ssh_dir = f'~{unix_user}/.ssh'
 
+    # TODO(kevin): SSH sessions don't inherit Slurm env vars (SLURM_*, CUDA_*,
+    # etc.) because sshd/dropbear spawns a fresh shell. Fix by capturing env
+    # to a file and sourcing it.
+
     if is_container_image:
-        # Container SSH requires dropbear support. See the stacked PR.
-        raise NotImplementedError(
-            'Container SSH is not yet supported in this branch.')
+        # Dropbear + socat bridge for container mode.
+        # See slurm-ray.yml.j2 for why we use Dropbear instead of OpenSSH.
+        # Dropbear's -i (inetd) mode expects a socket fd on stdin, but srun
+        # provides pipes. socat bridges stdin/stdout to a TCP socket.
+        ssh_bootstrap_cmd = (
+            # Find dropbear in PATH
+            'DROPBEAR=$(command -v dropbear); '
+            'if [ -z "$DROPBEAR" ]; then '
+            'echo "dropbear not found" >&2; exit 1; fi; '
+            # Find a free port in the ephemeral range
+            'while :; do '
+            'PORT=$((30000 + RANDOM % 30000)); '
+            'ss -tln | awk \'{print $4}\' | grep -q ":$PORT$" || break; '
+            'done; '
+            # Start dropbear and wait for it to bind
+            '"$DROPBEAR" -F -s -R -p "127.0.0.1:$PORT" & '
+            'DROPBEAR_PID=$!; '
+            'trap "kill $DROPBEAR_PID 2>/dev/null" EXIT; '
+            'for i in $(seq 1 50); do '
+            'ss -tlnp 2>/dev/null | grep -q ":$PORT.*pid=$DROPBEAR_PID" '
+            '&& break; sleep 0.1; done; '
+            'if ! ss -tlnp 2>/dev/null | '
+            'grep -q ":$PORT.*pid=$DROPBEAR_PID"; then '
+            'echo "Error: Timed out waiting for dropbear to start." >&2; '
+            'exit 1; fi; '
+            'socat STDIO TCP:127.0.0.1:$PORT')
+        return shlex.join([
+            'srun',
+            '--overlap',
+            '--quiet',
+            '--unbuffered',
+            '--jobid',
+            job_id,
+            '--nodes=1',
+            '--ntasks=1',
+            '--ntasks-per-node=1',
+            '-w',
+            target_node,
+            '--container-remap-root',
+            f'--container-name='
+            f'{pyxis_container_name(cluster_name_on_cloud)}:exec',
+            '/bin/bash',
+            '-c',
+            ssh_bootstrap_cmd,
+        ])
 
     # Non-container: OpenSSH sshd
     return shlex.join([

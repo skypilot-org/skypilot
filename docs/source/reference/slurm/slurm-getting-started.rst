@@ -5,7 +5,7 @@ Getting Started on Slurm
 
 .. note::
 
-    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    Slurm support is under active development. We'd love to hear from you —
     please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
@@ -74,7 +74,9 @@ Create the configuration file:
 
 .. note::
 
-    ``HostName``, ``User``, and ``IdentityFile`` are required fields.
+    ``HostName`` and ``User`` are required fields. ``IdentityFile`` is optional;
+    if not specified, SSH will use keys from ssh-agent or default key locations
+    (e.g., ``~/.ssh/id_rsa``, ``~/.ssh/id_ed25519``).
 
 Verify your SSH connection works by running:
 
@@ -209,7 +211,7 @@ You can also view GPU availability from the CLI:
 
 .. code-block:: console
 
-    $ sky show-gpus --infra slurm
+    $ sky gpus list --infra slurm
     Slurm GPUs
     GPU    UTILIZATION
     L40S   3 of 8 free

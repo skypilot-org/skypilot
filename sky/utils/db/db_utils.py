@@ -472,32 +472,31 @@ def get_engine(
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
-                if _max_connections == 0:
-                    kw_args = {'poolclass': sqlalchemy.NullPool}
-                    if async_engine:
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy_async.create_async_engine(
-                                conn_string, **kw_args))
-                    else:
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy.create_engine(conn_string, **kw_args))
+                if async_engine:
+                    # Use NullPool for async engines to avoid event loop binding
+                    # issues. asyncpg connection pools bind to the event loop on
+                    # first use, which causes "Future attached to a different
+                    # loop" errors if the engine is created in a different
+                    # context (e.g., a thread). NullPool creates a fresh
+                    # connection per operation, avoiding this issue.
+                    # Refer to https://docs.sqlalchemy.org/en/21/orm/extensions/asyncio.html#using-multiple-asyncio-event-loops for more details. # pylint: disable=line-too-long
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy_async.create_async_engine(
+                            conn_string, poolclass=sqlalchemy.NullPool))
+                elif _max_connections == 0:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(conn_string,
+                                                 poolclass=sqlalchemy.NullPool))
                 else:
-                    kw_args = {
-                        'pool_size': _max_connections,
-                        'max_overflow': max(0, 5 - _max_connections),
-                        'pool_pre_ping': True,
-                        'pool_recycle': 1800
-                    }
-                    if async_engine:
-                        kw_args[
-                            'poolclass'] = sqlalchemy.pool.AsyncAdaptedQueuePool
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy_async.create_async_engine(
-                                conn_string, **kw_args))
-                    else:
-                        kw_args['poolclass'] = sqlalchemy.pool.QueuePool
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy.create_engine(conn_string, **kw_args))
+                    # Sync engines can safely use QueuePool for connection reuse
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string,
+                            poolclass=sqlalchemy.pool.QueuePool,
+                            pool_size=_max_connections,
+                            max_overflow=max(0, 5 - _max_connections),
+                            pool_pre_ping=True,
+                            pool_recycle=1800))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'

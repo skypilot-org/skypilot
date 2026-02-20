@@ -14,6 +14,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
+from sky.server import versions
 from sky.server.requests import request_names
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -135,12 +136,17 @@ def apply(
         return dag, skypilot_config.to_dict()
 
     user = None
+    client_api_version = None
+    client_version = None
     if at_client_side:
         logger.info(f'Applying client admin policy: {policy}')
     else:
         # When being called by the server, the middleware has set the
         # current user and this information is available at this point.
         user = common_utils.get_current_user()
+        # Retrieve client version info from context vars (set by middleware)
+        client_api_version = versions.get_remote_api_version()
+        client_version = versions.get_remote_version()
         logger.info(f'Applying server admin policy: {policy}')
     config = copy.deepcopy(skypilot_config.to_dict())
     mutated_dag = dag_lib.Dag()
@@ -152,9 +158,16 @@ def apply(
 
     mutated_config = None
     for task in dag.tasks:
-        user_request = admin_policy.UserRequest(task, config, request_name,
-                                                request_options, at_client_side,
-                                                user)
+        user_request = admin_policy.UserRequest(
+            task,
+            config,
+            request_name,
+            request_options,
+            at_client_side,
+            user,
+            client_api_version=client_api_version,
+            client_version=client_version,
+        )
         try:
             mutated_user_request = policy.apply(user_request)
         # Avoid duplicate exception wrapping.

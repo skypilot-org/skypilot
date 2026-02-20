@@ -12,6 +12,7 @@ from sky.backends import backend_utils
 from sky.clouds import Region
 from sky.clouds import Zone
 from sky.clouds.aws import AWS
+from sky.provision import constants as provision_constants
 from sky.provision.aws import config
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -62,7 +63,7 @@ def test_usable_subnets(monkeypatch):
                                       vpc_name=None)
 
     error_message = str(e.value)
-    assert f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: The default VPC in {region} either does not exist or has no subnets." == error_message
+    assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: The default VPC in {region} either does not exist or has no subnets." == error_message
 
     # Case 2: Specified VPC has no subnets.
     with pytest.raises(RuntimeError) as e:
@@ -74,7 +75,7 @@ def test_usable_subnets(monkeypatch):
                                       vpc_name=vpc_name)
 
     error_message = str(e.value)
-    assert f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: No candidate subnets found in specified VPC {vpc_id}." == error_message
+    assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: No candidate subnets found in specified VPC {vpc_id}." == error_message
 
     # Case 3: All the subnets are public and use_internal_ips is True.
     monkeypatch.setattr('sky.provision.aws.config._is_subnet_public',
@@ -94,7 +95,7 @@ def test_usable_subnets(monkeypatch):
                                       vpc_name=vpc_name)
 
     error_message = str(e.value)
-    assert f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: The use_internal_ips option is set to True, but all candidate subnets are public." == error_message
+    assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: The use_internal_ips option is set to True, but all candidate subnets are public." == error_message
 
     # Case 4: All the subnets are private and use_internal_ips is False
     monkeypatch.setattr('sky.provision.aws.config._is_subnet_public',
@@ -114,7 +115,7 @@ def test_usable_subnets(monkeypatch):
                                       vpc_name=vpc_name)
 
     error_message = str(e.value)
-    assert f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: All candidate subnets are private, did you mean to set use_internal_ips to True?" == error_message
+    assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: All candidate subnets are private, did you mean to set use_internal_ips to True?" == error_message
 
 
 def test_ssm_default(monkeypatch):

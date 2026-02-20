@@ -3,6 +3,44 @@
 import { getErrorMessageFromResponse } from '@/data/utils';
 import { ENDPOINT } from './constants';
 
+// Cache for current user info
+let cachedUserInfo = null;
+let userInfoPromise = null;
+
+// Fetch and cache the current user info
+async function getCurrentUserInfo() {
+  if (cachedUserInfo) {
+    return cachedUserInfo;
+  }
+
+  if (userInfoPromise) {
+    return userInfoPromise;
+  }
+
+  userInfoPromise = (async () => {
+    try {
+      const baseUrl = window.location.origin;
+      const response = await fetch(`${baseUrl}/internal/dashboard/users/role`);
+      if (response.ok) {
+        const data = await response.json();
+        cachedUserInfo = {
+          id: data.id || 'local',
+          name: data.name || data.id || 'local',
+        };
+      } else {
+        // Not authenticated or error - use 'local' as fallback
+        cachedUserInfo = { id: 'local', name: 'local' };
+      }
+    } catch (error) {
+      console.error('Failed to get user info:', error);
+      cachedUserInfo = { id: 'local', name: 'local' };
+    }
+    return cachedUserInfo;
+  })();
+
+  return userInfoPromise;
+}
+
 // Wait for plugins that need early initialization (e.g., fetch interceptors)
 // Such plugins are marked with data-requires-early-init="true" and set
 // window.__skyPluginsReady = true when ready
@@ -49,11 +87,13 @@ export const apiClient = {
     const fullUrl = `${baseUrl}${ENDPOINT}${path}`;
 
     if (body !== undefined) {
+      // Get user info (cached after first call)
+      const userInfo = await getCurrentUserInfo();
       body.env_vars = {
         ...(body.env_vars || {}),
         SKYPILOT_IS_FROM_DASHBOARD: 'true',
-        SKYPILOT_USER_ID: 'dashboard',
-        SKYPILOT_USER: 'dashboard',
+        SKYPILOT_USER_ID: userInfo.id,
+        SKYPILOT_USER: userInfo.name,
       };
     }
 

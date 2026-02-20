@@ -9,6 +9,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from sky import sky_logging
+from sky.jobs import state as managed_job_state
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -211,7 +212,9 @@ class Autoscaler:
     def from_spec(cls, service_name: str,
                   spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
-        if spec.use_ondemand_fallback:
+        if spec.pool:
+            return QueueLengthAutoscaler(service_name, spec)
+        elif spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(service_name, spec)
         elif isinstance(spec.target_qps_per_replica, dict):
             # Use instance-aware autoscaler
@@ -1065,3 +1068,221 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             _generate_scale_down_decisions(all_replica_ids_to_scale_down))
 
         return scaling_decisions
+
+
+class QueueLengthAutoscaler(_AutoscalerWithHysteresis):
+    """QueueLengthAutoscaler: Autoscale pools based on queue length.
+
+    Scales pool workers based on the number of pending jobs in the queue.
+    When queue length exceeds the threshold, scales up by 1 worker.
+    When queue length is below the threshold, scales down by 1 worker.
+    Uses hysteresis to prevent rapid scaling decisions.
+    """
+
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        """Initialize the queue length autoscaler.
+
+        Variables:
+            queue_length_threshold: Threshold for queue length to trigger
+            scaling up or down.
+            service_name: The pool name (used to query pending jobs).
+        """
+        super().__init__(service_name, spec)
+        # Use default threshold if not specified
+        self.queue_length_threshold = (
+            spec.queue_length_threshold
+            if spec.queue_length_threshold is not None else
+            constants.AUTOSCALER_DEFAULT_QUEUE_LENGTH_THRESHOLD)
+        self._service_name: str = service_name
+        logger.info(f'QueueLengthAutoscaler for pool "{service_name}": '
+                    f'min_replicas={self.min_replicas}, '
+                    f'max_replicas={self.max_replicas}, '
+                    f'queue_length_threshold={self.queue_length_threshold}')
+
+    def _calculate_target_num_replicas(self) -> int:
+        """Calculate target number of replicas based on queue length."""
+        queue_length = managed_job_state.get_pending_jobs_count_by_pool(
+            self._service_name)
+        current_num_replicas = self.target_num_replicas
+
+        logger.info(f'[QueueLengthAutoscaler] Pool "{self._service_name}": '
+                    f'queue_length={queue_length}, '
+                    f'threshold={self.queue_length_threshold}, '
+                    f'current_target_replicas={current_num_replicas}, '
+                    f'min_replicas={self.min_replicas}, '
+                    f'max_replicas={self.max_replicas}')
+
+        # Determine target based on queue length vs threshold
+        if queue_length == 0:
+            # There are no pending jobs, we should quickly scale down to 0.
+            target_num_replicas = 0
+            decision = 'SCALE_DOWN_TO_ZERO'
+        elif queue_length > self.queue_length_threshold:
+            # Scale up by 1
+            # TODO(lloyd): we probably want support for scaling up by more than
+            # 1 in the future. We are punting on this currently because without
+            # an understanding of the workload the right number of replicas to
+            # scale up by is not clear and the user can just tweak the upscale
+            # delay to control the rate of scaling up.
+            target_num_replicas = current_num_replicas + 1
+            decision = 'SCALE_UP'
+        elif queue_length < self.queue_length_threshold:
+            # Scale down by 1
+            target_num_replicas = current_num_replicas - 1
+            decision = 'SCALE_DOWN'
+        else:
+            # Queue length equals threshold, keep current
+            target_num_replicas = current_num_replicas
+            decision = 'NO_CHANGE'
+        logger.info(f'[QueueLengthAutoscaler] Decision: {decision} '
+                    f'{current_num_replicas} -> {target_num_replicas}')
+
+        # Special case: if target_num_replicas is 0 and queue_length is greater
+        # than 0, we should not scale down to 0. This is to prevent the service
+        # from scaling to zero when there are jobs in the queue.
+        if target_num_replicas == 0 and queue_length > 0:
+            target_num_replicas = 1
+            logger.info('Preventing scale to zero since there are jobs in the'
+                        f'queue: {queue_length}')
+
+        clipped_target = self._clip_target_num_replicas(target_num_replicas)
+        if clipped_target != target_num_replicas:
+            logger.info(f'[QueueLengthAutoscaler] Clipped target: '
+                        f'{target_num_replicas} -> {clipped_target} '
+                        f'(bounds: [{self.min_replicas}, {self.max_replicas}])')
+
+        return clipped_target
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super().update_version(version, spec, update_mode)
+        # Update threshold.
+        if isinstance(spec.queue_length_threshold, int):
+            self.queue_length_threshold = spec.queue_length_threshold
+
+    def collect_request_information(
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        """Collect request information from aggregator for autoscaling.
+
+        Not needed for queue-based autoscaling, we query the job queue directly.
+        """
+        pass
+
+    def _get_idle_replicas(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List['replica_managers.ReplicaInfo']:
+        """Get replicas that have no active jobs (idle replicas).
+
+        Args:
+            replica_infos: List of replica information to check.
+
+        Returns:
+            List of replicas that have no active jobs running on them.
+        """
+        idle_replicas = []
+        for info in replica_infos:
+            # Check if this replica has any active jobs
+            active_jobs = managed_job_state.get_nonterminal_job_ids_by_pool(
+                self._service_name, cluster_name=info.cluster_name)
+            if not active_jobs:
+                idle_replicas.append(info)
+                logger.debug(
+                    f'[QueueLengthAutoscaler] Replica {info.replica_id} '
+                    f'({info.cluster_name}) is idle (no active jobs)')
+            else:
+                logger.debug(
+                    f'[QueueLengthAutoscaler] Replica {info.replica_id} '
+                    f'({info.cluster_name}) has {len(active_jobs)} active jobs,'
+                    ' skipping for scale-down')
+        return idle_replicas
+
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate Autoscaling decisions based on queue length.
+
+        Overrides parent to ensure we only scale down replicas that are idle
+        (not running any jobs).
+        """
+        # Use standard hysteresis-based logic
+        self._set_target_num_replicas_with_hysteresis()
+
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
+
+        for info in replica_infos:
+            if info.version == self.latest_version:
+                if not info.is_terminal:
+                    latest_nonterminal_replicas.append(info)
+
+        scaling_decisions: List[AutoscalerDecision] = []
+
+        # Case 1. when latest_nonterminal_replicas is less
+        # than num_to_provision, we always scale up new replicas.
+        target_num_replicas = self.get_final_target_num_replicas()
+        if len(latest_nonterminal_replicas) < target_num_replicas:
+            num_replicas_to_scale_up = (target_num_replicas -
+                                        len(latest_nonterminal_replicas))
+            logger.info('[QueueLengthAutoscaler] Number of replicas to scale up'
+                        f': {num_replicas_to_scale_up}')
+            scaling_decisions.extend(
+                _generate_scale_up_decisions(num_replicas_to_scale_up, None))
+
+        # Case 2: when latest_nonterminal_replicas is more
+        # than target_num_replicas, we scale down new replicas.
+        # IMPORTANT: Only scale down replicas that are idle (no active jobs).
+        replicas_to_scale_down = []
+        if len(latest_nonterminal_replicas) > target_num_replicas:
+            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
+                                          target_num_replicas)
+
+            # Get idle replicas (replicas with no active jobs)
+            idle_replicas = self._get_idle_replicas(latest_nonterminal_replicas)
+            num_idle_replicas = len(idle_replicas)
+
+            # Clip the number of replicas to scale down to the number of idle
+            # replicas.
+            actual_num_to_scale_down = min(num_replicas_to_scale_down,
+                                           num_idle_replicas)
+
+            if actual_num_to_scale_down < num_replicas_to_scale_down:
+                logger.info(
+                    f'[QueueLengthAutoscaler] Clipping scale-down: requested '
+                    f'{num_replicas_to_scale_down} replicas, but only '
+                    f'{num_idle_replicas} idle replicas available. Scaling down'
+                    f' {actual_num_to_scale_down} replicas.')
+
+            if actual_num_to_scale_down > 0:
+                # Select replicas to scale down from idle replicas only
+                replicas_to_scale_down = (
+                    _select_nonterminal_replicas_to_scale_down(
+                        actual_num_to_scale_down, idle_replicas))
+                logger.info(
+                    f'[QueueLengthAutoscaler] Number of replicas to scale down:'
+                    f' {actual_num_to_scale_down} {replicas_to_scale_down}')
+            elif num_replicas_to_scale_down > 0:
+                logger.info(
+                    f'[QueueLengthAutoscaler] Cannot scale down: requested '
+                    f'{num_replicas_to_scale_down} replicas, but all replicas '
+                    'have active jobs. Skipping scale-down.')
+
+        scaling_decisions.extend(
+            _generate_scale_down_decisions(replicas_to_scale_down))
+
+        return scaling_decisions
+
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
+        """Dump dynamic states from autoscaler.
+
+        Hysteresis state is handled by base class, no additional state needed.
+        """
+        return {}
+
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        """Load dynamic states to autoscaler.
+
+        Hysteresis state is handled by base class, no additional state needed.
+        """
+        pass
