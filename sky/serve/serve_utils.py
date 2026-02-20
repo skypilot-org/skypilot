@@ -205,8 +205,8 @@ class RequestTimestamp(RequestsAggregator):
 
 
 def get_service_filelock_path(pool: str) -> str:
-    path = (pathlib.Path(constants.SKYSERVE_METADATA_DIR) / pool /
-            'pool.lock').expanduser().absolute()
+    path = pathlib.Path(generate_remote_service_dir_name(pool)) / 'pool.lock'
+    path = path.expanduser().absolute()
     path.parents[0].mkdir(parents=True, exist_ok=True)
     return str(path)
 
@@ -456,6 +456,12 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     # Don't expand here since it is used for remote machine.
     return os.path.join(dir_name, 'load_balancer.log')
+
+
+def generate_remote_batch_controller_log_file_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'batch_controller.log')
 
 
 def generate_replica_launch_log_file_name(service_name: str,

@@ -1,0 +1,16 @@
+# Pool configuration for Stable Diffusion batch image generation
+# Uses AWS L4 GPUs (24GB VRAM, good for SD v1.5 in fp16)
+
+pool:
+  workers: 2  # Number of parallel workers
+
+resources:
+  cloud: aws
+  accelerators: L4:1  # 1x L4 GPU per worker
+
+setup: |
+  uv venv .venv
+  source .venv/bin/activate
+  uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+  uv pip install diffusers transformers accelerate safetensors huggingface_hub
+  huggingface-cli download stable-diffusion-v1-5/stable-diffusion-v1-5
