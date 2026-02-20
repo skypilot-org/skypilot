@@ -163,6 +163,7 @@ class Verda(clouds.Cloud):
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> Optional[str]:
@@ -171,6 +172,7 @@ class Verda(clouds.Cloud):
             cpus=cpus,
             memory=memory,
             disk_tier=disk_tier,
+            local_disk=local_disk,
             region=region,
             zone=zone,
             clouds='verda',
