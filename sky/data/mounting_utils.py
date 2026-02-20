@@ -227,15 +227,14 @@ def get_tigris_mount_cmd(tigris_credentials_path: str,
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
         f'--s3-force-path-style=false '
         f'--s3-endpoint {endpoint_url} --daemon --allow-other')
-    goofys_mount = (
-        f'AWS_SHARED_CREDENTIALS_FILE={tigris_credentials_path} '
-        f'AWS_PROFILE={tigris_profile_name} {_GOOFYS_WRAPPER} '
-        '-o allow_other '
-        f'--stat-cache-ttl {_STAT_CACHE_TTL} '
-        f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-        f'--subdomain '
-        f'--endpoint {endpoint_url} '
-        f'{bucket_name}{_bucket_sub_path} {mount_path}')
+    goofys_mount = (f'AWS_SHARED_CREDENTIALS_FILE={tigris_credentials_path} '
+                    f'AWS_PROFILE={tigris_profile_name} {_GOOFYS_WRAPPER} '
+                    '-o allow_other '
+                    f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                    f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                    f'--subdomain '
+                    f'--endpoint {endpoint_url} '
+                    f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
     mount_cmd = (f'{arch_check}'
                  f'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '

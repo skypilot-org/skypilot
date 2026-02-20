@@ -115,8 +115,7 @@ def session():
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
         with _load_tigris_credentials_env():
-            session_ = boto3.session.Session(
-                profile_name=TIGRIS_PROFILE_NAME)
+            session_ = boto3.session.Session(profile_name=TIGRIS_PROFILE_NAME)
         return session_
 
 
