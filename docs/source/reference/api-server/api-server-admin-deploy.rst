@@ -929,7 +929,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. note::
 
-            ``HostName``, ``User``, and ``IdentityFile`` are required fields. The ``IdentityFile`` path should reference the key as mounted in the container (e.g., ``~/.ssh/id_rsa``).
+            ``HostName`` and ``User`` are required fields. ``IdentityFile`` is optional; if not specified, SSH will use keys from ssh-agent or default key locations (e.g., ``~/.ssh/id_rsa``, ``~/.ssh/id_ed25519``).
 
         **Step 3: Configure the Helm deployment**
 
