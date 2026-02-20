@@ -1288,7 +1288,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
-    'fuse_device_manager': {
+    'fuse_mounting': {
         'type': 'object',
         'required': [],
         'additionalProperties': False,

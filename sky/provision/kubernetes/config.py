@@ -550,8 +550,8 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
 
     # Override fusermount-server image if configured
-    fuse_device_manager_config = provider_config.get('fuse_device_manager', {})
-    custom_image = fuse_device_manager_config.get('image')
+    fuse_mounting_config = provider_config.get('fuse_mounting', {})
+    custom_image = fuse_mounting_config.get('image')
     if custom_image:
         daemonset['spec']['template']['spec']['containers'][0][
             'image'] = custom_image
