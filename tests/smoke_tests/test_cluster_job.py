@@ -325,6 +325,43 @@ def test_job_queue_multi_gpu(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_scp
+@pytest.mark.no_paperspace
+@pytest.mark.no_oci
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_seeweb
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+def test_exec_gpu_visibility(generic_cloud: str, accelerator: Dict[str, str]):
+    """Test that exec without --gpus hides GPUs, with --gpus exposes them."""
+    if generic_cloud in ('kubernetes', 'slurm'):
+        accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud,
+                                                           count=1)
+    else:
+        accelerator = accelerator.get(generic_cloud, 'T4')
+    if not accelerator:
+        pytest.skip(f'No available GPUs for {generic_cloud}')
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'exec_gpu_visibility',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} --gpus {accelerator}:1 -- sleep 1',
+            # Without --gpus: CUDA_VISIBLE_DEVICES should be empty
+            f'sky exec {name} -- "echo CUDA_VISIBLE_DEVICES=\\$CUDA_VISIBLE_DEVICES"',
+            f's=$(sky logs {name} 2); echo "$s" && echo "$s" | grep "CUDA_VISIBLE_DEVICES=$"',
+            # With --gpus: CUDA_VISIBLE_DEVICES should be non-empty
+            f'sky exec {name} --gpus {accelerator}:1 -- "echo CUDA_VISIBLE_DEVICES=\\$CUDA_VISIBLE_DEVICES"',
+            f's=$(sky logs {name} 3); echo "$s" && echo "$s" | grep "CUDA_VISIBLE_DEVICES=[0-9]"',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
