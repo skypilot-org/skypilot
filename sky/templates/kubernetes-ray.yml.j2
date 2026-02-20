@@ -46,6 +46,13 @@ provider:
     # Used to set up the necessary permissions and sidecars.
     fuse_device_required: {{k8s_fuse_device_required}}
 
+    {% if k8s_fusermount_server_image %}
+    # Configuration for fusermount-server daemonset.
+    # Allows customizing the image for air-gapped or rate-limited environments.
+    fusermount_server:
+      image: {{k8s_fusermount_server_image}}
+    {% endif %}
+
     {% if ephemeral_volume_mounts %}
     ephemeral_volume_specs: {{ephemeral_volume_mounts | tojson}}
     {% endif %}

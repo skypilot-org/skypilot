@@ -642,6 +642,13 @@ class Kubernetes(clouds.Cloud):
 
         fuse_device_required = bool(resources.requires_fuse)
 
+        # Get fusermount_server config for custom fusermount-server image
+        fusermount_server_image = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('fusermount_server', 'image'),
+            default_value=None)
+
         # Configure spot labels, if requested and supported
         spot_label_key, spot_label_value = None, None
         if resources.use_spot:
@@ -773,6 +780,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': 'true',
             'k8s_fuse_device_required': fuse_device_required,
+            'k8s_fusermount_server_image': fusermount_server_image,
             'k8s_kueue_local_queue_name': k8s_kueue_local_queue_name,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,

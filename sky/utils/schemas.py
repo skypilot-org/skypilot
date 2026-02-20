@@ -1288,6 +1288,16 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
+    'fusermount_server': {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'image': {
+                'type': 'string',
+            },
+        },
+    },
 }
 
 
