@@ -487,7 +487,11 @@ if script or True:
     setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-    gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
+    # Always pass --gpus-per-node (even when 0) so --exclusive
+    # only claims the specified GPUs. Without an explicit GPU
+    # count, --exclusive claims all node resources including
+    # GPUs, blocking behind any running GPU step (SKY-3930).
+    gpu_arg = f'--gpus-per-node=1'
 
     def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                               task_name=None, is_setup=False,
@@ -599,7 +603,7 @@ if script or True:
             result = run_thread_result['result']
             returncode = int(result.get('return_code', 1))
             pid = result.get('pid', os.getpid())
-            msg = f'ERROR: [31mJob 2\'s setup failed with return code {returncode} (pid={pid}).'
+            msg = f'ERROR: [31mJob 2\'s setup failed. Failed workers: (pid={pid}, returncode={returncode}).'
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             returncodes = [returncode]
@@ -621,7 +625,7 @@ if script or True:
 
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
-        setup_flags = f'--overlap --nodes=1'
+        setup_flags = f'--overlap --nodes=1 --gpus-per-node=0'
         setup_srun, setup_cleanup = build_task_runner_cmd(
             'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
             is_setup=True
@@ -641,7 +645,7 @@ if script or True:
         setup_returncode = setup_proc.returncode
         if setup_returncode != 0:
             setup_pid = setup_proc.pid
-            msg = f'ERROR: [31mJob 2\'s setup failed with return code {setup_returncode} (pid={setup_pid}).'
+            msg = f'ERROR: [31mJob 2\'s setup failed. Failed workers: (pid={setup_pid}, returncode={setup_returncode}).'
             msg += f' See error logs above for more details.[0m'
             print(msg, flush=True)
             job_lib.set_status(2, job_lib.JobStatus.FAILED_SETUP)

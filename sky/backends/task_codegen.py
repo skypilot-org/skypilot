@@ -852,7 +852,11 @@ class SlurmCodeGen(TaskCodeGen):
                 setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
                 # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-                gpu_arg = f'--gpus-per-node={num_gpus}' if {num_gpus} > 0 else ''
+                # Always pass --gpus-per-node (even when 0) so --exclusive
+                # only claims the specified GPUs. Without an explicit GPU
+                # count, --exclusive claims all node resources including
+                # GPUs, blocking behind any running GPU step (SKY-3930).
+                gpu_arg = f'--gpus-per-node={num_gpus}'
 
                 def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                                           task_name=None, is_setup=False,
@@ -964,7 +968,7 @@ class SlurmCodeGen(TaskCodeGen):
                         result = run_thread_result['result']
                         returncode = int(result.get('return_code', 1))
                         pid = result.get('pid', os.getpid())
-                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{returncode}} (pid={{pid}}).'
+                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed. Failed workers: (pid={{pid}}, returncode={{returncode}}).'
                         msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
                         print(msg, flush=True)
                         returncodes = [returncode]
@@ -986,7 +990,7 @@ class SlurmCodeGen(TaskCodeGen):
 
                     # --overlap as we have already secured allocation with the srun for the run section,
                     # and otherwise this srun would get blocked and deadlock.
-                    setup_flags = f'--overlap --nodes={self._setup_num_nodes}'
+                    setup_flags = f'--overlap --nodes={self._setup_num_nodes} --gpus-per-node=0'
                     setup_srun, setup_cleanup = build_task_runner_cmd(
                         {self._setup_cmd!r}, setup_flags, {self._setup_log_dir!r}, {self._setup_envs!r},
                         is_setup=True
@@ -1006,7 +1010,7 @@ class SlurmCodeGen(TaskCodeGen):
                     setup_returncode = setup_proc.returncode
                     if setup_returncode != 0:
                         setup_pid = setup_proc.pid
-                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with return code {{setup_returncode}} (pid={{setup_pid}}).'
+                        msg = f'ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed. Failed workers: (pid={{setup_pid}}, returncode={{setup_returncode}}).'
                         msg += f' See error logs above for more details.{colorama.Style.RESET_ALL}'
                         print(msg, flush=True)
                         job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)

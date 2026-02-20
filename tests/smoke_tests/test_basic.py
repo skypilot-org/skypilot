@@ -662,6 +662,7 @@ def test_autostopping_behaviors(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+@pytest.mark.no_slurm  # Slurm does not support stopping instances
 def test_start_preserves_autostop(generic_cloud: str):
     """Test that sky start preserves the autostop setting from the database."""
     name = smoke_tests_utils.get_cluster_name()
