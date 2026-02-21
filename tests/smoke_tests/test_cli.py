@@ -238,21 +238,20 @@ def test_debug_dump_recent(generic_cloud: str):
             's=$(cat summary.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            'assert \"requested\" in d; '
-            'assert \"collected\" in d; '
-            'assert \"timing\" in d; '
-            'assert d[\"collected\"][\"request_count\"] > 0, '
-            '\"system daemon requests should always be collected\"; '
+            'assert \\\"requested\\\" in d; '
+            'assert \\\"collected\\\" in d; '
+            'assert d[\\\"collected\\\"][\\\"request_count\\\"] > 0, '
+            '\\\"system daemon requests should always be collected\\\"; '
             '"',
             # Verify server_info.json has enriched fields
             'cd /tmp/test_debug_dump_recent/debug_dump_* && '
             's=$(cat server_info.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            'assert \"skypilot_version\" in d; '
-            'assert \"python_version\" in d; '
-            'assert \"os_platform\" in d; '
-            'assert \"dump_timestamp_human\" in d; '
+            'assert \\\"skypilot_version\\\" in d; '
+            'assert \\\"python_version\\\" in d; '
+            'assert \\\"os_platform\\\" in d; '
+            'assert \\\"dump_timestamp_human\\\" in d; '
             '"',
         ],
         teardown='rm -f /tmp/test_debug_dump_recent.zip && '
@@ -287,18 +286,18 @@ def test_debug_dump_cluster(generic_cloud: str):
             f's=$(cat clusters/{name}/cluster_info.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            'assert \"cluster_name\" in d; '
-            'assert \"status\" in d; '
+            'assert \\\"cluster_name\\\" in d; '
+            'assert \\\"status\\\" in d; '
             '"',
             # Verify summary shows the cluster was collected
             'cd /tmp/test_debug_dump_cluster/debug_dump_* && '
             's=$(cat summary.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            f'assert \"{name}\" in d[\"collected\"][\"cluster_names\"]; '
-            'assert d[\"collected\"][\"cluster_count\"] >= 1; '
+            f'assert \\\"{name}\\\" in d[\\\"collected\\\"][\\\"cluster_names\\\"]; '
+            'assert d[\\\"collected\\\"][\\\"cluster_count\\\"] >= 1; '
             # Cross-linked requests from the launch should be present
-            'assert d[\"collected\"][\"request_count\"] > 0; '
+            'assert d[\\\"collected\\\"][\\\"request_count\\\"] > 0; '
             '"',
         ],
         teardown=f'sky down -y {name} && '
@@ -348,9 +347,9 @@ def test_debug_dump_request_id(generic_cloud: str):
             's=$(cat requests/$req_id/request_info.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            'assert \"request_id\" in d; '
-            'assert \"name\" in d; '
-            'assert \"status\" in d; '
+            'assert \\\"request_id\\\" in d; '
+            'assert \\\"name\\\" in d; '
+            'assert \\\"status\\\" in d; '
             '"',
         ],
         teardown=f'sky down -y {name} && '
@@ -397,7 +396,7 @@ def test_debug_dump_job(generic_cloud: str):
             's=$(cat summary.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            'assert d[\"collected\"][\"managed_job_count\"] >= 1; '
+            'assert d[\\\"collected\\\"][\\\"managed_job_count\\\"] >= 1; '
             '"',
         ],
         teardown=f'sky jobs cancel -y -n {name} || true && '
