@@ -752,13 +752,16 @@ class TestCreateDebugDump:
             summary_data = json.loads(zf.read(summary_files[0]))
             assert 'requested' in summary_data
             assert 'collected' in summary_data
-            assert 'timing' in summary_data
             assert 'errors' in summary_data
             assert 'warnings' not in summary_data
             assert 'req-1' in summary_data['requested']['request_ids']
 
             errors_files = [n for n in names if n.endswith('errors.json')]
             assert len(errors_files) == 1
+
+            # debug_dump.log should be present (from the file handler)
+            log_files = [n for n in names if n.endswith('debug_dump.log')]
+            assert len(log_files) == 1
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -992,6 +995,33 @@ class TestCreateDebugDump:
         assert not old_zip.exists()
         # Recent zip should remain
         assert recent_zip.exists()
+
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
+    def test_debug_handler_cleaned_up(self, mock_req_from_clusters,
+                                      mock_req_from_jobs, mock_jobs_from_req,
+                                      mock_clusters_from_req,
+                                      mock_clusters_from_jobs, mock_dump_server,
+                                      mock_dump_requests, mock_dump_clusters,
+                                      mock_dump_jobs, tmp_path):
+        """The debug file handler should be removed after create_debug_dump."""
+        import logging as _logging
+        dbg_logger = _logging.getLogger('sky.utils.debug_utils')
+        handlers_before = list(dbg_logger.handlers)
+
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            debug_utils.create_debug_dump()
+
+        # No new handlers should remain on the logger
+        assert dbg_logger.handlers == handlers_before
 
 
 # ---------------------------------------------------------------------------

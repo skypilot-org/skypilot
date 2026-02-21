@@ -1,6 +1,7 @@
 """Debug dump utilities for troubleshooting SkyPilot issues."""
 import datetime
 import json
+import logging
 import os
 import pathlib
 import platform
@@ -784,39 +785,25 @@ def _dump_managed_job_info(
     logger.debug('Exiting _dump_managed_job_info')
 
 
-def create_debug_dump(
-    request_ids: Optional[List[str]] = None,
-    cluster_names: Optional[List[str]] = None,
-    managed_job_ids: Optional[List[int]] = None,
-    recent_hours: Optional[float] = None,
-    client_info: Optional[Dict[str, Any]] = None,
-) -> pathlib.Path:
-    """Create a debug dump for troubleshooting.
+def _build_debug_dump(
+    dump_dir: str,
+    debug_dump_context: DebugDumpContext,
+    recent_hours: Optional[float],
+    client_info: Optional[Dict[str, Any]],
+) -> None:
+    """Build the debug dump contents in dump_dir.
 
-    Args:
-        request_ids: List of request IDs to include in the dump.
-        cluster_names: List of cluster names to include in the dump.
-        managed_job_ids: List of managed job IDs to include in the dump.
-        recent_hours: If specified, include all resources active within
-            this many hours.
-        client_info: Optional client-side info to include in the dump.
-
-    Returns:
-        Path to the created zip file.
+    Populates context via cross-linking, then dumps all sections
+    (server info, requests, clusters, managed jobs, client info,
+    errors, summary).
     """
-    start_time = time.time()
-    logger.debug('Starting debug dump creation')
-    logger.debug(f'Initial inputs: request_ids={request_ids}, '
-                 f'cluster_names={cluster_names}, '
-                 f'managed_job_ids={managed_job_ids}, '
-                 f'recent_hours={recent_hours}')
-
-    debug_dump_context = DebugDumpContext(
-        request_ids=set(request_ids or []),
-        cluster_names=set(cluster_names or []),
-        managed_job_ids=set(managed_job_ids or []),
-        errors=[],
-    )
+    # Snapshot original inputs before cross-linking modifies the sets
+    requested = {
+        'request_ids': sorted(debug_dump_context['request_ids']),
+        'cluster_names': sorted(debug_dump_context['cluster_names']),
+        'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
+        'recent_hours': recent_hours,
+    }
 
     # Populate from recent activity if requested
     if recent_hours is not None:
@@ -838,6 +825,84 @@ def create_debug_dump(
                  f'{len(debug_dump_context["cluster_names"])} clusters, '
                  f'{len(debug_dump_context["managed_job_ids"])} managed jobs')
 
+    # Dump all sections
+    errors = debug_dump_context['errors']
+    _dump_server_info(dump_dir, errors=errors)
+    _dump_request_id_info(debug_dump_context['request_ids'],
+                          dump_dir,
+                          errors=errors)
+    _dump_cluster_info(debug_dump_context['cluster_names'],
+                       dump_dir,
+                       errors=errors)
+    _dump_managed_job_info(debug_dump_context['managed_job_ids'],
+                           dump_dir,
+                           errors=errors)
+
+    # Write client info if provided
+    if client_info:
+        logger.debug('Writing client info')
+        client_info_path = os.path.join(dump_dir, 'client_info.json')
+        with open(client_info_path, 'w', encoding='utf-8') as f:
+            json.dump(client_info, f, indent=2, default=str)
+    else:
+        logger.debug('No client info provided')
+
+    # Write errors file
+    errors_path = os.path.join(dump_dir, 'errors.json')
+    with open(errors_path, 'w', encoding='utf-8') as f:
+        json.dump(errors, f, indent=2, default=str)
+
+    # Write summary file
+    summary: Dict[str, Any] = {
+        'requested': requested,
+        'collected': {
+            'request_count': len(debug_dump_context['request_ids']),
+            'cluster_count': len(debug_dump_context['cluster_names']),
+            'managed_job_count': len(debug_dump_context['managed_job_ids']),
+            'request_ids': sorted(debug_dump_context['request_ids']),
+            'cluster_names': sorted(debug_dump_context['cluster_names']),
+            'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
+        },
+        'errors': errors,
+    }
+    summary_path = os.path.join(dump_dir, 'summary.json')
+    with open(summary_path, 'w', encoding='utf-8') as f:
+        json.dump(summary, f, indent=2)
+
+
+def create_debug_dump(
+    request_ids: Optional[List[str]] = None,
+    cluster_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    recent_hours: Optional[float] = None,
+    client_info: Optional[Dict[str, Any]] = None,
+) -> pathlib.Path:
+    """Create a debug dump for troubleshooting.
+
+    Args:
+        request_ids: List of request IDs to include in the dump.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_hours: If specified, include all resources active within
+            this many hours.
+        client_info: Optional client-side info to include in the dump.
+
+    Returns:
+        Path to the created zip file.
+    """
+    logger.debug('Starting debug dump creation')
+    logger.debug(f'Initial inputs: request_ids={request_ids}, '
+                 f'cluster_names={cluster_names}, '
+                 f'managed_job_ids={managed_job_ids}, '
+                 f'recent_hours={recent_hours}')
+
+    debug_dump_context = DebugDumpContext(
+        request_ids=set(request_ids or []),
+        cluster_names=set(cluster_names or []),
+        managed_job_ids=set(managed_job_ids or []),
+        errors=[],
+    )
+
     # Create persistent output directory
     timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     dump_base_dir = pathlib.Path(DEBUG_DUMP_DIR).expanduser()
@@ -853,66 +918,28 @@ def create_debug_dump(
         except OSError:
             pass
 
-    # Use temp dir for building the dump, then zip to persistent location
+    # Build dump in temp dir, then zip to persistent location
     with tempstore.tempdir() as temp_dir:
         dump_dir = os.path.join(temp_dir, f'debug_dump_{timestamp}')
         os.makedirs(dump_dir)
         logger.debug(f'Building dump in temp directory: {dump_dir}')
 
-        errors = debug_dump_context['errors']
-        _dump_server_info(dump_dir, errors=errors)
-        _dump_request_id_info(debug_dump_context['request_ids'],
-                              dump_dir,
-                              errors=errors)
-        _dump_cluster_info(debug_dump_context['cluster_names'],
-                           dump_dir,
-                           errors=errors)
-        _dump_managed_job_info(debug_dump_context['managed_job_ids'],
-                               dump_dir,
-                               errors=errors)
-
-        # Write client info if provided
-        if client_info:
-            logger.debug('Writing client info')
-            client_info_path = os.path.join(dump_dir, 'client_info.json')
-            with open(client_info_path, 'w', encoding='utf-8') as f:
-                json.dump(client_info, f, indent=2, default=str)
-        else:
-            logger.debug('No client info provided')
-
-        # Write errors file
-        errors_path = os.path.join(dump_dir, 'errors.json')
-        with open(errors_path, 'w', encoding='utf-8') as f:
-            json.dump(errors, f, indent=2, default=str)
-
-        # Write summary file
-        elapsed_time = time.time() - start_time
-        summary: Dict[str, Any] = {
-            'requested': {
-                'request_ids': list(request_ids) if request_ids else [],
-                'cluster_names': list(cluster_names) if cluster_names else [],
-                'managed_job_ids': list(managed_job_ids)
-                                   if managed_job_ids else [],
-                'recent_hours': recent_hours,
-            },
-            'collected': {
-                'request_count': len(debug_dump_context['request_ids']),
-                'cluster_count': len(debug_dump_context['cluster_names']),
-                'managed_job_count': len(debug_dump_context['managed_job_ids']),
-                'request_ids': sorted(debug_dump_context['request_ids']),
-                'cluster_names': sorted(debug_dump_context['cluster_names']),
-                'managed_job_ids': sorted(debug_dump_context['managed_job_ids']
-                                         ),
-            },
-            'timing': {
-                'elapsed_seconds': round(elapsed_time, 2),
-                'timestamp': timestamp,
-            },
-            'errors': errors,
-        }
-        summary_path = os.path.join(dump_dir, 'summary.json')
-        with open(summary_path, 'w', encoding='utf-8') as f:
-            json.dump(summary, f, indent=2)
+        # Attach a file handler to capture debug-level logs into the
+        # dump. The logger's effective level is already DEBUG (inherited
+        # from root 'sky' logger), so we only need to set the handler
+        # level — no logger level changes needed.
+        debug_handler = logging.FileHandler(
+            os.path.join(dump_dir, 'debug_dump.log'))
+        debug_handler.setFormatter(sky_logging.FORMATTER)
+        debug_handler.setLevel(logging.DEBUG)
+        logger.addHandler(debug_handler)
+        try:
+            _build_debug_dump(dump_dir, debug_dump_context, recent_hours,
+                              client_info)
+        finally:
+            logger.removeHandler(debug_handler)
+            debug_handler.flush()
+            debug_handler.close()
 
         # Log total dump size before zipping
         total_dump_size = sum(f.stat().st_size
