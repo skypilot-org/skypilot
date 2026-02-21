@@ -16,6 +16,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
 
+import sky
 from sky import skypilot_config
 from sky.client import sdk
 from sky.server import common as server_common
