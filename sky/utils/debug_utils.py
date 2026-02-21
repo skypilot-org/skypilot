@@ -36,6 +36,7 @@ class DebugDumpContext(TypedDict):
     request_ids: Set[str]
     cluster_names: Set[str]
     managed_job_ids: Set[int]
+    errors: List[Dict[str, str]]
 
 
 def _epoch_to_human(epoch: Optional[float]) -> Optional[str]:
@@ -66,6 +67,11 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get requests for cluster '
                            f'{cluster_name}: {e}')
+            debug_dump_context['errors'].append({
+                'component': 'cross_link',
+                'resource': f'requests_from_cluster/{cluster_name}',
+                'error': str(e)
+            })
 
 
 def _get_requests_from_managed_jobs(
@@ -95,6 +101,11 @@ def _get_requests_from_managed_jobs(
                 job_user_hashes.add(user_hash)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to fetch managed job details: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'cross_link',
+            'resource': 'managed_job_details',
+            'error': str(e)
+        })
 
     # Request names related to managed jobs (excludes read-only queue)
     managed_job_request_names = [
@@ -141,11 +152,22 @@ def _get_requests_from_managed_jobs(
                         matched = True
                 if matched:
                     debug_dump_context['request_ids'].add(request.request_id)
-            except Exception:  # pylint: disable=broad-except
+            except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Failed to parse request '
                                f'{request.request_id}')
+                debug_dump_context['errors'].append({
+                    'component': 'cross_link',
+                    'resource':
+                        f'parse_request/{request.request_id}',
+                    'error': str(e)
+                })
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get requests for managed jobs: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'cross_link',
+            'resource': 'requests_from_managed_jobs',
+            'error': str(e)
+        })
 
 
 def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
@@ -164,6 +186,54 @@ def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get cluster for request '
                            f'{request_id}: {e}')
+            debug_dump_context['errors'].append({
+                'component': 'cross_link',
+                'resource': f'clusters_from_request/{request_id}',
+                'error': str(e)
+            })
+
+
+def _get_managed_jobs_from_requests(
+        debug_dump_context: DebugDumpContext) -> None:
+    """Extract managed job IDs from request bodies.
+
+    If any request in the context is a managed job request (launch, cancel,
+    logs), extract the job IDs from its body and add them to the context.
+    """
+    if not debug_dump_context['request_ids']:
+        return
+    logger.debug(f'Getting managed jobs for '
+                 f'{len(debug_dump_context["request_ids"])} requests')
+
+    managed_job_request_names = {
+        request_names.RequestName.JOBS_LAUNCH.value,
+        request_names.RequestName.JOBS_CANCEL.value,
+        request_names.RequestName.JOBS_LOGS.value,
+    }
+
+    for request_id in debug_dump_context['request_ids']:
+        try:
+            request = requests_lib.get_request(request_id,
+                                               fields=['name', 'request_body'])
+            if request is None or request.name not in managed_job_request_names:
+                continue
+            body = request.request_body
+            if body is None:
+                continue
+            job_id = getattr(body, 'job_id', None)
+            if job_id is not None:
+                debug_dump_context['managed_job_ids'].add(job_id)
+            job_ids = getattr(body, 'job_ids', None)
+            if job_ids is not None:
+                debug_dump_context['managed_job_ids'].update(job_ids)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to get managed job info for '
+                           f'request {request_id}: {e}')
+            debug_dump_context['errors'].append({
+                'component': 'cross_link',
+                'resource': f'managed_jobs_from_request/{request_id}',
+                'error': str(e)
+            })
 
 
 def _get_clusters_from_managed_jobs(
@@ -201,6 +271,11 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
                 debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent requests: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'recent_context',
+            'resource': 'requests',
+            'error': str(e)
+        })
 
     # Get recent clusters
     try:
@@ -214,6 +289,11 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
                     debug_dump_context['cluster_names'].add(cluster_name)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent clusters: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'recent_context',
+            'resource': 'clusters',
+            'error': str(e)
+        })
 
     # Get recent managed jobs via queue_v2 (handles remote controllers
     # via gRPC/SSH, unlike direct DB access which only works in
@@ -229,6 +309,11 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
                     debug_dump_context['managed_job_ids'].add(job_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent managed jobs: {e}')
+        debug_dump_context['errors'].append({
+            'component': 'recent_context',
+            'resource': 'managed_jobs',
+            'error': str(e)
+        })
 
     logger.debug(f'Found {len(debug_dump_context["request_ids"])} requests, '
                  f'{len(debug_dump_context["cluster_names"])} clusters, '
@@ -293,6 +378,22 @@ def _dump_server_info(dump_dir: str,
     server_info['environment'] = {
         'SKYPILOT_DEBUG': os.environ.get('SKYPILOT_DEBUG', ''),
         'SKYPILOT_DEV': os.environ.get('SKYPILOT_DEV', ''),
+        'SKYPILOT_DB_CONNECTION_URI': bool(
+            os.environ.get('SKYPILOT_DB_CONNECTION_URI')),
+        skylet_constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING: os.environ.get(
+            skylet_constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING, ''),
+        server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR: os.environ.get(
+            server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, ''),
+        server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR: os.environ.get(
+            server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR, ''),
+        'SKYPILOT_API_SERVER_STORAGE_ENABLED': os.environ.get(
+            'SKYPILOT_API_SERVER_STORAGE_ENABLED', ''),
+        'SKYPILOT_ROLLING_UPDATE_ENABLED': os.environ.get(
+            'SKYPILOT_ROLLING_UPDATE_ENABLED', ''),
+        'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE': os.environ.get(
+            'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE', ''),
+        'SKY_API_SERVER_METRICS_ENABLED': os.environ.get(
+            'SKY_API_SERVER_METRICS_ENABLED', ''),
     }
 
     # Add cloud status
@@ -403,6 +504,19 @@ def _dump_request_id_info(
                     'error': str(e)
                 })
 
+        # Copy debug log file (only exists when
+        # ENABLE_REQUEST_DEBUG_LOGGING is enabled)
+        try:
+            debug_log_path = pathlib.Path(
+                sky_logging._DEBUG_LOG_DIR) / f'{request_id}.log'
+            if debug_log_path.exists():
+                shutil.copy2(debug_log_path,
+                             os.path.join(request_dir, 'request_debug.log'))
+                logger.debug(f'Copied debug log for {request_id}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to copy debug log for request {request_id}: {e}')
+
     logger.debug('Exiting _dump_request_id_info')
 
 
@@ -509,7 +623,8 @@ def _dump_cluster_info(cluster_names: Set[str],
                         if errors is not None:
                             errors.append({
                                 'component': 'clusters',
-                                'resource': f'{cluster_name}/events_{event_type.value}',
+                                'resource': f'{cluster_name}/events_'
+                                            f'{event_type.value}',
                                 'error': str(e)
                             })
         except Exception as e:  # pylint: disable=broad-except
@@ -713,13 +828,11 @@ def create_debug_dump(
                  f'managed_job_ids={managed_job_ids}, '
                  f'recent_hours={recent_hours}')
 
-    # Error collector for surfacing issues in the dump
-    errors: List[Dict[str, str]] = []
-
     debug_dump_context = DebugDumpContext(
         request_ids=set(request_ids or []),
         cluster_names=set(cluster_names or []),
         managed_job_ids=set(managed_job_ids or []),
+        errors=[],
     )
 
     # Populate from recent activity if requested
@@ -730,6 +843,7 @@ def create_debug_dump(
     logger.debug('Cross-linking related resources')
     _get_requests_from_clusters(debug_dump_context)
     _get_requests_from_managed_jobs(debug_dump_context)
+    _get_managed_jobs_from_requests(debug_dump_context)
     _get_clusters_from_requests(debug_dump_context)
     _get_clusters_from_managed_jobs(debug_dump_context)
 
@@ -762,6 +876,7 @@ def create_debug_dump(
         os.makedirs(dump_dir)
         logger.debug(f'Building dump in temp directory: {dump_dir}')
 
+        errors = debug_dump_context['errors']
         _dump_server_info(dump_dir, errors=errors)
         _dump_request_id_info(debug_dump_context['request_ids'],
                               dump_dir,
@@ -779,6 +894,8 @@ def create_debug_dump(
             client_info_path = os.path.join(dump_dir, 'client_info.json')
             with open(client_info_path, 'w', encoding='utf-8') as f:
                 json.dump(client_info, f, indent=2, default=str)
+        else:
+            logger.debug('No client info provided')
 
         # Write errors file
         errors_path = os.path.join(dump_dir, 'errors.json')
@@ -808,7 +925,7 @@ def create_debug_dump(
                 'elapsed_seconds': round(elapsed_time, 2),
                 'timestamp': timestamp,
             },
-            'warnings': errors,
+            'errors': errors,
         }
         summary_path = os.path.join(dump_dir, 'summary.json')
         with open(summary_path, 'w', encoding='utf-8') as f:

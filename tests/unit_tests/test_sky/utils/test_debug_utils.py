@@ -17,12 +17,14 @@ def _make_context(
     request_ids: Optional[Set[str]] = None,
     cluster_names: Optional[Set[str]] = None,
     managed_job_ids: Optional[Set[int]] = None,
+    errors: Optional[List[Dict[str, str]]] = None,
 ) -> debug_utils.DebugDumpContext:
     """Helper to create a DebugDumpContext."""
     return debug_utils.DebugDumpContext(
         request_ids=request_ids or set(),
         cluster_names=cluster_names or set(),
         managed_job_ids=managed_job_ids or set(),
+        errors=errors if errors is not None else [],
     )
 
 
@@ -472,6 +474,83 @@ class TestGetClustersFromManagedJobs:
 
 
 # ---------------------------------------------------------------------------
+# Tests for _get_managed_jobs_from_requests
+# ---------------------------------------------------------------------------
+class TestGetManagedJobsFromRequests:
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_extracts_job_id_from_launch(self, mock_get_request):
+        """Should extract job_id from a jobs.launch request body."""
+        body = SimpleNamespace(job_id=42, job_ids=None)
+        mock_get_request.return_value = _make_request(request_id='req-1',
+                                                      request_body=body,
+                                                      name='jobs.launch')
+        ctx = _make_context(request_ids={'req-1'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert 42 in ctx['managed_job_ids']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_extracts_job_ids_from_cancel(self, mock_get_request):
+        """Should extract job_ids list from a jobs.cancel request body."""
+        body = SimpleNamespace(job_id=None, job_ids=[10, 20])
+        mock_get_request.return_value = _make_request(request_id='req-1',
+                                                      request_body=body,
+                                                      name='jobs.cancel')
+        ctx = _make_context(request_ids={'req-1'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert 10 in ctx['managed_job_ids']
+        assert 20 in ctx['managed_job_ids']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_skips_non_managed_job_requests(self, mock_get_request):
+        """Should skip requests that are not managed job requests."""
+        mock_get_request.return_value = _make_request(
+            request_id='req-1',
+            request_body=SimpleNamespace(cluster_name='my-cluster'),
+            name='sky.launch')
+        ctx = _make_context(request_ids={'req-1'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == set()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_skips_none_body(self, mock_get_request):
+        """Should skip requests with None body."""
+        mock_get_request.return_value = _make_request(request_id='req-1',
+                                                      request_body=None,
+                                                      name='jobs.launch')
+        ctx = _make_context(request_ids={'req-1'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == set()
+
+    def test_empty_request_ids_is_noop(self):
+        """Empty request_ids should not trigger any DB call."""
+        ctx = _make_context(request_ids=set())
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == set()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_db_failure_does_not_crash(self, mock_get_request):
+        """DB failure should not crash the function."""
+        mock_get_request.side_effect = RuntimeError('DB error')
+        ctx = _make_context(request_ids={'req-1'})
+
+        # Should not raise
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert ctx['managed_job_ids'] == set()
+
+
+# ---------------------------------------------------------------------------
 # Tests for _populate_recent_context
 # ---------------------------------------------------------------------------
 class TestPopulateRecentContext:
@@ -625,12 +704,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_creates_zip_file(self, mock_req_from_clusters, mock_req_from_jobs,
-                              mock_clusters_from_req, mock_clusters_from_jobs,
-                              mock_dump_server, mock_dump_requests,
-                              mock_dump_clusters, mock_dump_jobs, tmp_path):
+                              mock_jobs_from_req, mock_clusters_from_req,
+                              mock_clusters_from_jobs, mock_dump_server,
+                              mock_dump_requests, mock_dump_clusters,
+                              mock_dump_jobs, tmp_path):
         """create_debug_dump should produce a zip file."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -649,12 +730,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_zip_contains_summary_and_errors(
             self, mock_req_from_clusters, mock_req_from_jobs,
-            mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-            mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
         """The zip should contain summary.json and errors.json."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -670,6 +753,8 @@ class TestCreateDebugDump:
             assert 'requested' in summary_data
             assert 'collected' in summary_data
             assert 'timing' in summary_data
+            assert 'errors' in summary_data
+            assert 'warnings' not in summary_data
             assert 'req-1' in summary_data['requested']['request_ids']
 
             errors_files = [n for n in names if n.endswith('errors.json')]
@@ -681,12 +766,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_includes_system_request_ids(
             self, mock_req_from_clusters, mock_req_from_jobs,
-            mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-            mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
         """System daemon request IDs should always be included."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -704,10 +791,12 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_includes_client_info(self, mock_req_from_clusters,
-                                  mock_req_from_jobs, mock_clusters_from_req,
+                                  mock_req_from_jobs, mock_jobs_from_req,
+                                  mock_clusters_from_req,
                                   mock_clusters_from_jobs, mock_dump_server,
                                   mock_dump_requests, mock_dump_clusters,
                                   mock_dump_jobs, tmp_path):
@@ -736,12 +825,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_calls_populate_recent_context(
             self, mock_req_from_clusters, mock_req_from_jobs,
-            mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-            mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
         """When recent_hours is provided, _populate_recent_context should be
         called."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
@@ -760,12 +851,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_does_not_call_populate_without_recent_hours(
             self, mock_req_from_clusters, mock_req_from_jobs,
-            mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-            mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
         """When recent_hours is None, _populate_recent_context should NOT
         be called."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
@@ -782,10 +875,12 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_cross_linking_called(self, mock_req_from_clusters,
-                                  mock_req_from_jobs, mock_clusters_from_req,
+                                  mock_req_from_jobs, mock_jobs_from_req,
+                                  mock_clusters_from_req,
                                   mock_clusters_from_jobs, mock_dump_server,
                                   mock_dump_requests, mock_dump_clusters,
                                   mock_dump_jobs, tmp_path):
@@ -800,6 +895,7 @@ class TestCreateDebugDump:
 
         mock_req_from_clusters.assert_called_once()
         mock_req_from_jobs.assert_called_once()
+        mock_jobs_from_req.assert_called_once()
         mock_clusters_from_req.assert_called_once()
         mock_clusters_from_jobs.assert_called_once()
 
@@ -809,12 +905,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_summary_contains_collected_counts(
             self, mock_req_from_clusters, mock_req_from_jobs,
-            mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-            mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
         """Summary should reflect the final collected counts."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')):
@@ -841,12 +939,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_empty_inputs_still_creates_dump(
             self, mock_req_from_clusters, mock_req_from_jobs,
-            mock_clusters_from_req, mock_clusters_from_jobs, mock_dump_server,
-            mock_dump_requests, mock_dump_clusters, mock_dump_jobs, tmp_path):
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
         """Calling with no inputs should still create a valid dump
         with system request IDs."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
@@ -862,12 +962,14 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._dump_server_info')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     def test_orphan_cleanup(self, mock_req_from_clusters, mock_req_from_jobs,
-                            mock_clusters_from_req, mock_clusters_from_jobs,
-                            mock_dump_server, mock_dump_requests,
-                            mock_dump_clusters, mock_dump_jobs, tmp_path):
+                            mock_jobs_from_req, mock_clusters_from_req,
+                            mock_clusters_from_jobs, mock_dump_server,
+                            mock_dump_requests, mock_dump_clusters,
+                            mock_dump_jobs, tmp_path):
         """Old zip files (>1 hour) should be cleaned up."""
         dump_dir = tmp_path / 'debug_dumps'
         dump_dir.mkdir(parents=True)
@@ -907,6 +1009,7 @@ class TestDebugDumpContext:
         assert ctx['request_ids'] == {'r1', 'r2'}
         assert ctx['cluster_names'] == {'c1'}
         assert ctx['managed_job_ids'] == {1, 2, 3}
+        assert ctx['errors'] == []
 
     def test_context_sets_are_mutable(self):
         """The sets in the context should be mutable."""
@@ -914,9 +1017,11 @@ class TestDebugDumpContext:
         ctx['request_ids'].add('new-req')
         ctx['cluster_names'].add('new-cluster')
         ctx['managed_job_ids'].add(99)
+        ctx['errors'].append({'component': 'test', 'error': 'oops'})
         assert 'new-req' in ctx['request_ids']
         assert 'new-cluster' in ctx['cluster_names']
         assert 99 in ctx['managed_job_ids']
+        assert len(ctx['errors']) == 1
 
 
 # ---------------------------------------------------------------------------
