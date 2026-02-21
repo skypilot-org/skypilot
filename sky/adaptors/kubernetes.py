@@ -7,15 +7,17 @@ created with context-specific ApiClient instances.
 
 Teleport tbot certificate rotation: When using Teleport's tbot for short-lived
 kubeconfig certificates, SSL errors can occur after rotation. The adaptor
-retries API calls once on SSL-related errors after clearing client caches so
-that a new client is built from the updated kubeconfig (e.g. from
-KUBECONFIG=/var/lib/tbot/kubeconfig/kubeconfig.yaml).
+retries API calls on SSL-related errors (with a short delay to allow tbot to
+refresh the cert) after clearing client caches so that a new client is built
+from the updated kubeconfig (e.g. from KUBECONFIG=/var/lib/tbot/kubeconfig/
+kubeconfig.yaml).
 """
 import functools
 import logging
 import os
 import platform
 import ssl
+import time
 import typing
 from typing import Any, Callable, Optional, Set
 
@@ -108,6 +110,8 @@ def _get_config_file() -> str:
 
 def _is_ssl_related_error(exc: BaseException) -> bool:
     """True if the exception is an SSL/certificate error (e.g. after cert rotation)."""
+    if exc is None:
+        return False
     if isinstance(exc, ssl.SSLError):
         return True
     if hasattr(urllib3.exceptions, 'SSLError') and isinstance(
@@ -116,8 +120,21 @@ def _is_ssl_related_error(exc: BaseException) -> bool:
     if hasattr(urllib3.exceptions, 'MaxRetryError') and isinstance(
             exc, urllib3.exceptions.MaxRetryError):
         reason = getattr(exc, 'reason', None)
-        return reason is not None and _is_ssl_related_error(reason)
+        if reason is not None and _is_ssl_related_error(reason):
+            return True
+    cause = getattr(exc, '__cause__', None)
+    if cause is not None and _is_ssl_related_error(cause):
+        return True
+    # Fallback: detect by message (e.g. heavily wrapped or custom exception)
+    msg = str(exc).lower()
+    if 'certificate expired' in msg or 'sslv3_alert_certificate_expired' in msg:
+        return True
     return False
+
+
+def is_ssl_related_error(exc: BaseException) -> bool:
+    """Public helper to detect SSL/cert errors (e.g. for outer retry logic)."""
+    return _is_ssl_related_error(exc)
 
 
 def _get_api_client(context: Optional[str] = None) -> Any:
@@ -265,12 +282,18 @@ class ClientWrapper:
                 logger.debug(f'Error closing Kubernetes client: {e}')
 
 
+# Max retries for SSL/cert errors (e.g. Teleport tbot rotation). Delay between
+# retries gives tbot time to write updated kubeconfig.
+_SSL_RETRY_ATTEMPTS = 3
+_SSL_RETRY_DELAY_SECONDS = 2
+
+
 class RetryableClientWrapper:
-    """Wraps a Kubernetes API client to retry once on SSL/cert errors.
+    """Wraps a Kubernetes API client to retry on SSL/cert errors.
 
     When a method call raises an SSL-related error (e.g. after Teleport tbot
-    certificate rotation), clears client caches and retries the call so a new
-    client is built from the updated kubeconfig.
+    certificate rotation), clears client caches and retries with a short delay
+    so a new client is built from the updated kubeconfig.
     """
 
     def __init__(self, client: Any, getter: Callable, getter_args: tuple,
@@ -286,18 +309,30 @@ class RetryableClientWrapper:
             return attr
 
         def with_retry(*args, **kwargs):
-            try:
-                return attr(*args, **kwargs)
-            except Exception as e:  # pylint: disable=broad-except
-                if not _is_ssl_related_error(e):
-                    raise
-                logger.debug('Kubernetes SSL/cert error, clearing caches and '
-                             'retrying once: %s', e)
-                _clear_kubernetes_client_caches()
-                new_client = self._getter(*self._getter_args,
-                                          **self._getter_kwargs)
-                new_attr = getattr(new_client, name)
-                return new_attr(*args, **kwargs)
+            last_exc = None
+            for attempt in range(_SSL_RETRY_ATTEMPTS):
+                try:
+                    if attempt == 0:
+                        client = self._client
+                    else:
+                        time.sleep(_SSL_RETRY_DELAY_SECONDS)
+                        _clear_kubernetes_client_caches()
+                        client = self._getter(*self._getter_args,
+                                              **self._getter_kwargs)
+                    method = getattr(client, name)
+                    return method(*args, **kwargs)
+                except Exception as e:  # pylint: disable=broad-except
+                    last_exc = e
+                    if not _is_ssl_related_error(e):
+                        raise
+                    logger.debug(
+                        'Kubernetes SSL/cert error (attempt %s/%s), clearing '
+                        'caches and retrying: %s',
+                        attempt + 1,
+                        _SSL_RETRY_ATTEMPTS,
+                        e,
+                    )
+            raise last_exc
 
         return with_retry
 
@@ -364,7 +399,7 @@ def custom_objects_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='request')
 def node_api(context: Optional[str] = None):
     client = ClientWrapper(
         kubernetes.client.NodeV1Api(api_client=_get_api_client(context)))
@@ -375,11 +410,15 @@ def _clear_kubernetes_client_caches() -> None:
     """Clear Kubernetes API client caches so the next call rebuilds from kubeconfig.
 
     Used after SSL/cert errors (e.g. Teleport tbot rotation) so clients are
-    recreated with updated certificates.
+    recreated with updated certificates. All API getters (including node_api) use
+    request-scoped cache, so clearing the request-level cache is sufficient.
     """
     annotations.clear_request_level_cache()
-    # node_api uses scope='global', so clear it explicitly.
-    node_api.cache_clear()
+
+
+def clear_kubernetes_client_caches() -> None:
+    """Clear Kubernetes API client caches (e.g. before outer retries on SSL errors)."""
+    _clear_kubernetes_client_caches()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)

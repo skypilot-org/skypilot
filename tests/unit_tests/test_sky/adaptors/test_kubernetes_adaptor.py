@@ -206,6 +206,27 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
         os.unlink(config_file)
 
 
+def test_is_ssl_related_error_message_fallback():
+    """Message-based fallback catches wrapped cert-expired errors."""
+    # Use internal helper to test behavior (public is_ssl_related_error delegates to it)
+    is_ssl = kubernetes._is_ssl_related_error  # pylint: disable=protected-access
+
+    # Wrapped exception with no __cause__ (e.g. from another layer)
+    class WrappedError(Exception):
+        pass
+
+    e = WrappedError(
+        "connection broken by 'SSLError(1, '[SSL: SSLV3_ALERT_CERTIFICATE_"
+        "EXPIRED] ssl/tls alert certificate expired (_ssl.c:2588)')'")
+    assert is_ssl(e) is True
+
+    e2 = WrappedError('certificate expired')
+    assert is_ssl(e2) is True
+
+    e3 = WrappedError('some other error')
+    assert is_ssl(e3) is False
+
+
 def test_ssl_retry_on_cert_rotation(monkeypatch):
     """Verify one retry on SSL/cert errors (e.g. Teleport tbot rotation)."""
     creation_count = [0]
@@ -226,7 +247,6 @@ def test_ssl_retry_on_cert_rotation(monkeypatch):
                         fake_core_v1_api)
 
     annotations.clear_request_level_cache()
-    kubernetes.node_api.cache_clear()
 
     api = kubernetes.core_api()
     result = api.list_node()
