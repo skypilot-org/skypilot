@@ -612,3 +612,29 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
         # TODO(kevin): implement this
         context.abort(grpc.StatusCode.UNIMPLEMENTED,
                       'StreamLogs is not implemented')
+
+    def GetDebugDumpData(  # type: ignore[return]
+        self, request: managed_jobsv1_pb2.GetDebugDumpDataRequest,
+        context: grpc.ServicerContext
+    ) -> managed_jobsv1_pb2.GetDebugDumpDataResponse:
+        try:
+            job_ids = list(request.job_ids)
+            result = managed_job_utils.collect_debug_dump_data(job_ids)
+            file_entries = [
+                managed_jobsv1_pb2.DebugDumpFileEntry(
+                    relative_path=f['relative_path'],
+                    content=f['content'],
+                ) for f in result.get('files', [])
+            ]
+            error_entries = [
+                managed_jobsv1_pb2.DebugDumpError(
+                    component=e['component'],
+                    resource=e['resource'],
+                    error=e['error'],
+                ) for e in result.get('errors', [])
+            ]
+            return managed_jobsv1_pb2.GetDebugDumpDataResponse(
+                files=file_entries, errors=error_entries)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(e, exc_info=True)
+            context.abort(grpc.StatusCode.INTERNAL, str(e))

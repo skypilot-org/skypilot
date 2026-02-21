@@ -1077,3 +1077,206 @@ class TestSystemRequestIds:
         # On-boot check should be present
         assert server_constants.ON_BOOT_CHECK_REQUEST_ID in \
             debug_utils.SYSTEM_REQUEST_IDS
+
+
+# ---------------------------------------------------------------------------
+# Tests for _dump_managed_job_queue_info
+# ---------------------------------------------------------------------------
+class TestDumpManagedJobQueueInfo:
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_writes_job_info_json(self, mock_queue_v2, tmp_path):
+        """Should write job_info.json for each job."""
+        mock_queue_v2.return_value = ([{
+            'job_id': 1,
+            'job_name': 'test-job',
+            'status': 'RUNNING',
+        }], 1, {}, 1)
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, errors)
+
+        job_info_path = os.path.join(jobs_dir, '1', 'job_info.json')
+        assert os.path.exists(job_info_path)
+        with open(job_info_path) as f:
+            data = json.load(f)
+        assert data['job_id'] == 1
+        assert data['job_name'] == 'test-job'
+        assert not errors
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_writes_multiple_tasks(self, mock_queue_v2, tmp_path):
+        """Pipeline with multiple tasks should write task-indexed files."""
+        mock_queue_v2.return_value = ([
+            {
+                'job_id': 1,
+                'task_name': 'task-a',
+                'status': 'SUCCEEDED'
+            },
+            {
+                'job_id': 1,
+                'task_name': 'task-b',
+                'status': 'RUNNING'
+            },
+        ], 1, {}, 1)
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, [])
+
+        assert os.path.exists(os.path.join(jobs_dir, '1',
+                                           'job_info_task0.json'))
+        assert os.path.exists(os.path.join(jobs_dir, '1',
+                                           'job_info_task1.json'))
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    def test_error_handling(self, mock_queue_v2, tmp_path):
+        """DB failure should record error but not crash."""
+        mock_queue_v2.side_effect = RuntimeError('queue_v2 failed')
+
+        jobs_dir = str(tmp_path / 'managed_jobs')
+        os.makedirs(jobs_dir, exist_ok=True)
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_managed_job_queue_info({1}, jobs_dir, errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'managed_jobs'
+        assert 'queue_v2 failed' in errors[0]['error']
+
+
+# ---------------------------------------------------------------------------
+# Tests for _collect_controller_debug_data
+# ---------------------------------------------------------------------------
+class TestCollectControllerDebugData:
+
+    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    def test_skips_when_controller_not_accessible(self, mock_accessible,
+                                                  tmp_path):
+        """Should skip gracefully if controller is not accessible."""
+        mock_accessible.side_effect = RuntimeError('Controller not UP')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert 'controller_access' in errors[0]['resource']
+
+    @mock.patch('sky.backends.backend_utils.invoke_skylet_with_retries')
+    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    def test_grpc_writes_files(self, mock_accessible, mock_invoke, tmp_path):
+        """gRPC path should write files from response."""
+        from sky.schemas.generated import managed_jobsv1_pb2
+
+        mock_handle = mock.MagicMock()
+        mock_handle.is_grpc_enabled_with_flag = True
+        mock_accessible.return_value = mock_handle
+
+        response = managed_jobsv1_pb2.GetDebugDumpDataResponse(
+            files=[
+                managed_jobsv1_pb2.DebugDumpFileEntry(
+                    relative_path='managed_jobs/1/test.log',
+                    content=b'hello world',
+                ),
+            ],
+            errors=[
+                managed_jobsv1_pb2.DebugDumpError(
+                    component='managed_jobs',
+                    resource='1/events',
+                    error='No events found',
+                ),
+            ],
+        )
+        mock_invoke.return_value = response
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # File should be written
+        file_path = os.path.join(str(tmp_path), 'managed_jobs', '1', 'test.log')
+        assert os.path.exists(file_path)
+        with open(file_path, 'rb') as f:
+            assert f.read() == b'hello world'
+
+        # Errors from controller should be propagated
+        assert len(errors) == 1
+        assert errors[0]['error'] == 'No events found'
+
+    @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
+    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    def test_codegen_fallback(self, mock_accessible, mock_backend_cls,
+                              tmp_path):
+        """CodeGen fallback should work when gRPC is not enabled."""
+        import base64
+
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_handle.is_grpc_enabled_with_flag = False
+        mock_accessible.return_value = mock_handle
+
+        # Simulate CodeGen response with base64-encoded content
+        result = {
+            'files': [{
+                'relative_path': 'managed_jobs/1/job_events.json',
+                'content': base64.b64encode(b'{"events": []}').decode('ascii'),
+            }],
+            'errors': [],
+        }
+        encoded = message_utils.encode_payload(result)
+
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (0, encoded, '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # File should be written (base64-decoded)
+        file_path = os.path.join(str(tmp_path), 'managed_jobs', '1',
+                                 'job_events.json')
+        assert os.path.exists(file_path)
+        with open(file_path, 'rb') as f:
+            assert f.read() == b'{"events": []}'
+        assert not errors
+
+    @mock.patch('sky.backends.backend_utils.invoke_skylet_with_retries')
+    @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
+    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    def test_grpc_fallback_to_codegen_on_not_implemented(
+            self, mock_accessible, mock_backend_cls, mock_invoke, tmp_path):
+        """Should fall back to CodeGen when gRPC method is not implemented."""
+        import base64
+
+        from sky import exceptions as sky_exceptions
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_handle.is_grpc_enabled_with_flag = True
+        mock_accessible.return_value = mock_handle
+
+        # gRPC raises SkyletMethodNotImplementedError
+        mock_invoke.side_effect = (
+            sky_exceptions.SkyletMethodNotImplementedError('GetDebugDumpData'))
+
+        # CodeGen should succeed
+        result = {
+            'files': [{
+                'relative_path': 'managed_jobs/1/test.log',
+                'content': base64.b64encode(b'fallback').decode('ascii'),
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(result), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        file_path = os.path.join(str(tmp_path), 'managed_jobs', '1', 'test.log')
+        assert os.path.exists(file_path)
+        with open(file_path, 'rb') as f:
+            assert f.read() == b'fallback'

@@ -12,11 +12,10 @@ import zipfile
 
 import sky
 from sky import check as sky_check
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky.jobs import constants as job_constants
-from sky.jobs import state as managed_job_state
 from sky.jobs.server import core as managed_jobs_core
 from sky.server import constants as server_constants
 from sky.server import daemons
@@ -671,20 +670,34 @@ def _dump_managed_job_info(
     jobs_dir = os.path.join(dump_dir, 'managed_jobs')
     os.makedirs(jobs_dir, exist_ok=True)
 
+    # Phase 1: Queue info from queue_v2 (works in both consolidation and
+    # non-consolidation modes via existing gRPC/SSH plumbing)
+    _dump_managed_job_queue_info(managed_job_ids, jobs_dir, errors)
+
+    # Phase 2: Controller-side debug data (controller logs, events,
+    # run logs, cluster info) via new gRPC RPC / CodeGen fallback
+    _collect_controller_debug_data(list(managed_job_ids), dump_dir, errors)
+
+    logger.debug('Exiting _dump_managed_job_info')
+
+
+def _dump_managed_job_queue_info(
+        managed_job_ids: Set[int],
+        jobs_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Collect managed job info from queue_v2.
+
+    This works in both consolidation and non-consolidation modes.
+    """
     for job_id in managed_job_ids:
         job_dir = os.path.join(jobs_dir, str(job_id))
         os.makedirs(job_dir, exist_ok=True)
 
-        # Get job info via queue_v2 (handles remote controllers via
-        # gRPC/SSH, unlike direct DB access which only works in
-        # consolidation mode).
         try:
             jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
                                                        job_ids=[job_id])
             if jobs:
-                # Iterate over ALL returned tasks, not just the first one
                 for task_idx, job in enumerate(jobs):
-                    # Convert non-serializable fields
                     job_info = {
                         k: (str(v) if not isinstance(v,
                                                      (str, int, float, bool,
@@ -697,19 +710,6 @@ def _dump_managed_job_info(
                                                  f'job_info{suffix}.json')
                     with open(job_info_path, 'w', encoding='utf-8') as f:
                         json.dump(job_info, f, indent=2, default=str)
-
-                    # Copy job log file if available
-                    local_log_file = job.get('local_log_file')
-                    if local_log_file and os.path.exists(local_log_file):
-                        log_name = f'run{suffix}.log'
-                        shutil.copy2(local_log_file,
-                                     os.path.join(job_dir, log_name))
-                        logger.debug(f'Copied log file for job {job_id} task '
-                                     f'{task_idx}')
-                    else:
-                        logger.debug(
-                            f'Log file not found for job {job_id} task '
-                            f'{task_idx}: {local_log_file}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for job {job_id}: {e}')
             if errors is not None:
@@ -719,70 +719,127 @@ def _dump_managed_job_info(
                     'error': str(e)
                 })
 
-        # Get job events (best-effort from local DB).
-        # Note: In non-consolidation mode, the spot_jobs DB lives on the
-        # remote controller VM, so events may be empty here. This is
-        # expected behavior - events are only available when running in
-        # consolidation mode where the DB is local.
-        try:
-            events = managed_job_state.get_job_events(job_id, limit=1000)
-            if events:
-                # Convert to serializable format
-                serializable_events = [{
-                    'spot_job_id': e.get('spot_job_id'),
-                    'task_id': e.get('task_id'),
-                    'new_status': str(e.get('new_status')),
-                    'code': e.get('code'),
-                    'reason': e.get('reason'),
-                    'timestamp': str(e.get('timestamp')),
-                    'timestamp_human': _epoch_to_human(e.get('timestamp')),
-                } for e in events]
 
-                events_path = os.path.join(job_dir, 'job_events.json')
-                with open(events_path, 'w', encoding='utf-8') as f:
-                    json.dump(serializable_events, f, indent=2, default=str)
+def _collect_controller_debug_data(
+        job_ids: List[int],
+        dump_dir: str,
+        errors: Optional[List[Dict[str, str]]] = None) -> None:
+    """Collect controller-side debug data via gRPC or CodeGen fallback.
+
+    This fetches controller logs, job events, job run logs, and cluster
+    info/events from the jobs controller. Works in both consolidation mode
+    (LocalResourcesHandle → runs locally) and non-consolidation mode
+    (remote controller via gRPC or SSH).
+    """
+    # Lazy imports to avoid circular dependencies
+    # pylint: disable=import-outside-toplevel
+    import base64
+
+    from sky.backends import backend_utils
+    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+    from sky.backends.cloud_vm_ray_backend import SkyletClient
+    from sky.jobs import utils as managed_job_utils
+    from sky.schemas.generated import managed_jobsv1_pb2
+    from sky.utils import controller_utils
+    from sky.utils import message_utils
+    from sky.utils import subprocess_utils
+
+    # pylint: enable=import-outside-toplevel
+    # Get controller handle
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            stopped_message='Jobs controller is not running.',
+        )
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Jobs controller not accessible, skipping '
+                       f'controller debug data: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'managed_jobs',
+                'resource': 'controller_access',
+                'error': str(e)
+            })
+        return
+
+    # Try gRPC first, fall back to CodeGen
+    result = None
+    use_legacy = not handle.is_grpc_enabled_with_flag
+    if not use_legacy:
+        try:
+            request = managed_jobsv1_pb2.GetDebugDumpDataRequest(
+                job_ids=job_ids)
+            response = backend_utils.invoke_skylet_with_retries(
+                lambda: SkyletClient(handle.get_grpc_channel()
+                                    ).get_debug_dump_data(request))
+            # Write files from gRPC response (raw bytes)
+            for file_entry in response.files:
+                file_path = os.path.join(dump_dir, file_entry.relative_path)
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, 'wb') as f:
+                    f.write(file_entry.content)
+            # Propagate controller-side errors
+            if errors is not None:
+                for err in response.errors:
+                    errors.append({
+                        'component': err.component,
+                        'resource': err.resource,
+                        'error': err.error,
+                    })
+            logger.debug(f'Collected {len(response.files)} files from '
+                         f'controller via gRPC')
+            return
+        except exceptions.SkyletMethodNotImplementedError:
+            use_legacy = True
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get events for job {job_id}: {e}')
+            logger.warning(f'gRPC debug dump failed, falling back to '
+                           f'CodeGen: {e}')
+            use_legacy = True
+
+    if use_legacy:
+        try:
+            code = managed_job_utils.ManagedJobCodeGen.get_debug_dump_data(
+                job_ids)
+            backend = CloudVmRayBackend()
+            returncode, stdout, stderr = backend.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(
+                returncode, code,
+                'Failed to collect debug dump data from controller.', stderr)
+            result = message_utils.decode_payload(stdout)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to collect controller debug data '
+                           f'via CodeGen: {e}')
             if errors is not None:
                 errors.append({
                     'component': 'managed_jobs',
-                    'resource': f'{job_id}/events',
+                    'resource': 'controller_debug_data',
                     'error': str(e)
                 })
+            return
 
-        # Copy controller logs
-        try:
-            controller_logs_dir = pathlib.Path(
-                job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
-            if controller_logs_dir.exists():
-                copied_any = False
-                # Per-job controller log: {job_id}.log
-                for log_file in controller_logs_dir.glob(f'{job_id}.log'):
-                    if log_file.is_file():
-                        shutil.copy2(log_file,
-                                     os.path.join(job_dir, log_file.name))
-                        logger.debug(f'Copied controller log: {log_file.name}')
-                        copied_any = True
-                # Controller system/process logs: controller_*.log
-                for log_file in controller_logs_dir.glob('controller_*.log'):
-                    if log_file.is_file():
-                        shutil.copy2(log_file,
-                                     os.path.join(job_dir, log_file.name))
-                        logger.debug(f'Copied controller log: {log_file.name}')
-                        copied_any = True
-                if not copied_any:
-                    logger.debug(f'No controller logs found for job {job_id}')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to copy controller logs for job '
-                           f'{job_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'managed_jobs',
-                    'resource': f'{job_id}/controller_logs',
-                    'error': str(e)
-                })
-
-    logger.debug('Exiting _dump_managed_job_info')
+    if result is not None:
+        # Write files from CodeGen response (base64-encoded content)
+        for file_entry in result.get('files', []):
+            try:
+                file_path = os.path.join(dump_dir, file_entry['relative_path'])
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                content = base64.b64decode(file_entry['content'])
+                with open(file_path, 'wb') as f:
+                    f.write(content)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to write file '
+                               f'{file_entry.get("relative_path")}: {e}')
+        # Propagate controller-side errors
+        if errors is not None:
+            for err in result.get('errors', []):
+                errors.append(err)
+        logger.debug(f'Collected {len(result.get("files", []))} files from '
+                     f'controller via CodeGen')
 
 
 def _build_debug_dump(

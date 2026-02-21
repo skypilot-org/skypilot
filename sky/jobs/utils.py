@@ -798,6 +798,233 @@ def event_callback_func(
 # ======== user functions ========
 
 
+def collect_debug_dump_data(job_ids: List[int]) -> Dict[str, Any]:
+    """Collect debug dump data from the controller.
+
+    This function runs ON the controller (either via gRPC or CodeGen/SSH).
+    It gathers controller logs, job events, job run logs, and cluster info
+    for the specified job IDs.
+
+    Returns:
+        Dict with 'files' (list of {'relative_path': str, 'content': bytes})
+        and 'errors' (list of {'component': str, 'resource': str,
+        'error': str}).
+    """
+    files: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    # Collect per-job data
+    seen_cluster_names: Set[str] = set()
+    for job_id in job_ids:
+        _collect_job_debug_data(job_id, files, errors, seen_cluster_names)
+
+    # Collect controller system logs (shared, not per-job)
+    _collect_controller_system_logs(files, errors)
+
+    return {'files': files, 'errors': errors}
+
+
+def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
+                            errors: List[Dict[str, str]],
+                            seen_cluster_names: Set[str]) -> None:
+    """Collect debug data for a single managed job."""
+    job_prefix = f'managed_jobs/{job_id}'
+
+    # 1. Controller log for this job
+    try:
+        controller_logs_dir = pathlib.Path(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        log_file = controller_logs_dir / f'{job_id}.log'
+        if log_file.is_file():
+            files.append({
+                'relative_path': f'{job_prefix}/{job_id}.log',
+                'content': log_file.read_bytes(),
+            })
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{job_id}/controller_log',
+            'error': str(e),
+        })
+
+    # 2. Job events from DB
+    try:
+        events = managed_job_state.get_job_events(job_id, limit=1000)
+        if events:
+            import json  # pylint: disable=import-outside-toplevel
+            serializable_events = []
+            for e in events:
+                serializable_events.append({
+                    'spot_job_id': e.get('spot_job_id'),
+                    'task_id': e.get('task_id'),
+                    'new_status': str(e.get('new_status')),
+                    'code': e.get('code'),
+                    'reason': e.get('reason'),
+                    'timestamp': str(e.get('timestamp')),
+                })
+            files.append({
+                'relative_path': f'{job_prefix}/job_events.json',
+                'content': json.dumps(serializable_events,
+                                      indent=2,
+                                      default=str).encode('utf-8'),
+            })
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{job_id}/events',
+            'error': str(e),
+        })
+
+    # 3. Job run logs
+    try:
+        task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+            job_id)
+        for task_idx, (_, _, _, local_log_file, _) in enumerate(task_info):
+            if local_log_file and os.path.exists(local_log_file):
+                suffix = f'_task{task_idx}' if len(task_info) > 1 else ''
+                log_path = pathlib.Path(local_log_file)
+                files.append({
+                    'relative_path': f'{job_prefix}/run{suffix}.log',
+                    'content': log_path.read_bytes(),
+                })
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{job_id}/run_logs',
+            'error': str(e),
+        })
+
+    # 4. Cluster info and events
+    try:
+        cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
+        if cluster_name is None:
+            # Fall back to generated name
+            task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
+                job_id)
+            if task_info:
+                _, task_name, _, _, _ = task_info[0]
+                cluster_name = generate_managed_job_cluster_name(
+                    task_name, job_id)
+        if cluster_name and cluster_name not in seen_cluster_names:
+            seen_cluster_names.add(cluster_name)
+            _collect_cluster_debug_data(cluster_name, job_prefix, files, errors)
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{job_id}/cluster_info',
+            'error': str(e),
+        })
+
+
+def _collect_cluster_debug_data(cluster_name: str, job_prefix: str,
+                                files: List[Dict[str, Any]],
+                                errors: List[Dict[str, str]]) -> None:
+    """Collect cluster info and events for a managed job's cluster."""
+    import json  # pylint: disable=import-outside-toplevel
+    cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
+
+    try:
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        if cluster_record is not None:
+            handle = cluster_record.get('handle')
+            handle_info: Dict[str, Any] = {}
+            if handle:
+                handle_info = {
+                    'cluster_name': getattr(handle, 'cluster_name', None),
+                    'cluster_name_on_cloud': getattr(handle,
+                                                     'cluster_name_on_cloud',
+                                                     None),
+                    'head_ip': getattr(handle, 'head_ip', None),
+                    'launched_nodes': getattr(handle, 'launched_nodes', None),
+                    'launched_resources': str(
+                        getattr(handle, 'launched_resources', None)),
+                }
+
+            launched_at = cluster_record.get('launched_at')
+            status_updated_at = cluster_record.get('status_updated_at')
+            cluster_info: Dict[str, Any] = {
+                'name': cluster_record.get('name'),
+                'cluster_hash': cluster_record.get('cluster_hash'),
+                'status': str(cluster_record.get('status')),
+                'launched_at': launched_at,
+                'autostop': cluster_record.get('autostop'),
+                'to_down': cluster_record.get('to_down'),
+                'cluster_ever_up': cluster_record.get('cluster_ever_up'),
+                'status_updated_at': status_updated_at,
+                'config_hash': cluster_record.get('config_hash'),
+                'workspace': cluster_record.get('workspace'),
+                'is_managed': cluster_record.get('is_managed'),
+                'user_hash': cluster_record.get('user_hash'),
+                'user_name': cluster_record.get('user_name'),
+                'handle': handle_info,
+            }
+            files.append({
+                'relative_path': f'{cluster_prefix}/cluster_info.json',
+                'content': json.dumps(cluster_info, indent=2,
+                                      default=str).encode('utf-8'),
+            })
+
+            # Cluster events
+            cluster_hash = cluster_record.get('cluster_hash')
+            if cluster_hash:
+                for event_type in [
+                        global_user_state.ClusterEventType.DEBUG,
+                        global_user_state.ClusterEventType.STATUS_CHANGE,
+                        global_user_state.ClusterEventType.TERMINAL,
+                ]:
+                    try:
+                        events = global_user_state.get_cluster_events(
+                            cluster_name=None,
+                            cluster_hash=cluster_hash,
+                            event_type=event_type,
+                            include_timestamps=True)
+                        if events:
+                            event_type_lower = event_type.value.lower()
+                            files.append({
+                                'relative_path':
+                                    f'{cluster_prefix}/'
+                                    f'events_{event_type_lower}.json',
+                                'content': json.dumps(
+                                    events, indent=2,
+                                    default=str).encode('utf-8'),
+                            })
+                    except Exception as e:  # pylint: disable=broad-except
+                        errors.append({
+                            'component': 'managed_jobs',
+                            'resource': f'{cluster_name}/'
+                                        f'events_{event_type.value}',
+                            'error': str(e),
+                        })
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{cluster_name}/cluster_info',
+            'error': str(e),
+        })
+
+
+def _collect_controller_system_logs(files: List[Dict[str, Any]],
+                                    errors: List[Dict[str, str]]) -> None:
+    """Collect controller system logs (controller_*.log files)."""
+    try:
+        controller_logs_dir = pathlib.Path(
+            managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
+        if controller_logs_dir.exists():
+            for log_file in controller_logs_dir.glob('controller_*.log'):
+                if log_file.is_file():
+                    files.append({
+                        'relative_path': f'managed_jobs/_controller_system/'
+                                         f'{log_file.name}',
+                        'content': log_file.read_bytes(),
+                    })
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': '_controller_system/logs',
+            'error': str(e),
+        })
+
+
 def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     """Generate managed job cluster name."""
     # Truncate the task name to 30 chars to avoid the cluster name being too
@@ -2586,6 +2813,25 @@ class ManagedJobCodeGen:
         from sky.utils import message_utils
         job_id = managed_job_state.get_all_job_ids_by_name({job_name!r})
         print(message_utils.encode_payload(job_id), end="", flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
+    def get_debug_dump_data(cls, job_ids: List[int]) -> str:
+        code = textwrap.dedent(f"""\
+        import base64
+        from sky.utils import message_utils
+        if managed_job_version >= 17:
+            result = utils.collect_debug_dump_data({job_ids!r})
+            # Base64-encode file content for safe stdout transport
+            for f in result.get('files', []):
+                f['content'] = base64.b64encode(f['content']).decode('ascii')
+            print(message_utils.encode_payload(result), end="", flush=True)
+        else:
+            print(message_utils.encode_payload({{'files': [], 'errors': [
+                {{'component': 'managed_jobs', 'resource': 'debug_dump',
+                  'error': 'Controller version too old (requires >= 17)'}}
+            ]}}), end="", flush=True)
         """)
         return cls._build(code)
 

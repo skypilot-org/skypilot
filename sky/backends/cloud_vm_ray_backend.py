@@ -2852,6 +2852,14 @@ class SkyletClient:
     ) -> 'managed_jobsv1_pb2.CancelJobsResponse':
         return self._managed_jobs_stub.CancelJobs(request, timeout=timeout)
 
+    def get_debug_dump_data(
+        self,
+        request: 'managed_jobsv1_pb2.GetDebugDumpDataRequest',
+        timeout: Optional[float] = 120
+    ) -> 'managed_jobsv1_pb2.GetDebugDumpDataResponse':
+        return self._managed_jobs_stub.GetDebugDumpData(request,
+                                                        timeout=timeout)
+
 
 @registry.BACKEND_REGISTRY.type_register(name='cloudvmray')
 class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
