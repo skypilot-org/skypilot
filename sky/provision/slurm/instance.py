@@ -29,8 +29,8 @@ logger = sky_logging.init_logger(__name__)
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
 
 
-def _sbatch_log_path(job_id: str) -> str:
-    return f'{PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-{job_id}.out'
+def _sbatch_log_path(base_dir: str, job_id: str) -> str:
+    return f'{base_dir}/{PROVISION_SCRIPTS_DIRECTORY_NAME}/slurm-{job_id}.out'
 
 
 POLL_INTERVAL_SECONDS = 2
@@ -372,6 +372,9 @@ def _create_virtual_instance(
     if workdir is not None or tmpdir is not None:
         logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
 
+    # Must be absolute — #SBATCH directives don't expand ~ or $HOME.
+    sbatch_log_base_dir = workdir if workdir is not None else remote_home_dir
+
     provision_script_path = _sbatch_provision_script_path(
         workdir, cluster_name_on_cloud)
     provision_scripts_dir = os.path.dirname(provision_script_path)
@@ -422,10 +425,16 @@ def _create_virtual_instance(
         # https://github.com/NVIDIA/enroot/blob/main/conf/hooks/10-devices.sh
         host_ccache_dir = '/tmp/ccache_$(id -u)'
         container_ccache_dir = '/var/cache/ccache'
-        container_mounts = ','.join([
+        mount_paths = [
             f'{remote_home_dir}:{remote_home_dir}',
             f'{host_ccache_dir}:{container_ccache_dir}',
-        ])
+        ]
+        # When workdir differs from remote_home_dir (e.g. workdir is on
+        # NFS at /home/ubuntu while $HOME is /home_local/ubuntu), mount
+        # it so the container can access sky_cluster_home_dir.
+        if workdir is not None and workdir != remote_home_dir:
+            mount_paths.append(f'{workdir}:{workdir}')
+        container_mounts = ','.join(mount_paths)
         # Add sudo alias to bashrc since we're already root in the container.
         # This allows scripts with 'sudo' commands to work without modification.
         # For containers, ~ is /root which is isolated inside the container,
@@ -491,8 +500,8 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
     provision_script = f"""\
 #!/bin/bash
 #SBATCH --job-name={cluster_name_on_cloud}
-#SBATCH --output={_sbatch_log_path('%j')}
-#SBATCH --error={_sbatch_log_path('%j')}
+#SBATCH --output={_sbatch_log_path(sbatch_log_base_dir, '%j')}
+#SBATCH --error={_sbatch_log_path(sbatch_log_base_dir, '%j')}
 #SBATCH --nodes={num_nodes}
 #SBATCH --time={max_time}
 #SBATCH --wait-all-nodes=1
@@ -593,7 +602,7 @@ touch {sky_cluster_home_dir}/.hushlogin
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
     # access the directories before they are created.
-    slurm_log = f'~/{_sbatch_log_path(job_id)}'
+    slurm_log = _sbatch_log_path(sbatch_log_base_dir, job_id)
 
     # Stream logs in background thread for visibility if debug mode
     if env_options.Options.SHOW_DEBUG_INFO.get():
