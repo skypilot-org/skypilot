@@ -9,8 +9,14 @@ import time
 from typing import Any, Dict, List, Optional, Set, TypedDict
 import zipfile
 
+import sky
+from sky import check as sky_check
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
+from sky.jobs import constants as job_constants
+from sky.jobs import state as managed_job_state
+from sky.jobs.server import core as managed_jobs_core
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server.requests import request_names
@@ -77,9 +83,6 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
 def _get_requests_from_managed_jobs(
         debug_dump_context: DebugDumpContext) -> None:
     """Parse request database to find requests related to managed jobs."""
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs.server import core as managed_jobs_core
-
     if not debug_dump_context['managed_job_ids']:
         return
     logger.debug(
@@ -122,45 +125,35 @@ def _get_requests_from_managed_jobs(
                 fields=['request_id', 'request_body']))
 
         for request in requests:
-            try:
-                body = request.request_body
-                if body is None:
-                    continue
-                matched = False
-                # Match by direct job ID
-                job_id = getattr(body, 'job_id', None)
-                job_ids = getattr(body, 'job_ids', None)
-                if (job_id is not None and
-                        job_id in debug_dump_context['managed_job_ids']):
+            body = request.request_body
+            if body is None:
+                continue
+            matched = False
+            # Match by direct job ID
+            job_id = getattr(body, 'job_id', None)
+            job_ids = getattr(body, 'job_ids', None)
+            if (job_id is not None and
+                    job_id in debug_dump_context['managed_job_ids']):
+                matched = True
+            elif (job_ids is not None and
+                  any(jid in debug_dump_context['managed_job_ids']
+                      for jid in job_ids)):
+                matched = True
+            # Match cancel-by-name
+            elif getattr(body, 'name', None) in job_names:
+                matched = True
+            # Match cancel-all-users (affects all jobs)
+            elif getattr(body, 'all_users', False):
+                matched = True
+            # Match cancel-all (affects only the requesting
+            # user's jobs, so include if user owns a target job)
+            elif getattr(body, 'all', False):
+                cancel_user = getattr(body, 'env_vars',
+                                      {}).get(skylet_constants.USER_ID_ENV_VAR)
+                if cancel_user and cancel_user in job_user_hashes:
                     matched = True
-                elif (job_ids is not None and
-                      any(jid in debug_dump_context['managed_job_ids']
-                          for jid in job_ids)):
-                    matched = True
-                # Match cancel-by-name
-                elif getattr(body, 'name', None) in job_names:
-                    matched = True
-                # Match cancel-all-users (affects all jobs)
-                elif getattr(body, 'all_users', False):
-                    matched = True
-                # Match cancel-all (affects only the requesting
-                # user's jobs, so include if user owns a target job)
-                elif getattr(body, 'all', False):
-                    cancel_user = getattr(body, 'env_vars', {}).get(
-                        skylet_constants.USER_ID_ENV_VAR)
-                    if cancel_user and cancel_user in job_user_hashes:
-                        matched = True
-                if matched:
-                    debug_dump_context['request_ids'].add(request.request_id)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Failed to parse request '
-                               f'{request.request_id}')
-                debug_dump_context['errors'].append({
-                    'component': 'cross_link',
-                    'resource':
-                        f'parse_request/{request.request_id}',
-                    'error': str(e)
-                })
+            if matched:
+                debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get requests for managed jobs: {e}')
         debug_dump_context['errors'].append({
@@ -252,10 +245,6 @@ def _get_clusters_from_managed_jobs(
 def _populate_recent_context(debug_dump_context: DebugDumpContext,
                              hours: float) -> None:
     """Populate context with resources active within the given time window."""
-    # Import here to avoid circular imports
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs.server import core as managed_jobs_core
-
     logger.debug(f'Populating context with resources from last {hours} hours')
     cutoff_time = time.time() - (hours * 3600)
 
@@ -325,12 +314,6 @@ def _dump_server_info(dump_dir: str,
                       errors: Optional[List[Dict[str, str]]] = None) -> None:
     """Collect server metadata."""
     logger.debug('Entering _dump_server_info')
-    # Import here to avoid circular imports
-    # pylint: disable=import-outside-toplevel
-    import sky
-    from sky import check as sky_check
-    from sky import skypilot_config
-
     server_info: Dict[str, Any] = {
         'skypilot_version': sky.__version__,
         'skypilot_commit': getattr(sky, '__commit__', 'unknown'),
@@ -516,6 +499,12 @@ def _dump_request_id_info(
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(
                 f'Failed to copy debug log for request {request_id}: {e}')
+            if errors is not None:
+                errors.append({
+                    'component': 'requests',
+                    'resource': f'{request_id}/request_debug.log',
+                    'error': str(e)
+                })
 
     logger.debug('Exiting _dump_request_id_info')
 
@@ -672,12 +661,6 @@ def _dump_managed_job_info(
         dump_dir: str,
         errors: Optional[List[Dict[str, str]]] = None) -> None:
     """Collect managed job state and logs."""
-    # Import here to avoid circular imports
-    # pylint: disable=import-outside-toplevel
-    from sky.jobs import constants as job_constants
-    from sky.jobs import state as managed_job_state
-    from sky.jobs.server import core as managed_jobs_core
-
     if not managed_job_ids:
         logger.debug('No managed jobs to dump')
         return
