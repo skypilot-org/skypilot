@@ -68,6 +68,7 @@ Below is the configuration syntax and some example values.  See details under ea
 
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
 
+  :ref:`env_file <yaml-spec-env-file>`: /path/to/.env
   :ref:`envs <yaml-spec-envs>`:
     MY_BUCKET: skypilot-temp-gcs-test
     MY_LOCAL_PATH: tmp-workdir
@@ -959,6 +960,57 @@ Available fields:
 - :code:`strategy`: The recovery strategy to use (:code:`FAILOVER` or :code:`EAGER_NEXT_REGION`)
 - :code:`max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
 - :code:`recover_on_exit_codes`: Exit code(s) (0-255) that should always trigger recovery. Can be a single integer (e.g., :code:`33`) or a list (e.g., :code:`[33, 34]`). Restarts triggered by these exit codes do not count towards the :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
+
+.. _yaml-spec-env-file:
+
+``env_file``
+~~~~~~~~~~~~
+
+Path to environment file(s) to load (optional).
+
+Similar to Docker Compose's ``env_file`` option, this allows you to specify one or more files containing environment variables. Each file should contain lines in the format ``KEY=value``.
+
+The environment variables loaded from these files can be accessed in the ``file_mounts``, ``setup``, and ``run`` sections.
+
+**Precedence**: Variables defined in :ref:`envs <yaml-spec-envs>` take precedence over variables loaded from ``env_file``. If the same variable is defined in both, the value from ``envs`` will be used.
+
+When multiple files are specified, files listed later take precedence over files listed earlier.
+
+**Format**: Each line in the env file should be in the format ``KEY=value``. Lines starting with ``#`` are treated as comments. Empty lines are ignored.
+
+Example env file (``.env``):
+
+.. code-block:: bash
+
+  # Database configuration
+  DB_HOST=localhost
+  DB_PORT=5432
+
+  # API keys
+  API_KEY=my-api-key
+
+Example of using a single env file:
+
+.. code-block:: yaml
+
+  env_file: /path/to/.env
+
+Example of using multiple env files:
+
+.. code-block:: yaml
+
+  env_file:
+    - /path/to/.env
+    - /path/to/.env.local
+
+Example combining ``env_file`` with ``envs`` (envs takes precedence):
+
+.. code-block:: yaml
+
+  env_file: /path/to/.env  # Contains DB_HOST=localhost
+
+  envs:
+    DB_HOST: production-db.example.com  # This value will be used
 
 
 .. _yaml-spec-envs:

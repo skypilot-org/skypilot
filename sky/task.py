@@ -7,6 +7,7 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
+from dotenv import dotenv_values
 from pydantic import SecretStr
 
 from sky import clouds
@@ -548,13 +549,45 @@ class Task:
     ) -> 'Task':
         user_specified_yaml = config.pop('_user_specified_yaml',
                                          yaml_utils.dump_yaml_str(config))
+        # Handle env_file from YAML.
+        if (env_file_config := config.pop('env_file', None)):
+            env_file_envs: Dict[str, Optional[str]] = {}
+            # Validate env_file type.
+            if isinstance(env_file_config, str):
+                env_files: List[str] = [env_file_config]
+            elif isinstance(env_file_config, list):
+                if not all(isinstance(item, str) for item in env_file_config):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Invalid `env_file` list: '
+                                         'must contain only strings.')
+                env_files = env_file_config
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid `env_file` type: {type(env_file_config)}. '
+                        'Must be a string or a list of strings.')
+
+            for ef in env_files:
+                env_file_path = os.path.expanduser(ef)
+                if not os.path.isfile(env_file_path):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'env_file not found: {ef}')
+                ef_envs = dotenv_values(env_file_path)
+                env_file_envs.update(ef_envs)
+
+            # Merge env_file_envs with config['envs'], where envs takes
+            # precedence over env_file (similar to Docker Compose behavior).
+            if config.get('envs') is not None:
+                env_file_envs.update(config['envs'])
+            config['envs'] = env_file_envs
+
         # More robust handling for 'envs': explicitly convert keys and values to
         # str, since users may pass '123' as keys/values which will get parsed
         # as int causing validate_schema() to fail.
-        envs = config.get('envs')
-        if envs is not None and isinstance(envs, dict):
+        if (envs_config := config.get('envs')) is not None and isinstance(
+                envs_config, dict):
             new_envs: Dict[str, Optional[str]] = {}
-            for k, v in envs.items():
+            for k, v in envs_config.items():
                 if v is not None:
                     new_envs[str(k)] = str(v)
                 else:
@@ -564,10 +597,10 @@ class Task:
         # More robust handling for 'secrets': explicitly convert keys and values
         # to str, since users may pass '123' as keys/values which will get
         # parsed as int causing validate_schema() to fail.
-        secrets = config.get('secrets')
-        if secrets is not None and isinstance(secrets, dict):
+        if (secrets_config := config.get('secrets')) is not None and isinstance(
+                secrets_config, dict):
             new_secrets: Dict[str, Optional[str]] = {}
-            for k, v in secrets.items():
+            for k, v in secrets_config.items():
                 if v is not None:
                     new_secrets[str(k)] = str(v)
                 else:
