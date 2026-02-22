@@ -105,10 +105,7 @@ spec:
         - name: SKYPILOT_IN_CLUSTER_NAMESPACE
           value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
         {{- end }}
-        {{- if .Values.kubernetesCredentials.kubeconfigPath }}
-        - name: KUBECONFIG
-          value: {{ .Values.kubernetesCredentials.kubeconfigPath | quote }}
-        {{- else if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
+        {{- if and .Values.kubernetesCredentials.useKubeconfig .Values.apiService.sshNodePools }}
         - name: KUBECONFIG
           value: /root/.kube/config:/var/skypilot/kubeconfig/config
         {{- end }}
