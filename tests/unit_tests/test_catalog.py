@@ -370,8 +370,8 @@ def test_filter_with_local_disk_instance_sets(local_disk, expected_instances):
 # -- get_hourly_cost_from_pricing (common function, dict-based) ------------
 
 
-def test_cpu_mem_rate_from_pricing():
-    """4CPU--16GB with rates 0.05/0.01 -> $0.36/hr."""
+def test_cpu_only_instance_uses_cpu_memory_pricing():
+    """CPU-only: 4CPU--16GB with rates 0.05/0.01 -> $0.36/hr."""
     pricing = {'cpu': 0.05, 'memory': 0.01}
     cost = catalog_common.get_hourly_cost_from_pricing(pricing,
                                                        cpus=4,
@@ -381,15 +381,22 @@ def test_cpu_mem_rate_from_pricing():
     assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
 
 
-def test_accelerator_price_from_pricing():
-    """A100 at $3.50/GPU, 4 GPUs -> $14.00."""
-    pricing = {'accelerators': {'A100': 3.50}}
+def test_gpu_instance_uses_accelerator_pricing_only():
+    """GPU instance uses ONLY accelerator rate; cpu/memory ignored."""
+    pricing = {
+        'cpu': 0.05,
+        'memory': 0.01,
+        'accelerators': {
+            'A100': 3.50,
+        },
+    }
     cost = catalog_common.get_hourly_cost_from_pricing(pricing,
-                                                       cpus=0,
-                                                       memory=0,
+                                                       cpus=8,
+                                                       memory=64,
                                                        accelerator_name='A100',
-                                                       accelerator_count=4)
-    assert cost == pytest.approx(4 * 3.50)
+                                                       accelerator_count=2)
+    # All-in accelerator pricing: 2 * 3.50 = 7.00 (NOT 8*0.05+64*0.01+7.00)
+    assert cost == pytest.approx(2 * 3.50)
 
 
 def test_accelerator_name_case_insensitive():
@@ -403,8 +410,8 @@ def test_accelerator_name_case_insensitive():
     assert cost == pytest.approx(3.50)
 
 
-def test_unknown_accelerator_returns_zero_accel_price():
-    """If accelerator isn't in config, its price component is 0."""
+def test_unknown_accelerator_returns_zero():
+    """GPU instance with unconfigured accelerator returns $0.00."""
     pricing = {'cpu': 0.05, 'memory': 0.01, 'accelerators': {'A100': 3.50}}
     cost = catalog_common.get_hourly_cost_from_pricing(
         pricing,
@@ -412,7 +419,7 @@ def test_unknown_accelerator_returns_zero_accel_price():
         memory=16,
         accelerator_name='TPUv5e',
         accelerator_count=4)
-    assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
+    assert cost == 0.0
 
 
 def test_empty_pricing_returns_zero():
@@ -653,7 +660,8 @@ def test_k8s_get_hourly_cost_end_to_end(mock_nested):
     cost = kubernetes_catalog.get_hourly_cost('8CPU--64GB--A100:2',
                                               use_spot=False,
                                               region=None)
-    expected = 8 * 0.05 + 64 * 0.01 + 2 * 3.50
+    # Accelerator-only pricing: cpu/memory ignored for GPU instances
+    expected = 2 * 3.50
     assert cost == pytest.approx(expected)
 
 
@@ -666,6 +674,6 @@ def test_slurm_get_hourly_cost_end_to_end(mock_nested):
                                          use_spot=False,
                                          region='my-slurm',
                                          zone='high-pri')
-    # cluster cpu=0.06, cloud memory=0.01, partition A100=5.00
-    expected = 8 * 0.06 + 64 * 0.01 + 4 * 5.00
+    # Accelerator-only pricing: partition A100=5.00, cpu/memory ignored
+    expected = 4 * 5.00
     assert cost == pytest.approx(expected)

@@ -1575,21 +1575,30 @@ Hourly pricing rates for Kubernetes virtual instance types (optional).
 
 By default, Kubernetes instance types report a cost of ``$0.00`` because
 SkyPilot has no way to know the true cost of on-prem or self-managed clusters.
-Use this field to supply per-vCPU, per-GB, and per-accelerator hourly rates so
-that ``sky launch``, ``sky status``, and ``sky gpus list`` display meaningful cost
-estimates.
+Use this field to supply hourly rates so that ``sky launch``, ``sky status``,
+and ``sky gpus list`` display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
 
 Fields:
 
 ``cpu``
-    Cost per vCPU per hour (e.g., ``0.05``).
+    Cost per vCPU per hour (e.g., ``0.05``).  Only used for CPU-only instances.
 
 ``memory``
-    Cost per GB of memory per hour (e.g., ``0.01``).
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
 
 ``accelerators``
-    A mapping of accelerator name to cost per accelerator per hour
-    (e.g., ``A100: 3.50``).
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``A100: 3.50``).  CPU and memory costs are included in this rate.
 
 All fields are optional; unset fields contribute ``$0.00`` to the total.
 
@@ -1731,20 +1740,30 @@ Example:
 Hourly pricing rates for Slurm virtual instance types (optional).
 
 By default, Slurm instance types report a cost of ``$0.00``. Use this field to
-supply per-vCPU, per-GB, and per-accelerator hourly rates so that ``sky launch``,
-``sky status``, and ``sky gpus list`` display meaningful cost estimates.
+supply hourly rates so that ``sky launch``, ``sky status``, and ``sky gpus list``
+display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
 
 Fields:
 
 ``cpu``
-    Cost per vCPU per hour (e.g., ``0.04``).
+    Cost per vCPU per hour (e.g., ``0.04``).  Only used for CPU-only instances.
 
 ``memory``
-    Cost per GB of memory per hour (e.g., ``0.01``).
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
 
 ``accelerators``
-    A mapping of accelerator name to cost per accelerator per hour
-    (e.g., ``V100: 2.50``).
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``V100: 2.50``).  CPU and memory costs are included in this rate.
 
 All fields are optional; unset fields contribute ``$0.00`` to the total.
 
