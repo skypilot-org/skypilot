@@ -322,8 +322,7 @@ def _create_virtual_instance(
         nodes, _ = client.get_job_nodes(job_id)
         # Reset spinner since nodes are now allocated
         rich_utils.force_update_status(
-            ux_utils.spinner_message('Launching',
-                                     cluster_name=cluster_name))
+            ux_utils.spinner_message('Launching', cluster_name=cluster_name))
         return common.ProvisionRecord(provider_name='slurm',
                                       region=region,
                                       zone=partition,
