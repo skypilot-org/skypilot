@@ -1795,12 +1795,12 @@ Per-cluster and per-partition configuration for Slurm (optional).
 
 Supported fields:
 
-- ``workdir`` (str): Base directory on a **shared filesystem** for SkyPilot
+- ``workdir``: Base directory on a **shared filesystem** for SkyPilot
   cluster files (provision scripts, cluster home directories, sbatch logs, etc).
   Defaults to ``$HOME``. Shell variables like ``$USER`` are expanded on the
   login node. Use this when ``$HOME`` is not on a shared filesystem.
 
-- ``tmpdir`` (str): Per-node temporary storage for the SkyPilot runtime.
+- ``tmpdir``: Per-node temporary storage for the SkyPilot runtime.
   Defaults to ``/tmp``.
 
 - ``pricing``: :ref:`Pricing <config-yaml-slurm-pricing>` overrides at both
