@@ -1,6 +1,7 @@
 """Slurm instance provisioning."""
 
 import os
+import re
 import shlex
 import tempfile
 import threading
@@ -27,6 +28,7 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
+_RESOLVED_PATH_PATTERN = re.compile(r'SKYPILOT_RESOLVED_PATH: ([^\s\n]+)')
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -112,14 +114,26 @@ def _resolve_remote_path(runner: 'command_runner.SSHCommandRunner',
     """Resolve a path with shell variable expansion on the remote host.
 
     Expands shell variables like $USER or $HOME by running echo on the
-    remote side. Returns the original path if expansion fails.
+    remote side. Uses pattern matching to safely extract the resolved path
+    even when MOTD or shell startup scripts produce noisy output.
+
+    Raises:
+        exceptions.CommandError: If the remote command fails.
+        RuntimeError: If the resolved path cannot be extracted from output.
     """
-    rc, stdout, _ = runner.run(f'echo {path}',
-                               require_outputs=True,
-                               stream_logs=False)
-    if rc == 0 and stdout.strip():
-        return stdout.strip()
-    return path
+    cmd = f'echo "SKYPILOT_RESOLVED_PATH: $(echo {path})"'
+    rc, stdout, stderr = runner.run(cmd,
+                                    require_outputs=True,
+                                    separate_stderr=True,
+                                    stream_logs=False)
+    subprocess_utils.handle_returncode(
+        rc, cmd, f'Failed to resolve remote path {path!r}.', stderr=stderr)
+    match = _RESOLVED_PATH_PATTERN.search(stdout)
+    if not match:
+        raise RuntimeError(
+            f'Failed to extract resolved path from output for {path!r}: '
+            f'{stdout!r}')
+    return match.group(1)
 
 
 def _sbatch_provision_script_path(base_dir: str,
