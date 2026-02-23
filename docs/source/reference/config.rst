@@ -1827,8 +1827,8 @@ Example:
           cpu: 0.03
         partition_configs:
           gpu-partition:
-            # Override accelerator rate for this partition; cpu and
-            # memory are inherited from the cluster-level pricing.
+            # Override accelerator rate for this partition; other values
+            # are inherited from parent levels.
             pricing:
               accelerators:
                 H100: 5.00
