@@ -955,6 +955,7 @@ def set_failed(
         spot_table.c.status: failure_type.value,
         spot_table.c.failure_reason: failure_reason,
     }
+    updated = False
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Get previous status
         previous_status = session.execute(
@@ -1011,6 +1012,7 @@ def set_pending_cancelled(job_id: int):
     add_job_event(job_id, None, ManagedJobStatus.CANCELLED,
                   'Job has been cancelled')
     assert _SQLALCHEMY_ENGINE is not None
+    count = 0
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         # Subquery to get the spot_job_ids that match the joined condition
         subquery = session.query(spot_table.c.job_id).join(
@@ -2575,6 +2577,7 @@ async def set_failed_async(
         spot_table.c.status: failure_type.value,
         spot_table.c.failure_reason: failure_reason,
     }
+    updated = False
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         # Get previous status
         result = await session.execute(
@@ -2694,6 +2697,7 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
                               'Job has been cancelled')
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    updated = False
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
