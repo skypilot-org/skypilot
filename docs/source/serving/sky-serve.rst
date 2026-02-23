@@ -576,20 +576,26 @@ The following table shows the approximate minimum memory required for different 
 
    * - Max Services
      - Min Memory Required (GB)
+   * - 1
+     - 5
    * - 2
-     - 10
-   * - 3
-     - 14
+     - 7
    * - 4
-     - 17
-   * - 6
-     - 25
+     - 11
    * - 8
-     - 32
+     - 19
    * - 16
-     - 62
+     - 36
+   * - 32
+     - 70
+   * - 64
+     - 137
+
+.. note::
+
+   In consolidation mode, the API server workers scale with the available pod memory, so the practical maximum is approximately 8 concurrent services. Adding more pod memory has diminishing returns because the API server workers consume the extra memory.
 
 If you encounter the "Max number of services reached" error, you can increase the limit by:
 
-- **Consolidation mode**: Increasing the API server pod memory.
 - **Non-consolidation mode**: Configuring a controller VM with more memory via ``serve.controller.resources`` above.
+- **Consolidation mode**: Increasing the API server pod memory (up to the practical limit of ~8 services).
