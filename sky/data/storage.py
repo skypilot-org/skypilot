@@ -352,6 +352,10 @@ class MountCachedConfig:
     # Mount as read-only.
     # rclone flag: --read-only
     read_only: Optional[bool] = None
+    # Start a rclone server. This is mostly for performance benchmarking.
+    # We do not expect users to use this.
+    # rclone flag: --rc
+    _server: bool = False
 
     def to_rclone_flags(self) -> str:
         """Convert non-None fields to rclone CLI flag string."""
@@ -386,6 +390,8 @@ class MountCachedConfig:
         flags.append(f'--vfs-write-back {self.vfs_write_back or "1s"}')
         if self.read_only:
             flags.append('--read-only')
+        if self._server:
+            flags.append('--rc')
         return ' '.join(flags)
 
     def to_yaml_config(self) -> Dict[str, Any]:

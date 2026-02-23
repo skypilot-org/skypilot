@@ -631,6 +631,9 @@ def get_storage_schema():
                             'read_only': {
                                 'type': 'boolean',
                             },
+                            '_server': {
+                                'type': 'boolean',
+                            }
                         },
                     },
                 },

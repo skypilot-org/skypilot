@@ -204,11 +204,40 @@ class TestMountCachedConfig:
     def test_to_yaml_config_omits_none(self):
         config = storage_lib.MountCachedConfig(transfers=4)
         yaml_dict = config.to_yaml_config()
-        assert yaml_dict == {'transfers': 4}
+        assert yaml_dict == {'transfers': 4, '_server': False}
 
     def test_from_yaml_config_empty(self):
         config = storage_lib.MountCachedConfig.from_yaml_config({})
         assert config == storage_lib.MountCachedConfig()
+
+    def test_server_default_false(self):
+        config = storage_lib.MountCachedConfig()
+        assert config._server is False
+        assert '--rc' not in config.to_rclone_flags()
+
+    def test_server_true_emits_rc_flag(self):
+        config = storage_lib.MountCachedConfig(_server=True)
+        assert '--rc' in config.to_rclone_flags()
+
+    def test_server_false_no_rc_flag(self):
+        config = storage_lib.MountCachedConfig(_server=False)
+        assert '--rc' not in config.to_rclone_flags()
+
+    def test_server_round_trip_yaml(self):
+        config = storage_lib.MountCachedConfig(_server=True)
+        yaml_dict = config.to_yaml_config()
+        assert '_server' in yaml_dict
+        assert yaml_dict['_server'] is True
+        restored = storage_lib.MountCachedConfig.from_yaml_config(yaml_dict)
+        assert restored._server is True
+
+    def test_server_round_trip_yaml_default_false(self):
+        config = storage_lib.MountCachedConfig()
+        yaml_dict = config.to_yaml_config()
+        assert '_server' in yaml_dict
+        assert yaml_dict['_server'] is False
+        restored = storage_lib.MountCachedConfig.from_yaml_config(yaml_dict)
+        assert restored._server is False
 
 
 class TestStorageFromYamlWithMountCachedConfig:
@@ -440,6 +469,25 @@ class TestMountCachedSchemaValidation:
         config = self._make_yaml_config({'vfs_read_chunk_streams': 0})
         storage_obj = storage_lib.Storage.from_yaml_config(config)
         assert storage_obj.mount_cached_config.vfs_read_chunk_streams == 0
+
+    # --- _server boolean ---
+
+    def test_server_accepts_true(self):
+        config = self._make_yaml_config({'_server': True})
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        assert storage_obj.mount_cached_config is not None
+        assert storage_obj.mount_cached_config._server is True
+
+    def test_server_accepts_false(self):
+        config = self._make_yaml_config({'_server': False})
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        assert storage_obj.mount_cached_config is not None
+        assert storage_obj.mount_cached_config._server is False
+
+    def test_server_rejects_non_boolean(self):
+        config = self._make_yaml_config({'_server': 'yes'})
+        with pytest.raises(ValueError):
+            storage_lib.Storage.from_yaml_config(config)
 
     # --- additionalProperties: false ---
 
