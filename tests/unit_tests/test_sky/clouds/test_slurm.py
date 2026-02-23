@@ -808,3 +808,84 @@ class TestOnPendingMessage:
             msg = 'Launching'
 
         assert msg == expected
+
+
+class TestHelperPathFunctions:
+    """Test path helper functions in sky/provision/slurm/instance.py."""
+
+    @pytest.mark.parametrize('base_dir,job_id,expected', [
+        ('/home/user', '123', '/home/user/.sky_provision/slurm-123.out'),
+        ('/fsx/ubuntu', '456', '/fsx/ubuntu/.sky_provision/slurm-456.out'),
+        ('/home/user', '%j', '/home/user/.sky_provision/slurm-%j.out'),
+    ])
+    def test_sbatch_log_path(self, base_dir, job_id, expected):
+        assert slurm_instance._sbatch_log_path(base_dir, job_id) == expected
+
+    @pytest.mark.parametrize('base_dir,cluster,expected', [
+        ('/home/user', 'my-cluster',
+         '/home/user/.sky_clusters/my-cluster'),
+        ('/fsx/ubuntu', 'test-abc123',
+         '/fsx/ubuntu/.sky_clusters/test-abc123'),
+    ])
+    def test_sky_cluster_home_dir(self, base_dir, cluster, expected):
+        assert slurm_instance._sky_cluster_home_dir(base_dir, cluster) == expected
+
+    @pytest.mark.parametrize('base_dir,cluster,expected', [
+        ('/home/user', 'my-cluster',
+         '/home/user/.sky_provision/my-cluster.sh'),
+        ('~', 'my-cluster', '~/.sky_provision/my-cluster.sh'),
+    ])
+    def test_sbatch_provision_script_path(self, base_dir, cluster, expected):
+        assert slurm_instance._sbatch_provision_script_path(
+            base_dir, cluster) == expected
+
+    @pytest.mark.parametrize('tmpdir,cluster,expected', [
+        (None, 'my-cluster', '/tmp/my-cluster'),
+        ('/scratch/tmp', 'my-cluster', '/scratch/tmp/my-cluster'),
+    ])
+    def test_skypilot_runtime_dir(self, tmpdir, cluster, expected):
+        assert slurm_instance._skypilot_runtime_dir(
+            tmpdir, cluster) == expected
+
+
+class TestResolveRemotePath:
+    """Test _resolve_remote_path with pattern matching."""
+
+    def test_successful_expansion(self):
+        runner = mock.MagicMock()
+        runner.run.return_value = (
+            0, 'SKYPILOT_RESOLVED_PATH: /home/ubuntu\n', '')
+        result = slurm_instance._resolve_remote_path(runner, '/home/$USER')
+        assert result == '/home/ubuntu'
+
+    def test_absolute_path_passthrough(self):
+        runner = mock.MagicMock()
+        runner.run.return_value = (
+            0, 'SKYPILOT_RESOLVED_PATH: /fsx/ubuntu\n', '')
+        result = slurm_instance._resolve_remote_path(runner, '/fsx/ubuntu')
+        assert result == '/fsx/ubuntu'
+
+    def test_noisy_stdout_extracts_correct_path(self):
+        runner = mock.MagicMock()
+        noisy_output = (
+            'Welcome to Ubuntu 24.04!\n'
+            'Last login: Mon Feb 23 2026\n'
+            'SKYPILOT_RESOLVED_PATH: /home/ubuntu\n'
+            'Some other noise\n')
+        runner.run.return_value = (0, noisy_output, '')
+        result = slurm_instance._resolve_remote_path(runner, '/home/$USER')
+        assert result == '/home/ubuntu'
+
+    def test_command_failure_raises(self):
+        runner = mock.MagicMock()
+        runner.run.return_value = (1, '', 'Connection refused')
+        with pytest.raises(Exception):
+            slurm_instance._resolve_remote_path(runner, '/home/$USER')
+
+    def test_missing_pattern_raises(self):
+        runner = mock.MagicMock()
+        runner.run.return_value = (0, 'garbage output\n', '')
+        with pytest.raises(RuntimeError, match='Failed to extract'):
+            slurm_instance._resolve_remote_path(runner, '/home/$USER')
+
+
