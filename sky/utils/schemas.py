@@ -1502,7 +1502,9 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
-            }
+                **_LABELS_SCHEMA,
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
