@@ -1510,8 +1510,10 @@ def get_config_schema():
                     }]
                 },
                 **_CAPABILITIES_SCHEMA,
+                **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
