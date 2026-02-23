@@ -186,6 +186,11 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
+    :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
+    :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
+    :ref:`labels <config-yaml-azure-labels>`:
+      team: ml-infra
 
   :ref:`oci <config-yaml-oci>`:
     region_configs:
@@ -1299,6 +1304,73 @@ Example:
   azure:
     resource_group_vm: user-resource-group-name
     storage_account: user-storage-account-name
+
+.. _config-yaml-azure-vpc-name:
+
+``azure.vpc_name``
+~~~~~~~~~~~~~~~~~~
+
+Name of an existing Azure Virtual Network (VNet) to use for the cluster (optional).
+
+When specified, SkyPilot will use the existing VNet and its first subnet instead of
+creating new networking resources. If the subnet has an associated Network Security Group
+(NSG), it will be used; otherwise, SkyPilot will create its own NSG.
+
+This is useful for organizations that require instances to be launched in a pre-configured
+VNet with specific network policies.
+
+.. code-block:: yaml
+
+  azure:
+    vpc_name: my-existing-vnet
+
+.. _config-yaml-azure-use-internal-ips:
+
+``azure.use_internal_ips``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If true, SkyPilot will not create public IP addresses for Azure instances and only use
+private IPs (optional). Requires a network setup that allows SSH access to private IPs
+(e.g., a VPN or ``ssh_proxy_command``).
+
+This flag is typically set together with ``vpc_name`` above and
+``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. code-block:: yaml
+
+  azure:
+    use_internal_ips: true
+    ssh_proxy_command: ssh -W %h:%p bastion-host
+
+.. _config-yaml-azure-ssh-proxy-command:
+
+``azure.ssh_proxy_command``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSH proxy command (optional).
+
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+Format 1:
+  A string; the same proxy command is used for all regions.
+
+Format 2:
+  A dict mapping region name to a string proxy command per region.
+
+.. code-block:: yaml
+
+  azure:
+    # Format 1
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
+
+    # Format 2
+    ssh_proxy_command:
+      eastus: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.eastus.proxy
+      westus2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
+
+.. _config-yaml-azure-labels:
 
 .. _config-yaml-kubernetes:
 

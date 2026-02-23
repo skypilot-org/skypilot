@@ -627,5 +627,63 @@ class TestSSHSchema(unittest.TestCase):
             self.assertEqual(default_identity, 'LOCAL_CREDENTIALS')
 
 
+class TestAzureSchema(unittest.TestCase):
+    """Tests for the Azure config schema."""
+
+    def setUp(self):
+        self.config_schema = schemas.get_config_schema()
+        self.azure_schema = self.config_schema['properties']['azure']
+
+    def test_azure_use_internal_ips(self):
+        """Test that Azure accepts use_internal_ips."""
+        config = {'use_internal_ips': True}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_ssh_proxy_command_string(self):
+        """Test that Azure accepts ssh_proxy_command as string."""
+        config = {'ssh_proxy_command': 'ssh -W %h:%p bastion'}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_ssh_proxy_command_dict(self):
+        """Test that Azure accepts ssh_proxy_command as region dict."""
+        config = {
+            'ssh_proxy_command': {
+                'eastus': 'ssh -W %h:%p bastion-east',
+                'westus2': 'ssh -W %h:%p bastion-west',
+            }
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_vpc_name(self):
+        """Test that Azure accepts vpc_name."""
+        config = {'vpc_name': 'my-vnet'}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_vpc_name_null(self):
+        """Test that Azure accepts null vpc_name."""
+        config = {'vpc_name': None}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_combined_config(self):
+        """Test that Azure accepts all new options together."""
+        config = {
+            'storage_account': 'mystorage',
+            'resource_group_vm': 'my-rg',
+            'vpc_name': 'my-vnet',
+            'labels': {
+                'team': 'ml'
+            },
+            'use_internal_ips': True,
+            'ssh_proxy_command': 'ssh -W %h:%p bastion',
+        }
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_rejects_unknown_properties(self):
+        """Test that Azure rejects unknown properties."""
+        config = {'unknown_property': 'value'}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.azure_schema)
+
+
 if __name__ == "__main__":
     unittest.main()

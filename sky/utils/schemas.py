@@ -1502,7 +1502,16 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
-            }
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }]
+                },
+                **_CAPABILITIES_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            },
         },
         'kubernetes': {
             'type': 'object',
