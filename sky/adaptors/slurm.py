@@ -653,8 +653,8 @@ class SlurmClient:
         """Check the filesystem type of a directory.
 
         Args:
-            path: The directory path to check. Defaults to '~' (home
-                directory). Shell expansion is supported.
+            path: The directory path to check. Shell expansion is
+                supported.
 
         Returns:
             The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
