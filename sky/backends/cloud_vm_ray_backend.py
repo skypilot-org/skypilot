@@ -3856,8 +3856,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # does not get killed.
         # Note: proctrack/cgroup is enabled by default on Nebius' Managed
         # Soperator.
+        # This workaround is only needed for the srun code path. With Monarch,
+        # workers are persistent processes that don't suffer from proctrack
+        # issues, so the wait is unnecessary.
         is_slurm = isinstance(handle.launched_resources.cloud, clouds.Slurm)
-        if is_slurm:
+        use_monarch = skypilot_config.get_nested(('slurm', 'use_monarch'),
+                                                 False)
+        if is_slurm and not use_monarch:
             wait_code = job_lib.JobLibCodeGen.wait_for_job(job_id)
             code = code + ' && ' + wait_code
 
@@ -6192,6 +6197,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             slurm_job_id = head_instance.tags.get('job_id')
             assert (slurm_job_id
                     is not None), ('job_id tag not found in head instance')
+
+            use_monarch = skypilot_config.get_nested(('slurm', 'use_monarch'),
+                                                     False)
+            if use_monarch:
+                return task_codegen.MonarchCodeGen(
+                    slurm_job_id=slurm_job_id,
+                    cluster_name=handle.cluster_name_on_cloud,
+                )
+
+            # Fall back to existing srun approach
             container_image = handle.launched_resources.extract_docker_image()
             container_name = None
             if container_image is not None:

@@ -255,6 +255,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'seeweb': ['ecsapi==0.4.0'],
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
+    'monarch': ['torchmonarch'],
     'yotta': [],  # No dependencies needed for Yotta
 }
 

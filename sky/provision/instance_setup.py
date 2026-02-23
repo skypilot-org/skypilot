@@ -546,6 +546,253 @@ def start_skylet_on_head_node(
                            f'===== stderr ====={stderr}')
 
 
+@common.log_function_start_end
+@_auto_retry()
+@timeline.event
+def start_monarch_workers(cluster_name: str,
+                          cluster_info: common.ClusterInfo,
+                          ssh_credentials: Dict[str, Any],
+                          is_container: bool = False) -> None:
+    """Start Monarch workers on all nodes for actor-based task execution.
+
+    Each worker binds to an OS-assigned port (avoiding conflicts when
+    multiple SkyPilot clusters share Slurm nodes) and writes its
+    tcp://hostname:port to a discovery directory on the shared filesystem.
+    The controller (MonarchCodeGen) reads these files to connect.
+
+    This must be called AFTER setup_runtime_on_cluster() which installs
+    torchmonarch into the skypilot-runtime venv.
+    """
+    runners = provision.get_command_runners(cluster_info.provider_name,
+                                            cluster_info, **ssh_credentials)
+    head_runner = runners[0]
+    assert cluster_info.head_instance_id is not None, cluster_info
+    log_path_abs = str(provision_logging.get_log_path())
+    num_nodes = cluster_info.num_instances
+
+    # The worker script runs on each node via srun. It:
+    # 1. Sets XDG_RUNTIME_DIR (Monarch needs it for Unix domain sockets)
+    # 2. Finds a free port (OS-assigned)
+    # 3. Writes its address to the discovery directory
+    # 4. Runs run_worker_loop_forever() (blocks, serving actor requests)
+    #
+    # We base64-encode the script to avoid nested quoting issues
+    # (the command goes through SSH -> srun -> bash -> srun -> python).
+    import base64  # pylint: disable=import-outside-toplevel
+    worker_script = (
+        'import socket, os, sys, site\n'
+        'rd = os.path.join(os.path.expanduser("~"), ".monarch_runtime")\n'
+        'os.makedirs(rd, exist_ok=True)\n'
+        'os.environ["XDG_RUNTIME_DIR"] = rd\n'
+        # Monarch spawns child processes using os.path.realpath(sys.executable)
+        # which resolves the venv symlink to the base python. Set PYTHONPATH
+        # so children can find packages (torchmonarch) from our venv.
+        '_sp = [p for p in site.getsitepackages() if "site-packages" in p]\n'
+        'if _sp:\n'
+        '    os.environ["PYTHONPATH"] = os.pathsep.join(_sp)\n'
+        # Configure Monarch to use TCP transport for inter-process
+        # communication. Default is Unix sockets which fail across
+        # Slurm nodes.
+        'from monarch._rust_bindings.monarch_hyperactor.channel '
+        'import ChannelTransport\n'
+        'from monarch._rust_bindings.monarch_hyperactor.config '
+        'import configure\n'
+        'configure(default_transport=ChannelTransport.TcpWithHostname)\n'
+        's = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n'
+        's.bind(("", 0))\n'
+        'p = s.getsockname()[1]\n'
+        's.close()\n'
+        'h = socket.gethostname()\n'
+        'wd = os.environ["MONARCH_WORKERS_DIR"]\n'
+        'open(os.path.join(wd, h), "w").write(f"tcp://{h}:{p}")\n'
+        'from monarch._src.actor.bootstrap import run_worker_loop_forever\n'
+        # Worker MUST bind to the actual hostname, not 0.0.0.0.
+        # Monarch uses the address as the worker's identity for internal
+        # message routing. A mismatch causes "ttl expired" errors.
+        'run_worker_loop_forever(\n'
+        '    address=f"tcp://{h}:{p}", ca="trust_all_connections")\n')
+    script_b64 = base64.b64encode(worker_script.encode()).decode()
+    python_cmd = constants.SKY_SLURM_PYTHON_CMD
+
+    # Use absolute paths from head_runner.sky_dir. This ensures paths are
+    # consistent regardless of whether we're on the HOST or in a container
+    # (where $HOME differs).
+    workers_dir = f'{head_runner.sky_dir}/{constants.MONARCH_WORKERS_DIR}'
+    script_path = f'{head_runner.sky_dir}/.sky/monarch_worker.py'
+
+    logger.info(f'Starting Monarch workers for {cluster_name} '
+                f'on {num_nodes} node(s)'
+                f'{" (container)" if is_container else ""}')
+    if is_container:
+        _start_monarch_workers_container(runners, workers_dir, script_path,
+                                         script_b64, num_nodes, log_path_abs)
+    else:
+        _start_monarch_workers_host(head_runner, workers_dir, script_path,
+                                    script_b64, python_cmd, num_nodes,
+                                    log_path_abs)
+
+
+def _start_monarch_workers_host(
+    head_runner: 'command_runner.SlurmCommandRunner',
+    workers_dir: str,
+    script_path: str,
+    script_b64: str,
+    python_cmd: str,
+    num_nodes: int,
+    log_path_abs: str,
+) -> None:
+    """Start Monarch workers on all nodes via a single srun from the HOST.
+
+    Uses srun --nodes=N to start workers on all nodes at once.
+    """
+    # Start workers on all allocated nodes via srun --overlap.
+    #
+    # Key details:
+    # - We unset ALL SLURM_* env vars (except SLURM_JOB_ID) because
+    #   SlurmCommandRunner wraps this in an outer srun (--nodes=1)
+    #   which sets vars like SLURM_JOB_NODELIST=<head_only>,
+    #   SLURM_NPROCS=1, etc. that constrain the inner srun.
+    # - --cpu-bind=none avoids CPU binding conflicts with the outer step.
+    # - --mem=0 avoids memory allocation conflicts.
+    # - nohup + disown keeps the background srun alive after the outer
+    #   shell exits (when head_runner.run() returns).
+    cmd = (
+        f'export MONARCH_WORKERS_DIR={workers_dir} && '
+        # Clean any stale files from a previous run before creating the dir.
+        f'rm -rf $MONARCH_WORKERS_DIR && '
+        f'mkdir -p $MONARCH_WORKERS_DIR && '
+        f'echo {script_b64} | base64 -d > {script_path} && '
+        # Unset all SLURM_* env vars except SLURM_JOB_ID. The outer
+        # srun sets vars that constrain resources to just the head node.
+        f'for v in $(env | grep ^SLURM | cut -d= -f1); do '
+        f'[ "$v" != "SLURM_JOB_ID" ] && unset "$v"; done && '
+        f'nohup srun --nodes={num_nodes} --ntasks-per-node=1 '
+        f'--overlap --cpu-bind=none --mem=0 '
+        f'{python_cmd} {script_path} '
+        f'> /dev/null 2>&1 & '
+        f'WORKER_PID=$! && disown $WORKER_PID && '
+        # Wait for all workers to register their addresses.
+        f'TIMEOUT=120; ELAPSED=0; '
+        f'while [ $(ls $MONARCH_WORKERS_DIR 2>/dev/null | wc -l) '
+        f'-lt {num_nodes} ]; do '
+        f'sleep 1; ELAPSED=$((ELAPSED + 1)); '
+        f'if [ $ELAPSED -ge $TIMEOUT ]; then '
+        f'echo "Monarch workers did not register within '
+        f'${{TIMEOUT}}s" >&2; '
+        f'kill $WORKER_PID 2>/dev/null; exit 1; fi; done && '
+        f'echo "[monarch] All {num_nodes} worker(s) registered"')
+
+    # Use run_driver() which runs on the HOST (not inside container).
+    returncode, stdout, stderr = head_runner.run_driver(cmd,
+                                                        stream_logs=False,
+                                                        log_path=log_path_abs,
+                                                        require_outputs=True,
+                                                        source_bashrc=True)
+    if returncode:
+        raise RuntimeError(f'Failed to start Monarch workers '
+                           f'(exit code {returncode}). Error: \n'
+                           f'===== stdout ===== \n{stdout}\n'
+                           f'===== stderr ====={stderr}')
+
+
+def _start_monarch_workers_container(
+    runners: list,
+    workers_dir: str,
+    script_path: str,
+    script_b64: str,
+    num_nodes: int,
+    log_path_abs: str,
+) -> None:
+    """Start Monarch workers inside containers, one per node.
+
+    For container clusters, we can't use srun from inside the container
+    (srun isn't installed there). Instead, we use each node's runner.run()
+    which executes inside the container via SlurmCommandRunner.
+
+    Key details:
+    - python3 isn't on PATH inside the container, so we read the python
+      binary path from /root/.sky/python_path (written during setup).
+    - We use nohup + disown to keep the worker alive after the srun
+      step exits (works with linuxproc proctrack).
+    """
+    import subprocess  # pylint: disable=import-outside-toplevel
+    import threading  # pylint: disable=import-outside-toplevel
+
+    head_runner = runners[0]
+
+    # Deploy the worker script and create the workers dir via the head runner
+    # (shared filesystem means this is visible to all nodes).
+    # Clean any stale files from a previous run before creating the dir.
+    deploy_cmd = (f'rm -rf {workers_dir} && mkdir -p {workers_dir} && '
+                  f'echo {script_b64} | base64 -d > {script_path}')
+    returncode = head_runner.run(deploy_cmd,
+                                 stream_logs=False,
+                                 log_path=log_path_abs)
+    if returncode:
+        raise RuntimeError('Failed to deploy Monarch worker script '
+                           f'(exit code {returncode})')
+
+    # Start a background worker on each node in parallel.
+    # runner.run() targets the node's container via SlurmCommandRunner.
+    #
+    # Inside the container:
+    # - python3 isn't on PATH (bare image like ubuntu)
+    # - The skypilot-runtime venv is at /root/skypilot-runtime/
+    # - The python path is recorded in /root/.sky/python_path
+    # - HOME is /fsx/ubuntu (via srun), not /root
+    # We set HOME=/root so the python_path file is found correctly.
+    python_from_path_file = ('$(cat /root/.sky/python_path 2>/dev/null '
+                             '|| echo /root/skypilot-runtime/bin/python3)')
+    worker_cmd = (f'export MONARCH_WORKERS_DIR={workers_dir} && '
+                  f'export HOME=/root && '
+                  f'nohup {python_from_path_file} {script_path} '
+                  f'> /dev/null 2>&1 & '
+                  f'disown $!')
+
+    errors = {}
+
+    def _start_worker(idx: int,
+                      runner: 'command_runner.SlurmCommandRunner') -> None:
+        try:
+            rc = runner.run(worker_cmd,
+                            stream_logs=False,
+                            log_path=log_path_abs)
+            if rc:
+                errors[idx] = f'exit code {rc}'
+        except (subprocess.CalledProcessError, Exception) as e:  # pylint: disable=broad-except
+            errors[idx] = str(e)
+
+    threads = []
+    for i, runner in enumerate(runners):
+        t = threading.Thread(target=_start_worker, args=(i, runner))
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join(timeout=60)
+
+    if errors:
+        raise RuntimeError(f'Failed to start Monarch workers on nodes: '
+                           f'{errors}')
+
+    # Wait for all workers to register their addresses on shared filesystem.
+    # Use head_runner to check the shared filesystem from inside the
+    # container. The worker writes a file per hostname to workers_dir.
+    wait_cmd = (f'TIMEOUT=120; ELAPSED=0; '
+                f'while [ $(ls {workers_dir} 2>/dev/null | wc -l) '
+                f'-lt {num_nodes} ]; do '
+                f'sleep 1; ELAPSED=$((ELAPSED + 1)); '
+                f'if [ $ELAPSED -ge $TIMEOUT ]; then '
+                f'echo "Monarch workers did not register within '
+                f'${{TIMEOUT}}s" >&2; exit 1; fi; done && '
+                f'echo "[monarch] All {num_nodes} worker(s) registered"')
+    returncode = head_runner.run(wait_cmd,
+                                 stream_logs=False,
+                                 log_path=log_path_abs)
+    if returncode:
+        raise RuntimeError(f'Monarch workers did not register within timeout '
+                           f'(exit code {returncode})')
+
+
 @_auto_retry()
 def _internal_file_mounts(file_mounts: Dict,
                           runner: command_runner.CommandRunner,

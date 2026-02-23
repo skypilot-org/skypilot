@@ -675,6 +675,21 @@ X86_64_ARCH = 'x86_64'
 # Used by the executor to conditionally apply multi-node barrier.
 SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
 
+# Directory (relative to sky_cluster_home_dir) where Monarch workers write
+# their TCP addresses for controller discovery. Each worker binds to an
+# OS-assigned port and writes "tcp://hostname:port" to a file named after
+# its hostname. This avoids port conflicts when multiple SkyPilot clusters
+# share the same Slurm compute nodes.
+MONARCH_WORKERS_DIR = 'monarch_workers'
+
+# Install torchmonarch into the SkyPilot runtime environment on Slurm nodes.
+# This is run during provisioning (in the sbatch script) and also via
+# setup_commands so the head node's runtime env has it for the controller.
+# Uses uv pip for fast installation, matching the Ray installation pattern.
+MONARCH_INSTALLATION_COMMANDS = (
+    f'{SKY_UV_PIP_CMD} list 2>/dev/null | grep -q "torchmonarch" || '
+    f'{{ {SKY_UV_PIP_CMD} install "torchmonarch"; }}; ')
+
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
 

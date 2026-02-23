@@ -714,6 +714,20 @@ def _post_provision_setup(
             logger.debug('Ray cluster is ready. Skip starting ray cluster on '
                          'worker nodes.')
 
+        # Start Monarch workers for Slurm clusters with use_monarch enabled.
+        # This runs AFTER setup_runtime_on_cluster (which installs
+        # torchmonarch) and INSTEAD of Ray (Slurm doesn't use Ray).
+        if (skip_ray_setup and
+                isinstance(launched_resources.cloud, clouds.Slurm) and
+                skypilot_config.get_nested(('slurm', 'use_monarch'), False)):
+            is_container = (launched_resources.extract_docker_image()
+                            is not None)
+            instance_setup.start_monarch_workers(
+                cluster_name.name_on_cloud,
+                cluster_info=cluster_info,
+                ssh_credentials=ssh_credentials,
+                is_container=is_container)
+
         logging_agent = logs.get_logging_agent()
         if logging_agent:
             status.update(

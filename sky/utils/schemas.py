@@ -1560,6 +1560,9 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'use_monarch': {
+                    'type': 'boolean',
+                },
             }
         },
         'oci': {

@@ -1038,3 +1038,324 @@ class SlurmCodeGen(TaskCodeGen):
                 returncodes = [0]
             """),
         ]
+
+
+class MonarchCodeGen(TaskCodeGen):
+    """Code generator for task execution on Slurm using Monarch actors.
+
+    Instead of generating srun commands with signal file coordination
+    (like SlurmCodeGen), this generates an async Python script that:
+    1. Connects to pre-started Monarch workers via discovery files
+    2. Spawns SkyPilotExecutor actors on each node
+    3. Dispatches setup/run commands via actor endpoint calls
+
+    This eliminates signal files, proctrack/cgroup barriers, thread-based
+    synchronization, and SLURM_* env var unsetting workarounds.
+    """
+
+    def __init__(
+        self,
+        slurm_job_id: str,
+        cluster_name: str,
+    ):
+        """Initialize MonarchCodeGen.
+
+        Args:
+            slurm_job_id: The Slurm job ID, i.e. SLURM_JOB_ID
+            cluster_name: The cluster name on cloud (for worker discovery)
+        """
+        super().__init__()
+        self._slurm_job_id = slurm_job_id
+        self._cluster_name = cluster_name
+
+    def add_prologue(self, job_id: int) -> None:
+        assert not self._has_prologue, 'add_prologue() called twice?'
+        self._has_prologue = True
+        self.job_id = job_id
+
+        self._add_common_imports()
+
+        self._code.append(
+            textwrap.dedent("""\
+            import asyncio
+            import colorama
+            import json
+            """))
+        self._add_skylet_imports()
+
+        self._add_constants()
+
+        self._add_logging_functions()
+
+        self._code += [
+            'autostop_lib.set_last_active_time_to_now()',
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
+        ]
+
+        self._setup_cmd: Optional[str] = None
+        self._setup_envs: Optional[Dict[str, str]] = None
+        self._setup_log_dir: Optional[str] = None
+        self._setup_num_nodes: Optional[int] = None
+
+    def add_setup(
+        self,
+        num_nodes: int,
+        resources_dict: Dict[str, float],
+        stable_cluster_internal_ips: List[str],
+        env_vars: Dict[str, str],
+        log_dir: str,
+        setup_cmd: Optional[str] = None,
+    ) -> None:
+        assert self._has_prologue, ('Call add_prologue() before add_setup().')
+        self._has_setup = True
+        self._cluster_num_nodes = len(stable_cluster_internal_ips)
+        self._stable_cluster_ips = stable_cluster_internal_ips
+
+        self._add_waiting_for_resources_msg(num_nodes)
+
+        # Store setup information for use in add_task().
+        if setup_cmd is not None:
+            setup_envs = env_vars.copy()
+            setup_envs[constants.SKYPILOT_NUM_NODES] = str(num_nodes)
+            self._setup_cmd = setup_cmd
+            self._setup_envs = setup_envs
+            self._setup_log_dir = log_dir
+            self._setup_num_nodes = num_nodes
+
+    def add_task(
+        self,
+        num_nodes: int,
+        bash_script: Optional[str],
+        task_name: Optional[str],
+        resources_dict: Dict[str, float],
+        log_dir: str,
+        env_vars: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Generates code that uses Monarch actors to execute a task."""
+        assert self._has_setup, 'Call add_setup() before add_task().'
+        env_vars = env_vars or {}
+        task_name = task_name if task_name is not None else 'task'
+
+        acc_name, acc_count = self._get_accelerator_details(resources_dict)
+        num_gpus = 0
+        if (acc_name is not None and
+                not accelerator_registry.is_schedulable_non_gpu_accelerator(
+                    acc_name)):
+            num_gpus = int(math.ceil(acc_count))
+
+        sky_env_vars_dict_str = [
+            textwrap.dedent(f"""\
+            sky_env_vars_dict = {{}}
+            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            """)
+        ]
+
+        if env_vars:
+            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
+                                         for k, v in env_vars.items())
+        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
+
+        rclone_flush_script = self.get_rclone_flush_script()
+        streaming_msg = self._get_job_started_msg()
+        has_setup_cmd = self._setup_cmd is not None
+        self._code += [
+            sky_env_vars_dict_str,
+            textwrap.dedent(f"""\
+            script = {bash_script!r}
+            if script is None:
+                script = ''
+            rclone_flush_script = {rclone_flush_script!r}
+
+            if script or {has_setup_cmd!r}:
+                script += rclone_flush_script
+                sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
+
+                async def _monarch_run():
+                    import site as _site
+
+                    # Ensure XDG_RUNTIME_DIR points to a writable directory.
+                    # Monarch's Rust runtime creates Unix domain sockets there
+                    # and /run/user/<uid>/ often doesn't exist on Slurm nodes.
+                    _rd = os.path.join(os.path.expanduser('~'), '.monarch_runtime')
+                    os.makedirs(_rd, exist_ok=True)
+                    os.environ['XDG_RUNTIME_DIR'] = _rd
+
+                    # Monarch spawns child procs using os.path.realpath(sys.executable)
+                    # which resolves venv symlinks to the base Python. Set PYTHONPATH
+                    # so children can find packages from our venv.
+                    _sp = [p for p in _site.getsitepackages() if 'site-packages' in p]
+                    if _sp:
+                        os.environ['PYTHONPATH'] = os.pathsep.join(_sp)
+
+                    # Configure Monarch to use TCP transport for proc mesh
+                    # communication. The default (Unix domain sockets) fails
+                    # across Slurm nodes. Must be called BEFORE any other
+                    # Monarch API calls.
+                    from monarch._rust_bindings.monarch_hyperactor.channel import ChannelTransport
+                    from monarch._rust_bindings.monarch_hyperactor.config import configure
+                    configure(default_transport=ChannelTransport.TcpWithHostname)
+
+                    from monarch._src.actor.bootstrap import attach_to_workers
+                    from sky.skylet.executor.monarch_executor import SkyPilotExecutor
+
+                    # Read worker addresses from discovery files.
+                    # Workers are started by instance_setup.start_monarch_workers()
+                    # during cluster provisioning (after torchmonarch is installed).
+                    # HOME is always the sky cluster home dir in the job
+                    # execution context (both container and non-container).
+                    worker_dir = os.path.join(
+                        os.path.expanduser('~'),
+                        {constants.MONARCH_WORKERS_DIR!r})
+                    workers = []
+                    for f in sorted(os.listdir(worker_dir)):
+                        fpath = os.path.join(worker_dir, f)
+                        with open(fpath) as fh:
+                            addr = fh.read().strip()
+                        # Only accept valid worker addresses (tcp://host:port).
+                        # Skip stale or unrelated files.
+                        if addr.startswith('tcp://'):
+                            workers.append(addr)
+
+                    # Connect to Monarch workers
+                    host_mesh = attach_to_workers(
+                        name='sky_mesh',
+                        ca='trust_all_connections',
+                        workers=workers)
+                    await host_mesh.initialized
+
+                    # Create process mesh and spawn executor actors
+                    proc_mesh = host_mesh.spawn_procs()
+                    executors = proc_mesh.spawn('executors', SkyPilotExecutor)
+
+                    # Discover IPs for deterministic SKYPILOT_NODE_RANK assignment
+                    ip_futures = await executors.get_ip.call()
+                    actor_ips = [ip for _, ip in ip_futures.flatten('hosts')]
+
+                    cluster_ips = {self._stable_cluster_ips!r}
+
+                    task_display_name = {task_name!r}
+
+                    def _build_prefix(node_idx, rank, ip, is_setup=False,
+                                       single_node=False):
+                        \"\"\"Build colorama log prefix matching executor/slurm.py conventions.\"\"\"
+                        node_name = 'head' if node_idx == 0 else f'worker{{node_idx}}'
+                        if is_setup:
+                            if node_idx == 0:
+                                return (f'{{colorama.Fore.CYAN}}(setup pid={{{{pid}}}})'
+                                        f'{{colorama.Style.RESET_ALL}} ')
+                            return (f'{{colorama.Fore.CYAN}}(setup pid={{{{pid}}}}, ip={{ip}})'
+                                    f'{{colorama.Style.RESET_ALL}} ')
+                        elif single_node:
+                            return (f'{{colorama.Fore.CYAN}}({{task_display_name}}, pid={{{{pid}}}})'
+                                    f'{{colorama.Style.RESET_ALL}} ')
+                        else:
+                            if node_idx == 0:
+                                return (f'{{colorama.Fore.CYAN}}({{node_name}}, rank={{rank}}, pid={{{{pid}}}})'
+                                        f'{{colorama.Style.RESET_ALL}} ')
+                            return (f'{{colorama.Fore.CYAN}}({{node_name}}, rank={{rank}}, pid={{{{pid}}}}, ip={{ip}})'
+                                    f'{{colorama.Style.RESET_ALL}} ')
+
+                    # --- Setup phase ---
+                    if {has_setup_cmd!r}:
+                        job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETTING_UP)
+                        job_lib.scheduler.schedule_step()
+
+                        setup_futures = []
+                        setup_log_paths = []
+                        for i, ip in enumerate(actor_ips):
+                            node_idx = cluster_ips.index(ip)
+                            node_name = 'head' if node_idx == 0 else f'worker{{node_idx}}'
+                            # Expand ~ here (controller side) because executor
+                            # procs may have a different HOME.
+                            log_path = os.path.expanduser(
+                                os.path.join({self._setup_log_dir!r}, f'setup-{{node_name}}.log'))
+                            setup_log_paths.append(log_path)
+                            prefix = _build_prefix(node_idx, i, ip, is_setup=True)
+                            setup_env = dict({self._setup_envs!r})
+
+                            fut = executors.slice(hosts=i).run_command.call(
+                                {self._setup_cmd!r}, setup_env, log_path, prefix)
+                            setup_futures.append(fut)
+
+                        # Wait for all setup completions
+                        for i, fut in enumerate(setup_futures):
+                            result = await fut
+                            setup_rc = [rc for _, rc in result.flatten('hosts')][0]
+                            # Print setup log output
+                            lp = setup_log_paths[i]
+                            if os.path.exists(lp):
+                                with open(lp) as _f:
+                                    print(_f.read(), end='', flush=True)
+                            if setup_rc != 0:
+                                msg = (f'ERROR: {{colorama.Fore.RED}}Job {self.job_id}\\'s '
+                                       f'setup failed with return code {{setup_rc}}.'
+                                       f' See error logs above for more details.'
+                                       f'{{colorama.Style.RESET_ALL}}')
+                                print(msg, flush=True)
+                                job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                                return [setup_rc]
+
+                    print({streaming_msg!r}, flush=True)
+
+                    job_lib.set_job_started({self.job_id!r})
+                    if not {has_setup_cmd!r}:
+                        job_lib.scheduler.schedule_step()
+
+                    # --- Task phase ---
+                    # Only dispatch to num_nodes actors (task may use fewer
+                    # nodes than the cluster has).
+                    task_num_nodes = {num_nodes}
+                    task_actor_ips = actor_ips[:task_num_nodes]
+                    node_ips_str = '\\n'.join(task_actor_ips)
+
+                    task_futures = []
+                    task_log_paths = []
+                    for i, ip in enumerate(task_actor_ips):
+                        node_idx = cluster_ips.index(ip)
+                        rank = i
+                        node_name = 'head' if node_idx == 0 else f'worker{{node_idx}}'
+
+                        if task_num_nodes == 1:
+                            log_filename = 'run.log'
+                        else:
+                            log_filename = f'{{rank}}-{{node_name}}.log'
+                        # Expand ~ here (controller side) because executor
+                        # procs may have a different HOME.
+                        log_path = os.path.expanduser(
+                            os.path.join({log_dir!r}, log_filename))
+                        task_log_paths.append(log_path)
+
+                        task_env = dict(sky_env_vars_dict)
+                        task_env['SKYPILOT_NODE_RANK'] = str(rank)
+                        task_env['SKYPILOT_NUM_NODES'] = str(task_num_nodes)
+                        task_env['SKYPILOT_NODE_IPS'] = node_ips_str
+
+                        prefix = _build_prefix(node_idx, rank, ip,
+                                               single_node=(task_num_nodes == 1))
+                        fut = executors.slice(hosts=i).run_command.call(
+                            script, task_env, log_path, prefix)
+                        task_futures.append(fut)
+
+                    # Collect return codes
+                    task_returncodes = []
+                    for fut in task_futures:
+                        result = await fut
+                        rc = [rc for _, rc in result.flatten('hosts')][0]
+                        task_returncodes.append(rc)
+
+                    # Print log file contents. The Monarch actor writes output
+                    # to log files (via run_bash_command_with_log), but the
+                    # actor's stdout is not forwarded to the controller. Read
+                    # the log files from the shared filesystem and print them.
+                    for lp in task_log_paths:
+                        if os.path.exists(lp):
+                            with open(lp) as _f:
+                                print(_f.read(), end='', flush=True)
+
+                    return task_returncodes
+
+                returncodes = asyncio.run(_monarch_run())
+            else:
+                returncodes = [0]
+            """),
+        ]

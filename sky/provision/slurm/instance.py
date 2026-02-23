@@ -434,6 +434,13 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'echo "[container] Ready in $((SECONDS - CONTAINER_START))s"\n'
             f'touch {container_marker_file} {ready_signal}')
 
+    # NOTE: Monarch worker startup is NOT done in the sbatch script.
+    # The skypilot-runtime venv (which contains torchmonarch) is installed
+    # later by setup_commands (via instance_setup.py). Monarch workers are
+    # started on-demand by the controller script (MonarchCodeGen) when the
+    # first job runs, using srun --overlap from the head node.
+    monarch_block = ''
+
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
@@ -494,6 +501,7 @@ echo '{proctrack_type or "unknown"}' > {sky_cluster_home_dir}/{skylet_constants.
 # Suppress login messages.
 touch {sky_cluster_home_dir}/.hushlogin
 {container_block}
+{monarch_block}
 {f'touch {ready_signal}' if container_image is None else ''}
 {'sleep infinity' if container_image is None else 'wait'}
 """

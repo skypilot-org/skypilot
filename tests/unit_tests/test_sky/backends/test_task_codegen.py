@@ -1,13 +1,15 @@
-"""Snapshot tests for RayCodeGen and SlurmCodeGen code generation.
+"""Snapshot tests for RayCodeGen, SlurmCodeGen, and MonarchCodeGen.
 
-These tests validate that RayCodeGen and SlurmCodeGen produce consistent output
-for various configurations. The expected outputs are stored in:
+These tests validate that RayCodeGen, SlurmCodeGen, and MonarchCodeGen produce
+consistent output for various configurations. The expected outputs are stored in:
 - testdata/ray_codegen/*.py
 - testdata/slurm_codegen/*.py
+- testdata/monarch_codegen/*.py
 
 To update snapshots when intentional changes are made:
     UPDATE_SNAPSHOT=1 pytest tests/unit_tests/test_sky/backends/test_task_codegen.py
 """
+import ast
 import os
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from sky.provision.slurm import utils as slurm_utils
 
 TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'ray_codegen'
 SLURM_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'slurm_codegen'
+MONARCH_TESTDATA_DIR = Path(__file__).parent / 'testdata' / 'monarch_codegen'
 
 
 def assert_codegen_matches_snapshot(test_name: str,
@@ -316,3 +319,181 @@ class TestRcloneFlushScript:
         slurm_script = slurm_codegen.get_rclone_flush_script()
 
         assert ray_script == slurm_script
+
+
+# ---- MonarchCodeGen tests ----
+
+
+def _build_monarch_codegen(
+    num_nodes: int = 1,
+    setup_cmd: str = None,
+    bash_script: str = 'echo hello',
+    task_name: str = 'test_task',
+    resources_dict: dict = None,
+    env_vars: dict = None,
+    cluster_ips: list = None,
+) -> str:
+    """Helper to build a MonarchCodeGen output for testing."""
+    if resources_dict is None:
+        resources_dict = {'CPU': 2.0}
+    if env_vars is None:
+        env_vars = {
+            'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2',
+        }
+    if cluster_ips is None:
+        cluster_ips = [f'10.0.0.{i + 1}' for i in range(num_nodes)]
+
+    codegen = task_codegen.MonarchCodeGen(
+        slurm_job_id='12345',
+        cluster_name='test-cluster',
+    )
+    codegen.add_prologue(job_id=2)
+    codegen.add_setup(
+        num_nodes,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=cluster_ips,
+        env_vars=env_vars,
+        log_dir='/sky/logs',
+        setup_cmd=setup_cmd,
+    )
+    codegen.add_task(
+        num_nodes,
+        bash_script=bash_script,
+        task_name=task_name,
+        resources_dict=dict(resources_dict),
+        log_dir='/sky/logs/tasks',
+        env_vars=env_vars,
+    )
+    codegen.add_epilogue()
+    return codegen.build()
+
+
+def test_monarch_single_node_produces_valid_python():
+    """Test that MonarchCodeGen produces syntactically valid Python."""
+    code = _build_monarch_codegen(num_nodes=1, bash_script='echo hello')
+    # ast.parse will raise SyntaxError if the code is invalid
+    ast.parse(code)
+
+
+def test_monarch_multi_node_produces_valid_python():
+    """Test that MonarchCodeGen produces syntactically valid Python for
+    multi-node."""
+    code = _build_monarch_codegen(
+        num_nodes=2,
+        bash_script='hostname',
+        setup_cmd='pip install torch',
+    )
+    ast.parse(code)
+
+
+def test_monarch_single_node_with_gpu():
+    """Test single-node GPU job with setup on Monarch."""
+    codegen = task_codegen.MonarchCodeGen(
+        slurm_job_id='12345',
+        cluster_name='test-cluster',
+    )
+    codegen.add_prologue(job_id=2)
+
+    resources_dict = {'CPU': 4.0, 'GPU': 1.0}
+    task_env_vars = {
+        'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2',
+        'MODEL_NAME': 'resnet50',
+    }
+
+    codegen.add_setup(
+        1,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=['10.0.0.1'],
+        env_vars=task_env_vars,
+        log_dir='/sky/logs',
+        setup_cmd='pip install torch',
+    )
+
+    codegen.add_task(
+        1,
+        bash_script='python train.py',
+        task_name='train_task',
+        resources_dict={
+            'CPU': 4.0,
+            'GPU': 1.0
+        },
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
+
+    codegen.add_epilogue()
+
+    result = codegen.build()
+    # Verify the generated code is valid Python
+    ast.parse(result)
+    assert_codegen_matches_snapshot('monarch_single_node_with_gpu',
+                                    result,
+                                    testdata_dir=MONARCH_TESTDATA_DIR)
+
+
+def test_monarch_multi_node_2nodes():
+    """Test multi-node job (2 nodes) on Monarch."""
+    codegen = task_codegen.MonarchCodeGen(
+        slurm_job_id='12345',
+        cluster_name='test-cluster',
+    )
+    codegen.add_prologue(job_id=3)
+
+    num_nodes = 2
+    resources_dict = {'CPU': 2.0}
+    task_env_vars = {
+        'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000002-cluster-3',
+    }
+
+    codegen.add_setup(
+        num_nodes,
+        resources_dict=resources_dict,
+        stable_cluster_internal_ips=['10.0.0.1', '10.0.0.2'],
+        env_vars=task_env_vars,
+        log_dir='/sky/logs',
+        setup_cmd=None,
+    )
+
+    codegen.add_task(
+        num_nodes,
+        bash_script='echo "Running on node $SKYPILOT_NODE_RANK"',
+        task_name='distributed_task',
+        resources_dict={'CPU': 2.0},
+        log_dir='/sky/logs/tasks',
+        env_vars=task_env_vars,
+    )
+
+    codegen.add_epilogue()
+
+    result = codegen.build()
+    ast.parse(result)
+    assert_codegen_matches_snapshot('monarch_multi_node_2nodes',
+                                    result,
+                                    testdata_dir=MONARCH_TESTDATA_DIR)
+
+
+def test_monarch_no_script_produces_valid_python():
+    """Test MonarchCodeGen with no script (empty run command)."""
+    code = _build_monarch_codegen(num_nodes=1, bash_script=None)
+    ast.parse(code)
+
+
+def test_monarch_codegen_contains_monarch_imports():
+    """Test that generated code contains Monarch-specific imports."""
+    code = _build_monarch_codegen()
+    assert 'attach_to_workers' in code
+    assert 'SkyPilotExecutor' in code
+
+
+def test_monarch_codegen_no_srun_commands():
+    """Test that Monarch codegen does NOT produce any srun commands."""
+    code = _build_monarch_codegen(num_nodes=2, setup_cmd='pip install torch')
+    assert 'srun' not in code
+
+
+def test_monarch_codegen_no_signal_files():
+    """Test that Monarch codegen does NOT use signal file coordination."""
+    code = _build_monarch_codegen(num_nodes=2, setup_cmd='pip install torch')
+    assert 'alloc_signal_file' not in code
+    assert 'setup_done_signal_file' not in code
+    assert 'sky_run_done' not in code

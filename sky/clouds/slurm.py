@@ -468,6 +468,8 @@ class Slurm(clouds.Cloud):
             'slurm_cluster_name_env_var':
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
+            'use_monarch': skypilot_config.get_nested(('slurm', 'use_monarch'),
+                                                      False),
         }
 
         return deploy_vars
