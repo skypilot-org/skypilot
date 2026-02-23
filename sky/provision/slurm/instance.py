@@ -99,16 +99,12 @@ def _wait_for_job_nodes(
                        f'{timeout} seconds. Last state: {last_state}')
 
 
-def _sky_cluster_home_dir(home_dir: str,
-                          cluster_name_on_cloud: str,
-                          workdir: Optional[str] = None) -> str:
+def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     """Returns the SkyPilot cluster's home directory path on the Slurm cluster.
 
     This path is assumed to be on a shared NFS mount accessible by all nodes.
-    If workdir is specified via config, it overrides the default home_dir.
     """
-    base = workdir if workdir is not None else home_dir
-    return f'{base}/.sky_clusters/{cluster_name_on_cloud}'
+    return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
 
 
 def _resolve_remote_path(runner: 'command_runner.SSHCommandRunner',
@@ -126,14 +122,13 @@ def _resolve_remote_path(runner: 'command_runner.SSHCommandRunner',
     return path
 
 
-def _sbatch_provision_script_path(workdir: Optional[str],
+def _sbatch_provision_script_path(base_dir: str,
                                   cluster_name_on_cloud: str) -> str:
     """Returns the path to the sbatch provision script on the login node."""
     # Put sbatch script in $HOME instead of /tmp as there can be
     # multiple login nodes, and different SSH connections
     # can land on different login nodes.
-    wd = workdir if workdir is not None else '~'
-    return os.path.join(wd, PROVISION_SCRIPTS_DIRECTORY_NAME,
+    return os.path.join(base_dir, PROVISION_SCRIPTS_DIRECTORY_NAME,
                         f'{cluster_name_on_cloud}.sh')
 
 
@@ -372,16 +367,18 @@ def _create_virtual_instance(
         logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
 
     # Must be absolute — #SBATCH directives don't expand ~ or $HOME.
-    sbatch_log_base_dir = workdir if workdir is not None else remote_home_dir
+    sky_base_dir = workdir if workdir is not None else remote_home_dir
+    assert os.path.isabs(sky_base_dir), (
+        f'sky_base_dir must be absolute, got: {sky_base_dir}')
+    sbatch_log_base_dir = sky_base_dir
 
     provision_script_path = _sbatch_provision_script_path(
-        workdir, cluster_name_on_cloud)
+        sky_base_dir, cluster_name_on_cloud)
     provision_scripts_dir = os.path.dirname(provision_script_path)
 
     skypilot_runtime_dir = _skypilot_runtime_dir(tmpdir, cluster_name_on_cloud)
-    sky_cluster_home_dir = _sky_cluster_home_dir(remote_home_dir,
-                                                 cluster_name_on_cloud,
-                                                 workdir=workdir)
+    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                                 cluster_name_on_cloud)
     ready_signal = f'{sky_cluster_home_dir}/.sky_sbatch_ready'
     slurm_marker_file = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_MARKER_FILE}')
@@ -1011,9 +1008,9 @@ def get_command_runners(
     if tmpdir is not None:
         tmpdir = _resolve_remote_path(login_node_runner, tmpdir)
 
-    sky_cluster_home_dir = _sky_cluster_home_dir(remote_home_dir,
-                                                 cluster_name_on_cloud,
-                                                 workdir=workdir)
+    sky_base_dir = workdir if workdir is not None else remote_home_dir
+    sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
+                                                 cluster_name_on_cloud)
     container_marker = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
     rc, stdout, stderr = login_node_runner.run(f'test -f {container_marker}',

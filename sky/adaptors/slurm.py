@@ -649,7 +649,7 @@ class SlurmClient:
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
 
-    def check_dir_shared_fs(self, path: str = '~') -> Optional[str]:
+    def check_dir_shared_fs(self, path: str) -> Optional[str]:
         """Check the filesystem type of a directory.
 
         Args:
