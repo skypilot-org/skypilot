@@ -2897,3 +2897,35 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_managed_jobs_api_access(generic_cloud: str):
+    """Test managed jobs with api_access: nested job launch from a job.
+
+    Requires a remote API server because the worker VM must be able to
+    reach the API server endpoint over the network.
+    """
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Requires a remote API server (--remote-server)')
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'managed-jobs-api-access',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_api_access.yaml -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+            f's=$(sky jobs logs -n {name} --no-follow); echo "$s"; '
+            f'echo "$s" | grep "NESTED_JOB_SUCCESS"',
+        ],
+        f'sky jobs cancel -y -n {name}; sky jobs cancel -y -n nested-job',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
