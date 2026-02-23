@@ -2707,7 +2707,7 @@ async def download_debug_dump(
 
     The dump file is automatically deleted after the download completes.
     """
-    from sky.utils import debug_utils
+    from sky.utils import debug_utils  # pylint: disable=import-outside-toplevel
 
     dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
     dump_path = dump_dir / dump_filename

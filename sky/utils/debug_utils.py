@@ -490,8 +490,8 @@ def _dump_request_id_info(
         # Copy debug log file (only exists when
         # ENABLE_REQUEST_DEBUG_LOGGING is enabled)
         try:
-            debug_log_path = pathlib.Path(
-                sky_logging._DEBUG_LOG_DIR) / f'{request_id}.log'
+            debug_log_path = pathlib.Path(sky_logging._DEBUG_LOG_DIR  # pylint: disable=protected-access
+                                         ) / f'{request_id}.log'
             if debug_log_path.exists():
                 shutil.copy2(debug_log_path,
                              os.path.join(request_dir, 'request_debug.log'))

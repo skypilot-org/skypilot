@@ -3059,7 +3059,7 @@ def slurm_node_info(
 def _build_client_info() -> Dict[str, Any]:
     """Build client-side info for debug dumps."""
     import sky  # pylint: disable=import-outside-toplevel
-    from sky.server import constants as server_constants
+    # pylint: disable-next=import-outside-toplevel
     from sky.utils import config_utils
 
     # Sensitive config paths to redact, following the same pattern as
