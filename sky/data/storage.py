@@ -355,7 +355,7 @@ class MountCachedConfig:
     # Start a rclone server. This is mostly for performance benchmarking.
     # We do not expect users to use this.
     # rclone flag: --rc
-    _server: bool = False
+    _server: Optional[bool] = None
 
     def to_rclone_flags(self) -> str:
         """Convert non-None fields to rclone CLI flag string."""

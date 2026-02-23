@@ -204,15 +204,15 @@ class TestMountCachedConfig:
     def test_to_yaml_config_omits_none(self):
         config = storage_lib.MountCachedConfig(transfers=4)
         yaml_dict = config.to_yaml_config()
-        assert yaml_dict == {'transfers': 4, '_server': False}
+        assert yaml_dict == {'transfers': 4}
 
     def test_from_yaml_config_empty(self):
         config = storage_lib.MountCachedConfig.from_yaml_config({})
         assert config == storage_lib.MountCachedConfig()
 
-    def test_server_default_false(self):
+    def test_server_default_none(self):
         config = storage_lib.MountCachedConfig()
-        assert config._server is False
+        assert config._server is None
         assert '--rc' not in config.to_rclone_flags()
 
     def test_server_true_emits_rc_flag(self):
@@ -231,13 +231,10 @@ class TestMountCachedConfig:
         restored = storage_lib.MountCachedConfig.from_yaml_config(yaml_dict)
         assert restored._server is True
 
-    def test_server_round_trip_yaml_default_false(self):
+    def test_server_default_omitted_from_yaml(self):
         config = storage_lib.MountCachedConfig()
         yaml_dict = config.to_yaml_config()
-        assert '_server' in yaml_dict
-        assert yaml_dict['_server'] is False
-        restored = storage_lib.MountCachedConfig.from_yaml_config(yaml_dict)
-        assert restored._server is False
+        assert '_server' not in yaml_dict
 
 
 class TestStorageFromYamlWithMountCachedConfig:
