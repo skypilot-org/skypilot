@@ -3,6 +3,7 @@ import pytest
 
 from sky.clouds.utils import azure_utils
 from sky.provision.azure.config import _remove_msi_resources_from_template
+from sky.provision.azure.config import _remove_network_resources_from_template
 from sky.provision.azure.config import _resolve_custom_managed_identity
 
 
@@ -70,36 +71,7 @@ class TestRemoveMsiResourcesFromTemplate:
 
     def test_removes_msi_and_role_assignment(self):
         """MSI and role assignment resources are removed."""
-        template = {
-            'resources': [
-                {
-                    'type': 'Microsoft.ManagedIdentity/userAssignedIdentities'
-                },
-                {
-                    'type': 'Microsoft.Authorization/roleAssignments'
-                },
-                {
-                    'type': 'Microsoft.Network/networkSecurityGroups'
-                },
-                {
-                    'type': 'Microsoft.Network/virtualNetworks'
-                },
-            ],
-            'outputs': {
-                'subnet': {
-                    'type': 'string',
-                    'value': 'subnet-id'
-                },
-                'nsg': {
-                    'type': 'string',
-                    'value': 'nsg-id'
-                },
-                'msi': {
-                    'type': 'string',
-                    'value': 'msi-id'
-                },
-            }
-        }
+        template = _make_arm_template()
         _remove_msi_resources_from_template(template)
         resource_types = [r['type'] for r in template['resources']]
         assert 'Microsoft.ManagedIdentity/userAssignedIdentities' \
@@ -111,3 +83,63 @@ class TestRemoveMsiResourcesFromTemplate:
         assert 'msi' not in template['outputs']
         assert 'subnet' in template['outputs']
         assert 'nsg' in template['outputs']
+
+
+class TestRemoveNetworkResourcesFromTemplate:
+    """Tests for _remove_network_resources_from_template."""
+
+    def test_removes_vnet(self):
+        """VNet resource is removed, NSG is kept."""
+        template = _make_arm_template()
+        _remove_network_resources_from_template(template)
+        resource_types = [r['type'] for r in template['resources']]
+        assert 'Microsoft.Network/virtualNetworks' not in resource_types
+        assert 'Microsoft.Network/networkSecurityGroups' in resource_types
+        assert 'Microsoft.ManagedIdentity/userAssignedIdentities' \
+            in resource_types
+        assert 'subnet' not in template['outputs']
+        assert 'nsg' in template['outputs']
+        assert 'msi' in template['outputs']
+
+    def test_combined_msi_and_network_removal(self):
+        """Both MSI and network resources can be removed together."""
+        template = _make_arm_template()
+        _remove_msi_resources_from_template(template)
+        _remove_network_resources_from_template(template)
+        resource_types = [r['type'] for r in template['resources']]
+        assert resource_types == ['Microsoft.Network/networkSecurityGroups']
+        assert list(template['outputs'].keys()) == ['nsg']
+
+
+def _make_arm_template():
+    """Create a minimal ARM template for testing."""
+    return {
+        'resources': [
+            {
+                'type': 'Microsoft.ManagedIdentity/userAssignedIdentities'
+            },
+            {
+                'type': 'Microsoft.Authorization/roleAssignments'
+            },
+            {
+                'type': 'Microsoft.Network/networkSecurityGroups'
+            },
+            {
+                'type': 'Microsoft.Network/virtualNetworks'
+            },
+        ],
+        'outputs': {
+            'subnet': {
+                'type': 'string',
+                'value': 'subnet-id'
+            },
+            'nsg': {
+                'type': 'string',
+                'value': 'nsg-id'
+            },
+            'msi': {
+                'type': 'string',
+                'value': 'msi-id'
+            },
+        }
+    }
