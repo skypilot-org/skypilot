@@ -1428,6 +1428,34 @@ def can_start_new_process(pool: bool) -> bool:
     return serve_state.get_num_services() < _get_number_of_services(pool)
 
 
+def get_max_services_error_message(pool: bool) -> str:
+    """Returns a detailed error message when max services is reached."""
+    current = serve_state.get_num_services()
+    maximum = _get_number_of_services(pool)
+    consolidation = _is_consolidation_mode(pool)
+    controller_type = 'jobs' if pool else 'serve'
+
+    msg = (f'Max number of services reached: {current}/{maximum} '
+           f'services are running.')
+    msg += ' To spin up more services, please tear down some existing ones.'
+
+    if consolidation:
+        msg += (f'\n\nThe {controller_type} controller is running in '
+                'consolidation mode, sharing memory with the API server. '
+                'The max number of concurrent services is calculated based '
+                'on the available memory after reserving resources for the '
+                'API server workers. To increase the limit, allocate more '
+                'memory to the API server pod.')
+    else:
+        msg += (f'\n\nThe max number of concurrent services is calculated '
+                f'based on the controller VM memory. To increase the limit, '
+                f'use a controller with more memory by configuring '
+                f'`{controller_type}.controller.resources` in '
+                f'~/.sky/config.yaml.')
+
+    return msg
+
+
 def can_terminate(pool: bool) -> bool:
     # TODO(tian): probe API server to see if there is any pending terminate
     # requests.
