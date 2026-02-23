@@ -852,7 +852,7 @@ class SlurmCodeGen(TaskCodeGen):
                 setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
                 # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-                gpu_arg = f'--gpus-per-node={num_gpus}' if {num_gpus} > 0 else ''
+                gpu_arg = f'--gpus-per-node={num_gpus}'
 
                 def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                                           task_name=None, is_setup=False,

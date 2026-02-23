@@ -316,8 +316,10 @@ class Slurm(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        """For now, we assume zero cost for Slurm clusters."""
-        return 0.0
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import slurm_catalog
+        return slurm_catalog.get_hourly_cost(instance_type, use_spot, region,
+                                             zone)
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
