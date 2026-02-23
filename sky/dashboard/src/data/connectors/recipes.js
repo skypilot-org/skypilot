@@ -140,3 +140,21 @@ export async function togglePinRecipe(recipeName, pinned) {
     throw error;
   }
 }
+
+/**
+ * Launch a recipe by name.
+ * This is a fire-and-forget operation that submits the recipe for execution.
+ *
+ * @param {string} recipeName - The recipe's unique name
+ * @returns {Promise<string>} Request ID for tracking the launch
+ */
+export async function launchRecipe(recipeName) {
+  const response = await apiClient.fetchImmediate('/recipes/launch', {
+    recipe_name: recipeName,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Launch failed: ${text}`);
+  }
+  return response.headers.get('X-Skypilot-Request-ID');
+}

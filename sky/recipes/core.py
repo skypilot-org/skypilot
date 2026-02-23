@@ -291,3 +291,79 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Dict[str, Any]]:
     if recipe is None:
         return None
     return recipe.to_dict()
+
+
+def launch_recipe(
+    recipe_name: str,
+) -> Optional[str]:
+    """Launch a recipe by name.
+
+    Fetches the recipe from the database and dispatches to the appropriate
+    launch handler based on recipe_type.
+
+    Args:
+        recipe_name: The recipe's unique name.
+
+    Returns:
+        A status message string on success.
+
+    Raises:
+        ValueError: If recipe not found or YAML is invalid.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky import execution
+    from sky.jobs.server import core as jobs_server_core
+    from sky.utils import dag_utils
+    from sky.volumes.server import core as volumes_server_core
+    from sky.volumes import volume as volume_lib
+
+    recipe = recipes_db.get_recipe(recipe_name)
+    if recipe is None:
+        raise ValueError(f'Recipe not found: {recipe_name}')
+
+    content = recipe.content
+    recipe_type = recipe.recipe_type
+
+    if recipe_type == RecipeType.CLUSTER:
+        dag = dag_utils.load_chain_dag_from_yaml_str(content)
+        execution.launch(dag, cluster_name=recipe_name)
+        return f'Cluster recipe {recipe_name!r} launched successfully.'
+
+    if recipe_type == RecipeType.JOB:
+        dag = dag_utils.load_chain_dag_from_yaml_str(content)
+        jobs_server_core.launch(task=dag)
+        return f'Job recipe {recipe_name!r} launched successfully.'
+
+    if recipe_type == RecipeType.VOLUME:
+        config = yaml.safe_load(content)
+        volume = volume_lib.Volume.from_yaml_config(config)
+        volumes_server_core.volume_apply(
+            name=volume.name,
+            volume_type=volume.type,
+            cloud=volume.cloud,
+            region=volume.region,
+            zone=volume.zone,
+            size=volume.size,
+            config=volume.config or {},
+            labels=volume.labels,
+            use_existing=volume.use_existing,
+        )
+        return f'Volume recipe {recipe_name!r} applied successfully.'
+
+    if recipe_type == RecipeType.POOL:
+        config = yaml.safe_load(content)
+        pool_config = config.pop('pool', {})
+        pool_name = pool_config.get('name', recipe_name)
+        workers = pool_config.get('workers')
+        # Rebuild YAML without pool section for the task
+        task_yaml = yaml.dump(config) if config else ''
+        dag = dag_utils.load_chain_dag_from_yaml_str(task_yaml)
+        task = dag.tasks[0]
+        jobs_server_core.pool_apply(
+            task=task,
+            pool_name=pool_name,
+            workers=workers,
+        )
+        return f'Pool recipe {recipe_name!r} applied successfully.'
+
+    raise ValueError(f'Unsupported recipe type: {recipe_type}')

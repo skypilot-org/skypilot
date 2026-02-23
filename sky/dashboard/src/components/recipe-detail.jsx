@@ -11,6 +11,7 @@ import {
   CopyIcon,
   PinIcon,
   PinOffIcon,
+  PlayIcon,
   Trash2Icon,
   EditIcon,
   ShareIcon,
@@ -46,6 +47,7 @@ import {
   updateRecipe,
   deleteRecipe,
   togglePinRecipe,
+  launchRecipe,
 } from '@/data/connectors/recipes';
 import {
   getRecipeTypeInfo,
@@ -237,6 +239,65 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
   );
 }
 
+// Launch Confirmation Modal
+function LaunchModal({ isOpen, onClose, template, onLaunch }) {
+  const [isLaunching, setIsLaunching] = useState(false);
+
+  const handleLaunch = async () => {
+    setIsLaunching(true);
+    try {
+      await onLaunch();
+      onClose();
+    } catch (error) {
+      showToast(`Launch failed: ${error.message}`, 'error');
+    } finally {
+      setIsLaunching(false);
+    }
+  };
+
+  if (!template) return null;
+
+  const typeInfo = getRecipeTypeInfo(template.recipe_type);
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl text-gray-900">
+            Launch Recipe
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to launch &quot;{template.name}&quot; ({typeInfo.fullLabel})?
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={onClose} disabled={isLaunching}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleLaunch}
+            disabled={isLaunching}
+            className="bg-sky-600 hover:bg-sky-700 text-white"
+          >
+            {isLaunching ? (
+              <>
+                <CircularProgress size={16} className="mr-2" />
+                Launching...
+              </>
+            ) : (
+              <>
+                <PlayIcon className="w-4 h-4 mr-2" />
+                Launch
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // Main YamlDetail Component
 export function RecipeDetail() {
   const router = useRouter();
@@ -251,9 +312,25 @@ export function RecipeDetail() {
   const [commandCopied, setCommandCopied] = useState(false);
   const [yamlCopied, setYamlCopied] = useState(false);
 
+  // Auth state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
   // Modal states
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isLaunchModalOpen, setIsLaunchModalOpen] = useState(false);
+
+  // Fetch auth state to determine if launch button should be shown
+  useEffect(() => {
+    fetch(`${window.location.origin}/internal/dashboard/users/role`)
+      .then((res) => res.json())
+      .then((data) => {
+        setIsAuthenticated(!!data.id && data.id !== 'local');
+      })
+      .catch(() => {
+        setIsAuthenticated(false);
+      });
+  }, []);
 
   const fetchTemplate = useCallback(async () => {
     // Wait for router to be ready before accessing query params
@@ -320,6 +397,18 @@ export function RecipeDetail() {
       }
     } catch (error) {
       showToast(`Recipe pin operation failed: ${error.message}`, 'error');
+    }
+  };
+
+  const handleLaunch = async () => {
+    try {
+      await launchRecipe(template.name);
+      showToast(
+        `Recipe "${template.name}" launch submitted successfully!`,
+        'success'
+      );
+    } catch (error) {
+      throw error;
     }
   };
 
@@ -456,6 +545,16 @@ export function RecipeDetail() {
         </div>
 
         <div className="flex items-center gap-4">
+          {isAuthenticated && (
+            <Button
+              onClick={() => setIsLaunchModalOpen(true)}
+              className="bg-sky-600 hover:bg-sky-700 text-white"
+              size="sm"
+            >
+              <PlayIcon className="w-4 h-4 mr-1.5" />
+              Launch
+            </Button>
+          )}
           <button
             onClick={handleShare}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
@@ -660,6 +759,12 @@ export function RecipeDetail() {
         onClose={() => setIsDeleteModalOpen(false)}
         template={template}
         onDelete={handleDelete}
+      />
+      <LaunchModal
+        isOpen={isLaunchModalOpen}
+        onClose={() => setIsLaunchModalOpen(false)}
+        template={template}
+        onLaunch={handleLaunch}
       />
     </div>
   );
