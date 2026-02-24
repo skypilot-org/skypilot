@@ -1710,6 +1710,9 @@ class Task:
             config = yaml_utils.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
                 config['secrets'] = {k: '<redacted>' for k in config['secrets']}
+            docker_config = config.get('resources', {}).get('_docker_login_config', {})
+            if docker_config.get('password') is not None:
+                docker_config['password'] = '<redacted>'
             return config
         return self._to_yaml_config()
 
