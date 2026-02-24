@@ -608,15 +608,35 @@ class Slurm(clouds.Cloud):
                     region=cluster,
                     keys=('workdir',),
                     default_value=None)
-                check_path = workdir if workdir is not None else '~'
+                # Resolve the check path to an absolute path so that
+                # stat (via shlex.quote) gets a literal path with no
+                # shell variables or ~.
+                from sky.provision.slurm import instance as slurm_instance  # pylint: disable=import-outside-toplevel
+                remote_env = client.get_env()
+                if workdir is not None:
+                    check_path = slurm_instance._resolve_remote_path(
+                        workdir, remote_env)
+                else:
+                    check_path = remote_env.get('HOME', '~')
                 fs_type = client.check_dir_shared_fs(check_path)
-                if fs_type is not None and fs_type not in cls._SHARED_FS_TYPES:
-                    path_label = (f'workdir ({workdir})' if workdir is not None
-                                  else 'Home directory (~)')
-                    hint = (' Set slurm.cluster_configs.'
-                            f'{cluster}.workdir in '
-                            '~/.sky/config.yaml to a shared '
-                            'filesystem path.')
+                path_label = (f'workdir ({workdir})' if workdir is not None
+                              else 'Home directory (~)')
+                hint = (' Set slurm.cluster_configs.'
+                        f'{cluster}.workdir in '
+                        '~/.sky/config.yaml to a shared '
+                        'filesystem path.')
+                if fs_type is None:
+                    ctx2text[cluster] = (
+                        f'{colorama.Fore.GREEN}enabled.'
+                        f'{colorama.Style.RESET_ALL} '
+                        f'{colorama.Fore.LIGHTYELLOW_EX}'
+                        f'Warning: Could not determine filesystem '
+                        f'type for {path_label} ({check_path}). '
+                        'Ensure the working directory is on a shared '
+                        'filesystem (e.g., NFS) visible to all nodes.'
+                        f'{hint}'
+                        f'{colorama.Style.RESET_ALL}')
+                elif fs_type not in cls._SHARED_FS_TYPES:
                     ctx2text[cluster] = (
                         f'{colorama.Fore.GREEN}enabled.'
                         f'{colorama.Style.RESET_ALL} '

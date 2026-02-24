@@ -650,12 +650,28 @@ class SlurmClient:
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
 
+    def get_env(self) -> Dict[str, str]:
+        """Fetch environment variables from the remote host.
+
+        Returns:
+            Dictionary of environment variable name -> value.
+        """
+        rc, stdout, _ = self._run_slurm_cmd('env')
+        if rc != 0:
+            return {}
+        env: Dict[str, str] = {}
+        for line in stdout.splitlines():
+            if '=' in line:
+                key, _, value = line.partition('=')
+                env[key] = value
+        return env
+
     def check_dir_shared_fs(self, path: str) -> Optional[str]:
         """Check the filesystem type of a directory.
 
         Args:
-            path: The directory path to check. Shell expansion is
-                supported.
+            path: The directory path to check. Must be an absolute path
+                (no shell variables or ~).
 
         Returns:
             The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
