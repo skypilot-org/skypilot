@@ -845,47 +845,62 @@ class TestHelperPathFunctions:
         assert slurm_instance._skypilot_runtime_dir(tmpdir, cluster) == expected
 
 
-class TestResolveRemotePath:
-    """Test _resolve_remote_path with pattern matching."""
+class TestGetRemoteEnv:
+    """Test _get_remote_env parsing."""
 
-    def test_successful_expansion(self):
+    def test_parses_env_output(self):
         runner = mock.MagicMock()
-        runner.run.return_value = (0, 'SKYPILOT_RESOLVED_PATH: /home/ubuntu\n',
-                                   '')
-        result = slurm_instance._resolve_remote_path(runner, '/home/$USER')
-        assert result == '/home/ubuntu'
+        runner.run.return_value = (0, 'HOME=/home/ubuntu\nUSER=ubuntu\n', '')
+        env = slurm_instance._get_remote_env(runner)
+        assert env == {'HOME': '/home/ubuntu', 'USER': 'ubuntu'}
 
-    def test_absolute_path_passthrough(self):
+    def test_handles_values_with_equals(self):
         runner = mock.MagicMock()
-        runner.run.return_value = (0, 'SKYPILOT_RESOLVED_PATH: /fsx/ubuntu\n',
-                                   '')
-        result = slurm_instance._resolve_remote_path(runner, '/fsx/ubuntu')
-        assert result == '/fsx/ubuntu'
-
-    def test_noisy_stdout_extracts_correct_path(self):
-        runner = mock.MagicMock()
-        noisy_output = ('Welcome to Ubuntu 24.04!\n'
-                        'Last login: Mon Feb 23 2026\n'
-                        'SKYPILOT_RESOLVED_PATH: /home/ubuntu\n'
-                        'Some other noise\n')
-        runner.run.return_value = (0, noisy_output, '')
-        result = slurm_instance._resolve_remote_path(runner, '/home/$USER')
-        assert result == '/home/ubuntu'
+        runner.run.return_value = (0, 'PATH=/usr/bin:/bin\nFOO=a=b\n', '')
+        env = slurm_instance._get_remote_env(runner)
+        assert env['PATH'] == '/usr/bin:/bin'
+        assert env['FOO'] == 'a=b'
 
     def test_command_failure_raises(self):
         runner = mock.MagicMock()
         runner.run.return_value = (1, '', 'Connection refused')
         with pytest.raises(Exception):
-            slurm_instance._resolve_remote_path(runner, '/home/$USER')
+            slurm_instance._get_remote_env(runner)
 
-    def test_missing_pattern_raises(self):
-        runner = mock.MagicMock()
-        runner.run.return_value = (0, 'garbage output\n', '')
-        with pytest.raises(RuntimeError, match='Failed to extract'):
-            slurm_instance._resolve_remote_path(runner, '/home/$USER')
 
-    def test_unsafe_path_rejected(self):
-        runner = mock.MagicMock()
-        with pytest.raises(ValueError, match='unsafe characters'):
-            slurm_instance._resolve_remote_path(runner, '/home/; rm -rf /')
-        runner.run.assert_not_called()
+class TestResolveRemotePath:
+    """Test _resolve_remote_path with Python-side variable expansion."""
+
+    REMOTE_ENV = {'USER': 'ubuntu', 'HOME': '/home/ubuntu'}
+
+    def test_expands_dollar_var(self):
+        result = slurm_instance._resolve_remote_path('/fsx/$USER',
+                                                     self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_expands_braced_var(self):
+        result = slurm_instance._resolve_remote_path('/fsx/${USER}',
+                                                     self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_expands_multiple_vars(self):
+        result = slurm_instance._resolve_remote_path('$HOME/$USER',
+                                                     self.REMOTE_ENV)
+        assert result == '/home/ubuntu/ubuntu'
+
+    def test_unknown_var_left_unchanged(self):
+        result = slurm_instance._resolve_remote_path('/fsx/$UNKNOWN',
+                                                     self.REMOTE_ENV)
+        assert result == '/fsx/$UNKNOWN'
+
+    def test_no_vars_passthrough(self):
+        result = slurm_instance._resolve_remote_path('/fsx/ubuntu',
+                                                     self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_injection_not_expanded(self):
+        # Even if someone puts shell metacharacters in config,
+        # they are never sent to a shell — just literal string replacement.
+        result = slurm_instance._resolve_remote_path(
+            '/home/; rm -rf /', self.REMOTE_ENV)
+        assert result == '/home/; rm -rf /'

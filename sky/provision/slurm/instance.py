@@ -28,11 +28,7 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
-_RESOLVED_PATH_PATTERN = re.compile(r'SKYPILOT_RESOLVED_PATH: ([^\s\n]+)')
-# Allowlist for path characters: alphanumerics, path separators, shell
-# variables ($), tilde (~), dot, and hyphen. Rejects injection characters
-# like ;, |, &, backticks, $(), etc.
-_SAFE_PATH_PATTERN = re.compile(r'^[a-zA-Z0-9/_.$~-]+$')
+_VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -113,36 +109,46 @@ def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
 
 
-def _resolve_remote_path(runner: 'command_runner.SSHCommandRunner',
-                         path: str) -> str:
-    """Resolve a path with shell variable expansion on the remote host.
+def _get_remote_env(
+        runner: 'command_runner.SSHCommandRunner') -> Dict[str, str]:
+    """Fetch environment variables from the remote host.
 
-    Expands shell variables like $USER or $HOME by running echo on the
-    remote side. Uses pattern matching to safely extract the resolved path
-    even when MOTD or shell startup scripts produce noisy output.
-
-    Raises:
-        ValueError: If the path contains unsafe characters.
-        exceptions.CommandError: If the remote command fails.
-        RuntimeError: If the resolved path cannot be extracted from output.
+    Runs `env` over SSH and parses the key=value output. The command is
+    fixed (no user input), so there is no injection risk.
     """
-    if not _SAFE_PATH_PATTERN.match(path):
-        raise ValueError(f'Path contains unsafe characters: {path!r}. '
-                         'Only alphanumerics, /, _, ., $, ~, and - '
-                         'are allowed.')
-    cmd = f'echo "SKYPILOT_RESOLVED_PATH: $(echo "{path}")"'
+    cmd = 'env'
     rc, stdout, stderr = runner.run(cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
                                     stream_logs=False)
     subprocess_utils.handle_returncode(
-        rc, cmd, f'Failed to resolve remote path {path!r}.', stderr=stderr)
-    match = _RESOLVED_PATH_PATTERN.search(stdout)
-    if not match:
-        raise RuntimeError(
-            f'Failed to extract resolved path from output for {path!r}: '
-            f'{stdout!r}')
-    return match.group(1)
+        rc, cmd, 'Failed to fetch remote environment variables.',
+        stderr=stderr)
+    env: Dict[str, str] = {}
+    for line in stdout.splitlines():
+        if '=' in line:
+            key, _, value = line.partition('=')
+            env[key] = value
+    return env
+
+
+def _resolve_remote_path(path: str, remote_env: Dict[str, str]) -> str:
+    """Expand $VAR and ${VAR} in path using remote environment variables.
+
+    Uses the same expansion logic as os.path.expandvars from CPython:
+    only $name and ${name} forms are expanded. The user-provided path
+    never reaches a shell, eliminating command injection risk.
+
+    Unknown variables are left unchanged.
+    """
+
+    def _repl(m: re.Match) -> str:
+        name = m.group(1)
+        if name.startswith('{') and name.endswith('}'):
+            name = name[1:-1]
+        return remote_env.get(name, m.group(0))
+
+    return _VAR_PATTERN.sub(_repl, path)
 
 
 def _sbatch_provision_script_path(base_dir: str,
@@ -381,12 +387,14 @@ def _create_virtual_instance(
     )
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
-    # Resolve shell variables (e.g. $USER) in workdir/tmpdir on the remote.
-    if workdir is not None:
-        workdir = _resolve_remote_path(login_node_runner, workdir)
-    if tmpdir is not None:
-        tmpdir = _resolve_remote_path(login_node_runner, tmpdir)
+    # Resolve shell variables (e.g. $USER) in workdir/tmpdir using the
+    # remote host's environment. The path never reaches a shell.
     if workdir is not None or tmpdir is not None:
+        remote_env = _get_remote_env(login_node_runner)
+        if workdir is not None:
+            workdir = _resolve_remote_path(workdir, remote_env)
+        if tmpdir is not None:
+            tmpdir = _resolve_remote_path(tmpdir, remote_env)
         logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
 
     # Must be absolute — #SBATCH directives don't expand ~ or $HOME.
@@ -1026,10 +1034,12 @@ def get_command_runners(
         region=slurm_cluster_name,
         keys=('tmpdir',),
         default_value=None)
-    if workdir is not None:
-        workdir = _resolve_remote_path(login_node_runner, workdir)
-    if tmpdir is not None:
-        tmpdir = _resolve_remote_path(login_node_runner, tmpdir)
+    if workdir is not None or tmpdir is not None:
+        remote_env = _get_remote_env(login_node_runner)
+        if workdir is not None:
+            workdir = _resolve_remote_path(workdir, remote_env)
+        if tmpdir is not None:
+            tmpdir = _resolve_remote_path(tmpdir, remote_env)
 
     sky_base_dir = workdir if workdir is not None else remote_home_dir
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
