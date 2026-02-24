@@ -565,6 +565,21 @@ def _normalize_gpu_name(name: str) -> str:
     return result
 
 
+def _normalized_prefix_matches(norm_a: str, norm_b: str) -> bool:
+    """Check if one normalized name is a dash-separated prefix of the other.
+
+    Returns True if the shorter string is a prefix of the longer and the
+    character immediately after is '-'. This prevents false positives like
+    'l4' matching 'l40' (no '-' boundary).
+    """
+    if len(norm_a) <= len(norm_b):
+        shorter, longer = norm_a, norm_b
+    else:
+        shorter, longer = norm_b, norm_a
+    return (longer.startswith(shorter) and len(longer) > len(shorter) and
+            longer[len(shorter)] == '-')
+
+
 def _accelerator_name_matches_slurm(requested_acc: str,
                                     candidate_raw: str) -> bool:
     """Check if a requested accelerator name matches a Slurm GRES raw type.
@@ -597,14 +612,61 @@ def _accelerator_name_matches_slurm(requested_acc: str,
         return True
 
     # 3. Prefix match with '-' boundary.
-    shorter, longer = ((req_norm,
-                        cand_norm) if len(req_norm) <= len(cand_norm) else
-                       (cand_norm, req_norm))
-    if (longer.startswith(shorter) and len(longer) > len(shorter) and
-            longer[len(shorter)] == '-'):
-        return True
+    return _normalized_prefix_matches(req_norm, cand_norm)
 
-    return False
+
+def canonicalize_raw_gpu_name(raw_name: str) -> str:
+    """Convert a raw Slurm GRES GPU type to a canonical display name.
+
+    Iterates CANONICAL_GPU_NAMES (most-specific first) and returns the
+    first canonical name whose normalized form matches the raw string.
+    Falls back to uppercasing.
+
+    Matching rules (checked in order for each canonical name):
+    1. Normalized equality (vendor-prefix stripped, separators unified).
+    2. Canonical normalized is a prefix of raw normalized with '-' boundary.
+    3. Memory-variant: for names like 'A100-80GB', checks if the base model
+       is a prefix and the raw name contains the memory suffix. This handles
+       cases like 'NVIDIA_A100_SXM_80GB' -> 'A100-80GB'.
+
+    Examples:
+        'nvidia_h100_80gb_hbm3' -> 'H100-80GB'
+        'nvidia_l40s'           -> 'L40S'
+        'H100'                  -> 'H100'
+        'unknown_custom_gpu'    -> 'UNKNOWN_CUSTOM_GPU'
+    """
+    # Import here to avoid circular dependency at module level.
+    from sky.utils import gpu_names  # pylint: disable=import-outside-toplevel
+
+    raw_norm = _normalize_gpu_name(raw_name)
+
+    for canonical in gpu_names.CANONICAL_GPU_NAMES:
+        can_norm = _normalize_gpu_name(canonical)
+
+        # 1. Normalized equality (also covers exact case-insensitive matches
+        #    since normalization lowercases and unifies separators).
+        if can_norm == raw_norm:
+            return canonical
+
+        # 2. Canonical is a prefix of raw with '-' boundary.
+        # Only check one direction: canonical as prefix of raw, not the
+        # reverse, because the list is ordered most-specific first (e.g.
+        # 'H100-80GB' before 'H100') and a reverse match would cause
+        # 'H100' to incorrectly resolve to 'H100-80GB'.
+        if (raw_norm.startswith(can_norm) and len(raw_norm) > len(can_norm) and
+                raw_norm[len(can_norm)] == '-'):
+            return canonical
+
+        # 3. Memory-variant matching (like K8s special-case for A100-80GB).
+        # For canonical names ending in '-80GB', check if the base model is
+        # a prefix and the raw name also contains '80gb'.
+        if can_norm.endswith('-80gb'):
+            base = can_norm[:-len('-80gb')]
+            if (raw_norm.startswith(base) and len(raw_norm) > len(base) and
+                    raw_norm[len(base)] == '-' and '80gb' in raw_norm):
+                return canonical
+
+    return raw_name.upper()
 
 
 def resolve_gres_gpu_type(
@@ -716,7 +778,7 @@ def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
     """
     try:
         return resolve_gres_gpu_type(cluster, requested_gpu_type)
-    except (exceptions.ResourcesUnavailableError, Exception) as e:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         logger.warning(
             'Failed to determine the exact GPU GRES type from the Slurm '
             f'cluster {cluster!r}. Falling back to '
@@ -782,7 +844,7 @@ def _get_slurm_node_info_list(
         node_gpu_type, total_gpus = get_gpu_type_and_count(gres_str)
         if total_gpus > 0:
             if node_gpu_type is not None:
-                node_gpu_type = node_gpu_type.upper()
+                node_gpu_type = canonicalize_raw_gpu_name(node_gpu_type)
             else:
                 node_gpu_type = 'GPU'
 

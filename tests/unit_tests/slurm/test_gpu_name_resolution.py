@@ -8,6 +8,7 @@ from sky.adaptors.slurm import NodeInfo
 from sky.exceptions import ResourcesUnavailableError
 from sky.provision.slurm.utils import _accelerator_name_matches_slurm
 from sky.provision.slurm.utils import _normalize_gpu_name
+from sky.provision.slurm.utils import canonicalize_raw_gpu_name
 from sky.provision.slurm.utils import check_instance_fits
 from sky.provision.slurm.utils import resolve_gres_gpu_type
 
@@ -375,3 +376,50 @@ class TestCheckInstanceFitsCanonical:  # pylint: disable=unused-argument
                                            partition='gpu')
         assert not fits
         assert 'A100' in reason
+
+
+# ---------------------------------------------------------------------------
+# canonicalize_raw_gpu_name
+# ---------------------------------------------------------------------------
+class TestCanonicalizeRawGpuName:
+    """Tests for canonicalize_raw_gpu_name."""
+
+    def test_nvidia_h100_80gb_hbm3(self):
+        assert canonicalize_raw_gpu_name('nvidia_h100_80gb_hbm3') == 'H100-80GB'
+
+    def test_nvidia_l40s(self):
+        assert canonicalize_raw_gpu_name('nvidia_l40s') == 'L40S'
+
+    def test_nvidia_a100_sxm_80gb(self):
+        assert canonicalize_raw_gpu_name('NVIDIA_A100_SXM_80GB') == 'A100-80GB'
+
+    def test_already_canonical_h100(self):
+        assert canonicalize_raw_gpu_name('H100') == 'H100'
+
+    def test_already_canonical_v100(self):
+        assert canonicalize_raw_gpu_name('V100') == 'V100'
+
+    def test_l40_not_l4(self):
+        """L40 should canonicalize to L40, not L4."""
+        assert canonicalize_raw_gpu_name('nvidia_l40') == 'L40'
+
+    def test_l4_stays_l4(self):
+        assert canonicalize_raw_gpu_name('nvidia_l4') == 'L4'
+
+    def test_a100_40gb_maps_to_a100(self):
+        """A 40GB A100 does not contain '80GB' so should match A100."""
+        assert canonicalize_raw_gpu_name('NVIDIA_A100_PCIE_40GB') == 'A100'
+
+    def test_tesla_v100(self):
+        assert canonicalize_raw_gpu_name('TESLA_V100_SXM2') == 'V100'
+
+    def test_unknown_falls_back_to_upper(self):
+        assert canonicalize_raw_gpu_name('unknown_custom_gpu') == (
+            'UNKNOWN_CUSTOM_GPU')
+
+    def test_uppercase_raw_gres(self):
+        """Uppercase raw GRES (e.g. from PR #8399 scenario)."""
+        assert canonicalize_raw_gpu_name('NVIDIA_H100_80GB_S') == 'H100-80GB'
+
+    def test_b200(self):
+        assert canonicalize_raw_gpu_name('nvidia_b200') == 'B200'
