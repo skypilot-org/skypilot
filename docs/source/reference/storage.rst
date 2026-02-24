@@ -407,6 +407,27 @@ Storage YAML reference
           - R2, Nebius, CoreWeave: goofys (x86) or rclone (ARM64)
           - IBM COS, OCI: rclone
 
+          These options are **appended** after SkyPilot's default flags. If you
+          specify a flag that is already set by default, the behavior depends on
+          the underlying tool — most tools (goofys, gcsfuse, rclone) use the
+          last occurrence of a flag, effectively overriding the default.
+
+          Default flags set by SkyPilot for each tool:
+
+          - **goofys** (S3, R2, Nebius, CoreWeave on x86):
+            ``-o allow_other --stat-cache-ttl 5s --type-cache-ttl 5s``
+          - **rclone** (S3, R2, Nebius, CoreWeave on ARM64):
+            ``--daemon --allow-other``
+          - **gcsfuse** (GCS):
+            ``--debug_fuse_errors -o allow_other --implicit-dirs
+            --stat-cache-capacity 4096 --stat-cache-ttl 5s
+            --type-cache-ttl 5s --rename-dir-limit 10000``
+          - **blobfuse2** (Azure):
+            ``--no-symlinks --tmp-path <cache_dir>
+            --container-name <name> -o allow_other -o default_permissions``
+          - **rclone** (IBM COS, OCI):
+            ``--daemon`` (COS); ``--daemon --allow-non-empty`` (OCI)
+
           For Azure blobfuse2, if ``--tmp-path`` is included in mount_options
           it overrides the default cache directory.
 
