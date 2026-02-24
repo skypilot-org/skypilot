@@ -395,3 +395,39 @@ Storage YAML reference
           other workers mounting the same Storage). With COPY mode, files are
           copied at VM initialization and any writes to the mount path will
           not be replicated on the bucket.
+
+        mount_options: str; default: None. Optional.
+          Custom options appended to the underlying mount command. Only valid
+          when mode is MOUNT. The options are passed directly to the mount
+          tool used by each provider:
+
+          - AWS S3: goofys (x86) or rclone (ARM64)
+          - GCS: gcsfuse
+          - Azure Blob: blobfuse2
+          - R2, Nebius, CoreWeave: goofys (x86) or rclone (ARM64)
+          - IBM COS, OCI: rclone
+
+          For Azure blobfuse2, if ``--tmp-path`` is included in mount_options
+          it overrides the default cache directory.
+
+          Examples:
+
+          .. code-block:: yaml
+
+            # Azure: custom blobfuse2 cache settings
+            /data:
+              source: az://my-container
+              mode: MOUNT
+              mount_options: '--file-cache-timeout-in-seconds=0 --cache-size-mb=4096'
+
+            # S3: custom goofys options
+            /models:
+              source: s3://my-bucket
+              mode: MOUNT
+              mount_options: '--stat-cache-ttl 60s --type-cache-ttl 60s'
+
+            # GCS: custom gcsfuse options
+            /datasets:
+              source: gs://my-bucket
+              mode: MOUNT
+              mount_options: '--max-conns-per-host 20'
