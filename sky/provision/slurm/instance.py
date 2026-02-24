@@ -344,7 +344,7 @@ def _create_virtual_instance(
     remote_home_dir = login_node_runner.get_remote_home_dir()
 
     # Resolve shell variables (e.g. $USER) in workdir/tmpdir using the
-    # remote host's environment. The path never reaches a shell.
+    # remote host's environment.
     if workdir is not None or tmpdir is not None:
         remote_env = client.get_env()
         if workdir is not None:
@@ -997,20 +997,15 @@ def get_command_runners(
             tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
 
     sky_base_dir = workdir if workdir is not None else remote_home_dir
+    assert os.path.isabs(sky_base_dir), (
+        f'sky_base_dir must be absolute, got: {sky_base_dir}')
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
     container_marker = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    rc, stdout, stderr = client._run_slurm_cmd(  # pylint: disable=protected-access
-        f'test -f {container_marker}')
-    if rc not in (0, 1):
-        subprocess_utils.handle_returncode(
-            rc,
-            f'test -f {container_marker}',
-            f'Failed to check for container marker file: {container_marker}',
-            stderr=f'{stdout}\n{stderr}')
+    has_container = client.check_file_exists(container_marker)
     container_args = _build_pyxis_args(
-        cluster_name_on_cloud) if rc == 0 else None
+        cluster_name_on_cloud) if has_container else None
 
     runners = [
         # Note: For Slurm, the external IP for all instances is the same,

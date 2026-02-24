@@ -671,6 +671,18 @@ class SlurmClient:
         """Returns the remote user's home directory."""
         return self._runner.get_remote_home_dir()
 
+    def check_file_exists(self, path: str) -> bool:
+        """Check if a file exists on the remote host."""
+        cmd = f'test -f {shlex.quote(path)}'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc not in (0, 1):
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                f'Failed to check for file: {path}',
+                stderr=f'{stdout}\n{stderr}')
+        return rc == 0
+
     def check_dir_shared_fs(self, path: str) -> Optional[str]:
         """Check the filesystem type of a directory.
 
