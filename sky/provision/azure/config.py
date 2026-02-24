@@ -327,9 +327,9 @@ def _resolve_custom_vnet(vpc_name: Optional[str], subscription_id: str,
     except azure.exceptions().ResourceNotFoundError as e:
         # Also try listing all VNets and matching by name, in case the
         # VNet is in a different resource group within the subscription.
-        vnets = list(network_client.virtual_networks.list_all())
         matches = [
-            v for v in vnets if v.name == vpc_name and v.location == location
+            v for v in network_client.virtual_networks.list_all()
+            if v.name == vpc_name and v.location == location
         ]
         if not matches:
             raise exceptions.ResourcesUnavailableError(
