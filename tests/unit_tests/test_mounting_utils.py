@@ -8,6 +8,9 @@ changes when modifying mount logic.
 import unittest
 
 from sky.data import mounting_utils
+from sky.data import storage as storage_lib
+from sky.utils import common_utils
+from sky.utils import schemas
 
 
 class TestS3MountCmdDefaults(unittest.TestCase):
@@ -950,6 +953,151 @@ class TestDefaultConstantsUsage(unittest.TestCase):
         self.assertIn(
             f'--rename-dir-limit {mounting_utils._RENAME_DIR_LIMIT}',  # pylint: disable=protected-access
             cmd)
+
+
+class TestStorageYamlRoundTrip(unittest.TestCase):
+    """Test mount_options round-trip through Storage YAML config."""
+
+    def test_from_yaml_config_with_mount_options(self):
+        """mount_options is parsed from YAML config."""
+
+        config = {
+            'name': 'test-bucket',
+            'source': 's3://test-bucket',
+            'mode': 'MOUNT',
+            'mount_options': '--stat-cache-ttl 60s',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        self.assertEqual(storage_obj.mount_options, '--stat-cache-ttl 60s')
+
+    def test_from_yaml_config_without_mount_options(self):
+        """Without mount_options, attribute is None."""
+
+        config = {
+            'name': 'test-bucket',
+            'source': 's3://test-bucket',
+            'mode': 'MOUNT',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(config)
+        self.assertIsNone(storage_obj.mount_options)
+
+    def test_to_yaml_config_with_mount_options(self):
+        """mount_options appears in YAML config output."""
+
+        storage_obj = storage_lib.Storage(
+            name='test-bucket',
+            source='s3://test-bucket',
+            mode=storage_lib.StorageMode.MOUNT,
+            mount_options='--my-flag value',
+        )
+        config = storage_obj.to_yaml_config()
+        self.assertEqual(config['mount_options'], '--my-flag value')
+
+    def test_to_yaml_config_without_mount_options(self):
+        """mount_options not in YAML config when None."""
+
+        storage_obj = storage_lib.Storage(
+            name='test-bucket',
+            source='s3://test-bucket',
+            mode=storage_lib.StorageMode.MOUNT,
+        )
+        config = storage_obj.to_yaml_config()
+        self.assertNotIn('mount_options', config)
+
+    def test_round_trip(self):
+        """mount_options survives from_yaml_config -> to_yaml_config."""
+
+        original = {
+            'name': 'test-bucket',
+            'source': 's3://test-bucket',
+            'mode': 'MOUNT',
+            'mount_options': '--cache-size-mb=4096',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(original)
+        result = storage_obj.to_yaml_config()
+        self.assertEqual(result['mount_options'], '--cache-size-mb=4096')
+
+
+class TestStorageMountOptionsValidation(unittest.TestCase):
+    """Test mount_options validation in Storage.__init__."""
+
+    def test_mount_options_rejected_for_copy_mode(self):
+        """mount_options raises error when mode is COPY."""
+
+        with self.assertRaises(Exception):
+            storage_lib.Storage(
+                name='test-bucket',
+                source='s3://test-bucket',
+                mode=storage_lib.StorageMode.COPY,
+                mount_options='--some-flag',
+            )
+
+    def test_mount_options_accepted_for_mount_mode(self):
+        """mount_options is accepted when mode is MOUNT."""
+
+        storage_obj = storage_lib.Storage(
+            name='test-bucket',
+            source='s3://test-bucket',
+            mode=storage_lib.StorageMode.MOUNT,
+            mount_options='--some-flag',
+        )
+        self.assertEqual(storage_obj.mount_options, '--some-flag')
+
+    def test_none_mount_options_accepted_for_any_mode(self):
+        """None mount_options is fine for any mode."""
+
+        for mode in [
+                storage_lib.StorageMode.MOUNT, storage_lib.StorageMode.COPY
+        ]:
+            storage_obj = storage_lib.Storage(
+                name='test-bucket',
+                source='s3://test-bucket',
+                mode=mode,
+                mount_options=None,
+            )
+            self.assertIsNone(storage_obj.mount_options)
+
+
+class TestSchemaValidation(unittest.TestCase):
+    """Test mount_options in storage JSON schema."""
+
+    def test_schema_accepts_mount_options_string(self):
+        """Schema accepts mount_options as string."""
+
+        config = {
+            'name': 'test-bucket',
+            'source': 's3://test-bucket',
+            'mode': 'MOUNT',
+            'mount_options': '--my-flag value',
+        }
+        # Should not raise
+        common_utils.validate_schema(config, schemas.get_storage_schema(),
+                                     'test: ')
+
+    def test_schema_rejects_mount_options_non_string(self):
+        """Schema rejects mount_options as non-string."""
+
+        config = {
+            'name': 'test-bucket',
+            'source': 's3://test-bucket',
+            'mode': 'MOUNT',
+            'mount_options': 123,
+        }
+        with self.assertRaises(Exception):
+            common_utils.validate_schema(config, schemas.get_storage_schema(),
+                                         'test: ')
+
+    def test_schema_accepts_without_mount_options(self):
+        """Schema accepts config without mount_options."""
+
+        config = {
+            'name': 'test-bucket',
+            'source': 's3://test-bucket',
+            'mode': 'MOUNT',
+        }
+        # Should not raise
+        common_utils.validate_schema(config, schemas.get_storage_schema(),
+                                     'test: ')
 
 
 if __name__ == '__main__':
