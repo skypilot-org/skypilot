@@ -656,8 +656,9 @@ class SlurmClient:
         Returns:
             Dictionary of environment variable name -> value.
         """
-        rc, stdout, _ = self._run_slurm_cmd('env')
+        rc, stdout, stderr = self._run_slurm_cmd('env')
         if rc != 0:
+            logger.warning(f'Failed to fetch remote env: {stderr}')
             return {}
         env: Dict[str, str] = {}
         for line in stdout.splitlines():
@@ -665,6 +666,10 @@ class SlurmClient:
                 key, _, value = line.partition('=')
                 env[key] = value
         return env
+
+    def get_remote_home_dir(self) -> str:
+        """Returns the remote user's home directory."""
+        return self._runner.get_remote_home_dir()
 
     def check_dir_shared_fs(self, path: str) -> Optional[str]:
         """Check the filesystem type of a directory.

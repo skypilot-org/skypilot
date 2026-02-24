@@ -611,16 +611,15 @@ class Slurm(clouds.Cloud):
                 # Resolve the check path to an absolute path so that
                 # stat (via shlex.quote) gets a literal path with no
                 # shell variables or ~.
-                from sky.provision.slurm import instance as slurm_instance  # pylint: disable=import-outside-toplevel
                 remote_env = client.get_env()
                 if workdir is not None:
-                    check_path = slurm_instance._resolve_remote_path(
+                    check_path = slurm_utils.expand_path_vars(
                         workdir, remote_env)
                 else:
                     check_path = remote_env.get('HOME', '~')
                 fs_type = client.check_dir_shared_fs(check_path)
-                path_label = (f'workdir ({workdir})' if workdir is not None
-                              else 'Home directory (~)')
+                path_label = (f'workdir ({workdir})'
+                              if workdir is not None else 'Home directory (~)')
                 hint = (' Set slurm.cluster_configs.'
                         f'{cluster}.workdir in '
                         '~/.sky/config.yaml to a shared '

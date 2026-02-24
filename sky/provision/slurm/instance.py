@@ -1,7 +1,6 @@
 """Slurm instance provisioning."""
 
 import os
-import re
 import shlex
 import tempfile
 import threading
@@ -28,7 +27,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
-_VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -107,48 +105,6 @@ def _sky_cluster_home_dir(base_dir: str, cluster_name_on_cloud: str) -> str:
     This path is assumed to be on a shared NFS mount accessible by all nodes.
     """
     return f'{base_dir}/.sky_clusters/{cluster_name_on_cloud}'
-
-
-def _get_remote_env(
-        runner: 'command_runner.SSHCommandRunner') -> Dict[str, str]:
-    """Fetch environment variables from the remote host.
-
-    Runs `env` over SSH and parses the key=value output. The command is
-    fixed (no user input), so there is no injection risk.
-    """
-    cmd = 'env'
-    rc, stdout, stderr = runner.run(cmd,
-                                    require_outputs=True,
-                                    separate_stderr=True,
-                                    stream_logs=False)
-    subprocess_utils.handle_returncode(
-        rc, cmd, 'Failed to fetch remote environment variables.',
-        stderr=stderr)
-    env: Dict[str, str] = {}
-    for line in stdout.splitlines():
-        if '=' in line:
-            key, _, value = line.partition('=')
-            env[key] = value
-    return env
-
-
-def _resolve_remote_path(path: str, remote_env: Dict[str, str]) -> str:
-    """Expand $VAR and ${VAR} in path using remote environment variables.
-
-    Uses the same expansion logic as os.path.expandvars from CPython:
-    only $name and ${name} forms are expanded. The user-provided path
-    never reaches a shell, eliminating command injection risk.
-
-    Unknown variables are left unchanged.
-    """
-
-    def _repl(m: re.Match) -> str:
-        name = m.group(1)
-        if name.startswith('{') and name.endswith('}'):
-            name = name[1:-1]
-        return remote_env.get(name, m.group(0))
-
-    return _VAR_PATTERN.sub(_repl, path)
 
 
 def _sbatch_provision_script_path(base_dir: str,
@@ -390,11 +346,11 @@ def _create_virtual_instance(
     # Resolve shell variables (e.g. $USER) in workdir/tmpdir using the
     # remote host's environment. The path never reaches a shell.
     if workdir is not None or tmpdir is not None:
-        remote_env = _get_remote_env(login_node_runner)
+        remote_env = client.get_env()
         if workdir is not None:
-            workdir = _resolve_remote_path(workdir, remote_env)
+            workdir = slurm_utils.expand_path_vars(workdir, remote_env)
         if tmpdir is not None:
-            tmpdir = _resolve_remote_path(tmpdir, remote_env)
+            tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
         logger.debug(f'Resolved workdir: {workdir}, tmpdir: {tmpdir}')
 
     # Must be absolute — #SBATCH directives don't expand ~ or $HOME.
@@ -1011,17 +967,16 @@ def get_command_runners(
     # collisions between different Slurm clusters.
     ssh_control_name = command_runner.DEFAULT_SSH_CONTROL_NAME
 
-    login_node_runner = command_runner.SSHCommandRunner(
-        (login_node_ssh_hostname, login_node_ssh_port),
+    client = slurm.SlurmClient(
+        login_node_ssh_hostname,
+        login_node_ssh_port,
         login_node_ssh_user,
         login_node_ssh_private_key,
         ssh_proxy_command=login_node_ssh_proxy_command,
         ssh_proxy_jump=login_node_ssh_proxy_jump,
-        ssh_control_name=ssh_control_name,
-        enable_interactive_auth=True,
-        disable_identities_only=not login_node_identities_only,
+        identities_only=login_node_identities_only,
     )
-    remote_home_dir = login_node_runner.get_remote_home_dir()
+    remote_home_dir = client.get_remote_home_dir()
 
     slurm_cluster_name = provider_config.get('cluster')
     workdir = skypilot_config.get_effective_region_config(
@@ -1035,20 +990,19 @@ def get_command_runners(
         keys=('tmpdir',),
         default_value=None)
     if workdir is not None or tmpdir is not None:
-        remote_env = _get_remote_env(login_node_runner)
+        remote_env = client.get_env()
         if workdir is not None:
-            workdir = _resolve_remote_path(workdir, remote_env)
+            workdir = slurm_utils.expand_path_vars(workdir, remote_env)
         if tmpdir is not None:
-            tmpdir = _resolve_remote_path(tmpdir, remote_env)
+            tmpdir = slurm_utils.expand_path_vars(tmpdir, remote_env)
 
     sky_base_dir = workdir if workdir is not None else remote_home_dir
     sky_cluster_home_dir = _sky_cluster_home_dir(sky_base_dir,
                                                  cluster_name_on_cloud)
     container_marker = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    rc, stdout, stderr = login_node_runner.run(f'test -f {container_marker}',
-                                               require_outputs=True,
-                                               stream_logs=False)
+    rc, stdout, stderr = client._run_slurm_cmd(  # pylint: disable=protected-access
+        f'test -f {container_marker}')
     if rc not in (0, 1):
         subprocess_utils.handle_returncode(
             rc,
