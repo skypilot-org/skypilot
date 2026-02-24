@@ -883,3 +883,9 @@ class TestResolveRemotePath:
         runner.run.return_value = (0, 'garbage output\n', '')
         with pytest.raises(RuntimeError, match='Failed to extract'):
             slurm_instance._resolve_remote_path(runner, '/home/$USER')
+
+    def test_unsafe_path_rejected(self):
+        runner = mock.MagicMock()
+        with pytest.raises(ValueError, match='unsafe characters'):
+            slurm_instance._resolve_remote_path(runner, '/home/; rm -rf /')
+        runner.run.assert_not_called()

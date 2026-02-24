@@ -3,6 +3,7 @@
 import ipaddress
 import logging
 import re
+import shlex
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
@@ -660,7 +661,7 @@ class SlurmClient:
             The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
             or None if the check could not be performed.
         """
-        cmd = f'stat -f -c %T {path}'
+        cmd = f'stat -f -c %T {shlex.quote(path)}'
         rc, stdout, _ = self._run_slurm_cmd(cmd)
         if rc != 0:
             return None

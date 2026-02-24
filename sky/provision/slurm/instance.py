@@ -29,6 +29,10 @@ logger = sky_logging.init_logger(__name__)
 
 PROVISION_SCRIPTS_DIRECTORY_NAME = '.sky_provision'
 _RESOLVED_PATH_PATTERN = re.compile(r'SKYPILOT_RESOLVED_PATH: ([^\s\n]+)')
+# Allowlist for path characters: alphanumerics, path separators, shell
+# variables ($), tilde (~), dot, and hyphen. Rejects injection characters
+# like ;, |, &, backticks, $(), etc.
+_SAFE_PATH_PATTERN = re.compile(r'^[a-zA-Z0-9/_.$~-]+$')
 
 
 def _sbatch_log_path(base_dir: str, job_id: str) -> str:
@@ -118,10 +122,15 @@ def _resolve_remote_path(runner: 'command_runner.SSHCommandRunner',
     even when MOTD or shell startup scripts produce noisy output.
 
     Raises:
+        ValueError: If the path contains unsafe characters.
         exceptions.CommandError: If the remote command fails.
         RuntimeError: If the resolved path cannot be extracted from output.
     """
-    cmd = f'echo "SKYPILOT_RESOLVED_PATH: $(echo {path})"'
+    if not _SAFE_PATH_PATTERN.match(path):
+        raise ValueError(f'Path contains unsafe characters: {path!r}. '
+                         'Only alphanumerics, /, _, ., $, ~, and - '
+                         'are allowed.')
+    cmd = f'echo "SKYPILOT_RESOLVED_PATH: $(echo "{path}")"'
     rc, stdout, stderr = runner.run(cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
