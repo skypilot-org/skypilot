@@ -414,10 +414,10 @@ Storage YAML reference
 
           Default flags set by SkyPilot for each tool:
 
-          - **goofys** (S3, R2, Nebius, CoreWeave on x86):
-            ``-o allow_other --stat-cache-ttl 5s --type-cache-ttl 5s``
-          - **rclone** (S3, R2, Nebius, CoreWeave on ARM64):
-            ``--daemon --allow-other``
+          - **goofys** (S3 on x86): ``-o allow_other --stat-cache-ttl 5s --type-cache-ttl 5s``
+          - **goofys** (R2, Nebius, CoreWeave on x86): ``-o allow_other --stat-cache-ttl 5s --type-cache-ttl 5s`` plus provider-specific flags like ``--endpoint``.
+          - **rclone** (S3 on ARM64): ``--daemon --allow-other --s3-env-auth=true``
+          - **rclone** (R2, Nebius, CoreWeave on ARM64): ``--daemon --allow-other`` plus provider-specific flags like ``--s3-endpoint``.
           - **gcsfuse** (GCS):
             ``--debug_fuse_errors -o allow_other --implicit-dirs
             --stat-cache-capacity 4096 --stat-cache-ttl 5s
