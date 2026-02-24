@@ -36,6 +36,7 @@ CANONICAL_GPU_NAMES = [
     'A5000',
     'A4000',
     # Older architectures - Volta/Pascal/Turing
+    'V100-32GB',
     'V100',
     'P100',
     'P40',

@@ -108,6 +108,27 @@ class TestAcceleratorNameMatchesSlurm:
     def test_h200_does_not_match_h100(self):
         assert not _accelerator_name_matches_slurm('H200', 'H100')
 
+    # --- Memory-variant (non-contiguous segments) ---
+    def test_a100_80gb_matches_sxm4_variant(self):
+        assert _accelerator_name_matches_slurm('A100-80GB',
+                                               'nvidia_a100_sxm4_80gb')
+
+    def test_a100_80gb_matches_sxm_variant(self):
+        assert _accelerator_name_matches_slurm('A100-80GB',
+                                               'NVIDIA_A100_SXM_80GB')
+
+    def test_v100_32gb_matches_pcie_variant(self):
+        assert _accelerator_name_matches_slurm('V100-32GB',
+                                               'tesla_v100_pcie_32gb')
+
+    def test_v100_32gb_does_not_match_16gb(self):
+        assert not _accelerator_name_matches_slurm('V100-32GB',
+                                                   'tesla_v100_pcie_16gb')
+
+    def test_a100_80gb_does_not_match_40gb(self):
+        assert not _accelerator_name_matches_slurm('A100-80GB',
+                                                   'nvidia_a100_pcie_40gb')
+
 
 # ---------------------------------------------------------------------------
 # Helpers for building mock NodeInfo lists
@@ -390,8 +411,8 @@ class TestCanonicalizeRawGpuName:
     def test_nvidia_l40s(self):
         assert canonicalize_raw_gpu_name('nvidia_l40s') == 'L40S'
 
-    def test_nvidia_a100_sxm_80gb(self):
-        assert canonicalize_raw_gpu_name('NVIDIA_A100_SXM_80GB') == 'A100-80GB'
+    def test_nvidia_a100_sxm4_80gb(self):
+        assert canonicalize_raw_gpu_name('NVIDIA_A100_SXM4_80GB') == 'A100-80GB'
 
     def test_already_canonical_h100(self):
         assert canonicalize_raw_gpu_name('H100') == 'H100'
@@ -423,3 +444,10 @@ class TestCanonicalizeRawGpuName:
 
     def test_b200(self):
         assert canonicalize_raw_gpu_name('nvidia_b200') == 'B200'
+
+    def test_a100_sxm4_80gb(self):
+        """Non-contiguous memory variant: SXM4 between model and 80GB."""
+        assert canonicalize_raw_gpu_name('nvidia_a100_sxm4_80gb') == 'A100-80GB'
+
+    def test_tesla_v100_pcie_32gb(self):
+        assert canonicalize_raw_gpu_name('tesla_v100_pcie_32gb') == 'V100-32GB'

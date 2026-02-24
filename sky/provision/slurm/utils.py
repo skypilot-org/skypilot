@@ -16,6 +16,7 @@ from sky.adaptors import slurm
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import gpu_names
 from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
@@ -565,19 +566,25 @@ def _normalize_gpu_name(name: str) -> str:
     return result
 
 
-def _normalized_prefix_matches(norm_a: str, norm_b: str) -> bool:
-    """Check if one normalized name is a dash-separated prefix of the other.
+def _is_segment_subsequence(segs_a: List[str], segs_b: List[str]) -> bool:
+    """Check if segs_a appears as an ordered subsequence of segs_b.
 
-    Returns True if the shorter string is a prefix of the longer and the
-    character immediately after is '-'. This prevents false positives like
-    'l4' matching 'l40' (no '-' boundary).
+    Each segment must match exactly (preventing e.g. 'l4' matching 'l40').
+
+    Examples:
+        (['h100'], ['h100', '80gb', 's'])          -> True
+        (['a100', '80gb'], ['a100', 'sxm4', '80gb']) -> True
+        (['v100', '32gb'], ['v100', 'pcie', '16gb']) -> False
+        (['l4'], ['l40'])                           -> False
     """
-    if len(norm_a) <= len(norm_b):
-        shorter, longer = norm_a, norm_b
-    else:
-        shorter, longer = norm_b, norm_a
-    return (longer.startswith(shorter) and len(longer) > len(shorter) and
-            longer[len(shorter)] == '-')
+    b_iter = iter(segs_b)
+    for seg in segs_a:
+        for b_seg in b_iter:
+            if seg == b_seg:
+                break
+        else:
+            return False
+    return True
 
 
 def _accelerator_name_matches_slurm(requested_acc: str,
@@ -587,10 +594,11 @@ def _accelerator_name_matches_slurm(requested_acc: str,
     Matching rules (checked in order):
     1. Case-insensitive exact match of raw strings.
     2. Normalized forms are equal (vendor-prefix stripped, separators unified).
-    3. Prefix match: the shorter normalized form is a prefix of the longer,
-       separated by '-'. This handles e.g. 'H100' matching 'H100-80GB'.
-       To avoid false positives like 'L4' matching 'L40', the prefix must
-       be followed by '-' (not a digit/letter).
+    3. Segment subsequence: the shorter name's dash-segments appear in order
+       within the longer name's segments. Handles both prefix cases
+       (H100 ~ H100-80GB-S) and non-contiguous memory variants
+       (A100-80GB ~ A100-SXM4-80GB, V100-32GB ~ V100-PCIE-32GB).
+       Exact segment matching prevents false positives (L4 ≠ L40).
 
     Args:
         requested_acc: The accelerator name requested by the user
@@ -599,7 +607,7 @@ def _accelerator_name_matches_slurm(requested_acc: str,
             (e.g. 'NVIDIA_H100_80GB_S').
 
     Returns:
-        True if the names are considered compatible.
+        True if the names are considered matching.
     """
     # 1. Exact case-insensitive match.
     if requested_acc.lower() == candidate_raw.lower():
@@ -611,8 +619,16 @@ def _accelerator_name_matches_slurm(requested_acc: str,
     if req_norm == cand_norm:
         return True
 
-    # 3. Prefix match with '-' boundary.
-    return _normalized_prefix_matches(req_norm, cand_norm)
+    # 3. Segment subsequence (bidirectional).
+    req_segs = req_norm.split('-')
+    cand_segs = cand_norm.split('-')
+    if len(req_segs) <= len(cand_segs):
+        shorter_segs, longer_segs = req_segs, cand_segs
+    else:
+        shorter_segs, longer_segs = cand_segs, req_segs
+    if len(shorter_segs) < len(longer_segs):
+        return _is_segment_subsequence(shorter_segs, longer_segs)
+    return False
 
 
 def canonicalize_raw_gpu_name(raw_name: str) -> str:
@@ -624,21 +640,19 @@ def canonicalize_raw_gpu_name(raw_name: str) -> str:
 
     Matching rules (checked in order for each canonical name):
     1. Normalized equality (vendor-prefix stripped, separators unified).
-    2. Canonical normalized is a prefix of raw normalized with '-' boundary.
-    3. Memory-variant: for names like 'A100-80GB', checks if the base model
-       is a prefix and the raw name contains the memory suffix. This handles
-       cases like 'NVIDIA_A100_SXM_80GB' -> 'A100-80GB'.
+    2. Segment subsequence: canonical's dash-segments appear in order within
+       the raw name's segments. One-directional only (canonical into raw)
+       because the list is ordered most-specific first.
 
     Examples:
-        'nvidia_h100_80gb_hbm3' -> 'H100-80GB'
-        'nvidia_l40s'           -> 'L40S'
-        'H100'                  -> 'H100'
-        'unknown_custom_gpu'    -> 'UNKNOWN_CUSTOM_GPU'
+        'nvidia_h100_80gb_hbm3'  -> 'H100-80GB'
+        'nvidia_a100_sxm4_80gb'  -> 'A100-80GB'
+        'nvidia_l40s'            -> 'L40S'
+        'H100'                   -> 'H100'
+        'unknown_custom_gpu'     -> 'UNKNOWN_CUSTOM_GPU'
     """
-    # Import here to avoid circular dependency at module level.
-    from sky.utils import gpu_names  # pylint: disable=import-outside-toplevel
-
     raw_norm = _normalize_gpu_name(raw_name)
+    raw_segs = raw_norm.split('-')
 
     for canonical in gpu_names.CANONICAL_GPU_NAMES:
         can_norm = _normalize_gpu_name(canonical)
@@ -648,22 +662,14 @@ def canonicalize_raw_gpu_name(raw_name: str) -> str:
         if can_norm == raw_norm:
             return canonical
 
-        # 2. Canonical is a prefix of raw with '-' boundary.
-        # Only check one direction: canonical as prefix of raw, not the
-        # reverse, because the list is ordered most-specific first (e.g.
-        # 'H100-80GB' before 'H100') and a reverse match would cause
-        # 'H100' to incorrectly resolve to 'H100-80GB'.
-        if (raw_norm.startswith(can_norm) and len(raw_norm) > len(can_norm) and
-                raw_norm[len(can_norm)] == '-'):
-            return canonical
-
-        # 3. Memory-variant matching (like K8s special-case for A100-80GB).
-        # For canonical names ending in '-80GB', check if the base model is
-        # a prefix and the raw name also contains '80gb'.
-        if can_norm.endswith('-80gb'):
-            base = can_norm[:-len('-80gb')]
-            if (raw_norm.startswith(base) and len(raw_norm) > len(base) and
-                    raw_norm[len(base)] == '-' and '80gb' in raw_norm):
+        # 2. Canonical segments are a subsequence of raw segments.
+        # One-directional: only check canonical-into-raw, not the reverse,
+        # because the list is ordered most-specific first (e.g. 'H100-80GB'
+        # before 'H100') and a reverse match would cause 'H100' to
+        # incorrectly resolve to 'H100-80GB'.
+        can_segs = can_norm.split('-')
+        if len(can_segs) < len(raw_segs):
+            if _is_segment_subsequence(can_segs, raw_segs):
                 return canonical
 
     return raw_name.upper()
@@ -758,35 +764,6 @@ def resolve_gres_gpu_type(
         logger.debug(f'Resolved {requested_gpu_type!r} -> {chosen!r} '
                      f'on cluster {cluster!r}.')
     return chosen
-
-
-# GRES names are highly unlikely to change within a cluster.
-# TODO(kevin): Cache using sky/utils/db/kv_cache.py too.
-@annotations.lru_cache(scope='global', maxsize=10)
-def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
-    """Get the actual GPU type as it appears in the cluster's GRES.
-
-    This is a backward-compatible wrapper around ``resolve_gres_gpu_type``.
-
-    Args:
-        cluster: Name of the Slurm cluster.
-        requested_gpu_type: The GPU type requested by the user.
-
-    Returns:
-        The actual GPU type as it appears in the cluster's GRES string.
-        Falls back to the requested type if not found.
-    """
-    try:
-        return resolve_gres_gpu_type(cluster, requested_gpu_type)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(
-            'Failed to determine the exact GPU GRES type from the Slurm '
-            f'cluster {cluster!r}. Falling back to '
-            f'{requested_gpu_type.lower()!r}. This may cause issues if the '
-            f'casing is incorrect. Error: {common_utils.format_exception(e)}')
-
-    # GRES names are more commonly in lowercase from what we've seen so far.
-    return requested_gpu_type.lower()
 
 
 def _get_slurm_node_info_list(
