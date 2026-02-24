@@ -987,7 +987,8 @@ def write_cluster_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
                 keys=('vpc_name',),
-                default_value=None),
+                default_value=None,
+                override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.
             'labels': labels,
             # User-supplied remote_identity
