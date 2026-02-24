@@ -323,6 +323,59 @@ After usage, the pool can be terminated with :code:`sky jobs pool down`:
 
 The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
 
+Debugging and monitoring pools
+-------------------------------
+
+Use :code:`sky jobs pool status` to check the state of your pools and their workers:
+
+.. code-block:: console
+
+  # Show status of all pools
+  $ sky jobs pool status
+
+  # Show status of a specific pool
+  $ sky jobs pool status gpu-pool
+
+  # Show all individual workers (not just a summary)
+  $ sky jobs pool status gpu-pool --all
+
+To debug pool provisioning issues, use :code:`sky jobs pool logs --controller` to view the controller logs, which include details about worker provisioning, scaling, and any errors:
+
+.. code-block:: console
+
+  # Tail the controller logs (follows by default)
+  $ sky jobs pool logs --controller gpu-pool
+
+  # Show the last 100 lines of controller logs
+  $ sky jobs pool logs --controller --tail 100 gpu-pool
+
+  # Print controller logs so far and exit
+  $ sky jobs pool logs --controller --no-follow gpu-pool
+
+To view logs from a specific worker, pass the worker ID:
+
+.. code-block:: console
+
+  # Tail the logs of worker 1
+  $ sky jobs pool logs gpu-pool 1
+
+  # Print worker 1 logs so far and exit
+  $ sky jobs pool logs --no-follow gpu-pool 1
+
+To download all logs locally for offline analysis, use :code:`--sync-down`:
+
+.. code-block:: console
+
+  # Sync down all logs (controller + all workers)
+  $ sky jobs pool logs gpu-pool --sync-down
+
+  # Sync down controller and specific worker logs
+  $ sky jobs pool logs gpu-pool 1 3 --controller --sync-down
+
+.. tip::
+
+  If workers are stuck in a provisioning state, :code:`sky jobs pool logs --controller <pool-name>` is the best place to start debugging. The controller logs show the full provisioning lifecycle for each worker.
+
 .. admonition:: Coming Soon
 
   Some improved features are under development and will be available soon:

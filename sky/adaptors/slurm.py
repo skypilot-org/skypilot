@@ -348,8 +348,13 @@ class SlurmClient:
         """
         # Use --only-job-state since we only need the job state.
         # This reduces the work required by slurmctld.
+        # Fall back to the command without --only-job-state for older
+        # Slurm versions (< 21.08) that don't support this flag.
         cmd = f'squeue -h --only-job-state --jobs {job_id} -o "%T"'
         rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc != 0 and 'unrecognized option' in stderr:
+            cmd = f'squeue -h --jobs {job_id} -o "%T"'
+            rc, stdout, stderr = self._run_slurm_cmd(cmd)
         subprocess_utils.handle_returncode(
             rc,
             cmd,

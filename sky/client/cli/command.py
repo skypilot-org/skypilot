@@ -5933,14 +5933,14 @@ def jobs_pool_apply(
     """Either apply a config to a pool for managed jobs submission
     or update the number of workers in the pool. One of POOL_YAML or --workers
     must be provided.
-    Config:
-        If the pool is already running, the config will be applied to the pool.
-        Otherwise, a new pool will be created.
-    Workers:
-        The --workers option can be used to override the number of workers
-        specified in the YAML file, or to update workers without a YAML file.
-        Example:
-            sky jobs pool apply -p my-pool --workers 5
+
+    Config: If the pool is already running, the config will be applied to the
+    pool. Otherwise, a new pool will be created.
+
+    Workers: The --workers option can be used to override the number of workers
+    specified in the YAML file, or to update workers without a YAML file.
+
+    Example: ``sky jobs pool apply -p my-pool --workers 5``
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
