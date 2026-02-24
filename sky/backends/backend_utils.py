@@ -972,7 +972,7 @@ def write_cluster_config(
             'user': common_utils.get_cleaned_username(
                 os.environ.get(constants.USER_ENV_VAR, '')),
             'workspace': common_utils.get_cleaned_username(
-                skypilot_config.get_active_workspace() or 'default'),
+                skypilot_config.get_active_workspace()),
 
             # Networking configs
             'use_internal_ips': skypilot_config.get_effective_region_config(
