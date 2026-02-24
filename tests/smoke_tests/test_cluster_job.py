@@ -1106,6 +1106,114 @@ def test_task_labels_gcp():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Labels from task on Azure (labels) ----------
+@pytest.mark.azure
+def test_task_labels_azure():
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_labels.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud='azure', region='eastus')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = smoke_tests_utils.Test(
+            'task_labels_azure',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+                # Verify with az cli that the tags are set.
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, 'az vm list '
+                    f'--query "[?starts_with(name, \'{name}\') '
+                    '&& tags.inlinelabel1==\'inlinevalue1\' '
+                    '&& tags.inlinelabel2==\'inlinevalue2\'].name" '
+                    '--output tsv | grep .'),
+            ],
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Remote identity on Azure ----------
+@pytest.mark.azure
+def test_azure_remote_identity():
+    """Test Azure remote_identity with SERVICE_ACCOUNT and LOCAL_CREDENTIALS.
+
+    Verifies that:
+    1. With SERVICE_ACCOUNT, Azure credentials are not uploaded and the
+       VM has a managed identity.
+    2. With LOCAL_CREDENTIALS, Azure credentials are uploaded.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'azure_remote_identity',
+        [
+            # Test SERVICE_ACCOUNT: credentials should NOT be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_service_account.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky down -y {name}',
+            # Test LOCAL_CREDENTIALS: credentials should be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Custom VNet on Azure ----------
+@pytest.mark.azure
+def test_azure_vpc_name():
+    """Test Azure vpc_name with a custom VNet.
+
+    Creates a VNet, launches a cluster using it, and verifies the VM's
+    NIC is attached to the custom VNet's subnet.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    vnet_name = f'sky-test-vnet-{name}'
+    rg_name = f'sky-test-rg-{name}'
+    region = 'eastus'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_azure_vpc.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(vpc_name=vnet_name, region=region)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = smoke_tests_utils.Test(
+            'azure_vpc_name',
+            [
+                # Create a resource group and VNet for the test
+                f'az group create -n {rg_name} -l {region}',
+                f'az network vnet create -g {rg_name} -n {vnet_name} '
+                f'--address-prefix 10.0.0.0/16 '
+                f'--subnet-name default --subnet-prefix 10.0.0.0/24',
+                # Launch cluster using the custom VNet
+                f'sky launch -y -c {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+                # Verify the VM NIC is in the custom VNet
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'az network nic list '
+                    f'--query "[?contains(ipConfigurations[0].subnet.id, '
+                    f"'{vnet_name}'"
+                    f')].name" --output tsv | grep .'),
+            ],
+            f'sky down -y {name}; '
+            f'az group delete -n {rg_name} -y --no-wait; '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Labels from task on Kubernetes (labels) ----------
 @pytest.mark.kubernetes
 def test_task_labels_kubernetes():
