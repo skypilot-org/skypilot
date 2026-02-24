@@ -43,7 +43,6 @@ SENSITIVE_FIELDS = [
     ('docker_config', 'docker_login_config', 'password'),
     ('provider_config', 'create_instance_kwargs', 'login'),
     ('provider_config', 'create_instance_kwargs', 'api_key'),
-    ('resources', '_docker_login_config', 'password'),
 ]
 
 
