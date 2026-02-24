@@ -566,7 +566,7 @@ class TestVersionConstants(unittest.TestCase):
 
     def test_blobfuse2_version_defined(self):
         self.assertIsNotNone(mounting_utils.BLOBFUSE2_VERSION)
-        self.assertEqual(mounting_utils.BLOBFUSE2_VERSION, '2.2.0')
+        self.assertEqual(mounting_utils.BLOBFUSE2_VERSION, '2.5.2')
 
     def test_gcsfuse_version_defined(self):
         self.assertIsNotNone(mounting_utils.GCSFUSE_VERSION)
