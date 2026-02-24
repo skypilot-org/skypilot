@@ -1,10 +1,12 @@
-import { useEffect } from 'react';
-import { useRouter } from 'next/router';
+export async function getServerSideProps() {
+  return {
+    redirect: {
+      destination: '/settings/config',
+      permanent: false,
+    },
+  };
+}
 
 export default function SettingsIndexPage() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace('/settings/config');
-  }, [router]);
   return null;
 }

@@ -14,12 +14,12 @@ export default function SettingsConfigPage() {
       <Head>
         <title>Settings | SkyPilot Dashboard</title>
       </Head>
-      <div style={{ display: 'flex', gap: 24 }}>
+      <div className="flex gap-6">
         <PluginSlot
           name="settings.sidebar"
           context={{ activeSection: 'config' }}
         />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="flex-1 min-w-0">
           <Config />
         </div>
       </div>
