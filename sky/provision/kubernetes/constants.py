@@ -1,6 +1,6 @@
 """Constants for Kubernetes provisioning."""
 
-from sky.utils.gpu_names import (  # pylint: disable=unused-import # noqa: F401
+from sky.utils.gpu_names import (  # pylint: disable=unused-import # noqa: F401,E501
     CANONICAL_GPU_NAMES)
 
 NO_GPU_HELP_MESSAGE = ('If your cluster contains GPUs, make sure '

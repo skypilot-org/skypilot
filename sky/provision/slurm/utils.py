@@ -687,10 +687,9 @@ def resolve_gres_gpu_type(
     GRES GPU type string that the Slurm scheduler expects. The resolved raw
     type is used directly in ``#SBATCH --gres=gpu:<raw_type>:<count>``.
 
-    Selection policy (deterministic):
-        1. Prefer candidates with an exact case-insensitive raw match.
-        2. Among remaining candidates, prefer the raw type with the most
-           supporting nodes (higher chance of scheduling).
+    Selection policy when multiple raw types match (deterministic):
+        1. Prefer exact case-insensitive raw match.
+        2. Prefer the raw type with the most supporting nodes.
         3. Tie-break lexicographically by raw type string.
 
     Args:
@@ -707,17 +706,15 @@ def resolve_gres_gpu_type(
         exceptions.ResourcesUnavailableError: If no matching GPU type is found.
     """
     nodes = _get_slurm_nodes_info(cluster)
-
     default_partition = get_cluster_default_partition(cluster)
 
-    # Collect candidate raw types with their supporting node counts.
-    # {raw_type_str: node_count}
+    # Collect all GPU types from every node (for error messages) and
+    # matching candidates (for selection) in a single pass.
+    all_gpu_types: Dict[str, int] = {}
     candidates: Dict[str, int] = {}
     for node_info in nodes:
-        # Partition filter.
         if partition is not None:
             node_part = node_info.partition
-            # Strip '*' from default partition name for comparison.
             if (default_partition is not None and node_part.endswith('*') and
                     node_part[:-1] == default_partition):
                 node_part = node_part[:-1]
@@ -727,42 +724,31 @@ def resolve_gres_gpu_type(
         node_acc_type, node_acc_count = get_gpu_type_and_count(node_info.gres)
         if node_acc_type is None:
             continue
+        all_gpu_types[node_acc_type] = all_gpu_types.get(node_acc_type, 0) + 1
         if node_acc_count < requested_count:
             continue
-
         if _accelerator_name_matches_slurm(requested_gpu_type, node_acc_type):
             candidates[node_acc_type] = candidates.get(node_acc_type, 0) + 1
 
     if not candidates:
-        # Collect all discovered raw types for a helpful error message.
-        discovered: Dict[str, int] = {}
-        for node_info in nodes:
-            raw_type, _ = get_gpu_type_and_count(node_info.gres)
-            if raw_type is not None:
-                discovered[raw_type] = discovered.get(raw_type, 0) + 1
-
-        partition_msg = (f' in partition {partition!r}' if partition else '')
-        discovered_msg = (f' Discovered GPU types on cluster: '
-                          f'{sorted(discovered.keys())}'
-                          if discovered else ' No GPU nodes found on cluster.')
+        partition_msg = f' in partition {partition!r}' if partition else ''
+        if all_gpu_types:
+            discovered_msg = (f' Discovered GPU types on cluster: '
+                              f'{sorted(all_gpu_types.keys())}')
+        else:
+            discovered_msg = ' No GPU nodes found on cluster.'
         raise exceptions.ResourcesUnavailableError(
             f'No GPU nodes matching {requested_gpu_type!r} '
             f'(count>={requested_count}) found on Slurm cluster '
             f'{cluster!r}{partition_msg}.{discovered_msg}')
 
-    # Selection: prefer exact case-insensitive match, then by support count,
-    # then lexicographic.
-    def _sort_key(raw_type: str) -> Tuple[int, int, str]:
-        is_exact = (raw_type.lower() == requested_gpu_type.lower())
-        return (0 if is_exact else 1, -candidates[raw_type], raw_type)
-
-    chosen = min(candidates, key=_sort_key)
-    if len(candidates) > 1:
-        logger.debug(f'Multiple raw GRES types matched {requested_gpu_type!r}: '
-                     f'{dict(candidates)}. Resolved to {chosen!r}.')
-    else:
-        logger.debug(f'Resolved {requested_gpu_type!r} -> {chosen!r} '
-                     f'on cluster {cluster!r}.')
+    # Selection: prefer exact match, then highest node count, then
+    # lexicographic.
+    req_lower = requested_gpu_type.lower()
+    chosen = min(candidates,
+                 key=lambda rt: (rt.lower() != req_lower, -candidates[rt], rt))
+    logger.debug(f'Resolved {requested_gpu_type!r} -> {chosen!r} '
+                 f'on cluster {cluster!r} (candidates: {dict(candidates)}).')
     return chosen
 
 
