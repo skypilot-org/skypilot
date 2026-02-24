@@ -1,0 +1,18 @@
+file_mounts:
+  /mount_private:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    mode: MOUNT
+    mount_options: '{{mount_options}}'
+
+run: |
+  set -ex
+  # Verify the mount is readable and files from source were uploaded
+  ls /mount_private/foo
+  ls /mount_private/tmp\ file
+  # Verify that --read-only actually prevents writes
+  if echo "test" > /mount_private/write_test.txt 2>/dev/null; then
+    echo "ERROR: Write succeeded on read-only mount"
+    exit 1
+  fi
+  echo "Write correctly denied on read-only mount."
