@@ -238,8 +238,18 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     ]
 
     env = os.environ.copy()
-    if 'KUBECONFIG' not in env:
-        env['KUBECONFIG'] = os.path.expanduser('~/.kube/config')
+    # Use SkyPilot's kubeconfig discovery which respects KUBECONFIG env var
+    # (set by credential manager plugin) and falls back to ~/.kube/config.
+    # Always set explicitly so subprocess gets the resolved paths even if
+    # env var was modified after os.environ was last copied.
+    # Import lazily to avoid circular import (metrics -> provision -> clouds
+    # -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    kubeconfig_paths = kubernetes_utils.get_kubeconfig_paths()
+    env['KUBECONFIG'] = kubernetes_adaptors.ENV_KUBECONFIG_PATH_SEPARATOR.join(
+        kubeconfig_paths)
 
     port_forward_process = None
     port_forward_exit = False

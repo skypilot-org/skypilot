@@ -130,6 +130,8 @@ cluster_table = sqlalchemy.Table(
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
+    # Node names for dashboard display (comma-separated)
+    sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
 )
 
 storage_table = sqlalchemy.Table(
@@ -209,6 +211,8 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
+    # Node names for dashboard display (comma-separated)
+    sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
 )
 
 
@@ -734,6 +738,13 @@ def add_or_update_cluster(cluster_name: str,
             region = str(lr.region) if getattr(lr, 'region', None) else None
             zone = str(lr.zone) if getattr(lr, 'zone', None) else None
 
+    # Extract node_names from cached_cluster_info and merge with lineage
+    current_names = None
+    if hasattr(cluster_handle, 'cached_cluster_info'):
+        ci = cluster_handle.cached_cluster_info
+        if ci is not None:
+            current_names = ci.get_node_names()
+
     # TODO (sumanth): Cluster history table will have multiple entries
     # when the cluster failover through multiple regions (one entry per region).
     # It can be more inaccurate for the multi-node cluster
@@ -784,6 +795,12 @@ def add_or_update_cluster(cluster_name: str,
         # is called, or until the code escapes the with block.
         cluster_row = session.query(cluster_table).filter_by(
             name=cluster_name).with_for_update().first()
+
+        # Merge current node names into existing lineage
+        existing_node_names = (cluster_row.node_names if cluster_row else None)
+        node_names = common_utils.merge_node_names_lineage(
+            existing_node_names, current_names)
+
         if (not cluster_row or
                 cluster_row.status == status_lib.ClusterStatus.STOPPED.value):
             conditional_values.update({
@@ -830,6 +847,7 @@ def add_or_update_cluster(cluster_name: str,
                     cluster_table.c.cloud: cloud,
                     cluster_table.c.region: region,
                     cluster_table.c.zone: zone,
+                    cluster_table.c.node_names: node_names,
                 })
             assert count <= 1
             if count == 0:
@@ -850,6 +868,7 @@ def add_or_update_cluster(cluster_name: str,
                 cloud=cloud,
                 region=region,
                 zone=zone,
+                node_names=node_names,
             )
             insert_or_update_stmt = insert_stmnt.on_conflict_do_update(
                 index_elements=[cluster_table.c.name],
@@ -866,6 +885,7 @@ def add_or_update_cluster(cluster_name: str,
                     cluster_table.c.cloud: cloud,
                     cluster_table.c.region: region,
                     cluster_table.c.zone: zone,
+                    cluster_table.c.node_names: node_names,
                 })
             session.execute(insert_or_update_stmt)
 
@@ -904,6 +924,7 @@ def add_or_update_cluster(cluster_name: str,
             cloud=cloud,
             region=region,
             zone=zone,
+            node_names=node_names,
             **creation_info,
         )
         do_update_stmt = insert_stmnt.on_conflict_do_update(
@@ -925,6 +946,7 @@ def add_or_update_cluster(cluster_name: str,
                 cluster_history_table.c.cloud: cloud,
                 cluster_history_table.c.region: region,
                 cluster_history_table.c.zone: zone,
+                cluster_history_table.c.node_names: node_names,
                 **creation_info,
             })
         session.execute(do_update_stmt)
@@ -1250,9 +1272,27 @@ def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     assert _SQLALCHEMY_ENGINE is not None
     handle = pickle.dumps(cluster_handle)
+
+    # Extract current node names and merge with existing lineage
+    current_names = None
+    if hasattr(cluster_handle, 'cached_cluster_info'):
+        ci = cluster_handle.cached_cluster_info
+        if ci is not None:
+            current_names = ci.get_node_names()
+
+    update_dict: Dict[Any, Any] = {cluster_table.c.handle: handle}
+
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(cluster_table).filter_by(name=cluster_name).update(
-            {cluster_table.c.handle: handle})
+        if current_names is not None:
+            row = session.query(cluster_table.c.node_names).filter_by(
+                name=cluster_name).with_for_update().first()
+            existing_json = row.node_names if row else None
+            node_names = common_utils.merge_node_names_lineage(
+                existing_json, current_names)
+            update_dict[cluster_table.c.node_names] = node_names
+
+        session.query(cluster_table).filter_by(
+            name=cluster_name).update(update_dict)
         session.commit()
 
 
@@ -1923,6 +1963,7 @@ def get_clusters(
         cluster_table.c.cluster_ever_up,
         cluster_table.c.user_hash,
         cluster_table.c.workspace,
+        cluster_table.c.node_names,
         user_table.c.name.label('user_name'),
     ]
     if not summary_response:
@@ -2000,6 +2041,7 @@ def get_clusters(
             'workspace': row.workspace,
             'is_managed': False
                           if exclude_managed_clusters else bool(row.is_managed),
+            'node_names': common_utils.get_display_node_names(row.node_names),
         }
         if not summary_response:
             record['last_creation_yaml'] = row.last_creation_yaml
@@ -2065,7 +2107,8 @@ def get_clusters_from_history(
                 cluster_history_table.c.user_hash,
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_history_table.c.launched_at,
+                cluster_history_table.c.node_names, cluster_table.c.status,
                 cluster_table.c.workspace)
         else:
             query = session.query(
@@ -2078,7 +2121,8 @@ def get_clusters_from_history(
                 cluster_history_table.c.last_creation_command,
                 cluster_history_table.c.workspace.label('history_workspace'),
                 cluster_history_table.c.last_activity_time,
-                cluster_history_table.c.launched_at, cluster_table.c.status,
+                cluster_history_table.c.launched_at,
+                cluster_history_table.c.node_names, cluster_table.c.status,
                 cluster_table.c.workspace)
 
         query = query.select_from(
@@ -2167,6 +2211,7 @@ def get_clusters_from_history(
             'user_name': user_name,
             'workspace': workspace,
             'last_event': last_event,
+            'node_names': common_utils.get_display_node_names(row.node_names),
         }
         if not abbreviate_response:
             record['last_creation_yaml'] = row.last_creation_yaml

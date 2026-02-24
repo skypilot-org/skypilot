@@ -100,6 +100,9 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
+# Content written to the jobs cancel signal file.
+_JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
+
 # After enabling consolidation mode, we need to restart the API server to get
 # the jobs refresh deamon and correct number of executors. We use this file to
 # indicate that the API server has been restarted after enabling consolidation
@@ -148,6 +151,8 @@ class UserSignal(enum.Enum):
 def terminate_cluster(
     cluster_name: str,
     max_retry: int = 6,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
@@ -167,7 +172,9 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            core.down(cluster_name)
+            core.down(cluster_name,
+                      graceful=graceful,
+                      graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
@@ -806,7 +813,9 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
                       current_workspace: Optional[str] = None,
-                      user_hash: Optional[str] = None) -> str:
+                      user_hash: Optional[str] = None,
+                      graceful: bool = False,
+                      graceful_timeout: Optional[int] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
@@ -860,12 +869,22 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 with signal_file.open('w', encoding='utf-8') as f:
                     f.write(UserSignal.CANCEL.value)
                     f.flush()
+            if graceful:
+                logger.warning(f'Job {job_id} is on legacy controller, '
+                               'graceful shutdown not supported.')
         else:
             # New controller process.
             try:
                 signal_file = pathlib.Path(
                     managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                signal_file.touch()
+                with filelock.FileLock(str(signal_file) + '.lock'):
+                    if graceful:
+                        content = _JOBS_GRACEFUL_CANCEL_SIGNAL
+                        if graceful_timeout is not None:
+                            content += f':{graceful_timeout}'
+                        signal_file.write_text(content, encoding='utf-8')
+                    else:
+                        signal_file.touch()
             except OSError as e:
                 logger.error(f'Failed to cancel job {job_id}: {e}')
                 # Don't add it to the to be cancelled job ids
@@ -896,7 +915,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
 
 def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None) -> str:
+                       current_workspace: Optional[str] = None,
+                       graceful: bool = False,
+                       graceful_timeout: Optional[int] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -905,7 +926,10 @@ def cancel_job_by_name(job_name: str,
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    msg = cancel_jobs_by_id(job_ids,
+                            current_workspace=current_workspace,
+                            graceful=graceful,
+                            graceful_timeout=graceful_timeout)
     return f'{job_name!r} {msg}'
 
 
@@ -2336,6 +2360,28 @@ def _job_proto_to_dict(
     return job_dict
 
 
+def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
+    """Parse the job cancel signal file to check if graceful cancel is enabled.
+
+    Args:
+        content: content of the signal file, if any.
+
+    Returns:
+        A tuple of whether graceful cancel is enabled, and cancel timeout if
+        present.
+    """
+    graceful, graceful_timeout = False, None
+    if content and content.startswith(_JOBS_GRACEFUL_CANCEL_SIGNAL):
+        graceful = True
+        if ':' in content:
+            try:
+                graceful_timeout = int(content.split(':')[1])
+            except (ValueError, IndexError):
+                logger.warning('Incorrect graceful signal contents. Got: '
+                               f'{content}. Ignoring timeout...')
+    return graceful, graceful_timeout
+
+
 class ManagedJobCodeGen:
     """Code generator for managed job utility functions.
 
@@ -2442,7 +2488,9 @@ class ManagedJobCodeGen:
     @classmethod
     def cancel_jobs_by_id(cls,
                           job_ids: Optional[List[int]],
-                          all_users: bool = False) -> str:
+                          all_users: bool = False,
+                          graceful: bool = False,
+                          graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
@@ -2455,15 +2503,26 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        else:
+        elif managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
+        else:
+            msg = utils.cancel_jobs_by_id(
+                {job_ids},
+                all_users={all_users},
+                current_workspace={active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
 
     @classmethod
-    def cancel_job_by_name(cls, job_name: str) -> str:
+    def cancel_job_by_name(cls,
+                           job_name: str,
+                           graceful: bool = False,
+                           graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 4:
@@ -2471,8 +2530,15 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_job_by_name({job_name!r})
-        else:
+        elif managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
+        else:
+            msg = utils.cancel_job_by_name(
+                {job_name!r},
+                {active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)

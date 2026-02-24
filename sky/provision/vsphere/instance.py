@@ -593,6 +593,7 @@ def get_cluster_info(
                 internal_ip=vm.summary.guest.ipAddress,
                 external_ip=None,
                 tags={},
+                node_name=vm.summary.config.instanceUuid,
             )
         ]
 

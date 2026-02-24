@@ -789,10 +789,15 @@ async def api_cancel(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_status(request_ids: Optional[List[str]] = None,
-                     all_status: bool = False) -> List[payloads.RequestPayload]:
+async def api_status(
+        request_ids: Optional[List[str]] = None,
+        all_status: bool = False,
+        limit: Optional[int] = None,
+        fields: Optional[List[str]] = None,
+        cluster_name: Optional[str] = None) -> List[payloads.RequestPayload]:
     """Async version of api_status() that lists all requests."""
-    return await asyncio.to_thread(sdk.api_status, request_ids, all_status)
+    return await asyncio.to_thread(sdk.api_status, request_ids, all_status,
+                                   limit, fields, cluster_name)
 
 
 @usage_lib.entrypoint

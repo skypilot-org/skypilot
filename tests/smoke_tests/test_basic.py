@@ -2474,3 +2474,43 @@ def test_slurm_multi_node_proctrack():
         smoke_tests_utils.get_timeout('slurm'),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_node_names_single_node(generic_cloud: str):
+    """Test that node_names is populated for a single-node cluster."""
+    name = smoke_tests_utils.get_cluster_name()
+    task = sky.Task(run='echo hello')
+    task.set_resources(
+        sky.Resources(infra=generic_cloud,
+                      **smoke_tests_utils.LOW_RESOURCE_PARAM))
+    try:
+        sky.get(sky.launch(task, cluster_name=name))
+        # Verify node_names is populated
+        clusters = sky.get(sky.status())
+        cluster = [c for c in clusters if c['name'] == name][0]
+        node_names = cluster['node_names']
+        assert node_names, f'node_names should not be empty, got: {node_names}'
+        print(f'node_names: {node_names}')
+    finally:
+        sky.get(sky.down(name))
+
+
+def test_node_names_multi_node(generic_cloud: str):
+    """Test that node_names contains multiple nodes for a multi-node cluster."""
+    name = smoke_tests_utils.get_cluster_name()
+    task = sky.Task(run='echo hello', num_nodes=2)
+    task.set_resources(
+        sky.Resources(infra=generic_cloud,
+                      **smoke_tests_utils.LOW_RESOURCE_PARAM))
+    try:
+        sky.get(sky.launch(task, cluster_name=name))
+        # Verify node_names contains multiple nodes
+        clusters = sky.get(sky.status())
+        cluster = [c for c in clusters if c['name'] == name][0]
+        node_names = cluster['node_names']
+        assert node_names, f'node_names should not be empty, got: {node_names}'
+        nodes = node_names.split(',')
+        assert len(nodes) >= 2, f'Expected 2+ nodes, got {len(nodes)}: {nodes}'
+        print(f'node_names: {node_names} ({len(nodes)} nodes)')
+    finally:
+        sky.get(sky.down(name))

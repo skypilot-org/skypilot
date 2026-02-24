@@ -235,6 +235,7 @@ def get_cluster_info(
                 external_ip=instance_info['public_ipaddr'],
                 ssh_port=instance_info['ports']['22/tcp'][0]['HostPort'],
                 tags={},
+                node_name=instance_id,
             )
         ]
         if instance_info['name'].endswith('-head'):
