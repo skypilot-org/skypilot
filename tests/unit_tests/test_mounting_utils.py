@@ -541,6 +541,330 @@ class TestOciMountCmdDefaults(unittest.TestCase):
             f'{self.mount_path}', cmd)
 
 
+class TestS3MountOptions(unittest.TestCase):
+    """Test mount_options parameter for S3 mount commands."""
+
+    def setUp(self):
+        self.bucket_name = 'test-bucket'
+        self.mount_path = '/mnt/test'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_s3_mount_cmd(self.bucket_name,
+                                                      self.mount_path)
+        cmd_none = mounting_utils.get_s3_mount_cmd(self.bucket_name,
+                                                   self.mount_path,
+                                                   mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_in_goofys(self):
+        """mount_options appears in goofys branch."""
+        cmd = mounting_utils.get_s3_mount_cmd(self.bucket_name,
+                                              self.mount_path,
+                                              mount_options='--my-flag val')
+        self.assertIn('--my-flag val', cmd)
+        # Should appear after mount_path in goofys branch
+        self.assertIn(f'{self.mount_path} --my-flag val', cmd)
+
+    def test_mount_options_in_rclone(self):
+        """mount_options appears in rclone branch."""
+        cmd = mounting_utils.get_s3_mount_cmd(self.bucket_name,
+                                              self.mount_path,
+                                              mount_options='--my-flag val')
+        self.assertIn('--s3-env-auth=true --my-flag val', cmd)
+
+    def test_mount_options_with_sub_path(self):
+        """mount_options works with sub_path."""
+        cmd = mounting_utils.get_s3_mount_cmd(self.bucket_name,
+                                              self.mount_path,
+                                              _bucket_sub_path='sub/dir',
+                                              mount_options='--extra')
+        self.assertIn(':sub/dir', cmd)
+        self.assertIn('--extra', cmd)
+
+
+class TestGcsMountOptions(unittest.TestCase):
+    """Test mount_options parameter for GCS mount commands."""
+
+    def setUp(self):
+        self.bucket_name = 'test-bucket'
+        self.mount_path = '/mnt/test'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_gcs_mount_cmd(self.bucket_name,
+                                                       self.mount_path)
+        cmd_none = mounting_utils.get_gcs_mount_cmd(self.bucket_name,
+                                                    self.mount_path,
+                                                    mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_appended(self):
+        """mount_options is appended after bucket and mount_path."""
+        opts = '--max-conns-per-host 20 --stat-cache-capacity 8192'
+        cmd = mounting_utils.get_gcs_mount_cmd(self.bucket_name,
+                                               self.mount_path,
+                                               mount_options=opts)
+        self.assertIn(opts, cmd)
+        self.assertIn(f'{self.mount_path} {opts}', cmd)
+
+    def test_default_options_preserved(self):
+        """Default gcsfuse options are still present with mount_options."""
+        cmd = mounting_utils.get_gcs_mount_cmd(self.bucket_name,
+                                               self.mount_path,
+                                               mount_options='--extra')
+        self.assertIn('--debug_fuse_errors', cmd)
+        self.assertIn('-o allow_other', cmd)
+        self.assertIn('--implicit-dirs', cmd)
+
+
+class TestAzMountOptions(unittest.TestCase):
+    """Test mount_options parameter for Azure blobfuse2 mount commands."""
+
+    def setUp(self):
+        self.container_name = 'test-container'
+        self.storage_account = 'teststorage'
+        self.mount_path = '/mnt/test'
+        self.storage_key = 'dGVzdGtleQ=='
+
+    def test_no_mount_options(self):
+        """Without mount_options the default --tmp-path is present."""
+        cmd = mounting_utils.get_az_mount_cmd(self.container_name,
+                                              self.storage_account,
+                                              self.mount_path, self.storage_key)
+        self.assertIn('--tmp-path', cmd)
+        expected_cache = mounting_utils._BLOBFUSE_CACHE_DIR.format(  # pylint: disable=protected-access
+            storage_account_name=self.storage_account,
+            container_name=self.container_name)
+        self.assertIn(f'--tmp-path {expected_cache}_', cmd)
+
+    def test_mount_options_appended(self):
+        """Custom mount_options are appended to blobfuse2 command."""
+        opts = '--file-cache-timeout-in-seconds=0 --cache-size-mb=4096'
+        cmd = mounting_utils.get_az_mount_cmd(self.container_name,
+                                              self.storage_account,
+                                              self.mount_path,
+                                              self.storage_key,
+                                              mount_options=opts)
+        self.assertIn(opts, cmd)
+        # Default --tmp-path should still be present
+        self.assertIn('--tmp-path', cmd)
+
+    def test_custom_tmp_path_overrides_default(self):
+        """When mount_options includes --tmp-path, default is omitted."""
+        opts = '--tmp-path /custom/cache'
+        cmd = mounting_utils.get_az_mount_cmd(self.container_name,
+                                              self.storage_account,
+                                              self.mount_path,
+                                              self.storage_key,
+                                              mount_options=opts)
+        self.assertIn('--tmp-path /custom/cache', cmd)
+        # Default cache path should NOT be present
+        expected_cache = mounting_utils._BLOBFUSE_CACHE_DIR.format(  # pylint: disable=protected-access
+            storage_account_name=self.storage_account,
+            container_name=self.container_name)
+        self.assertNotIn(f'--tmp-path {expected_cache}_', cmd)
+
+    def test_default_options_preserved(self):
+        """Default blobfuse2 options are still present with mount_options."""
+        cmd = mounting_utils.get_az_mount_cmd(self.container_name,
+                                              self.storage_account,
+                                              self.mount_path,
+                                              self.storage_key,
+                                              mount_options='--extra')
+        self.assertIn('--no-symlinks', cmd)
+        self.assertIn(f'--container-name {self.container_name}', cmd)
+
+    def test_none_mount_options_identical(self):
+        """Explicit None mount_options is same as default."""
+        cmd_default = mounting_utils.get_az_mount_cmd(self.container_name,
+                                                      self.storage_account,
+                                                      self.mount_path,
+                                                      self.storage_key)
+        cmd_none = mounting_utils.get_az_mount_cmd(self.container_name,
+                                                   self.storage_account,
+                                                   self.mount_path,
+                                                   self.storage_key,
+                                                   mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+
+class TestR2MountOptions(unittest.TestCase):
+    """Test mount_options parameter for R2 mount commands."""
+
+    def setUp(self):
+        self.credentials_path = '/path/to/credentials'
+        self.profile_name = 'r2-profile'
+        self.endpoint_url = 'https://account.r2.cloudflarestorage.com'
+        self.bucket_name = 'test-bucket'
+        self.mount_path = '/mnt/test'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_r2_mount_cmd(self.credentials_path,
+                                                      self.profile_name,
+                                                      self.endpoint_url,
+                                                      self.bucket_name,
+                                                      self.mount_path)
+        cmd_none = mounting_utils.get_r2_mount_cmd(self.credentials_path,
+                                                   self.profile_name,
+                                                   self.endpoint_url,
+                                                   self.bucket_name,
+                                                   self.mount_path,
+                                                   mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_in_both_branches(self):
+        """mount_options appears in both goofys and rclone branches."""
+        cmd = mounting_utils.get_r2_mount_cmd(self.credentials_path,
+                                              self.profile_name,
+                                              self.endpoint_url,
+                                              self.bucket_name,
+                                              self.mount_path,
+                                              mount_options='--my-opt')
+        # Should appear twice: once in rclone, once in goofys
+        self.assertEqual(cmd.count('--my-opt'), 2)
+
+
+class TestNebiusMountOptions(unittest.TestCase):
+    """Test mount_options parameter for Nebius mount commands."""
+
+    def setUp(self):
+        self.profile_name = 'nebius-profile'
+        self.endpoint_url = 'https://storage.ai.nebius.cloud'
+        self.bucket_name = 'test-bucket'
+        self.mount_path = '/mnt/test'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_nebius_mount_cmd(
+            self.profile_name, self.bucket_name, self.endpoint_url,
+            self.mount_path)
+        cmd_none = mounting_utils.get_nebius_mount_cmd(self.profile_name,
+                                                       self.bucket_name,
+                                                       self.endpoint_url,
+                                                       self.mount_path,
+                                                       mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_in_both_branches(self):
+        """mount_options appears in both goofys and rclone branches."""
+        cmd = mounting_utils.get_nebius_mount_cmd(self.profile_name,
+                                                  self.bucket_name,
+                                                  self.endpoint_url,
+                                                  self.mount_path,
+                                                  mount_options='--my-opt')
+        self.assertEqual(cmd.count('--my-opt'), 2)
+
+
+class TestCoreweaveMountOptions(unittest.TestCase):
+    """Test mount_options parameter for CoreWeave mount commands."""
+
+    def setUp(self):
+        self.credentials_path = '/path/to/cw-credentials'
+        self.profile_name = 'cw-profile'
+        self.endpoint_url = 'https://object.ord1.coreweave.com'
+        self.bucket_name = 'test-bucket'
+        self.mount_path = '/mnt/test'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_coreweave_mount_cmd(
+            self.credentials_path, self.profile_name, self.bucket_name,
+            self.endpoint_url, self.mount_path)
+        cmd_none = mounting_utils.get_coreweave_mount_cmd(self.credentials_path,
+                                                          self.profile_name,
+                                                          self.bucket_name,
+                                                          self.endpoint_url,
+                                                          self.mount_path,
+                                                          mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_in_both_branches(self):
+        """mount_options appears in both goofys and rclone branches."""
+        cmd = mounting_utils.get_coreweave_mount_cmd(self.credentials_path,
+                                                     self.profile_name,
+                                                     self.bucket_name,
+                                                     self.endpoint_url,
+                                                     self.mount_path,
+                                                     mount_options='--my-opt')
+        self.assertEqual(cmd.count('--my-opt'), 2)
+
+
+class TestCosMountOptions(unittest.TestCase):
+    """Test mount_options parameter for IBM COS mount commands."""
+
+    def setUp(self):
+        self.rclone_config = '[cos-profile]\ntype = s3\nprovider = IBMCOS'
+        self.profile_name = 'cos-profile'
+        self.bucket_name = 'test-bucket'
+        self.mount_path = '/mnt/test'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_cos_mount_cmd(self.rclone_config,
+                                                       self.profile_name,
+                                                       self.bucket_name,
+                                                       self.mount_path)
+        cmd_none = mounting_utils.get_cos_mount_cmd(self.rclone_config,
+                                                    self.profile_name,
+                                                    self.bucket_name,
+                                                    self.mount_path,
+                                                    mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_appended(self):
+        """mount_options is appended after --daemon."""
+        cmd = mounting_utils.get_cos_mount_cmd(
+            self.rclone_config,
+            self.profile_name,
+            self.bucket_name,
+            self.mount_path,
+            mount_options='--vfs-cache-mode full')
+        self.assertIn('--daemon --vfs-cache-mode full', cmd)
+
+
+class TestOciMountOptions(unittest.TestCase):
+    """Test mount_options parameter for OCI mount commands."""
+
+    def setUp(self):
+        self.mount_path = '/mnt/test'
+        self.store_name = 'test-bucket'
+        self.region = 'us-ashburn-1'
+        self.namespace = 'test-namespace'
+        self.compartment = 'ocid1.compartment.oc1..test'
+        self.config_file = '~/.oci/config'
+        self.config_profile = 'DEFAULT'
+
+    def test_no_mount_options(self):
+        """Without mount_options the command is unchanged."""
+        cmd_default = mounting_utils.get_oci_mount_cmd(
+            self.mount_path, self.store_name, self.region, self.namespace,
+            self.compartment, self.config_file, self.config_profile)
+        cmd_none = mounting_utils.get_oci_mount_cmd(self.mount_path,
+                                                    self.store_name,
+                                                    self.region,
+                                                    self.namespace,
+                                                    self.compartment,
+                                                    self.config_file,
+                                                    self.config_profile,
+                                                    mount_options=None)
+        self.assertEqual(cmd_default, cmd_none)
+
+    def test_mount_options_appended(self):
+        """mount_options is appended after --allow-non-empty."""
+        cmd = mounting_utils.get_oci_mount_cmd(
+            self.mount_path,
+            self.store_name,
+            self.region,
+            self.namespace,
+            self.compartment,
+            self.config_file,
+            self.config_profile,
+            mount_options='--buffer-size 64M')
+        self.assertIn('--allow-non-empty --buffer-size 64M', cmd)
+
+
 class TestMountBinaryDetection(unittest.TestCase):
     """Test _get_mount_binary for all supported mount tools."""
 
