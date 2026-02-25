@@ -522,9 +522,6 @@ touch {sky_cluster_home_dir}/.hushlogin
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
 
-    # Track start time to calculate remaining timeout after node allocation
-    provision_start_time = time.time()
-
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
     nodes, _ = client.get_job_nodes(job_id)
@@ -532,11 +529,11 @@ touch {sky_cluster_home_dir}/.hushlogin
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
 
-    # Calculate remaining timeout for job initialization
-    remaining_timeout = None
-    if provision_timeout is not None:
-        elapsed = time.time() - provision_start_time
-        remaining_timeout = max(0, provision_timeout - elapsed)
+    # No timeout for job initialization: once nodes are allocated, the
+    # provision has effectively succeeded. Container image pulls and
+    # package installation can take a long time for large images, and
+    # should not be subject to the provision timeout (which is meant for
+    # the Slurm scheduler queue, not for container setup).
 
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
@@ -561,7 +558,6 @@ touch {sky_cluster_home_dir}/.hushlogin
             job_id,
             ready_signal,
             slurm_log,
-            remaining_timeout,
         )
     except (TimeoutError, RuntimeError, exceptions.CommandError) as e:
         _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
