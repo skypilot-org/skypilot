@@ -1458,7 +1458,7 @@ Port to run your service on each replica.
 Job Pools
 =========
 
-To define a YAML for use with :ref:`job pools <job-pool>`, use previously mentioned fields to describe each worker, then add a pool section to configure the pool's scaling behavior.
+To define a YAML for use with :ref:`job pools <pool>`, use previously mentioned fields to describe each worker, then add a pool section to configure the pool's scaling behavior.
 
 Syntax
 
