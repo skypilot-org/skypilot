@@ -163,6 +163,18 @@ def main():
     if process is not None and parent_process is not None:
         # Wait for either parent or target process to exit
         while process.is_running() and parent_process.is_running():
+            # Check if the target process is a zombie. psutil.is_running()
+            # returns True for zombie processes, but a zombie means the
+            # process has already exited and is just waiting to be reaped
+            # by its parent. We should treat it as exited to avoid polling
+            # forever and leaking CPU. This is critical for the managed
+            # jobs controller where SSH/kubectl subprocesses can become
+            # zombies if their parent thread is cancelled.
+            try:
+                if process.status() == psutil.STATUS_ZOMBIE:
+                    break
+            except psutil.NoSuchProcess:
+                break
             if pgid is None:
                 # Refresh process tree for cleanup if process group is not
                 # available.

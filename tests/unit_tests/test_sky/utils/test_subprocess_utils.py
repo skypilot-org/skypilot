@@ -1,7 +1,10 @@
 """Unit tests for subprocess_utils.py."""
 import logging
 import multiprocessing
+import os
 import signal
+import subprocess
+import sys
 import time
 import unittest
 from unittest import mock
@@ -289,3 +292,152 @@ class TestKillProcessWithGrace(unittest.TestCase):
         # Process should be terminated by SIGKILL after grace period
         time.sleep(0.1)  # Give some time for the process to be fully terminated
         self.assertFalse(process.is_alive())
+
+
+def _count_zombie_children():
+    """Count zombie children of the current process."""
+    my_pid = os.getpid()
+    zombies = []
+    for proc in psutil.process_iter(['pid', 'ppid', 'status']):
+        try:
+            if (proc.info['ppid'] == my_pid and
+                    proc.info['status'] == psutil.STATUS_ZOMBIE):
+                zombies.append(proc.info['pid'])
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return zombies
+
+
+class TestKillProcessDaemonNoZombie(unittest.TestCase):
+    """Test that kill_process_daemon does not leave zombie processes."""
+
+    def test_no_zombie_from_daemon_fork(self):
+        """kill_process_daemon should not create zombie processes.
+
+        The daemon does a double-fork (daemonize). The intermediate process
+        (the Popen's direct child) exits immediately. If we don't call
+        .wait() on the Popen, the intermediate process becomes a zombie.
+        This test verifies that .wait() is called and no zombies accumulate.
+        """
+        initial_zombies = _count_zombie_children()
+
+        # Create 10 short-lived processes, each with a daemon
+        for _ in range(10):
+            proc = subprocess.Popen(
+                ['sleep', '0.01'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess_utils.kill_process_daemon(proc.pid)
+            proc.wait()
+            time.sleep(0.1)
+
+        # Let daemon forks settle
+        time.sleep(2)
+
+        current_zombies = _count_zombie_children()
+        new_zombies = set(current_zombies) - set(initial_zombies)
+        self.assertEqual(
+            len(new_zombies), 0,
+            f'kill_process_daemon created {len(new_zombies)} zombie '
+            f'processes. PIDs: {list(new_zombies)}')
+
+
+class TestSubprocessDaemonExitsOnZombie(unittest.TestCase):
+    """Test that subprocess_daemon exits when its target is a zombie."""
+
+    def test_daemon_exits_when_target_is_zombie(self):
+        """Daemon should exit when the target process becomes a zombie.
+
+        When a subprocess becomes a zombie (parent doesn't call wait()),
+        psutil.Process.is_running() returns True. Without the zombie check,
+        the daemon would poll forever. This test verifies the daemon detects
+        the zombie and exits.
+        """
+        # Create a child process that we WON'T wait on (creating a zombie)
+        proc = subprocess.Popen(
+            ['sleep', '0.5'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        child_pid = proc.pid
+
+        # Start the subprocess_daemon directly (not via kill_process_daemon,
+        # so we can track the daemon process)
+        daemon_script = os.path.join(
+            os.path.dirname(os.path.abspath(subprocess_utils.log_lib.__file__)),
+            'subprocess_daemon.py')
+        daemon_cmd = [
+            sys.executable,
+            daemon_script,
+            '--parent-pid',
+            str(os.getpid()),
+            '--proc-pid',
+            str(child_pid),
+            '--initial-children',
+            '',
+        ]
+        daemon_proc = subprocess.Popen(
+            daemon_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        # Reap the intermediate process from the daemon's double-fork
+        daemon_proc.wait()
+
+        # Wait for the child to finish (becomes zombie since we don't
+        # call proc.wait())
+        time.sleep(2)
+
+        # Verify child is indeed a zombie
+        try:
+            child = psutil.Process(child_pid)
+            child_status = child.status()
+        except psutil.NoSuchProcess:
+            # On some systems the child may be auto-reaped
+            self.skipTest('Child was auto-reaped, cannot test zombie behavior')
+            return
+
+        if child_status != psutil.STATUS_ZOMBIE:
+            # Reap and skip - system didn't create a zombie
+            proc.wait()
+            self.skipTest(f'Child status is {child_status}, not zombie. '
+                          'Cannot test zombie behavior on this system.')
+            return
+
+        # Find the daemon grandchild process (the actual daemon after
+        # double-fork). It should be watching our child_pid.
+        def find_daemon_for_pid(target_pid):
+            for p in psutil.process_iter(['pid', 'cmdline']):
+                try:
+                    cmdline = ' '.join(p.info['cmdline'] or [])
+                    if ('subprocess_daemon' in cmdline and
+                            f'--proc-pid {target_pid}' in cmdline):
+                        return p
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return None
+
+        # The daemon should detect the zombie and exit within 30 seconds.
+        # The daemon polls every 1s, then kill_process_tree has a 30s grace
+        # period, but for zombies there are no real children to wait for,
+        # so it should exit relatively quickly. We use 30s as a generous
+        # upper bound.
+        daemon = find_daemon_for_pid(child_pid)
+        if daemon is None:
+            # Daemon may have already exited (fast detection)
+            proc.wait()
+            return
+
+        try:
+            daemon.wait(timeout=30)
+        except psutil.TimeoutExpired:
+            # Clean up before failing
+            proc.wait()
+            self.fail(f'Daemon (PID={daemon.pid}) watching zombie target '
+                      f'(PID={child_pid}) did not exit within 30 seconds. '
+                      'The daemon is stuck polling on the zombie process.')
+
+        # Clean up - reap the zombie
+        proc.wait()
