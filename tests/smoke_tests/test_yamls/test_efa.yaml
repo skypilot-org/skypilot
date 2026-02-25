@@ -1,19 +1,13 @@
 # Test YAML for EFA smoke test. Uses any_of to try multiple EFA-capable
 # instance types across all AWS regions for better resource availability.
 resources:
+  infra: aws
+  network_tier: best
   any_of:
-    - infra: aws
-      instance_type: g6.8xlarge
-      network_tier: best
-    - infra: aws
-      instance_type: g6.16xlarge
-      network_tier: best
-    - infra: aws
-      instance_type: g5.8xlarge
-      network_tier: best
-    - infra: aws
-      instance_type: g5.16xlarge
-      network_tier: best
+    - instance_type: g6.8xlarge
+    - instance_type: g6.16xlarge
+    - instance_type: g5.8xlarge
+    - instance_type: g5.16xlarge
 
 num_nodes: 2
 
