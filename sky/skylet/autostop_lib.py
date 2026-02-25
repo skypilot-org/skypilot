@@ -236,16 +236,21 @@ def set_last_active_time_to_now() -> None:
 def has_active_ssh_sessions() -> bool:
     """Returns True if there are any active SSH sessions on the node."""
     try:
-        # /dev/pts is a virtual filesystem that contains the pseudo-terminal
-        # devices. ptmx is the pseudo-terminal multiplexer, which is the
-        # "master" device that creates new pseudo-terminal devices, so we
-        # exclude it from the count.
-        proc = subprocess.run('ls /dev/pts | grep -v ptmx | wc -l',
+        # Count sshd processes serving active sessions. Each active SSH
+        # connection spawns an sshd child with the pattern "sshd: user@".
+        # The listener daemon ("sshd: /usr/sbin/sshd [listener]") does not
+        # match. This avoids false positives from Docker entrypoint PTYs,
+        # which hold /dev/pts/0 without any SSH session.
+        # The [s] bracket trick prevents grep from matching its own process
+        # in the ps output, since "[s]shd" does not match the literal "grep"
+        # command line.
+        proc = subprocess.run('ps ax -o args= | grep -c "[s]shd:.*@"',
                               capture_output=True,
                               text=True,
                               check=False,
                               shell=True)
-        if proc.returncode != 0:
+        # grep -c returns 1 when no lines match, which is not an error.
+        if proc.returncode > 1:
             logger.warning(f'SSH session check command failed with return code '
                            f'{proc.returncode}.')
             return False
