@@ -490,11 +490,7 @@ Test that enroot can pull the private image on a compute node:
     $ rm /tmp/test.sqsh
 
 Once configured, users can launch SkyPilot tasks with private images without
-any additional setup:
-
-.. code-block:: bash
-
-    $ sky launch --image-id docker:<account-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag> -- echo "success"
+any additional setup.
 
 
 Current limitations
