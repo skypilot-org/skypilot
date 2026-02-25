@@ -340,18 +340,15 @@ To use a container image, specify ``image_id`` in your task YAML or use the
     $ sky launch --image-id docker:ubuntu:22.04 -- echo "hello from container"
 
 Images from any Docker-compatible registry are supported, including but not
-limited to Docker Hub, `NVIDIA NGC <https://catalog.ngc.nvidia.com/>`_,
-AWS ECR, and GCP Artifact Registry.
+limited to Docker Hub, AWS ECR, GCP Artifact Registry, and NVIDIA NGC.
 
 .. note::
 
     Container support requires the `Pyxis <https://github.com/NVIDIA/pyxis>`_
-    SPANK plugin to be installed on your Slurm cluster. If Pyxis is not
-    available, SkyPilot will report an error when attempting to use container
-    images.
+    SPANK plugin to be installed on your Slurm cluster.
 
-Private registries (admin setup)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Private registries
+^^^^^^^^^^^^^^^^^^
 
 .. note::
 
@@ -363,8 +360,7 @@ Private registries (admin setup)
 
 To pull images from private registries, the cluster administrator must configure
 enroot's credentials file on all compute nodes. Enroot uses a
-`netrc-formatted <https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html>`_
-credentials file to authenticate with container registries. For more details,
+netrc format credentials file to authenticate with container registries. For more details,
 see the `enroot import documentation <https://github.com/NVIDIA/enroot/blob/main/doc/cmd/import.md#description>`_.
 
 **Step 1: Find the credentials file path**
@@ -388,6 +384,23 @@ the file in the user's home directory typically makes it available on all nodes:
 
 .. tab-set::
 
+    .. tab-item:: Docker Hub
+        :sync: docker-hub-tab
+
+        Docker Hub authentication requires credentials for both the registry
+        and the auth server:
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine auth.docker.io login <username> password <access-token>
+            machine registry-1.docker.io login <username> password <access-token>
+            EOF
+
+        Use a `personal access token <https://app.docker.com/settings/personal-access-tokens>`_
+        with "Read" repository permissions as the password.
+
     .. tab-item:: AWS ECR
         :sync: aws-ecr-tab
 
@@ -408,35 +421,12 @@ the file in the user's home directory typically makes it available on all nodes:
         - AWS CLI must be installed on compute nodes
         - IAM credentials with ``ecr:GetAuthorizationToken``,
           ``ecr:BatchGetImage``, and ``ecr:GetDownloadUrlForLayer`` permissions
-        - **enroot >= 4.0** is required for ECR (see :ref:`enroot version note <slurm-enroot-version>`
-          below)
-
-    .. tab-item:: Docker Hub
-        :sync: docker-hub-tab
-
-        Docker Hub authentication requires credentials for both the registry
-        and the auth server:
-
-        .. code-block:: bash
-
-            $ mkdir -p <ENROOT_CONFIG_PATH>
-            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
-            machine auth.docker.io login <username> password <access-token>
-            machine registry-1.docker.io login <username> password <access-token>
-            EOF
-
-        Use a `personal access token <https://app.docker.com/settings/personal-access-tokens>`_
-        with "Read" repository permissions as the password.
-
-    .. tab-item:: NVIDIA NGC
-        :sync: nvidia-ngc-tab
-
-        .. code-block:: bash
-
-            $ mkdir -p <ENROOT_CONFIG_PATH>
-            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
-            machine nvcr.io login $oauthtoken password <NGC_API_KEY>
-            EOF
+        - **enroot >= 4.0** is required for ECR. Older versions do not support
+          ECR's non-standard authentication flow. If you see
+          ``[ERROR] Could not process JSON input`` when pulling ECR images,
+          upgrade enroot to 4.0 or later. See enroot issues
+          `#143 <https://github.com/NVIDIA/enroot/issues/143>`_ and
+          `#189 <https://github.com/NVIDIA/enroot/issues/189>`_ for details.
 
     .. tab-item:: GCP Artifact Registry
         :sync: gcp-tab
@@ -477,6 +467,16 @@ the file in the user's home directory typically makes it available on all nodes:
             Access tokens expire after 1 hour. Use a service account key for
             production setups.
 
+    .. tab-item:: NVIDIA NGC
+        :sync: nvidia-ngc-tab
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine nvcr.io login $oauthtoken password <NGC_API_KEY>
+            EOF
+
 **Step 3: Verify the setup**
 
 Test that enroot can pull the private image on a compute node:
@@ -495,17 +495,6 @@ any additional setup:
 .. code-block:: bash
 
     $ sky launch --image-id docker:<account-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag> -- echo "success"
-
-.. _slurm-enroot-version:
-
-.. note::
-
-    **enroot version requirement for ECR:** AWS ECR uses a non-standard
-    authentication flow that is not supported by enroot versions prior to 4.0.
-    If you see ``[ERROR] Could not process JSON input`` when pulling ECR images,
-    upgrade enroot to 4.0 or later. See enroot issues
-    `#143 <https://github.com/NVIDIA/enroot/issues/143>`_ and
-    `#189 <https://github.com/NVIDIA/enroot/issues/189>`_ for details.
 
 
 Current limitations
