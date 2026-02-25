@@ -312,13 +312,211 @@ See :ref:`slurm.pricing <config-yaml-slurm-pricing>` and
 partition-level overrides.
 
 
+.. _slurm-container-images:
+
+Container images
+----------------
+
+SkyPilot supports running tasks inside container images on Slurm, using
+`Pyxis <https://github.com/NVIDIA/pyxis>`_ and
+`enroot <https://github.com/NVIDIA/enroot>`_ under the hood.
+
+To use a container image, specify ``image_id`` in your task YAML or use the
+``--image-id`` CLI flag:
+
+.. code-block:: yaml
+
+    # task.yaml
+    resources:
+      image_id: docker:ubuntu:22.04
+
+    run: |
+      echo "Running inside container"
+      cat /etc/os-release
+
+.. code-block:: bash
+
+    # Or via CLI
+    $ sky launch --image-id docker:ubuntu:22.04 -- echo "hello from container"
+
+Images from any Docker-compatible registry are supported, including Docker Hub,
+`NVIDIA NGC <https://catalog.ngc.nvidia.com/>`_,
+AWS ECR, and GCP Artifact Registry.
+
+.. note::
+
+    Container support requires the `Pyxis <https://github.com/NVIDIA/pyxis>`_
+    SPANK plugin to be installed on your Slurm cluster. If Pyxis is not
+    available, SkyPilot will report an error when attempting to use container
+    images.
+
+Private registries (admin setup)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+    Unlike :ref:`cloud VMs <docker-containers-private-registries>` and
+    :ref:`Kubernetes <kubernetes-custom-images-private-repos>`, private registry
+    authentication on Slurm is configured **at the cluster level** by the
+    administrator. Users do not need to set ``SKYPILOT_DOCKER_*`` environment
+    variables.
+
+To pull images from private registries, the cluster administrator must configure
+enroot's credentials file on all compute nodes. Enroot uses a
+`netrc-formatted <https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html>`_
+credentials file to authenticate with container registries.
+
+**Step 1: Find the credentials file path**
+
+The credentials file location depends on your cluster's enroot configuration:
+
+.. code-block:: bash
+
+    # Check the configured ENROOT_CONFIG_PATH
+    $ grep ENROOT_CONFIG_PATH /etc/enroot/enroot.conf
+
+    # If ENROOT_CONFIG_PATH is set (e.g., ${HOME}/enroot):
+    #   Credentials file: ~/enroot/.credentials
+    # If unset (default):
+    #   Credentials file: ~/.config/enroot/.credentials
+
+**Step 2: Create the credentials file on all compute nodes**
+
+Since most Slurm clusters use a shared filesystem (e.g., NFS, Lustre), creating
+the file in the user's home directory typically makes it available on all nodes:
+
+.. tab-set::
+
+    .. tab-item:: AWS ECR
+        :sync: aws-ecr-tab
+
+        .. code-block:: bash
+
+            # Replace <ENROOT_CONFIG_PATH> with the path from Step 1
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine <account-id>.dkr.ecr.<region>.amazonaws.com login AWS password $(aws ecr get-login-password --region <region>)
+            EOF
+
+        The ``$(...)`` syntax is evaluated by enroot at import time, so the
+        ECR token (which expires every 12 hours) is always refreshed
+        automatically.
+
+        **Requirements:**
+
+        - AWS CLI must be installed on compute nodes
+        - IAM credentials with ``ecr:GetAuthorizationToken``,
+          ``ecr:BatchGetImage``, and ``ecr:GetDownloadUrlForLayer`` permissions
+        - **enroot >= 4.0** is required for ECR (see :ref:`slurm-enroot-version`
+          below)
+
+    .. tab-item:: Docker Hub
+        :sync: docker-hub-tab
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine auth.docker.io login <username> password <access-token>
+            EOF
+
+        Use a `personal access token <https://app.docker.com/settings/personal-access-tokens>`_
+        as the password.
+
+    .. tab-item:: NVIDIA NGC
+        :sync: nvidia-ngc-tab
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine nvcr.io login $oauthtoken password <NGC_API_KEY>
+            EOF
+
+    .. tab-item:: GCP Artifact Registry
+        :sync: gcp-tab
+
+        **Option 1: Service account key (recommended for persistent setup)**
+
+        The key must be base64-encoded because raw JSON contains characters
+        that break enroot's netrc parser:
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+
+            # Copy the service account key to the cluster
+            $ cp /path/to/service-account-key.json <ENROOT_CONFIG_PATH>/gcp-sa-key.json
+
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine <location>-docker.pkg.dev login _json_key_base64 password $(base64 -w0 <ENROOT_CONFIG_PATH>/gcp-sa-key.json)
+            EOF
+
+        The service account must have the ``roles/artifactregistry.reader``
+        role. See `Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication#json-key>`_.
+
+        Replace ``<location>`` with your repository's location (e.g., ``us``,
+        ``us-central1``, ``europe-west1``).
+
+        **Option 2: gcloud access token (for testing)**
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << EOF
+            machine <location>-docker.pkg.dev login oauth2accesstoken password $(gcloud auth print-access-token)
+            EOF
+
+        .. warning::
+
+            Access tokens expire after 1 hour. Use a service account key for
+            production setups.
+
+**Step 3: Verify the setup**
+
+Test that enroot can pull the private image on a compute node:
+
+.. code-block:: bash
+
+    $ srun enroot import --output /tmp/test.sqsh 'docker://<registry>#<image>:<tag>'
+    # Should succeed without authentication errors
+
+    # Clean up
+    $ rm /tmp/test.sqsh
+
+Once configured, users can launch SkyPilot tasks with private images without
+any additional setup:
+
+.. code-block:: bash
+
+    $ sky launch --image-id docker:<account-id>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag> -- echo "success"
+
+.. _slurm-enroot-version:
+
+.. note::
+
+    **enroot version requirement for ECR:** AWS ECR uses a non-standard
+    authentication flow that is not supported by enroot versions prior to 4.0.
+    If you see ``[ERROR] Could not process JSON input`` when pulling ECR images,
+    upgrade enroot to 4.0 or later:
+
+    .. code-block:: bash
+
+        $ arch=$(dpkg --print-architecture)
+        $ curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v4.1.1/enroot_4.1.1-1_${arch}.deb
+        $ curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v4.1.1/enroot+caps_4.1.1-1_${arch}.deb
+        $ sudo apt install -y ./enroot_4.1.1-1_${arch}.deb ./enroot+caps_4.1.1-1_${arch}.deb
+
+    See `enroot issue #143 <https://github.com/NVIDIA/enroot/issues/143>`_ and
+    `#189 <https://github.com/NVIDIA/enroot/issues/189>`_ for details.
+
+
 Current limitations
 -------------------
 
 Slurm support in SkyPilot is under active development. The following features are not yet supported:
 
 * **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
-* **Custom images**: Docker or custom container images are not supported.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 
 FAQs
