@@ -448,6 +448,7 @@ def test_image_no_conda():
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,  # GPU stop/start cycle can be slow
     )
     smoke_tests_utils.run_one_test(test)
 
