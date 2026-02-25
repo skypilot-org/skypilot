@@ -437,12 +437,8 @@ the file in the user's home directory typically makes it available on all nodes:
         .. code-block:: bash
 
             $ mkdir -p <ENROOT_CONFIG_PATH>
-
-            # Copy the service account key to the cluster
-            $ cp /path/to/service-account-key.json <ENROOT_CONFIG_PATH>/gcp-sa-key.json
-
             $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
-            machine <location>-docker.pkg.dev login _json_key_base64 password $(base64 -w0 <ENROOT_CONFIG_PATH>/gcp-sa-key.json)
+            machine <location>-docker.pkg.dev login _json_key_base64 password $(base64 -w0 /path/to/service-account-key.json)
             EOF
 
         The service account must have the ``roles/artifactregistry.reader``
