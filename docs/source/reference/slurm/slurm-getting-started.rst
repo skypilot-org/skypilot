@@ -314,8 +314,8 @@ partition-level overrides.
 
 .. _slurm-container-images:
 
-Container images
-----------------
+Containers
+----------
 
 SkyPilot supports running tasks inside container images on Slurm, using
 `Pyxis <https://github.com/NVIDIA/pyxis>`_ and
