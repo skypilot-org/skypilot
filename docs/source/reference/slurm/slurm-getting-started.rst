@@ -364,7 +364,8 @@ Private registries (admin setup)
 To pull images from private registries, the cluster administrator must configure
 enroot's credentials file on all compute nodes. Enroot uses a
 `netrc-formatted <https://www.gnu.org/software/inetutils/manual/html_node/The-_002enetrc-file.html>`_
-credentials file to authenticate with container registries.
+credentials file to authenticate with container registries. For more details,
+see the `enroot import documentation <https://github.com/NVIDIA/enroot/blob/main/doc/cmd/import.md#description>`_.
 
 **Step 1: Find the credentials file path**
 
