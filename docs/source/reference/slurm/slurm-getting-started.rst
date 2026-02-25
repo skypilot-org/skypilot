@@ -339,8 +339,8 @@ To use a container image, specify ``image_id`` in your task YAML or use the
     # Or via CLI
     $ sky launch --image-id docker:ubuntu:22.04 -- echo "hello from container"
 
-Images from any Docker-compatible registry are supported, including Docker Hub,
-`NVIDIA NGC <https://catalog.ngc.nvidia.com/>`_,
+Images from any Docker-compatible registry are supported, including but not
+limited to Docker Hub, `NVIDIA NGC <https://catalog.ngc.nvidia.com/>`_,
 AWS ECR, and GCP Artifact Registry.
 
 .. note::
