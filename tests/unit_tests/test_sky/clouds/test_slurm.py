@@ -56,7 +56,7 @@ class TestCheckInstanceFits:
             ([node_gpu_a10g], '64CPU--256GB--a10g:4', None, True, None),
             # GPU - type not available
             ([node_gpu_a10g
-             ], '64CPU--256GB--h100:4', None, False, 'No GPU nodes found'),
+             ], '64CPU--256GB--h100:4', None, False, 'No GPU nodes matching'),
             # Partition filtering with default partition (*) handling
             ([node_2cpu_8gb_cpus], '1CPU--4GB', 'dev', True, None),
             # Resource exists but in different partition

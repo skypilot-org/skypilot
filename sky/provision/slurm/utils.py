@@ -499,34 +499,23 @@ def check_instance_fits(
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
+        # Resolve to the exact raw GRES type that will be used at deploy
+        # time, so the CPU/memory fitness check below runs against the
+        # same nodes that Slurm will actually schedule on.
+        try:
+            resolved_type = resolve_gres_gpu_type(cluster, acc_type,
+                                                  acc_count, partition)
+        except exceptions.ResourcesUnavailableError as e:
+            return (False, str(e))
+
+        # Filter to nodes carrying the resolved raw type with enough GPUs.
         gpu_nodes = []
         for node_info in nodes:
-            # Extract the GPU type and count from the GRES string
             node_acc_type, node_acc_count = get_gpu_type_and_count(
                 node_info.gres)
-            if node_acc_type is None:
-                continue
-
-            # TODO(jwj): Handle status check.
-
-            # Use canonical matching to support user-friendly GPU names
-            # (e.g. 'H100' matching 'NVIDIA_H100_80GB_S').
-            if (_accelerator_name_matches_slurm(acc_type, node_acc_type) and
+            if (node_acc_type == resolved_type and
                     node_acc_count >= acc_count):
                 gpu_nodes.append(node_info)
-        if len(gpu_nodes) == 0:
-            # Collect discovered raw GPU types for a helpful error message.
-            discovered_types = set()
-            for node_info in nodes:
-                raw_type, _ = get_gpu_type_and_count(node_info.gres)
-                if raw_type is not None:
-                    discovered_types.add(raw_type)
-            discovered_msg = (f' Available GPU types: '
-                              f'{sorted(discovered_types)}'
-                              if discovered_types else '')
-            return (False,
-                    f'No GPU nodes found with at least {acc_type}:{acc_count} '
-                    f'on the cluster.{discovered_msg}')
 
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
@@ -566,8 +555,9 @@ def _normalize_gpu_name(name: str) -> str:
     return result
 
 
-def _is_segment_subsequence(segs_a: List[str], segs_b: List[str]) -> bool:
-    """Check if segs_a appears as an ordered subsequence of segs_b.
+def _is_segment_subsequence(segments_a: List[str],
+                            segments_b: List[str]) -> bool:
+    """Check if segments_a appears as an ordered subsequence of segments_b.
 
     Each segment must match exactly (preventing e.g. 'l4' matching 'l40').
 
@@ -577,8 +567,8 @@ def _is_segment_subsequence(segs_a: List[str], segs_b: List[str]) -> bool:
         (['v100', '32gb'], ['v100', 'pcie', '16gb']) -> False
         (['l4'], ['l40'])                           -> False
     """
-    b_iter = iter(segs_b)
-    for seg in segs_a:
+    b_iter = iter(segments_b)
+    for seg in segments_a:
         for b_seg in b_iter:
             if seg == b_seg:
                 break
@@ -619,15 +609,15 @@ def _accelerator_name_matches_slurm(requested_acc: str,
     if req_norm == cand_norm:
         return True
 
-    # 3. Segment subsequence (bidirectional).
-    req_segs = req_norm.split('-')
-    cand_segs = cand_norm.split('-')
-    if len(req_segs) <= len(cand_segs):
-        shorter_segs, longer_segs = req_segs, cand_segs
-    else:
-        shorter_segs, longer_segs = cand_segs, req_segs
-    if len(shorter_segs) < len(longer_segs):
-        return _is_segment_subsequence(shorter_segs, longer_segs)
+    # 3. Segment subsequence (bidirectional): either side's segments may
+    #    be a subsequence of the other (e.g. user says 'A100-80GB' and
+    #    cluster has 'a100-sxm4-80gb', or vice-versa).
+    req_segments = req_norm.split('-')
+    cand_segments = cand_norm.split('-')
+    if len(req_segments) < len(cand_segments):
+        return _is_segment_subsequence(req_segments, cand_segments)
+    if len(cand_segments) < len(req_segments):
+        return _is_segment_subsequence(cand_segments, req_segments)
     return False
 
 
@@ -652,7 +642,7 @@ def canonicalize_raw_gpu_name(raw_name: str) -> str:
         'unknown_custom_gpu'     -> 'UNKNOWN_CUSTOM_GPU'
     """
     raw_norm = _normalize_gpu_name(raw_name)
-    raw_segs = raw_norm.split('-')
+    raw_segments = raw_norm.split('-')
 
     for canonical in gpu_names.CANONICAL_GPU_NAMES:
         can_norm = _normalize_gpu_name(canonical)
@@ -667,9 +657,9 @@ def canonicalize_raw_gpu_name(raw_name: str) -> str:
         # because the list is ordered most-specific first (e.g. 'H100-80GB'
         # before 'H100') and a reverse match would cause 'H100' to
         # incorrectly resolve to 'H100-80GB'.
-        can_segs = can_norm.split('-')
-        if len(can_segs) < len(raw_segs):
-            if _is_segment_subsequence(can_segs, raw_segs):
+        can_segments = can_norm.split('-')
+        if len(can_segments) < len(raw_segments):
+            if _is_segment_subsequence(can_segments, raw_segments):
                 return canonical
 
     return raw_name.upper()
@@ -743,10 +733,17 @@ def resolve_gres_gpu_type(
             f'{cluster!r}{partition_msg}.{discovered_msg}')
 
     # Selection: prefer exact match, then highest node count, then
-    # lexicographic.
-    req_lower = requested_gpu_type.lower()
-    chosen = min(candidates,
-                 key=lambda rt: (rt.lower() != req_lower, -candidates[rt], rt))
+    # alphabetical.
+    chosen = min(
+        candidates,
+        key=lambda rt: (
+            # 0 (exact match) before 1 (fuzzy)
+            rt.lower() != requested_gpu_type.lower(),
+            # prioritize GPU type with more nodes
+            -candidates[rt],
+            # alphabetical tie-break
+            rt,
+        ))
     logger.debug(f'Resolved {requested_gpu_type!r} -> {chosen!r} '
                  f'on cluster {cluster!r} (candidates: {dict(candidates)}).')
     return chosen

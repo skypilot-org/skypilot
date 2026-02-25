@@ -423,8 +423,16 @@ class Slurm(clouds.Cloud):
         # Slurm GRES types are case-sensitive and may differ from user-facing
         # canonical names (e.g. 'H100' -> 'NVIDIA_H100_80GB_S').
         if acc_type:
-            acc_type = slurm_utils.resolve_gres_gpu_type(
-                cluster, acc_type, acc_count, partition)
+            try:
+                acc_type = slurm_utils.resolve_gres_gpu_type(
+                    cluster, acc_type, acc_count, partition)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to determine the exact GPU GRES type from '
+                    f'the Slurm cluster {cluster!r}. Falling back to '
+                    f'{acc_type!r}. This may cause issues if it is not '
+                    f'the exact GRES name. '
+                    f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
 
