@@ -431,10 +431,8 @@ the file in the user's home directory typically makes it available on all nodes:
     .. tab-item:: GCP Artifact Registry
         :sync: gcp-tab
 
-        **Option 1: Service account key (recommended for persistent setup)**
-
-        The key must be base64-encoded because raw JSON contains characters
-        that break enroot's netrc parser:
+        The service account key must be base64-encoded because raw JSON
+        contains characters that break enroot's netrc parser:
 
         .. code-block:: bash
 
@@ -452,20 +450,6 @@ the file in the user's home directory typically makes it available on all nodes:
 
         Replace ``<location>`` with your repository's location (e.g., ``us``,
         ``us-central1``, ``europe-west1``).
-
-        **Option 2: gcloud access token (for testing)**
-
-        .. code-block:: bash
-
-            $ mkdir -p <ENROOT_CONFIG_PATH>
-            $ cat > <ENROOT_CONFIG_PATH>/.credentials << EOF
-            machine <location>-docker.pkg.dev login oauth2accesstoken password $(gcloud auth print-access-token)
-            EOF
-
-        .. warning::
-
-            Access tokens expire after 1 hour. Use a service account key for
-            production setups.
 
     .. tab-item:: NVIDIA NGC
         :sync: nvidia-ngc-tab
