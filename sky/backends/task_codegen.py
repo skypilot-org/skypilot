@@ -834,10 +834,10 @@ class SlurmCodeGen(TaskCodeGen):
                                          for k, v in env_vars.items())
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
-        task_bash_script = (self.build_task_bash_script(bash_script)
-                            if bash_script else '')
-        streaming_msg = self._get_job_started_msg()
         has_setup_cmd = self._setup_cmd is not None
+        task_bash_script = (self.build_task_bash_script(bash_script or '')
+                            if bash_script or has_setup_cmd else '')
+        streaming_msg = self._get_job_started_msg()
 
         container_flags = ''
         if self._container_name is not None:
