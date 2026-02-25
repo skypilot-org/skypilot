@@ -1793,9 +1793,11 @@ class ControllerManager:
 
         # Clean up API access token if one was created for this job.
         try:
-            token_id = managed_job_state.get_api_access_token_id(job_id)
+            token_id = await managed_job_state.get_api_access_token_id_async(
+                job_id)
             if token_id is not None:
-                global_user_state.delete_service_account_token(token_id)
+                await asyncio.to_thread(
+                    global_user_state.delete_service_account_token, token_id)
                 logger.info(f'Revoked API access token for job {job_id}')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(

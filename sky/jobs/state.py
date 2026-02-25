@@ -2009,6 +2009,32 @@ def get_api_access_token_id(job_id: int) -> Optional[str]:
 
 
 @_init_db_async
+async def set_api_access_token_id_async(job_id: int, token_id: str) -> None:
+    """Store the API access token ID for a managed job (async)."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values(
+                    api_access_token_id=token_id))
+        await session.commit()
+
+
+@_init_db_async
+async def get_api_access_token_id_async(job_id: int) -> Optional[str]:
+    """Get the API access token ID for a managed job (async)."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        result = await session.execute(
+            sqlalchemy.select(job_info_table.c.api_access_token_id).where(
+                job_info_table.c.spot_job_id == job_id))
+        row = result.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+
+@_init_db_async
 async def scheduler_set_launching_async(job_id: int):
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
