@@ -56,7 +56,10 @@ CONTAINER_START=$SECONDS
 echo "[container] Initializing test-cluster on all nodes"
 rm -rf /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
 mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_init_done
+rm -rf /home/testuser/.sky_clusters/test-cluster/.sky_container_image_pulled
+mkdir -p /home/testuser/.sky_clusters/test-cluster/.sky_container_image_pulled
 srun --overlap --unbuffered --nodes=1 --ntasks-per-node=1 --container-image='nvcr.io#nvidia/pytorch:24.01-py3' --container-name=test-cluster:create --container-mounts="/home/testuser:/home/testuser,/tmp/ccache_$(id -u):/var/cache/ccache" --container-remap-root --no-container-mount-home --container-writable bash -c 'set -e
+touch /home/testuser/.sky_clusters/test-cluster/.sky_container_image_pulled/$SLURM_PROCID
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
 apt-get update
