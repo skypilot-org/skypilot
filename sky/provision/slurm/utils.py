@@ -565,12 +565,17 @@ def _is_segment_subsequence(segments_a: List[str],
         (['v100', '32gb'], ['v100', 'pcie', '16gb']) -> False
         (['l4'], ['l40'])                           -> False
     """
+    # The iterator is stateful: once an element is consumed it won't be
+    # revisited, so matches are always found in left-to-right order.
     b_iter = iter(segments_b)
     for seg in segments_a:
+        # Scan forward through b_iter for a matching segment.
         for b_seg in b_iter:
             if seg == b_seg:
                 break
         else:
+            # for...else: runs when b_iter is exhausted without finding
+            # seg, meaning segments_a is not a subsequence.
             return False
     return True
 
