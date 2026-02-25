@@ -408,7 +408,7 @@ the file in the user's home directory typically makes it available on all nodes:
         - AWS CLI must be installed on compute nodes
         - IAM credentials with ``ecr:GetAuthorizationToken``,
           ``ecr:BatchGetImage``, and ``ecr:GetDownloadUrlForLayer`` permissions
-        - **enroot >= 4.0** is required for ECR (see :ref:`slurm-enroot-version`
+        - **enroot >= 4.0** is required for ECR (see :ref:`enroot version note <slurm-enroot-version>`
           below)
 
     .. tab-item:: Docker Hub
