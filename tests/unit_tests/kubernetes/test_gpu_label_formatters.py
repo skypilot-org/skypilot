@@ -3,8 +3,8 @@
 Tests verify correct GPU detection from Kubernetes labels.
 """
 from sky.provision.kubernetes.utils import _accelerator_name_matches
-from sky.utils import gpu_names
 from sky.provision.kubernetes.utils import GFDLabelFormatter
+from sky.utils import gpu_names
 
 
 class TestCanonicalGPUNames:
