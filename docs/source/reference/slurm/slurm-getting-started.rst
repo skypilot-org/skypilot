@@ -503,16 +503,8 @@ any additional setup:
     **enroot version requirement for ECR:** AWS ECR uses a non-standard
     authentication flow that is not supported by enroot versions prior to 4.0.
     If you see ``[ERROR] Could not process JSON input`` when pulling ECR images,
-    upgrade enroot to 4.0 or later:
-
-    .. code-block:: bash
-
-        $ arch=$(dpkg --print-architecture)
-        $ curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v4.1.1/enroot_4.1.1-1_${arch}.deb
-        $ curl -fSsL -O https://github.com/NVIDIA/enroot/releases/download/v4.1.1/enroot+caps_4.1.1-1_${arch}.deb
-        $ sudo apt install -y ./enroot_4.1.1-1_${arch}.deb ./enroot+caps_4.1.1-1_${arch}.deb
-
-    See `enroot issue #143 <https://github.com/NVIDIA/enroot/issues/143>`_ and
+    upgrade enroot to 4.0 or later. See
+    `enroot issue #143 <https://github.com/NVIDIA/enroot/issues/143>`_ and
     `#189 <https://github.com/NVIDIA/enroot/issues/189>`_ for details.
 
 
