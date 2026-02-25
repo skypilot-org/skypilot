@@ -414,15 +414,19 @@ the file in the user's home directory typically makes it available on all nodes:
     .. tab-item:: Docker Hub
         :sync: docker-hub-tab
 
+        Docker Hub authentication requires credentials for both the registry
+        and the auth server:
+
         .. code-block:: bash
 
             $ mkdir -p <ENROOT_CONFIG_PATH>
             $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
             machine auth.docker.io login <username> password <access-token>
+            machine registry-1.docker.io login <username> password <access-token>
             EOF
 
         Use a `personal access token <https://app.docker.com/settings/personal-access-tokens>`_
-        as the password.
+        with "Read" repository permissions as the password.
 
     .. tab-item:: NVIDIA NGC
         :sync: nvidia-ngc-tab
