@@ -911,7 +911,9 @@ def test_efa():
     test = smoke_tests_utils.Test(
         'efa',
         [
-            f'sky launch -y -c {name} --infra aws/ap-northeast-1 --gpus L4:1 --instance-type g6.8xlarge examples/aws_efa/efa_vm.yaml',
+            # Use any_of with multiple EFA-capable instance types across all
+            # AWS regions for better resource availability.
+            f'sky launch -y -c {name} tests/smoke_tests/test_yamls/test_efa.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky logs {name} 1 | grep "Selected provider is efa, fabric is efa"',  # Ensure efa is enabled.
         ],
