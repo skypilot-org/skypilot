@@ -503,8 +503,8 @@ def check_instance_fits(
         # time, so the CPU/memory fitness check below runs against the
         # same nodes that Slurm will actually schedule on.
         try:
-            resolved_type = resolve_gres_gpu_type(cluster, acc_type,
-                                                  acc_count, partition)
+            resolved_type = resolve_gres_gpu_type(cluster, acc_type, acc_count,
+                                                  partition)
         except exceptions.ResourcesUnavailableError as e:
             return (False, str(e))
 
@@ -513,8 +513,7 @@ def check_instance_fits(
         for node_info in nodes:
             node_acc_type, node_acc_count = get_gpu_type_and_count(
                 node_info.gres)
-            if (node_acc_type == resolved_type and
-                    node_acc_count >= acc_count):
+            if (node_acc_type == resolved_type and node_acc_count >= acc_count):
                 gpu_nodes.append(node_info)
 
         candidate_nodes = gpu_nodes
@@ -542,7 +541,6 @@ def _normalize_gpu_name(name: str) -> str:
     for matching, never for submission.
 
     Examples:
-        'NVIDIA_H100_80GB_S'  -> 'h100-80gb-s'
         'nvidia_h100_80gb_hbm3' -> 'h100-80gb-hbm3'
         'H100'                -> 'h100'
         'A100-SXM-80GB'       -> 'a100-sxm-80gb'
@@ -594,7 +592,7 @@ def _accelerator_name_matches_slurm(requested_acc: str,
         requested_acc: The accelerator name requested by the user
             (e.g. 'H100', 'A100-80GB').
         candidate_raw: A raw GRES GPU type string from Slurm node metadata
-            (e.g. 'NVIDIA_H100_80GB_S').
+            (e.g. 'NVIDIA_H100_80GB_HBM3').
 
     Returns:
         True if the names are considered matching.
