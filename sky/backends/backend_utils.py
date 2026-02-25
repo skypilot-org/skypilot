@@ -44,6 +44,8 @@ from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_utils
+from sky.server import plugin_utils
+from sky.server import plugins
 from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -807,6 +809,19 @@ def write_cluster_config(
             assert k not in credentials, f'{k} already in credentials'
             credentials[k] = v
 
+    # Upload plugin wheels and config to regular clusters so that
+    # notifications (and other plugins) work on-cluster.
+    cluster_plugin_mounts, cluster_plugin_install_cmds = (
+        plugin_utils.get_cluster_plugin_mounts_and_commands())
+    for k, v in cluster_plugin_mounts.items():
+        credentials[k] = v
+    # Upload remote_plugins.yaml as ~/.sky/plugins.yaml on the cluster so
+    # that plugins.load_plugins() can discover and load the plugins.
+    cluster_plugins_config = plugin_utils.get_cluster_plugins_config_path()
+    if cluster_plugins_config is not None:
+        credentials[plugins.REMOTE_PLUGINS_CONFIG_PATH] = (
+            cluster_plugins_config)
+
     private_key_path, _ = auth_utils.get_or_generate_keys()
     auth_config = {'ssh_private_key': private_key_path}
     region_name = resources_vars.get('region')
@@ -1075,6 +1090,25 @@ def write_cluster_config(
     common_utils.fill_template(cluster_config_template,
                                variables,
                                output_path=tmp_yaml_path)
+
+    # Inject plugin wheel installation commands into setup_commands.
+    # This must happen after fill_template renders the YAML and after
+    # the runtime setup (conda, uv, skypilot) so that uv pip is
+    # available.  We append to the last setup_commands entry.
+    if cluster_plugin_install_cmds:
+        yaml_config = yaml_utils.read_yaml(tmp_yaml_path)
+        setup_cmds = yaml_config.get('setup_commands', [])
+        if setup_cmds:
+            # Strip trailing whitespace/newlines from the last command
+            # to avoid "bash: syntax error near unexpected token `&&'"
+            # when the YAML multi-line string ends with a newline.
+            setup_cmds[-1] = (f'{setup_cmds[-1].rstrip()} && '
+                              f'{cluster_plugin_install_cmds}')
+        else:
+            setup_cmds = [cluster_plugin_install_cmds]
+        yaml_config['setup_commands'] = setup_cmds
+        yaml_utils.dump_yaml(tmp_yaml_path, yaml_config)
+
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
 

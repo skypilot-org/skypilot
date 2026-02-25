@@ -94,6 +94,13 @@ def main():
                         f'{constants.SKYLET_GRPC_PORT})')
     args = parser.parse_args()
 
+    # Load cluster plugins (e.g., notifications) if configured.
+    try:
+        from sky.server import plugins  # pylint: disable=import-outside-toplevel  # isort: skip
+        plugins.load_plugins(plugins.ExtensionContext())
+    except Exception:  # pylint: disable=broad-except
+        logger.debug('Failed to load cluster plugins', exc_info=True)
+
     grpc_server = start_grpc_server(port=args.port)
     try:
         run_event_loop()

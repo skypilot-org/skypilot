@@ -83,6 +83,34 @@ def get_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
     return file_mounts, ' && '.join(commands)
 
 
+def get_cluster_plugin_mounts_and_commands() -> Tuple[Dict[str, str], str]:
+    """Get file mounts and installation commands for cluster plugin wheels.
+
+    Regular (non-controller) clusters use the same wheel source and remote
+    plugin config as controllers.  This thin wrapper makes the intent
+    explicit at the call-site.
+
+    Returns:
+        A tuple of:
+        - Dictionary mapping remote paths to local paths for plugin wheels
+        - Shell commands to install all plugin wheels
+    """
+    return get_plugin_mounts_and_commands()
+
+
+def get_cluster_plugins_config_path() -> Optional[str]:
+    """Return the path to remote_plugins.yaml for uploading to clusters.
+
+    On the cluster the file will be installed as ``~/.sky/plugins.yaml`` so
+    that ``plugins.load_plugins()`` can discover and load the plugins.
+
+    Returns:
+        Path to the remote_plugins.yaml file if it exists and contains
+        plugins, or None if no remote plugins are configured.
+    """
+    return get_filtered_plugins_config_path()
+
+
 def get_filtered_plugins_config_path() -> Optional[str]:
     """Return the path to remote_plugins.yaml if it exists.
 
