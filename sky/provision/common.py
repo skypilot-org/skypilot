@@ -121,6 +121,10 @@ class InstanceInfo:
     ssh_port: int = 22
     # The internal service address of the instance on Kubernetes.
     internal_svc: Optional[str] = None
+    # The infrastructure node name for display in dashboard.
+    # For Kubernetes: the k8s node name the pod runs on.
+    # For clouds: the instance name (e.g., from AWS Name tag, GCP name).
+    node_name: Optional[str] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -250,6 +254,22 @@ class ClusterInfo:
             instance.ssh_port for instance in worker_instances
         ]
         return head_instance_port + worker_instance_ports
+
+    def get_node_names(self) -> Optional[List[str]]:
+        """Get current node names as a list, head first.
+
+        Returns:
+            List of node names ordered head-first, or None if unavailable.
+            For Kubernetes, this is the k8s node name the pod runs on.
+            For clouds, this is the instance name.
+        """
+        node_names: List[str] = []
+        head = self.get_head_instance()
+        if head is not None and head.node_name:
+            node_names.append(head.node_name)
+        for worker in self.get_worker_instances():
+            node_names.append(worker.node_name or '')
+        return node_names if node_names else None
 
 
 class Endpoint:

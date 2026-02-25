@@ -884,6 +884,126 @@ Following tabs describe how to configure credentials for different clouds on the
 
            SSH hosts configured on your local machine will not be available to the API server. It is recommended to set the SSH keys and password in the ``ssh_node_pools.yaml`` file for helm deployment.
 
+    .. tab-item:: Slurm
+        :sync: slurm-creds-tab
+
+        SkyPilot API server connects to :ref:`Slurm clusters <slurm-getting-started>` via SSH to the login nodes. To configure Slurm access for the API server, you need to provide SSH keys and a Slurm SSH configuration file (``~/.slurm/config``).
+
+        **Step 1: Create SSH key secret**
+
+        Create a Kubernetes secret containing the SSH private key(s) used to connect to your Slurm login nodes:
+
+        .. code-block:: bash
+
+            kubectl create secret generic slurm-ssh-key \
+              --namespace $NAMESPACE \
+              --from-file=id_rsa=/path/to/your/ssh/id_rsa
+
+        If you need multiple SSH keys for different clusters, include them all in the same secret:
+
+        .. code-block:: bash
+
+            kubectl create secret generic slurm-ssh-key \
+              --namespace $NAMESPACE \
+              --from-file=id_rsa=/path/to/id_rsa \
+              --from-file=cluster2_key=/path/to/cluster2_key
+
+        **Step 2: Create Slurm SSH configuration file**
+
+        Create a local file containing the SSH configuration for your Slurm clusters. This follows the same format as ``~/.slurm/config`` described in :ref:`slurm-getting-started`:
+
+        .. code-block:: bash
+
+            cat > /tmp/slurm-config <<EOF
+            Host mycluster1
+                HostName login.mycluster1.myorg.com
+                User myusername
+                IdentityFile ~/.ssh/id_rsa
+
+            # Optional: Add more clusters
+            Host mycluster2
+                HostName login.mycluster2.myorg.com
+                User myusername
+                IdentityFile ~/.ssh/cluster2_key
+            EOF
+
+        .. note::
+
+            ``HostName`` and ``User`` are required fields. ``IdentityFile`` is optional; if not specified, SSH will use keys from ssh-agent or default key locations (e.g., ``~/.ssh/id_rsa``, ``~/.ssh/id_ed25519``).
+
+        **Step 3: Configure the Helm deployment**
+
+        Deploy with the SSH key secret and Slurm configuration:
+
+        .. code-block:: bash
+
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              --set apiService.sshKeySecret=slurm-ssh-key \
+              --set-file slurmCredentials.config=/tmp/slurm-config
+
+        Alternatively, you can use a ``values.yaml`` file:
+
+        .. code-block:: yaml
+
+            # values.yaml
+            apiService:
+              sshKeySecret: slurm-ssh-key
+
+            slurmCredentials:
+              config: |
+                Host mycluster1
+                    HostName login.mycluster1.myorg.com
+                    User myusername
+                    IdentityFile ~/.ssh/id_rsa
+
+        Then apply:
+
+        .. code-block:: bash
+
+            helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --namespace $NAMESPACE \
+              --reuse-values \
+              -f values.yaml
+
+        .. dropdown:: Update Slurm credentials
+
+           To update the SSH configuration or keys:
+
+           1. Update the SSH key secret:
+
+              .. code-block:: bash
+
+                  kubectl delete secret slurm-ssh-key -n $NAMESPACE
+                  kubectl create secret generic slurm-ssh-key \
+                    --namespace $NAMESPACE \
+                    --from-file=id_rsa=/path/to/your/ssh/id_rsa
+
+           2. Update the Slurm configuration by running helm upgrade with the new config file:
+
+              .. code-block:: bash
+
+                  helm upgrade $RELEASE_NAME skypilot/skypilot-nightly --devel \
+                    --namespace $NAMESPACE \
+                    --reuse-values \
+                    --set-file slurmCredentials.config=/path/to/new/slurm-config
+
+           3. For SSH key secret changes, restart the API server:
+
+              .. code-block:: bash
+
+                  kubectl rollout restart deployment/$RELEASE_NAME-api-server -n $NAMESPACE
+
+           4. Verify the configuration:
+
+              .. code-block:: bash
+
+                  API_SERVER_POD=$(kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec $API_SERVER_POD -n $NAMESPACE -- cat /root/.slurm/config
+
+        After the API server is configured, run ``sky check`` from a connected client to verify that your Slurm clusters are detected.
+
     .. tab-item:: Cloudflare R2
         :sync: r2-creds-tab
 

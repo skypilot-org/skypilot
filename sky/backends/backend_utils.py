@@ -2279,6 +2279,7 @@ def _update_cluster_status(
           the node number larger than expected.
     """
     handle = record['handle']
+    status = record['status']
     if handle.cluster_yaml is None:
         # Remove cluster from db since this cluster does not have a config file
         # or any other ongoing requests
@@ -2719,13 +2720,15 @@ def _update_cluster_status(
         if status_reason:
             log_message += f' ({status_reason})'
         log_message += '. Transitioned to INIT.'
-        global_user_state.add_cluster_event(
-            cluster_name,
-            status_lib.ClusterStatus.INIT,
-            log_message,
-            global_user_state.ClusterEventType.STATUS_CHANGE,
-            nop_if_duplicate=True,
-            duplicate_regex=init_reason_regex)
+        # Do not add event if the cluster is already in INIT status.
+        if status != status_lib.ClusterStatus.INIT:
+            global_user_state.add_cluster_event(
+                cluster_name,
+                status_lib.ClusterStatus.INIT,
+                log_message,
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                nop_if_duplicate=True,
+                duplicate_regex=init_reason_regex)
         global_user_state.add_or_update_cluster(
             cluster_name,
             handle,

@@ -308,6 +308,10 @@ spec:
         - name: skypilot-ssh-identity
           mountPath: /var/skypilot/ssh_keys
         {{- end }}
+        {{- if .Values.slurmCredentials.config }}
+        - name: slurm-config
+          mountPath: /root/.slurm
+        {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         {{- if .Values.awsCredentials.useCredentialsFile }}
           # Mount the config and credentials files directly from secret
@@ -779,6 +783,11 @@ spec:
         secret:
           secretName: {{ .Values.apiService.sshKeySecret }}
           defaultMode: 0600
+      {{- end }}
+      {{- if .Values.slurmCredentials.config }}
+      - name: slurm-config
+        secret:
+          secretName: {{ $fullName }}-slurm-config
       {{- end }}
       {{- if .Values.apiService.extraVolumes }}
       {{- toYaml .Values.apiService.extraVolumes | nindent 6 }}

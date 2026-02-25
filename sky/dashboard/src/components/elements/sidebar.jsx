@@ -24,8 +24,10 @@ import {
   KueueIcon,
   KeyIcon,
   ShieldIcon,
+  PieChartIcon,
+  RepeatIcon,
 } from '@/components/elements/icons';
-import { Settings, User, Clock, FileCode } from 'lucide-react';
+import { Settings, User, Clock, FileCode, Activity } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -40,6 +42,9 @@ const ICON_MAP = {
   clock: Clock,
   kueue: KueueIcon,
   filecode: FileCode,
+  repeat: RepeatIcon,
+  piechart: PieChartIcon,
+  activity: Activity,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';

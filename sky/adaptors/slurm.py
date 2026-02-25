@@ -634,3 +634,30 @@ class SlurmClient:
         if match:
             return match.group(1)
         return None
+
+    def check_pyxis_enabled(self) -> bool:
+        """Check if the Pyxis SPANK plugin is installed.
+
+        Pyxis registers --container-* flags tagged with [pyxis] in srun
+        help output. This is a reliable way to detect the plugin without
+        requiring a job allocation.
+
+        Returns:
+            True if Pyxis is installed, False otherwise.
+        """
+        cmd = 'srun --help 2>&1 | grep -q \'\\[pyxis\\]\''
+        rc, _, _ = self._run_slurm_cmd(cmd)
+        return rc == 0
+
+    def check_homedir_shared_fs(self) -> Optional[str]:
+        """Check the filesystem type of the home directory.
+
+        Returns:
+            The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
+            or None if the check could not be performed.
+        """
+        cmd = 'stat -f -c %T ~'
+        rc, stdout, _ = self._run_slurm_cmd(cmd)
+        if rc != 0:
+            return None
+        return stdout.strip().lower()

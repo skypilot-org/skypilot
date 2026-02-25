@@ -581,6 +581,20 @@ coreweaveCredentials:
   # Name of the secret containing the coreweave credentials. Only used if enabled is true.
   coreweaveSecretName: coreweave-credentials
 
+# Slurm cluster SSH configuration
+# Refer to https://docs.skypilot.co/en/latest/reference/slurm/slurm-getting-started.html for more details.
+slurmCredentials:
+  # Content of ~/.slurm/config (SSH config format)
+  # Pass via --set-file slurmCredentials.config=/path/to/slurm/config
+  # @schema type: [string, null]
+  config: null
+  # Example:
+  # config: |
+  #   Host mycluster1
+  #       HostName login.mycluster1.myorg.com
+  #       User myusername
+  #       IdentityFile ~/.ssh/id_rsa
+
 # Extra init containers to run before the api container
 # @schema type: [array, null]; item: object
 extraInitContainers: null

@@ -91,12 +91,19 @@ Below is the configuration syntax and some example values. See detailed explanat
       max_run_duration: 10m
     :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
       - echo "hello world!"
+    :ref:`pricing <config-yaml-kubernetes-pricing>`:
+      cpu: 0.05        # $/vCPU/hr
+      memory: 0.01     # $/GB/hr
+      accelerators:
+        A100: 3.50     # $/accelerator/hr
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
           metadata:
             labels:
               my-label: my-value
+        pricing:
+          cpu: 0.08
       context2:
         remote_identity: my-k8s-service-account
 
@@ -123,6 +130,15 @@ Below is the configuration syntax and some example values. See detailed explanat
       - mycluster1
       - mycluster2
     :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
+    :ref:`pricing <config-yaml-slurm-pricing>`:
+      cpu: 0.04        # $/vCPU/hr
+      memory: 0.01     # $/GB/hr
+      accelerators:
+        V100: 2.50     # $/accelerator/hr
+    :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
+      mycluster1:
+        pricing:
+          cpu: 0.06
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -1550,6 +1566,76 @@ This can also be configured per-context using ``context_configs``:
       prod-cluster:
         set_pod_resource_limits: 2.0
 
+.. _config-yaml-kubernetes-pricing:
+
+``kubernetes.pricing``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Hourly pricing rates for Kubernetes virtual instance types (optional).
+
+By default, Kubernetes instance types report a cost of ``$0.00`` because
+SkyPilot has no way to know the true cost of on-prem or self-managed clusters.
+Use this field to supply hourly rates so that ``sky launch``, ``sky status``,
+and ``sky gpus list`` display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
+
+Fields:
+
+``cpu``
+    Cost per vCPU per hour (e.g., ``0.05``).  Only used for CPU-only instances.
+
+``memory``
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
+
+``accelerators``
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``A100: 3.50``).  CPU and memory costs are included in this rate.
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+Default: not set (all costs report as $0.00).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    pricing:
+      cpu: 0.05
+      memory: 0.01
+      accelerators:
+        A100: 3.50
+        H100: 5.00
+
+Pricing can also be set per-context using :ref:`context_configs <config-yaml-kubernetes-context-configs>`.
+Context-level pricing is deep-merged with the cloud-level default: only the
+keys you specify are overridden, and unmentioned accelerators are inherited.
+
+.. code-block:: yaml
+
+  kubernetes:
+    pricing:
+      cpu: 0.05
+      memory: 0.01
+      accelerators:
+        A100: 3.50
+        H100: 5.00
+    context_configs:
+      on-prem-cluster:
+        pricing:
+          # Overrides only the cpu rate; memory and accelerators are
+          # inherited from the cloud-level pricing above.
+          cpu: 0.08
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -1645,6 +1731,107 @@ Example:
 
   slurm:
     provision_timeout: 1200
+
+.. _config-yaml-slurm-pricing:
+
+``slurm.pricing``
+~~~~~~~~~~~~~~~~~
+
+Hourly pricing rates for Slurm virtual instance types (optional).
+
+By default, Slurm instance types report a cost of ``$0.00``. Use this field to
+supply hourly rates so that ``sky launch``, ``sky status``, and ``sky gpus list``
+display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
+
+Fields:
+
+``cpu``
+    Cost per vCPU per hour (e.g., ``0.04``).  Only used for CPU-only instances.
+
+``memory``
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
+
+``accelerators``
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``V100: 2.50``).  CPU and memory costs are included in this rate.
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+Default: not set (all costs report as $0.00).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    pricing:
+      cpu: 0.04
+      memory: 0.01
+      accelerators:
+        V100: 2.50
+        A100: 3.50
+
+Pricing can also be set per-cluster and per-partition using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
+
+.. _config-yaml-slurm-cluster-configs:
+
+``slurm.cluster_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Per-cluster and per-partition configuration for Slurm (optional).
+
+Currently supports :ref:`pricing <config-yaml-slurm-pricing>` overrides at both
+the cluster and partition level. Pricing at each level is deep-merged with the
+parent level: only the keys you specify are overridden, and unmentioned
+accelerators are inherited.
+
+The merge order is::
+
+    cloud-level  <  cluster-level  <  partition-level
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    # Cloud-level defaults
+    pricing:
+      cpu: 0.04
+      memory: 0.01
+      accelerators:
+        V100: 2.50
+        A100: 3.50
+
+    cluster_configs:
+      mycluster1:
+        # Override cpu rate for this cluster; memory and accelerators
+        # are inherited from the cloud-level pricing above.
+        pricing:
+          cpu: 0.06
+          accelerators:
+            A100: 4.00   # Override A100; V100 inherited
+
+      mycluster2:
+        pricing:
+          cpu: 0.03
+        partition_configs:
+          gpu-partition:
+            # Override accelerator rate for this partition; other values
+            # are inherited from parent levels.
+            pricing:
+              accelerators:
+                H100: 5.00
 
 .. _config-yaml-oci:
 
