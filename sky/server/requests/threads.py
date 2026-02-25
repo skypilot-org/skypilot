@@ -55,7 +55,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         try:
             result = fn(*args, **kwargs)
             fut.set_result(result)
-        except Exception as e:  # pylint: disable=broad-except
+        except BaseException as e:  # pylint: disable=broad-except
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             fut.set_exception(e)
         finally:
