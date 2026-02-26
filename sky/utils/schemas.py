@@ -148,6 +148,27 @@ def _get_infra_pattern():
     return infra_pattern
 
 
+_RESOURCES_ADDITIONAL_CONFIG = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'runtime_version': {
+            'type': 'string',
+        },
+        'tpu_name': {
+            'type': 'string',
+        },
+        'tpu_vm': {
+            'type': 'boolean',
+        },
+        'gcp_queued_resource': {
+            'type': 'boolean',
+        },
+    }
+}
+
+
 def _get_single_resources_schema():
     """Schema for a single resource in a resources list."""
     return {
@@ -334,45 +355,9 @@ def _get_single_resources_schema():
                     'type': 'string'
                 }
             },
-            'accelerator_args': {
-                # Deprecated: use 'config' instead.
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    },
-                    'gcp_queued_resource': {
-                        'type': 'boolean',
-                    },
-                }
-            },
-            'config': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': False,
-                'properties': {
-                    'runtime_version': {
-                        'type': 'string',
-                    },
-                    'tpu_name': {
-                        'type': 'string',
-                    },
-                    'tpu_vm': {
-                        'type': 'boolean',
-                    },
-                    'gcp_queued_resource': {
-                        'type': 'boolean',
-                    },
-                }
-            },
+            # Deprecated: use `config` instead.
+            'accelerator_args': _RESOURCES_ADDITIONAL_CONFIG,
+            'config': _RESOURCES_ADDITIONAL_CONFIG,
             '_no_missing_accel_warnings': {
                 'type': 'boolean'
             },
