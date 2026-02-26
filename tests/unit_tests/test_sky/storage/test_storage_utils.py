@@ -139,6 +139,26 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     assert len(excluded_files) == len(expected_excluded_files)
 
 
+def test_get_excluded_files_from_skyignore_with_negation(tmp_dir_with_files_to_ignore):
+    # Setup a custom skyignore with negation
+    skyignore_path = os.path.join(tmp_dir_with_files_to_ignore, constants.SKY_IGNORE_FILE)
+    with open(skyignore_path, 'w', encoding='utf-8') as f:
+        f.write(textwrap.dedent("""\
+        *.py
+        !keep.py
+        """))
+    
+    # Run parsing
+    excluded_files = storage_utils.get_excluded_files_from_skyignore(
+        tmp_dir_with_files_to_ignore)
+    
+    # remove.py should be excluded, but keep.py should not be
+    assert 'remove.py' in excluded_files
+    assert 'dir/subdir/remove.py' in excluded_files
+    assert 'keep.py' not in excluded_files
+    assert 'dir/subdir/keep.py' not in excluded_files
+
+
 def test_get_excluded_files_from_gitignore(gitignore_dir):
     # Test function
     excluded_files = storage_utils.get_excluded_files_from_gitignore(
