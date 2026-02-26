@@ -31,7 +31,7 @@ Below is the configuration syntax and some example values.  See details under ea
 
     # Hardware.
     :ref:`accelerators <yaml-spec-resources-accelerators>`: H100:8
-    :ref:`accelerator_args <yaml-spec-resources-accelerator-args>`:
+    :ref:`config <yaml-spec-resources-accelerator-args>`:
       runtime_version: tpu-vm-base
     :ref:`cpus <yaml-spec-resources-cpus>`: 4+
     :ref:`memory <yaml-spec-resources-memory>`: 32+
@@ -397,7 +397,7 @@ OR
 
 .. _yaml-spec-resources-accelerator-args:
 
-``resources.accelerator_args``
+``resources.config``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Additional accelerator metadata (optional); only used for TPU node and TPU VM.
@@ -409,7 +409,7 @@ Example usage:
   .. code-block:: yaml
 
     resources:
-      accelerator_args:
+      config:
         tpu_vm: true  # optional, default: True
 
 - To request a TPU node:
@@ -417,7 +417,7 @@ Example usage:
   .. code-block:: yaml
 
     resources:
-      accelerator_args:
+      config:
         tpu_name: mytpu
         tpu_vm: false
 
@@ -428,7 +428,7 @@ Example:
 .. code-block:: yaml
 
   resources:
-    accelerator_args:
+    config:
       # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
       runtime_version: tpu-vm-base
       # tpu_name: mytpu

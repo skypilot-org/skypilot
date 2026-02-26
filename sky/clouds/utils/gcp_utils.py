@@ -42,9 +42,9 @@ def is_tpu_vm(resources: Optional['resources_lib.Resources']) -> bool:
     acc, _ = list(resources.accelerators.items())[0]
     if kubernetes_utils.is_tpu_on_gke(acc, normalize=False):
         return False
-    if resources.accelerator_args is None:
+    if resources.config is None:
         return True
-    return resources.accelerator_args.get('tpu_vm', True)
+    return resources.config.get('tpu_vm', True)
 
 
 def is_tpu_vm_pod(resources: Optional['resources_lib.Resources']) -> bool:

@@ -335,6 +335,26 @@ def _get_single_resources_schema():
                 }
             },
             'accelerator_args': {
+                # Deprecated: use 'config' instead.
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'runtime_version': {
+                        'type': 'string',
+                    },
+                    'tpu_name': {
+                        'type': 'string',
+                    },
+                    'tpu_vm': {
+                        'type': 'boolean',
+                    },
+                    'gcp_queued_resource': {
+                        'type': 'boolean',
+                    },
+                }
+            },
+            'config': {
                 'type': 'object',
                 'required': [],
                 'additionalProperties': False,

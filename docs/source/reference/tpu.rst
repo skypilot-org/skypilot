@@ -62,10 +62,10 @@ To use TPU VMs/Pods, set the following in a task YAML's ``resources`` field:
 
    resources:
       accelerators: tpu-v6e-8
-      accelerator_args:
+      config:
          runtime_version: v2-alpha-tpuv6e  # optional
 
-The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the optional :code:`tpu_vm` bool (defaults to true, which means TPU VM is used), and an optional TPU ``runtime_version`` field.
+The ``accelerators`` field specifies the TPU type, and the :code:`config` dict includes the optional :code:`tpu_vm` bool (defaults to true, which means TPU VM is used), and an optional TPU ``runtime_version`` field.
 To show what TPU types are supported, run :code:`sky gpus list`.
 
 Here is a complete task YAML that trains a `Llama 3 model <https://ai.meta.com/blog/meta-llama-3/>`_ on a TPU VM using Torch XLA.
@@ -256,7 +256,7 @@ To use a TPU Node, set the following in a task YAML's ``resources`` field:
    resources:
       instance_type: n1-highmem-8
       accelerators: tpu-v2-8
-      accelerator_args:
+      config:
          runtime_version: 2.12.0  # optional, TPU runtime version.
          tpu_vm: False
 
@@ -272,7 +272,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
 
    resources:
       accelerators: tpu-v2-8
-      accelerator_args:
+      config:
          runtime_version: 2.12.0  # optional, TPU runtime version.
          tpu_vm: False
 

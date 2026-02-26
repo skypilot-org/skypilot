@@ -321,7 +321,7 @@ def test_instance_type_matches_accelerators(enable_all_clouds):
     _test_resources_launch(sky.GCP(),
                            instance_type='n1-standard-8',
                            accelerators='tpu-v3-8',
-                           accelerator_args={'tpu_vm': False})
+                           config={'tpu_vm': False})
     _test_resources_launch(sky.GCP(),
                            instance_type='a2-highgpu-1g',
                            accelerators='a100')

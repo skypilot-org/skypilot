@@ -4,7 +4,7 @@ resources:
   use_spot: true
   infra: gcp/us-central1/us-central1-a
   accelerators: tpu-v5litepod-16:1
-  accelerator_args:
+  config:
     runtime_version: v2-alpha-tpuv5-lite
     gcp_queued_resource: true
 

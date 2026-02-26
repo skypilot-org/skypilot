@@ -143,7 +143,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 29
+    _VERSION = 30
 
     def __init__(
         self,
@@ -152,7 +152,8 @@ class Resources:
         cpus: Union[None, int, float, str] = None,
         memory: Union[None, int, float, str] = None,
         accelerators: Union[None, str, Dict[str, Union[int, float]]] = None,
-        accelerator_args: Optional[Dict[str, str]] = None,
+        accelerator_args: Optional[Dict[str, str]] = None,  # deprecated alias.
+        config: Optional[Dict[str, str]] = None,
         infra: Optional[str] = None,
         use_spot: Optional[bool] = None,
         job_recovery: Optional[Union[Dict[str, Optional[Union[str, int]]],
@@ -213,6 +214,9 @@ class Resources:
             indicates that the task requires 2 V100 GPUs. If a dict, must be a
             dict of the form ``{'V100': 2}`` or ``{'tpu-v2-8': 1}``.
           accelerator_args: accelerator-specific arguments. For example,
+            ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
+            Deprecated. Use ``config`` instead.
+          config: configurations for resources. For example,
             ``{'tpu_vm': True, 'runtime_version': 'tpu-vm-base'}`` for TPUs.
           infra: a string specifying the infrastructure to use, in the format
             of "cloud/region" or "cloud/region/zone". For example,
@@ -409,9 +413,17 @@ class Resources:
         # Initialize _priority before calling the setter
         self._priority: Optional[int] = None
 
+        if accelerator_args is not None:
+            if config is not None:
+                raise ValueError(
+                    'Cannot specify both "config" and "accelerator_args". '
+                    '"accelerator_args" is deprecated; use "config" instead.')
+            logger.warning('accelerator_args is deprecated. Use config instead.')
+            config = accelerator_args
+
         self._set_cpus(cpus)
         self._set_memory(memory)
-        self._set_accelerators(accelerators, accelerator_args)
+        self._set_accelerators(accelerators, config)
         self._set_autostop_config(autostop)
         self._set_priority(priority)
         self._set_volumes(volumes)
@@ -464,11 +476,11 @@ class Resources:
         if self._cached_repr is not None:
             return self._cached_repr
         accelerators = ''
-        accelerator_args = ''
+        config = ''
         if self.accelerators is not None:
             accelerators = f', {self.accelerators}'
-            if self.accelerator_args is not None:
-                accelerator_args = f', accelerator_args={self.accelerator_args}'
+            if self.config is not None:
+                config = f', config={self.config}'
 
         cpus = ''
         if self._cpus is not None:
@@ -519,7 +531,7 @@ class Resources:
         # failover, and the region may be dynamically determined.
         hardware_str = (
             f'{instance_type}{use_spot}'
-            f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
+            f'{cpus}{memory}{accelerators}{config}{image_id}'
             f'{disk_tier}{network_tier}{disk_size}{local_disk}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
@@ -628,7 +640,12 @@ class Resources:
 
     @property
     def accelerator_args(self) -> Optional[Dict[str, Any]]:
-        return self._accelerator_args
+        # Deprecated. Use `config` instead.
+        return self._config
+    
+    @property
+    def config(self) -> Optional[Dict[str, Any]]:
+        return self._config
 
     @property
     def use_spot(self) -> bool:
@@ -806,13 +823,13 @@ class Resources:
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, Union[int, float]]],
-        accelerator_args: Optional[Dict[str, Any]],
+        config: Optional[Dict[str, Any]],
     ) -> None:
         """Sets accelerators.
 
         Args:
             accelerators: A string or a dict of accelerator types to counts.
-            accelerator_args: A dict of accelerator types to args.
+            config: A dict of resource configurations.
         """
         if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
@@ -854,14 +871,14 @@ class Resources:
                         'Cloud must be GCP or Kubernetes for TPU '
                         'accelerators.')
 
-                if accelerator_args is None:
-                    accelerator_args = {}
+                if config is None:
+                    config = {}
 
-                use_tpu_vm = accelerator_args.get('tpu_vm', True)
+                use_tpu_vm = config.get('tpu_vm', True)
                 if (self.cloud.is_same_cloud(clouds.GCP()) and
                         not kubernetes_utils.is_tpu_on_gke(acc,
                                                            normalize=False)):
-                    if 'runtime_version' not in accelerator_args:
+                    if 'runtime_version' not in config:
 
                         def _get_default_runtime_version() -> str:
                             if not use_tpu_vm:
@@ -874,11 +891,11 @@ class Resources:
                                 return 'v2-alpha-tpuv6e'
                             return 'tpu-vm-base'
 
-                        accelerator_args['runtime_version'] = (
+                        config['runtime_version'] = (
                             _get_default_runtime_version())
                         logger.info(
-                            'Missing runtime_version in accelerator_args, using'
-                            f' default ({accelerator_args["runtime_version"]})')
+                            'Missing runtime_version in config, using'
+                            f' default ({config["runtime_version"]})')
 
                     if self.instance_type is not None and use_tpu_vm:
                         if self.instance_type != 'TPU-VM':
@@ -889,7 +906,7 @@ class Resources:
 
         self._accelerators: Optional[Dict[str, Union[int,
                                                      float]]] = accelerators
-        self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
+        self._config: Optional[Dict[str, Any]] = config
 
     def _set_autostop_config(
         self,
@@ -1788,10 +1805,10 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
-        if (self.accelerator_args is not None and
-                self.accelerator_args != other.accelerator_args):
+        if (self.config is not None and
+                self.config != other.config):
             return False
-        # self.accelerator_args == other.accelerator_args
+        # self.config == other.config
 
         if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
@@ -1875,7 +1892,7 @@ class Resources:
             self._cpus is None,
             self._memory is None,
             self._accelerators is None,
-            self._accelerator_args is None,
+            self._config is None,
             not self._use_spot_specified,
             self._disk_size == DEFAULT_DISK_SIZE_GB,
             self._disk_tier is None,
@@ -2012,8 +2029,8 @@ class Resources:
             # as the latter can auto-infer, causing potential conflicts with
             # instance_type override.
             accelerators=override.pop('accelerators', self._accelerators),
-            accelerator_args=override.pop('accelerator_args',
-                                          self.accelerator_args),
+            config=override.pop('config',
+                                          self.config),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
@@ -2334,6 +2351,7 @@ class Resources:
         resources_fields['accelerators'] = config.pop('accelerators', None)
         resources_fields['accelerator_args'] = config.pop(
             'accelerator_args', None)
+        resources_fields['config'] = config.pop('config', None)
         resources_fields['use_spot'] = config.pop('use_spot', None)
         if config.get('spot_recovery') is not None:
             logger.warning('spot_recovery is deprecated. Use job_recovery '
@@ -2371,6 +2389,8 @@ class Resources:
         if resources_fields['accelerator_args'] is not None:
             resources_fields['accelerator_args'] = dict(
                 resources_fields['accelerator_args'])
+        if resources_fields['config'] is not None:
+            resources_fields['config'] = dict(resources_fields['config'])
         if resources_fields['disk_size'] is not None:
             # although it will end up being an int, we don't know at this point
             # if it has units or not, so we store it as a string
@@ -2402,7 +2422,7 @@ class Resources:
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)
-        add_if_not_none('accelerator_args', self.accelerator_args)
+        add_if_not_none('config', self.config)
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
@@ -2617,7 +2637,20 @@ class Resources:
         if version < 29:
             self._local_disk = None
 
+        # We need to pop this regardless of version to prevent double-updates.
+        config = state.pop('_accelerator_args', None)
+        if version < 30:
+            state['_config'] = config
+
         self.__dict__.update(state)
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Backward compat: old clients (version < 30) expect _accelerator_args.
+        # Emit both keys so old __setstate__ + __dict__.update works.
+        if '_config' in state:
+            state['_accelerator_args'] = state['_config'].copy()
+        return state
 
 
 class LaunchableResources(Resources):

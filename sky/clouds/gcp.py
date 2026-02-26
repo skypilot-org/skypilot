@@ -538,15 +538,15 @@ class GCP(clouds.Cloud):
                                                                         ':'))
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
-                assert r.accelerator_args is not None, r
+                assert r.config is not None, r
 
-                resources_vars['tpu_vm'] = r.accelerator_args.get(
+                resources_vars['tpu_vm'] = r.config.get(
                     'tpu_vm', True)
-                resources_vars['runtime_version'] = r.accelerator_args[
+                resources_vars['runtime_version'] = r.config[
                     'runtime_version']
-                resources_vars['tpu_node_name'] = r.accelerator_args.get(
+                resources_vars['tpu_node_name'] = r.config.get(
                     'tpu_name')
-                resources_vars['gcp_queued_resource'] = r.accelerator_args.get(
+                resources_vars['gcp_queued_resource'] = r.config.get(
                     'gcp_queued_resource')
                 # TPU VMs require privileged mode for docker containers to
                 # access TPU devices.
