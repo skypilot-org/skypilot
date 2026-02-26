@@ -726,7 +726,7 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
             TagSpecifications=[{
                 'ResourceType': 'security-group',
                 'Tags': [{
-                    'Key': 'skypilot',
+                    'Key': SKYPILOT,
                     'Value': 'true'
                 }]
             }],
