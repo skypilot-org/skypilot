@@ -236,15 +236,17 @@ def set_last_active_time_to_now() -> None:
 def has_active_ssh_sessions() -> bool:
     """Returns True if there are any active SSH sessions on the node."""
     try:
-        # Count sshd processes serving active sessions. Each active SSH
-        # connection spawns an sshd child with the pattern "sshd: user@".
-        # The listener daemon ("sshd: /usr/sbin/sshd [listener]") does not
-        # match. This avoids false positives from Docker entrypoint PTYs,
-        # which hold /dev/pts/0 without any SSH session.
+        # Count sshd processes serving interactive sessions. Each SSH
+        # connection with a PTY spawns an sshd child like "sshd: user@pts/0".
+        # This excludes the listener daemon ("sshd: /usr/sbin/sshd") and
+        # background multiplexed connections ("sshd: user@notty") which
+        # persist after commands finish due to SSH ControlPersist.
+        # Unlike counting PTY devices in /dev/pts, this avoids false
+        # positives from Docker entrypoint PTYs (/dev/pts/0).
         # The [s] bracket trick prevents grep from matching its own process
         # in the ps output, since "[s]shd" does not match the literal "grep"
         # command line.
-        proc = subprocess.run('ps ax -o args= | grep -c "[s]shd:.*@"',
+        proc = subprocess.run('ps ax -o args= | grep -c "[s]shd:.*@pts/"',
                               capture_output=True,
                               text=True,
                               check=False,
