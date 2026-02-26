@@ -501,6 +501,10 @@ class JobController:
                 raise asyncio.CancelledError()
         assert cluster_name is not None, (cluster_name, job_id_on_pool_cluster)
 
+        if self._pool is None:
+            await managed_job_state.set_current_cluster_name_async(
+                self._job_id, cluster_name)
+
         if not is_resume:
             await managed_job_state.set_started_async(
                 job_id=self._job_id,
@@ -1264,6 +1268,8 @@ class JobController:
 
             # Only set STARTED state if not resuming (already started before)
             if not is_resuming:
+                await managed_job_state.set_current_cluster_name_async(
+                    self._job_id, cluster_name)
                 callback_func = managed_job_utils.event_callback_func(
                     job_id=self._job_id, task_id=task_id, task=task)
                 await managed_job_state.set_started_async(
