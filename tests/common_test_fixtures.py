@@ -658,6 +658,10 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    # Reset version context vars to prevent mocked objects from leaking
+    # between tests.
+    versions.set_remote_api_version(None)
+    versions.set_remote_version('unknown')
     # Reload config from default paths to reset any in-memory config changes
     # from previous tests that might have modified the config.
     _safe_reload_config()
@@ -666,5 +670,7 @@ def reset_global_state():
     server_common.get_server_url.cache_clear()
     server_common.is_api_server_local.cache_clear()
     server_common.get_dashboard_url.cache_clear()
+    versions.set_remote_api_version(None)
+    versions.set_remote_version('unknown')
     # Reload config again to reset any changes made by this test
     _safe_reload_config()

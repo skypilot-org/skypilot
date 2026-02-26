@@ -150,7 +150,12 @@ class PolicyServer:
     """Test policy server that runs in a background thread with automatic port assignment."""
 
     def __init__(self, port=None):
-        self.port = port or common_utils.find_free_port(50000)
+        import random
+
+        # Start looking from a random port to avoid collisions when running
+        # tests concurrently via pytest-xdist.
+        base_port = random.randint(50000, 60000)
+        self.port = port or common_utils.find_free_port(base_port)
         self.server = None
         self.thread = None
         self._started = False
