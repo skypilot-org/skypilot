@@ -20,6 +20,7 @@ from sky.provision import docker_utils
 from sky.provision.gcp import constants as gcp_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.nebius import constants as nebius_constants
+from sky.server import versions
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.utils import accelerator_registry
@@ -2421,7 +2422,13 @@ class Resources:
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)
-        add_if_not_none('config', self.config)
+
+        remote_api_version = versions.get_remote_api_version()
+        if (remote_api_version is not None and remote_api_version < 40):
+            config_key = 'accelerator_args'
+        else:
+            config_key = 'config'
+        add_if_not_none(config_key, self.config)
 
         if self._use_spot_specified:
             add_if_not_none('use_spot', self.use_spot)
