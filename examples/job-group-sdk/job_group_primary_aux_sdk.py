@@ -1,4 +1,5 @@
-"""Launch a Job Group with primary/auxiliary tasks using the Python SDK.
+"""
+Launch a Job Group with primary/auxiliary tasks using the Python SDK.
 
 This script demonstrates the primary/auxiliary task pattern: a primary
 trainer task drives the job lifecycle, while an auxiliary data-server
@@ -13,17 +14,21 @@ import sky
 
 trainer = sky.Task(
     name='trainer',
-    run=('echo "Trainer starting"\n'
-         'echo "Training for 30 seconds..."\n'
-         'sleep 30\n'
-         'echo "Training complete"'),
+    run="""
+echo "Trainer starting"
+echo "Training for 30 seconds..."
+sleep 30
+echo "Training complete"
+""",
 )
 trainer.set_resources(sky.Resources(cpus=2, infra='kubernetes'))
 
 data_server = sky.Task(
     name='data-server',
-    run=('echo "Data server starting on port 8000"\n'
-         'python3 -m http.server 8000'),
+    run="""
+echo "Data server starting on port 8000"
+python3 -m http.server 8000
+""",
 )
 data_server.set_resources(sky.Resources(cpus=2, infra='kubernetes'))
 

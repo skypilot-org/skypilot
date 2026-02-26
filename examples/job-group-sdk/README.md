@@ -45,11 +45,27 @@ python examples/job-group-sdk/job_group_primary_aux_sdk.py
 
 ## Example output
 
+After launching both scripts, `sky status` shows the Job Groups and their tasks:
+
+```console
+$ sky status
+Managed jobs
+In progress tasks: 2 PENDING, 2 STARTING
+ID   TASK  NAME                 REQUESTED  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS              POOL
+183        train-with-services  -          -            -              -             0            PENDING (task: 0)   -
+ ↳   0     trainer [P]          1x[CPU:2]  -            -              -             0            PENDING             -
+ ↳   1     data-server          1x[CPU:2]  -            -              -             0            PENDING             -
+
+182        server-client        -          29 secs ago  29s            -             0            STARTING (task: 0)  -
+ ↳   0     server               1x[CPU:2]  29 secs ago  29s            -             0            STARTING            -
+ ↳   1     client               1x[CPU:2]  29 secs ago  29s            -             0            STARTING            -
+```
+
 ### Server-client networking
 
 ```console
-$ sky jobs logs 178
-Hint: This job has 2 tasks. Use 'sky jobs logs 178 TASK' to view logs for a specific task (TASK can be task ID or name).
+$ sky jobs logs 182
+Hint: This job has 2 tasks. Use 'sky jobs logs 182 TASK' to view logs for a specific task (TASK can be task ID or name).
 === Task server(0) ===
 ├── Waiting for task resources on 1 node.
 └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
@@ -77,8 +93,8 @@ Hint: This job has 2 tasks. Use 'sky jobs logs 178 TASK' to view logs for a spec
 ### Primary/auxiliary tasks
 
 ```console
-$ sky jobs logs 179
-Hint: This job has 2 tasks. Use 'sky jobs logs 179 TASK' to view logs for a specific task (TASK can be task ID or name).
+$ sky jobs logs 183
+Hint: This job has 2 tasks. Use 'sky jobs logs 183 TASK' to view logs for a specific task (TASK can be task ID or name).
 === Task trainer(0) ===
 ├── Waiting for task resources on 1 node.
 └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
@@ -100,8 +116,11 @@ The trainer (primary task) completed successfully, and the auxiliary data-server
 # Check job status
 sky jobs queue
 
-# View logs
+# View all task logs
 sky jobs logs <job_id>
+
+# View logs for a specific task by name
+sky jobs logs <job_id> <task_name>
 ```
 
 ## How it works
