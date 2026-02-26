@@ -2343,7 +2343,7 @@ function UsersTable({
                               }
                               className={
                                 !isSystemUser
-                                  ? 'text-red-600 dark:text-red-400 hover:text-red-700 p-1'
+                                  ? 'text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 p-1'
                                   : 'text-gray-300 dark:text-gray-600 cursor-not-allowed p-1'
                               }
                               title={

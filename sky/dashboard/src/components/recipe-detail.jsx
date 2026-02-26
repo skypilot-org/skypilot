@@ -534,7 +534,7 @@ export function RecipeDetail() {
             className={`flex items-center ${
               template.is_editable === false
                 ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
-                : 'text-red-600 dark:text-red-400 hover:text-red-700'
+                : 'text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300'
             }`}
             title={
               template.is_editable === false
