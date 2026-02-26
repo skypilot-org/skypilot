@@ -723,6 +723,13 @@ def _get_or_create_vpc_security_group(ec2: 'mypy_boto3_ec2.ServiceResource',
             Description='Auto-created security group for Ray workers',
             GroupName=expected_sg_name,
             VpcId=vpc_id,
+            TagSpecifications=[{
+                'ResourceType': 'security-group',
+                'Tags': [{
+                    'Key': 'skypilot',
+                    'Value': 'true'
+                }]
+            }],
         )
     except ec2.meta.client.exceptions.ClientError as e:
         if e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
