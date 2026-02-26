@@ -1731,10 +1731,14 @@ def test_autostop_wait_for_none(generic_cloud: str):
 
 
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
+    # Use a simple GPU script with T4 instead of the V100-specific
+    # resnet_app.yaml, to avoid capacity issues with scarce GPU types
+    # like V100 (p3 instances on AWS).
     test = smoke_tests_utils.Test(
         f'{cloud}-cancel-task',
         [
-            f'sky launch -c {name} examples/resnet_app.yaml --infra {cloud} -y -d',
+            f'sky launch -c {name} examples/resnet_app.yaml --infra {cloud}'
+            f' --gpus T4:1 -y -d',
             # Wait the job to be scheduled and finished setup.
             f'until sky queue {name} | grep "RUNNING"; do sleep 10; done',
             # Wait the setup and initialize before the GPU process starts.
