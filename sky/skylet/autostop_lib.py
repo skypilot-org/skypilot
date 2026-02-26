@@ -234,29 +234,23 @@ def set_last_active_time_to_now() -> None:
 
 
 def has_active_ssh_sessions() -> bool:
-    """Returns True if there are any active SSH sessions on the node."""
+    """Check if any PTY traces back to sshd in the process tree."""
     try:
-        # Count sshd processes serving interactive sessions. Each SSH
-        # connection with a PTY spawns an sshd child like "sshd: user@pts/0".
-        # This excludes the listener daemon ("sshd: /usr/sbin/sshd") and
-        # background multiplexed connections ("sshd: user@notty") which
-        # persist after commands finish due to SSH ControlPersist.
-        # Unlike counting PTY devices in /dev/pts, this avoids false
-        # positives from Docker entrypoint PTYs (/dev/pts/0).
-        # The [s] bracket trick prevents grep from matching its own process
-        # in the ps output, since "[s]shd" does not match the literal "grep"
-        # command line.
-        proc = subprocess.run('ps ax -o args= | grep -c "[s]shd:.*@pts/"',
-                              capture_output=True,
-                              text=True,
-                              check=False,
-                              shell=True)
-        # grep -c returns 1 when no lines match, which is not an error.
-        if proc.returncode > 1:
-            logger.warning(f'SSH session check command failed with return code '
-                           f'{proc.returncode}.')
-            return False
-        return int(proc.stdout.strip()) > 0
+        pts_to_pid: dict[str, int] = {}
+        for proc in psutil.process_iter(['pid', 'terminal']):
+            terminal = proc.info['terminal']
+            if terminal and terminal.startswith('/dev/pts/'):
+                pts_to_pid.setdefault(terminal, proc.info['pid'])
+
+        for pid in pts_to_pid.values():
+            try:
+                for parent in psutil.Process(pid).parents():
+                    if parent.name() == 'sshd':
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        return False
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Error checking active SSH sessions: {e}.')
         return False
