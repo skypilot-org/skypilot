@@ -54,7 +54,7 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                     for i in range(len(matching_files)):
                         matching_files[i] = os.path.relpath(
                             matching_files[i], expand_src_dir_path)
-                    
+
                     if is_negate:
                         excluded_list.difference_update(matching_files)
                     else:
