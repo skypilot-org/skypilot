@@ -19,7 +19,7 @@ server = sky.Task(
 echo "Server starting on port 8080"
 python3 -m http.server 8080 &
 SERVER_PID=$!
-sleep 120
+sleep 60
 kill $SERVER_PID 2>/dev/null || true
 echo "Server done"
 """,
