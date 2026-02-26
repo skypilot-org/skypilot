@@ -1,5 +1,6 @@
 """Resources: compute requirements of Tasks."""
 import collections
+import copy
 import dataclasses
 import re
 import textwrap
@@ -2647,7 +2648,7 @@ class Resources:
         # Backward compat: old clients (version < 30) expect _accelerator_args.
         # Emit both keys so old __setstate__ + __dict__.update works.
         if '_config' in state:
-            state['_accelerator_args'] = state['_config'].copy()
+            state['_accelerator_args'] = copy.copy(state['_config'])
         return state
 
 
