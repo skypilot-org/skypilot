@@ -418,7 +418,8 @@ class Resources:
                 raise ValueError(
                     'Cannot specify both "config" and "accelerator_args". '
                     '"accelerator_args" is deprecated; use "config" instead.')
-            logger.warning('accelerator_args is deprecated. Use config instead.')
+            logger.warning(
+                'accelerator_args is deprecated. Use config instead.')
             config = accelerator_args
 
         self._set_cpus(cpus)
@@ -642,7 +643,7 @@ class Resources:
     def accelerator_args(self) -> Optional[Dict[str, Any]]:
         # Deprecated. Use `config` instead.
         return self._config
-    
+
     @property
     def config(self) -> Optional[Dict[str, Any]]:
         return self._config
@@ -893,9 +894,8 @@ class Resources:
 
                         config['runtime_version'] = (
                             _get_default_runtime_version())
-                        logger.info(
-                            'Missing runtime_version in config, using'
-                            f' default ({config["runtime_version"]})')
+                        logger.info('Missing runtime_version in config, using'
+                                    f' default ({config["runtime_version"]})')
 
                     if self.instance_type is not None and use_tpu_vm:
                         if self.instance_type != 'TPU-VM':
@@ -1805,8 +1805,7 @@ class Resources:
                     return False
         # self.accelerators <= other.accelerators
 
-        if (self.config is not None and
-                self.config != other.config):
+        if (self.config is not None and self.config != other.config):
             return False
         # self.config == other.config
 
@@ -2029,8 +2028,7 @@ class Resources:
             # as the latter can auto-infer, causing potential conflicts with
             # instance_type override.
             accelerators=override.pop('accelerators', self._accelerators),
-            config=override.pop('config',
-                                          self.config),
+            config=override.pop('config', self.config),
             use_spot=override.pop('use_spot', use_spot),
             job_recovery=override.pop('job_recovery', self.job_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
@@ -2643,7 +2641,7 @@ class Resources:
             state['_config'] = config
 
         self.__dict__.update(state)
-    
+
     def __getstate__(self):
         state = self.__dict__.copy()
         # Backward compat: old clients (version < 30) expect _accelerator_args.

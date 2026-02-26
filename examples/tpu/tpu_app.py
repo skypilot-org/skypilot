@@ -1,3 +1,4 @@
+"""SkyPilot TPU Example."""
 import sky
 
 with sky.Dag() as dag:
