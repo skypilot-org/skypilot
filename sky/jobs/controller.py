@@ -399,6 +399,10 @@ class JobController:
         callback_func = managed_job_utils.event_callback_func(
             job_id=self._job_id, task_id=task_id, task=task)
 
+        if task.metadata.get('batch_coordinator'):
+            return await self._run_batch_coordinator_task(
+                task_id, task, callback_func)
+
         if task.run is None:
             logger.info(f'Skip running task {task_id} ({task.name}) due to its '
                         'run commands being empty.')
@@ -560,6 +564,74 @@ class JobController:
             cleanup_cluster_on_success=True,
             force_transit_to_recovering=force_transit_to_recovering,
         )
+
+    async def _run_batch_coordinator_task(
+        self,
+        task_id: int,
+        task: 'sky.Task',
+        callback_func: typing.Callable,
+    ) -> bool:
+        """Run the BatchCoordinator inline on the controller.
+
+        The coordinator is lightweight orchestration (count items, split
+        batches, dispatch via ``sdk.exec()``).  Running it here avoids
+        provisioning a separate CPU cluster.
+        """
+        # Import lazily to avoid circular imports and keep startup fast.
+        from sky.batch.coordinator import (
+            BatchCoordinator)  # pylint: disable=import-outside-toplevel
+
+        metadata = task.metadata
+
+        coordinator = BatchCoordinator(
+            dataset_path=metadata['batch_dataset_path'],
+            output_path=metadata['batch_output_path'],
+            batch_size=metadata['batch_size'],
+            pool_name=metadata['batch_pool_name'],
+            serialized_fn=metadata['batch_serialized_fn'],
+            activate_env=metadata.get('batch_activate_env', ''),
+            job_id=self._job_id,
+        )
+
+        submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+            self._backend.run_timestamp) if task_id == 0 else time.time()
+
+        await managed_job_state.set_starting_async(
+            self._job_id,
+            task_id,
+            self._backend.run_timestamp,
+            submitted_at,
+            resources_str='BatchCoordinator',
+            specs={
+                'max_restarts_on_errors': 0,
+                'recover_on_exit_codes': []
+            },
+            callback_func=callback_func)
+        await managed_job_state.set_started_async(job_id=self._job_id,
+                                                  task_id=task_id,
+                                                  start_time=time.time(),
+                                                  callback_func=callback_func)
+
+        try:
+            await asyncio.to_thread(coordinator.run)
+            await managed_job_state.set_succeeded_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                end_time=time.time(),
+                callback_func=callback_func)
+            return True
+        except asyncio.CancelledError:
+            coordinator.cancel()
+            raise
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Batch coordinator failed: {e}', exc_info=True)
+            await managed_job_state.set_failed_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                failure_type=managed_job_state.ManagedJobStatus.FAILED,
+                failure_reason=str(e),
+                callback_func=callback_func)
+            return False
 
     async def _monitor_one_task(
         self,

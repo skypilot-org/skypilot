@@ -2,7 +2,7 @@
 # Uses AWS L4 GPUs (24GB VRAM, good for SD v1.5 in fp16)
 
 pool:
-  workers: 2  # Number of parallel workers
+  workers: 3  # Number of parallel workers
 
 resources:
   cloud: aws

@@ -1,26 +1,25 @@
-"""Batch coordinator — runs as a managed job task.
+"""Batch coordinator — orchestrates batch processing across pool workers.
 
-This module replaces the old HTTP-based ``BatchController``.  The
-``BatchCoordinator`` is launched by ``ds.map()`` as a regular managed
-job (via ``sky.jobs.launch``).  All batch parameters are hardcoded
-into the task's ``run`` script so no external configuration is needed.
+The ``BatchCoordinator`` runs inline on the jobs controller (no separate
+cluster).  ``ds.map()`` passes all config via ``task._metadata`` and
+``sky.jobs.launch()`` submits the task; the controller detects the
+``batch_coordinator`` metadata flag and calls ``BatchCoordinator.run()``
+directly via ``asyncio.to_thread()``.
 
 Lifecycle::
 
     ds.map()
-      └─ sky.jobs.launch(task with inline run script)
-           └─ Managed-job system launches a CPU cluster
-                └─ Runs BatchCoordinator.run()
-                     ├─ Discover own managed_job_id from jobs queue
+      └─ sky.jobs.launch(task with batch_coordinator metadata)
+           └─ Jobs controller detects metadata flag
+                └─ Runs BatchCoordinator.run() inline
                      ├─ Count & split dataset into batches
                      ├─ Discover pool workers (SkyServe replicas)
                      ├─ Dispatch batches to workers via sky.exec()
-                     ├─ Push progress to API server after each batch
+                     ├─ Write progress directly to DB
                      ├─ Merge results
-                     └─ Exit 0 (SUCCEEDED) or 1 (FAILED)
+                     └─ Return (success) or raise (failure)
 """
 import collections
-import json
 import logging
 import signal
 import sys
@@ -33,19 +32,18 @@ import sky
 from sky.batch import constants
 from sky.batch import utils
 from sky.client import sdk
-from sky.server import common as server_common
-from sky.server.requests import payloads
+from sky.jobs import state as managed_job_state
 from sky.skylet import constants as skylet_constants
 
 logger = logging.getLogger(__name__)
 
 
 class BatchCoordinator:
-    """Runs as a managed job task on a CPU cluster.
+    """Orchestrates batch processing across pool workers.
 
-    Config is passed directly via constructor (hardcoded into the
-    task's run script by ``ds.map()``).  Dispatches batches to pool
-    workers via ``sky.exec()``.  Pushes progress to the API server.
+    Runs inline on the jobs controller.  Config is passed via
+    ``task._metadata`` by ``ds.map()``.  Dispatches batches to pool
+    workers via ``sky.exec()``.  Writes progress directly to the DB.
     """
 
     def __init__(self,
@@ -54,7 +52,8 @@ class BatchCoordinator:
                  batch_size: int,
                  pool_name: str,
                  serialized_fn: str,
-                 activate_env: str = ''):
+                 activate_env: str = '',
+                 job_id: Optional[int] = None):
         self.dataset_path = dataset_path
         self.output_path = output_path
         self.batch_size = batch_size
@@ -62,15 +61,19 @@ class BatchCoordinator:
         self.serialized_fn = serialized_fn
         self.activate_env = activate_env
 
-        # Read managed_job_id from env var set by the jobs controller.
-        import os  # pylint: disable=import-outside-toplevel
-        env_var = skylet_constants.MANAGED_JOB_ID_ENV_VAR
-        raw = os.environ.get(env_var)
-        if raw is None:
-            raise RuntimeError(
-                f'{env_var} not set. The coordinator must run '
-                f'as a managed job.')
-        self._managed_job_id: int = int(raw)
+        # Use explicit job_id if provided (inline on controller),
+        # otherwise fall back to env var (backward compat).
+        if job_id is not None:
+            self._managed_job_id: int = job_id
+        else:
+            import os  # pylint: disable=import-outside-toplevel
+            env_var = skylet_constants.MANAGED_JOB_ID_ENV_VAR
+            raw = os.environ.get(env_var)
+            if raw is None:
+                raise RuntimeError(
+                    f'{env_var} not set. The coordinator must run '
+                    f'as a managed job.')
+            self._managed_job_id = int(raw)
 
         # Batch metadata: list of [start_idx, end_idx] tuples.
         self.batches: List[List[int]] = []
@@ -81,6 +84,9 @@ class BatchCoordinator:
         # Worker tracking: cluster_name → worker_job_id
         self._active_workers: Dict[str, int] = {}
 
+        # Cancellation flag for inline (controller) mode.
+        self._cancelled = False
+
         # Register SIGTERM handler for graceful cancellation.
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
@@ -89,7 +95,7 @@ class BatchCoordinator:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        """Main entry point.  Exits 0 on success, 1 on failure."""
+        """Main entry point.  Returns on success, raises on failure."""
         try:
             logger.info(f'managed_job_id={self._managed_job_id}')
             self._count_and_split()
@@ -100,10 +106,9 @@ class BatchCoordinator:
             self._dispatch_all()
             self._merge_results()
             logger.info('Batch job completed successfully.')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Batch job failed: {e}')
+        except Exception:
             self._cleanup_on_failure()
-            sys.exit(1)
+            raise
 
     # ------------------------------------------------------------------
     # SIGTERM handler (sky jobs cancel)
@@ -112,12 +117,21 @@ class BatchCoordinator:
     def _handle_sigterm(self, signum, frame):
         """Graceful shutdown on ``sky jobs cancel``."""
         logger.info('Received SIGTERM — shutting down workers...')
-        for cluster_name, worker_job_id in self._active_workers.items():
+        self.cancel()
+        sys.exit(1)
+
+    def cancel(self) -> None:
+        """Cancel the coordinator and shut down active workers.
+
+        Sets the ``_cancelled`` flag so the dispatch loop breaks early,
+        then shuts down any active worker services.
+        """
+        self._cancelled = True
+        for cluster_name, worker_job_id in list(self._active_workers.items()):
             try:
                 self._shutdown_worker(cluster_name, worker_job_id)
             except Exception:  # pylint: disable=broad-except
                 logger.warning(f'Failed to shutdown worker on {cluster_name}')
-        sys.exit(1)
 
     # ------------------------------------------------------------------
     # Dataset counting & splitting
@@ -362,8 +376,7 @@ class BatchCoordinator:
             echo "ERROR: Worker service did not start within {timeout}s"
             exit 1
             """)
-        health_task = sky.Task(name=f'health-check-{job_id}',
-                               run=health_code)
+        health_task = sky.Task(name=f'health-check-{job_id}', run=health_code)
         try:
             req_id = sdk.exec(health_task, cluster_name=cluster_name)
             sdk.get(req_id)
@@ -405,21 +418,13 @@ class BatchCoordinator:
     # ------------------------------------------------------------------
 
     def _write_progress(self) -> None:
-        """Push progress to the API server."""
+        """Write batch progress directly to the DB."""
         try:
-            body = payloads.SetBatchProgressBody(
-                job_id=self._managed_job_id,
-                total=len(self.batches),
-                completed=self.completed_count)
-            resp = server_common.make_authenticated_request(
-                'POST',
-                '/jobs/batch_progress',
-                json=json.loads(body.model_dump_json()),
-                timeout=(5, 10))
-            req_id = server_common.get_request_id(resp)
-            sdk.get(req_id)
+            managed_job_state.set_batch_progress(self._managed_job_id,
+                                                 len(self.batches),
+                                                 self.completed_count)
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to push progress: {e}')
+            logger.warning(f'Failed to write progress: {e}')
 
     # ------------------------------------------------------------------
     # Per-worker dispatch loop (runs in its own thread)
@@ -439,7 +444,7 @@ class BatchCoordinator:
         self._active_workers[cluster_name] = worker_job_id
 
         try:
-            while True:
+            while not self._cancelled:
                 try:
                     batch_idx = self.pending_batches.popleft()
                 except IndexError:
@@ -448,9 +453,8 @@ class BatchCoordinator:
                 retries = retry_counts.get(batch_idx, 0)
                 try:
                     notify_code = self._generate_notify_code(batch_idx)
-                    task = sky.Task(
-                        name=f'batch-notify-{job_id}-{batch_idx}',
-                        run=notify_code)
+                    task = sky.Task(name=f'batch-notify-{job_id}-{batch_idx}',
+                                    run=notify_code)
                     request_id = sdk.exec(task, cluster_name=cluster_name)
                     job_id_on_cluster, _ = sdk.get(request_id)
                     assert job_id_on_cluster is not None

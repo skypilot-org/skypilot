@@ -57,7 +57,7 @@ run: |
   # Write job_id_to_rank mapping to env file for rank lookup
   # For consolidation mode, job_id_to_rank is already fully set with all job IDs
   export _TMP_JOB_ID_TO_RANK='{{job_id_to_rank | tojson}}'
-  python3 -c "import json, os, shlex; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); print('export SKYPILOT_JOB_ID_TO_RANK=' + shlex.quote(json.dumps(d)))" 2>&1 >> {{remote_env_file_path}}
+  {{python_cmd}} -c "import json, os, shlex; d=json.loads(os.environ['_TMP_JOB_ID_TO_RANK']); print('export SKYPILOT_JOB_ID_TO_RANK=' + shlex.quote(json.dumps(d)))" 2>&1 >> {{remote_env_file_path}}
   unset _TMP_JOB_ID_TO_RANK
   {%- endif %}
 
@@ -66,7 +66,7 @@ run: |
   job_ids_array=({% for job_id in job_ids %}{{job_id}} {% endfor %})
   # Create a space-separated string of job IDs
   job_ids_str=$(IFS=' '; echo "${job_ids_array[*]}")
-  python \
+  {{python_cmd}} \
     -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
     --user-yaml-path {{remote_original_user_yaml_path}} \
     --env-file {{remote_env_file_path}} \

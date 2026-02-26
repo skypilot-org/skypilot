@@ -5,7 +5,6 @@ and distributing workloads across a pool of workers via managed jobs.
 """
 import datetime
 import logging
-import textwrap
 import time
 from typing import Callable, Optional
 import uuid
@@ -15,35 +14,8 @@ from sky.batch import remote
 from sky.batch import utils
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
-from sky.server import common as server_common
 
 logger = logging.getLogger(__name__)
-
-# Addresses that only resolve to the local machine and are
-# unreachable from a remote cluster / K8s pod.
-_LOCAL_HOSTS = ('127.0.0.1', 'localhost', '0.0.0.0')
-
-
-def _get_coordinator_api_endpoint() -> str:
-    """Return an API server URL reachable from the coordinator cluster.
-
-    When the API server is local (localhost / 0.0.0.0), remote pods
-    cannot reach it directly.  We try ``host.docker.internal`` which
-    Docker Desktop (macOS / Windows) and kind map to the host.  For
-    remote API servers the URL is returned as-is.
-    """
-    # pylint: disable=import-outside-toplevel
-    from urllib.parse import urlparse
-    from urllib.parse import urlunparse
-
-    endpoint = server_common.get_server_url()
-    parsed = urlparse(endpoint)
-    if parsed.hostname in _LOCAL_HOSTS:
-        # Replace the hostname but keep scheme, port, path, etc.
-        host_port = f'host.docker.internal:{parsed.port or 46580}'
-        replaced = parsed._replace(netloc=host_port)
-        return urlunparse(replaced)
-    return endpoint
 
 
 def _get_managed_job_record(managed_job_id: int):
@@ -220,48 +192,19 @@ class Dataset:
 
         serialized_fn = utils.serialize_function(mapper_fn)
 
-        # Build inline run script with all config hardcoded.
-        # Use the SkyPilot runtime Python env (which has sky installed).
-        # Write a temp .py file to avoid shell quoting issues and
-        # ensure the exit code propagates correctly.
-        # pylint: disable=import-outside-toplevel
-        from sky.skylet import constants as skylet_constants
-        activate_sky = skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV
-
-        # The coordinator needs to reach the user's API server to
-        # discover pool workers and dispatch batches via sky.exec().
-        # Pass the endpoint so the remote cluster doesn't start its
-        # own (empty) API server.
-        api_server_endpoint = _get_coordinator_api_endpoint()
-        env_var_name = skylet_constants.SKY_API_SERVER_URL_ENV_VAR
-
-        run_script = textwrap.dedent(f"""\
-            set -e
-            {activate_sky}
-            export {env_var_name}={api_server_endpoint}
-            cat > /tmp/sky_batch_coordinator.py << 'SKY_BATCH_EOF'
-            from sky.batch.coordinator import BatchCoordinator
-            BatchCoordinator(
-                dataset_path={self.path!r},
-                output_path={output_path!r},
-                batch_size={batch_size},
-                pool_name={pool_name!r},
-                serialized_fn={serialized_fn!r},
-                activate_env={(activate_env or "")!r},
-            ).run()
-            SKY_BATCH_EOF
-            python /tmp/sky_batch_coordinator.py
-        """)
-
-        # Install cloud storage dependencies in the SkyPilot runtime
-        # env so the coordinator can access cloud storage.
-        setup_script = textwrap.dedent(f"""\
-            {activate_sky}
-            pip install boto3 google-cloud-storage 2>/dev/null || true
-        """)
-
-        task = sky.Task(name=task_name, setup=setup_script, run=run_script)
-        task.set_resources(sky.Resources(cpus='2+'))
+        # The coordinator runs inline on the jobs controller (no
+        # separate cluster).  Pass all config via task metadata.
+        task = sky.Task(name=task_name, run=None)
+        # pylint: disable=protected-access
+        task._metadata = {
+            'batch_coordinator': True,
+            'batch_dataset_path': self.path,
+            'batch_output_path': output_path,
+            'batch_size': batch_size,
+            'batch_pool_name': pool_name,
+            'batch_serialized_fn': serialized_fn,
+            'batch_activate_env': activate_env or '',
+        }
 
         # Submit as regular managed job
         request_id = sky.jobs.launch(task)
