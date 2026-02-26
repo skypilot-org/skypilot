@@ -1972,6 +1972,10 @@ def format_job_table(
             pool_status: Optional[List[Dict[str, Any]]]) -> Dict[int, int]:
         """Create a mapping from job_id to worker replica_id.
 
+        Jobs that appear on multiple workers (e.g. batch coordinators
+        that orchestrate across the whole pool) are excluded — they
+        should not display a single ``(worker=N)`` annotation.
+
         Args:
             pool_status: List of pool status dictionaries with replica_info.
 
@@ -1979,6 +1983,7 @@ def format_job_table(
             Dictionary mapping job_id to replica_id (worker ID).
         """
         job_to_worker: Dict[int, int] = {}
+        multi_worker_jobs: Set[int] = set()
         if pool_status is None:
             return job_to_worker
         for pool in pool_status:
@@ -1987,7 +1992,11 @@ def format_job_table(
                 used_by = replica.get('used_by')
                 if used_by is not None:
                     for job_id in used_by:
+                        if job_id in job_to_worker:
+                            multi_worker_jobs.add(job_id)
                         job_to_worker[job_id] = replica.get('replica_id')
+        for job_id in multi_worker_jobs:
+            del job_to_worker[job_id]
         return job_to_worker
 
     # Create mapping from job_id to worker replica_id

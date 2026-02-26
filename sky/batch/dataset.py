@@ -206,8 +206,10 @@ class Dataset:
             'batch_activate_env': activate_env or '',
         }
 
-        # Submit as regular managed job
-        request_id = sky.jobs.launch(task)
+        # Submit as regular managed job.  Pass pool_name so the job
+        # shows up under the correct pool in ``sky jobs queue`` and
+        # pool workers display the job in their USED_BY column.
+        request_id = sky.jobs.launch(task, pool=pool_name)
         result = sdk.stream_and_get(request_id)
         job_ids, _ = result
         if not job_ids:

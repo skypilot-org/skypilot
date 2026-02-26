@@ -1308,12 +1308,18 @@ export function ManagedJobsTable({
       {
         id: 'batch_progress',
         order: 5.5,
-        renderHeader: () => <TableHead className="whitespace-nowrap">Progress</TableHead>,
+        renderHeader: () => (
+          <TableHead className="whitespace-nowrap">Progress</TableHead>
+        ),
         renderCell: (item) => {
           if (item.batch_total_batches == null) {
             const isBatchJob = item.name && item.name.startsWith('sky-batch-');
             if (isBatchJob && item.status === 'RUNNING') {
-              return <TableCell><span className="text-xs text-gray-400">Loading...</span></TableCell>;
+              return (
+                <TableCell>
+                  <span className="text-xs text-gray-400">Loading...</span>
+                </TableCell>
+              );
             }
             return <TableCell>-</TableCell>;
           }

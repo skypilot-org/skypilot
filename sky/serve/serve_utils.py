@@ -725,9 +725,18 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
         if pool:
+            # Get pool-level jobs (e.g. batch coordinators) that use
+            # all workers — they have pool set but no cluster_name.
+            pool_level_job_ids = (
+                managed_job_state.get_nonterminal_job_ids_by_pool(
+                    service_name, cluster_name=None))
             for replica_info in record['replica_info']:
                 job_ids = managed_job_state.get_nonterminal_job_ids_by_pool(
                     service_name, replica_info['name'])
+                # Show pool-level jobs on READY workers only.
+                if (replica_info.get('status') ==
+                        serve_state.ReplicaStatus.READY):
+                    job_ids = list(dict.fromkeys(pool_level_job_ids + job_ids))
                 replica_info['used_by'] = job_ids
     return record
 

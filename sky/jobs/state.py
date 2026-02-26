@@ -1920,6 +1920,17 @@ def set_batch_progress(job_id: int, total: int, completed: int) -> None:
 
 
 @_init_db
+def set_batch_resources(job_id: int, resources_str: str) -> None:
+    """Update the REQUESTED column for a batch coordinator job."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.query(spot_table).filter(
+            spot_table.c.spot_job_id == job_id).update(
+                {spot_table.c.resources: resources_str})
+        session.commit()
+
+
+@_init_db
 def update_job_full_resources(job_id: int,
                               full_resources_json: Dict[str, Any]) -> None:
     """Update the full_resources column for a job.
