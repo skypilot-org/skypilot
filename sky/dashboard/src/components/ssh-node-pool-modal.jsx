@@ -129,10 +129,10 @@ export function SSHNodePoolModal({
               value={poolName}
               onChange={(e) => setPoolName(e.target.value)}
               disabled={isEditing}
-              className={`placeholder:text-gray-500 ${errors.poolName ? 'border-red-500' : ''}`}
+              className={`placeholder:text-gray-500 dark:placeholder:text-gray-400 ${errors.poolName ? 'border-red-500' : ''}`}
             />
             {errors.poolName && (
-              <p className="text-sm text-red-500">{errors.poolName}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">{errors.poolName}</p>
             )}
           </div>
 
@@ -145,10 +145,10 @@ export function SSHNodePoolModal({
               value={hosts}
               onChange={(e) => setHosts(e.target.value)}
               rows={6}
-              className={`placeholder:text-gray-500 ${errors.hosts ? 'border-red-500' : ''}`}
+              className={`placeholder:text-gray-500 dark:placeholder:text-gray-400 ${errors.hosts ? 'border-red-500' : ''}`}
             />
             {errors.hosts && (
-              <p className="text-sm text-red-500">{errors.hosts}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">{errors.hosts}</p>
             )}
           </div>
 
@@ -160,10 +160,10 @@ export function SSHNodePoolModal({
               placeholder="ubuntu"
               value={sshUser}
               onChange={(e) => setSshUser(e.target.value)}
-              className={`placeholder:text-gray-500 ${errors.sshUser ? 'border-red-500' : ''}`}
+              className={`placeholder:text-gray-500 dark:placeholder:text-gray-400 ${errors.sshUser ? 'border-red-500' : ''}`}
             />
             {errors.sshUser && (
-              <p className="text-sm text-red-500">{errors.sshUser}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">{errors.sshUser}</p>
             )}
           </div>
 
@@ -175,10 +175,10 @@ export function SSHNodePoolModal({
               type="file"
               accept=".pem,.key,id_rsa,id_ed25519"
               onChange={(e) => setKeyUploadFile(e.target.files?.[0] || null)}
-              className="border-0 bg-transparent p-0 shadow-none focus:ring-0 file:mr-2 file:text-sm file:py-1 file:px-3 file:border file:border-gray-300 file:rounded file:bg-gray-50 hover:file:bg-gray-100 file:cursor-pointer"
+              className="border-0 bg-transparent p-0 shadow-none focus:ring-0 file:mr-2 file:text-sm file:py-1 file:px-3 file:border file:border-gray-300 dark:file:border-gray-600 file:rounded file:bg-gray-50 dark:file:bg-gray-900 hover:file:bg-gray-100 dark:hover:file:bg-gray-800 file:cursor-pointer"
             />
             {errors.keyUpload && (
-              <p className="text-sm text-red-500">{errors.keyUpload}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">{errors.keyUpload}</p>
             )}
           </div>
 
@@ -193,11 +193,11 @@ export function SSHNodePoolModal({
               placeholder="Leave empty if using passwordless sudo"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="placeholder:text-gray-500"
+              className="placeholder:text-gray-500 dark:placeholder:text-gray-400"
             />
           </div>
 
-          {errors.auth && <p className="text-sm text-red-500">{errors.auth}</p>}
+          {errors.auth && <p className="text-sm text-red-500 dark:text-red-400">{errors.auth}</p>}
         </div>
 
         <DialogFooter>
@@ -207,7 +207,7 @@ export function SSHNodePoolModal({
           <Button
             onClick={handleSave}
             disabled={isLoading}
-            className="bg-blue-600 hover:bg-blue-700 text-white disabled:bg-gray-300 disabled:text-gray-500"
+            className="bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-600 text-white disabled:bg-gray-300 disabled:text-gray-500"
           >
             {isLoading ? (
               <>

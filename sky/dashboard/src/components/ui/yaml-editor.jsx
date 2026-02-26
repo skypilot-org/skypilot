@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
+import { useTheme } from 'next-themes';
 
 /**
  * YAML Editor component with syntax highlighting.
@@ -16,9 +17,18 @@ export function YamlEditor({
   minHeight,
   disabled = false,
 }) {
+  const { resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const editorTheme = mounted && resolvedTheme === 'dark' ? 'dark' : 'light';
+
   return (
     <div
-      className={`rounded-md border border-gray-300 overflow-hidden ${className || ''}`}
+      className={`rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden ${className || ''}`}
       style={{
         width: '100%',
         maxWidth: '100%',
@@ -45,7 +55,7 @@ export function YamlEditor({
           minHeight,
           overflow: 'auto',
         }}
-        theme="light"
+        theme={editorTheme}
       />
     </div>
   );

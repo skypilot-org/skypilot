@@ -11,6 +11,7 @@ import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
 import { PluginProvider } from '@/plugins/PluginProvider';
 import { VersionProvider } from '@/components/elements/version-display';
+import { ThemeProvider } from 'next-themes';
 
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
@@ -34,15 +35,17 @@ function App({ Component, pageProps }) {
   }, []);
 
   return (
-    <PluginProvider>
-      <VersionProvider>
-        <TourProvider>
-          <Layout highlighted={pageProps.highlighted}>
-            <Component {...pageProps} />
-          </Layout>
-        </TourProvider>
-      </VersionProvider>
-    </PluginProvider>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <PluginProvider>
+        <VersionProvider>
+          <TourProvider>
+            <Layout highlighted={pageProps.highlighted}>
+              <Component {...pageProps} />
+            </Layout>
+          </TourProvider>
+        </VersionProvider>
+      </PluginProvider>
+    </ThemeProvider>
   );
 }
 

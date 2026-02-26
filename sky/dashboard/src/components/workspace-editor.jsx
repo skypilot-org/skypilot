@@ -53,9 +53,9 @@ const SuccessDisplay = ({ message }) => {
   if (!message) return null;
 
   return (
-    <Alert className="border-green-200 bg-green-50">
-      <CheckIcon className="h-4 w-4 text-green-600" />
-      <AlertDescription className="text-green-800">{message}</AlertDescription>
+    <Alert className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30">
+      <CheckIcon className="h-4 w-4 text-green-600 dark:text-green-400" />
+      <AlertDescription className="text-green-800 dark:text-green-200">{message}</AlertDescription>
     </Alert>
   );
 };
@@ -74,7 +74,7 @@ const WorkspaceConfigDescription = ({
 
   if (isDefault && isEmptyConfig) {
     return (
-      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-gray-500 dark:text-gray-400 mb-3 italic p-3 bg-sky-50 dark:bg-sky-900/30 rounded border border-sky-200 dark:border-sky-800">
         Workspace &apos;default&apos; can use all accessible infrastructure.
       </div>
     );
@@ -144,7 +144,7 @@ const WorkspaceConfigDescription = ({
           configuredButNotEnabled.push(
             <span
               key={`${cloud}-configured-not-enabled`}
-              className="block text-amber-700"
+              className="block text-amber-700 dark:text-amber-300"
             >
               {cloudName}
               {detail} is configured but not currently available.
@@ -174,7 +174,7 @@ const WorkspaceConfigDescription = ({
           configuredButNotEnabled.push(
             <span
               key={`${cloud}-default-not-enabled`}
-              className="block text-amber-700"
+              className="block text-amber-700 dark:text-amber-300"
             >
               {cloudName} is configured but not currently available.
             </span>
@@ -199,7 +199,7 @@ const WorkspaceConfigDescription = ({
 
   if (finalDescriptions.length > 0) {
     return (
-      <div className="text-sm text-gray-700 mb-3 p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-gray-700 dark:text-gray-300 mb-3 p-3 bg-sky-50 dark:bg-sky-900/30 rounded border border-sky-200 dark:border-sky-800">
         {finalDescriptions}
       </div>
     );
@@ -207,7 +207,7 @@ const WorkspaceConfigDescription = ({
 
   if (!isDefault && isEmptyConfig) {
     return (
-      <div className="text-sm text-gray-500 mb-3 italic p-3 bg-sky-50 rounded border border-sky-200">
+      <div className="text-sm text-gray-500 dark:text-gray-400 mb-3 italic p-3 bg-sky-50 dark:bg-sky-900/30 rounded border border-sky-200 dark:border-sky-800">
         This workspace has no specific cloud resource configurations and can use
         all accessible infrastructure.
       </div>
@@ -220,13 +220,13 @@ const WorkspaceConfigDescription = ({
 const WorkspaceBadge = ({ isPrivate }) => {
   if (isPrivate) {
     return (
-      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700 border border-gray-300">
+      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600">
         Private
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-300">
+    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 border border-green-300 dark:border-green-700">
       Public
     </span>
   );
@@ -251,10 +251,10 @@ const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
   if (allAllowedUsers.length === 0) {
     return (
       <div className="mt-4">
-        <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+        <h4 className="mb-2 text-xs text-gray-500 dark:text-gray-400 tracking-wider">
           Allowed Users (0)
         </h4>
-        <div className="text-amber-600 text-xs italic p-2 bg-amber-50 rounded border border-amber-200">
+        <div className="text-amber-600 dark:text-amber-400 text-xs italic p-2 bg-amber-50 dark:bg-amber-900/30 rounded border border-amber-200 dark:border-amber-800">
           No users configured (workspace may be inaccessible)
         </div>
       </div>
@@ -263,25 +263,25 @@ const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
 
   return (
     <div className="mt-4">
-      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+      <h4 className="mb-2 text-xs text-gray-500 dark:text-gray-400 tracking-wider">
         Allowed Users ({allAllowedUsers.length})
       </h4>
-      <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded">
+      <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded">
         {allAllowedUsers.map((username) => {
           const isAdmin = adminUsernames.includes(username);
           return (
             <div
               key={username}
-              className="flex items-center justify-between text-xs p-2 bg-gray-50 hover:bg-gray-100 border-b border-gray-100 last:border-b-0"
+              className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-800 last:border-b-0"
             >
-              <span className="font-medium text-gray-700">{username}</span>
+              <span className="font-medium text-gray-700 dark:text-gray-300">{username}</span>
               {isAdmin ? (
-                <span className="inline-flex items-center text-blue-600">
+                <span className="inline-flex items-center text-blue-600 dark:text-blue-400">
                   <StarIcon className="w-3 h-3 mr-1" />
                   Admin
                 </span>
               ) : (
-                <span className="inline-flex items-center text-gray-600">
+                <span className="inline-flex items-center text-gray-600 dark:text-gray-400">
                   <User className="w-3 h-3 mr-1" />
                   User
                 </span>
@@ -623,7 +623,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             <Link href="/workspaces" className="text-sky-blue hover:underline">
               Workspaces
             </Link>
-            <span className="mx-2 text-gray-500">›</span>
+            <span className="mx-2 text-gray-500 dark:text-gray-400">›</span>
             <Link
               href={
                 isNewWorkspace
@@ -635,7 +635,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
               {isNewWorkspace ? 'New Workspace' : workspaceName}
             </Link>
             {hasChanges && (
-              <span className="ml-3 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded">
+              <span className="ml-3 px-2 py-1 bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-200 text-xs rounded">
                 Unsaved changes
               </span>
             )}
@@ -645,7 +645,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
             {(loading || saving || statsLoading) && (
               <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
+                <span className="ml-2 text-gray-500 dark:text-gray-400">
                   {saving ? 'Saving...' : 'Loading...'}
                 </span>
               </div>
@@ -669,7 +669,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     setDeleteState({ ...deleteState, showDialog: true })
                   }
                   disabled={deleteState.deleting || saving}
-                  className="text-red-600 hover:text-red-700 font-medium inline-flex items-center"
+                  className="text-red-600 dark:text-red-400 hover:text-red-700 font-medium inline-flex items-center"
                 >
                   <TrashIcon className="w-4 h-4 mr-1.5" />
                   Delete
@@ -683,7 +683,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
         {loading ? (
           <div className="flex justify-center items-center py-12">
             <CircularProgress size={24} className="mr-2" />
-            <span className="text-gray-500">
+            <span className="text-gray-500 dark:text-gray-400">
               Loading workspace configuration...
             </span>
           </div>
@@ -718,22 +718,22 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     </CardHeader>
                     <CardContent className="text-sm pb-2 flex-1">
                       <div className="py-2 flex items-center justify-between">
-                        <div className="flex items-center text-gray-600">
-                          <ServerIcon className="w-4 h-4 mr-2 text-gray-500" />
+                        <div className="flex items-center text-gray-600 dark:text-gray-400">
+                          <ServerIcon className="w-4 h-4 mr-2 text-gray-500 dark:text-gray-400" />
                           <span>Clusters (Running / Total)</span>
                         </div>
-                        <span className="font-normal text-gray-800">
+                        <span className="font-normal text-gray-800 dark:text-gray-200">
                           {statsLoading
                             ? '...'
                             : `${workspaceStats.runningClusterCount} / ${workspaceStats.totalClusterCount}`}
                         </span>
                       </div>
-                      <div className="py-2 flex items-center justify-between border-t border-gray-100">
-                        <div className="flex items-center text-gray-600">
-                          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500" />
+                      <div className="py-2 flex items-center justify-between border-t border-gray-100 dark:border-gray-800">
+                        <div className="flex items-center text-gray-600 dark:text-gray-400">
+                          <BriefcaseIcon className="w-4 h-4 mr-2 text-gray-500 dark:text-gray-400" />
                           <span>Managed Jobs</span>
                         </div>
-                        <span className="font-normal text-gray-800">
+                        <span className="font-normal text-gray-800 dark:text-gray-200">
                           {statsLoading
                             ? '...'
                             : workspaceStats.managedJobsCount}
@@ -742,24 +742,24 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                     </CardContent>
 
                     <div className="px-6 pb-6 text-sm pt-3">
-                      <h4 className="mb-2 text-xs text-gray-500 tracking-wider">
+                      <h4 className="mb-2 text-xs text-gray-500 dark:text-gray-400 tracking-wider">
                         Enabled Infra
                       </h4>
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         {statsLoading ? (
-                          <span className="text-gray-500">Loading...</span>
+                          <span className="text-gray-500 dark:text-gray-400">Loading...</span>
                         ) : workspaceStats.clouds.length > 0 ? (
                           workspaceStats.clouds.map((cloud) => (
                             <div
                               key={cloud}
-                              className="flex items-center text-gray-700"
+                              className="flex items-center text-gray-700 dark:text-gray-300"
                             >
-                              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500" />
+                              <TickIcon className="w-3.5 h-3.5 mr-1.5 text-green-500 dark:text-green-400" />
                               <span>{cloud}</span>
                             </div>
                           ))
                         ) : (
-                          <span className="text-gray-500 italic">
+                          <span className="text-gray-500 dark:text-gray-400 italic">
                             No enabled infrastructure
                           </span>
                         )}
@@ -806,7 +806,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         />
                       )}
                       <div className="flex-1 flex flex-col">
-                        <p className="text-sm text-gray-600 mb-3">
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
                           Configure infra-specific settings for this workspace.
                           Leave empty to use all accessible infrastructure.
                           Refer to{' '}
@@ -814,7 +814,7 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                             href="https://docs.skypilot.co/en/latest/admin/workspaces.html#configuration"
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-blue-600"
+                            className="text-blue-600 dark:text-blue-400"
                           >
                             SkyPilot Docs
                           </a>{' '}
@@ -823,11 +823,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
 
                         {/* Example Configuration Section */}
                         <div className="mb-4">
-                          <h4 className="text-sm font-medium text-gray-700 mb-2">
+                          <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                             Example configuration:
                           </h4>
-                          <div className="p-3 bg-gray-50 border rounded-lg">
-                            <pre className="text-xs font-mono text-gray-600 whitespace-pre-wrap">
+                          <div className="p-3 bg-gray-50 dark:bg-gray-900 border rounded-lg">
+                            <pre className="text-xs font-mono text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
                               {`${workspaceName || 'my-workspace'}:
   private: true
   allowed_users:
@@ -853,11 +853,11 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                         />
 
                         {/* Action buttons */}
-                        <div className="flex justify-end space-x-3 pt-3 border-gray-200">
+                        <div className="flex justify-end space-x-3 pt-3 border-gray-200 dark:border-gray-700">
                           <Button
                             onClick={handleSave}
                             disabled={saving || yamlError || loading}
-                            className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+                            className="inline-flex items-center bg-sky-600 dark:bg-sky-blue hover:bg-sky-700 dark:hover:bg-sky-blue-bright text-white dark:text-black"
                           >
                             <SaveIcon className="w-4 h-4 mr-1.5" />
                             {saving ? 'Applying...' : 'Apply'}

@@ -17,80 +17,80 @@ export const getStatusStyle = (status) => {
   switch (status) {
     // Cluster specific statuses
     case 'LAUNCHING':
-      return 'bg-blue-100 text-sky-blue';
+      return 'bg-blue-100 dark:bg-blue-900/40 text-sky-blue';
     case 'RUNNING':
     case 'IN_USE':
-      return 'bg-green-50 text-green-700';
+      return 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300';
     case 'STOPPED':
-      return 'bg-yellow-100 text-yellow-800';
+      return 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-200';
     case 'AUTOSTOPPING':
-      return 'bg-purple-100 text-purple-800';
+      return 'bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200';
     case 'TERMINATED':
-      return 'bg-gray-100 text-gray-800';
+      return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200';
 
     // Job specific statuses
     case 'PENDING':
-      return 'bg-gray-100 text-gray-800';
+      return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200';
     case 'SUCCEEDED':
-      return 'bg-blue-50 text-blue-700';
+      return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
     case 'FAILED':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'CANCELLED':
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
     case 'RECOVERING':
-      return 'bg-orange-50 text-orange-700';
+      return 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300';
     case 'SUBMITTED':
-      return 'bg-indigo-50 text-indigo-700';
+      return 'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300';
     case 'STARTING':
-      return 'bg-cyan-50 text-cyan-700';
+      return 'bg-cyan-50 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300';
     case 'CANCELLING':
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
     case 'FAILED_SETUP':
-      return 'bg-pink-50 text-pink-700';
+      return 'bg-pink-50 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300';
     case 'FAILED_PRECHECKS':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'FAILED_NO_RESOURCE':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'FAILED_CONTROLLER':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
 
     // Volume statuses - 'READY' and 'NOT_READY' are
     // handled below with Serve statuses
 
     // Serve specific statuses - ReplicaStatus
     case 'READY':
-      return 'bg-green-50 text-green-700';
+      return 'bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300';
     case 'PROVISIONING':
-      return 'bg-blue-50 text-blue-700';
+      return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
     case 'NOT_READY':
-      return 'bg-yellow-50 text-yellow-700';
+      return 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300';
     case 'SHUTTING_DOWN':
-      return 'bg-orange-50 text-orange-700';
+      return 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300';
     case 'FAILED_INITIAL_DELAY':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'FAILED_PROBING':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'FAILED_PROVISION':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'FAILED_CLEANUP':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'PREEMPTED':
-      return 'bg-purple-50 text-purple-700';
+      return 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300';
     case 'UNKNOWN':
-      return 'bg-gray-100 text-gray-800';
+      return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200';
 
     // Serve specific statuses - ServiceStatus
     case 'CONTROLLER_INIT':
-      return 'bg-blue-50 text-blue-700';
+      return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
     case 'REPLICA_INIT':
-      return 'bg-blue-50 text-blue-700';
+      return 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300';
     case 'CONTROLLER_FAILED':
-      return 'bg-red-50 text-red-700';
+      return 'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300';
     case 'NO_REPLICA':
-      return 'bg-purple-50 text-purple-700';
+      return 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300';
 
     default:
-      return 'bg-gray-100 text-gray-800';
+      return 'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200';
   }
 };
 

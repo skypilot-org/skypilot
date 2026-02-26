@@ -300,8 +300,8 @@ export const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible bg-white">
-      <div className="border-r border-gray-300 flex-shrink-0">
+    <div className="flex flex-row border border-gray-300 dark:border-gray-600 rounded-md overflow-visible bg-white dark:bg-gray-900">
+      <div className="border-r border-gray-300 dark:border-gray-600 flex-shrink-0">
         <Select
           onValueChange={(val) => {
             setPropertyValue(val);
@@ -312,7 +312,7 @@ export const FilterDropdown = ({
         >
           <SelectTrigger
             aria-label="Filter Property"
-            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm bg-white"
+            className="focus:ring-0 focus:ring-offset-0 border-none rounded-l-md rounded-r-none w-20 sm:w-24 md:w-32 h-8 text-xs sm:text-sm bg-white dark:bg-gray-900"
           >
             <SelectValue placeholder={propertyList[0]?.label || 'Status'} />
           </SelectTrigger>
@@ -334,7 +334,7 @@ export const FilterDropdown = ({
           onChange={handleValueChange}
           onFocus={handleInputFocus}
           onKeyDown={handleKeyDown}
-          className="h-8 w-full px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none"
+          className="h-8 w-full px-3 pr-8 text-sm border-none rounded-l-none rounded-r-md focus:ring-0 focus:outline-none bg-white dark:bg-gray-900 dark:text-gray-100"
           autoComplete="off"
         />
         {value && (
@@ -343,7 +343,7 @@ export const FilterDropdown = ({
               setValue('');
               setIsOpen(false);
             }}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
             title="Clear filter"
             tabIndex={-1}
           >
@@ -365,20 +365,20 @@ export const FilterDropdown = ({
         {isOpen && valueOptions.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-y-auto"
             style={{ zIndex: 9999 }}
           >
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 text-sm ${
                   index !== valueOptions.length - 1
-                    ? 'border-b border-gray-100'
+                    ? 'border-b border-gray-100 dark:border-gray-800'
                     : ''
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700">{option}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">{option}</span>
               </div>
             ))}
           </div>
@@ -422,7 +422,7 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
             <>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
+                className="rounded-full px-4 py-1 text-sm text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600"
               >
                 Clear filters
               </button>
@@ -437,7 +437,7 @@ export const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 export const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+      <div className="flex items-center text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1 py-1 rounded-full text-sm">
         <div className="flex items-center gap-1 px-2">
           <span>{`${filter.property} `}</span>
           <span>{`${filter.operator} `}</span>
@@ -446,7 +446,7 @@ export const FilterItem = ({ filter, onRemove }) => {
 
         <button
           onClick={() => onRemove()}
-          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 ml-1 transform text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

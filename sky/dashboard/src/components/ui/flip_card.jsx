@@ -11,22 +11,19 @@ export const FlipCard = ({ card }) => {
     e.preventDefault();
     setIsFlipped(!isFlipped);
   };
-  const cardStyle = {
+  const cardDimensions = {
     width: '280px',
     height: '300px',
     objectFit: 'cover',
-    backgroundColor: card.isActive ? 'honeydew' : '#fff',
-  };
-  const cardBackStyle = {
-    width: '280px',
-    height: '300px',
-    objectFit: 'cover',
-    backgroundColor: 'white',
   };
 
   return (
     <ReactCardFlip isFlipped={isFlipped} flipDirection="horizontal">
-      <div className="flip-card-front" onClick={handleFlip} style={cardStyle}>
+      <div
+        className={`flip-card-front ${card.isActive ? 'bg-green-50 dark:bg-green-900/30' : 'bg-white dark:bg-gray-900'}`}
+        onClick={handleFlip}
+        style={cardDimensions}
+      >
         <div style={{ width: '80%', height: '300px', position: 'relative' }}>
           <Image
             src={card.image}
@@ -39,9 +36,9 @@ export const FlipCard = ({ card }) => {
       </div>
 
       <div
-        className="flip-card-back"
+        className="flip-card-back bg-white dark:bg-gray-900"
         onClick={handleFlip}
-        style={cardBackStyle}
+        style={cardDimensions}
       >
         <p>{card.description}</p>
         <Link href={card.detailsLink}>

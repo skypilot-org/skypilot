@@ -1078,15 +1078,15 @@ export function ManagedJobsTable({
                 <div className="flex items-center">
                   <button
                     onClick={() => toggleJobGroup(jobId)}
-                    className="p-1 hover:bg-gray-200 rounded mr-1"
+                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded mr-1"
                   >
                     {isExpanded ? (
-                      <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+                      <ChevronDownIcon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                     ) : (
-                      <ChevronRightIcon className="w-4 h-4 text-gray-500" />
+                      <ChevronRightIcon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                     )}
                   </button>
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600 dark:text-blue-400">
                     {jobId}
                   </Link>
                 </div>
@@ -1097,8 +1097,8 @@ export function ManagedJobsTable({
           if (renderMode === 'groupChild') {
             return (
               <TableCell className="whitespace-nowrap relative">
-                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300"></div>
-                <span className="text-gray-500 pl-6">{taskIndex}</span>
+                <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300 dark:bg-blue-700"></div>
+                <span className="text-gray-500 dark:text-gray-400 pl-6">{taskIndex}</span>
               </TableCell>
             );
           }
@@ -1109,12 +1109,12 @@ export function ManagedJobsTable({
               {hasAnyJobGroups ? (
                 <div className="flex items-center">
                   <span className="w-6 mr-1" aria-hidden="true" />
-                  <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  <Link href={`/jobs/${item.id}`} className="text-blue-600 dark:text-blue-400">
                     {item.id}
                   </Link>
                 </div>
               ) : (
-                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                <Link href={`/jobs/${item.id}`} className="text-blue-600 dark:text-blue-400">
                   {item.id}
                 </Link>
               )}
@@ -1141,12 +1141,12 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600">
+                  <Link href={`/jobs/${jobId}`} className="text-blue-600 dark:text-blue-400">
                     {item.name}
                   </Link>
                   <button
                     onClick={() => toggleJobGroup(jobId)}
-                    className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
+                    className="ml-2 text-xs font-medium bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
                   >
                     JobGroup: {tasks.length} tasks
                   </button>
@@ -1164,7 +1164,7 @@ export function ManagedJobsTable({
               <TableCell className="whitespace-nowrap">
                 <Link
                   href={`/jobs/${item.id}/${taskIndex}`}
-                  className="text-blue-600 hover:underline"
+                  className="text-blue-600 dark:text-blue-400 hover:underline"
                 >
                   {item.task || `Task ${taskIndex}`}
                 </Link>
@@ -1180,7 +1180,7 @@ export function ManagedJobsTable({
           // Single task
           return (
             <TableCell className="whitespace-nowrap">
-              <Link href={`/jobs/${item.id}`} className="text-blue-600">
+              <Link href={`/jobs/${item.id}`} className="text-blue-600 dark:text-blue-400">
                 {item.name}
               </Link>
             </TableCell>
@@ -1222,7 +1222,7 @@ export function ManagedJobsTable({
             <TableCell>
               <Link
                 href="/workspaces"
-                className="text-gray-700 hover:text-blue-600 hover:underline"
+                className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
               >
                 {item.workspace || 'default'}
               </Link>
@@ -1343,7 +1343,7 @@ export function ManagedJobsTable({
                   <span>
                     <Link
                       href="/infra"
-                      className="text-blue-600 hover:underline"
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
                     >
                       {item.cloud || item.infra.split('(')[0].trim()}
                     </Link>
@@ -1627,7 +1627,7 @@ export function ManagedJobsTable({
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
-                <span className="text-gray-500 mr-2">No jobs found</span>
+                <span className="text-gray-500 dark:text-gray-400 mr-2">No jobs found</span>
               )}
               {Object.entries(statusCounts).map(([status, count]) => (
                 <button
@@ -1637,12 +1637,12 @@ export function ManagedJobsTable({
                     isStatusHighlighted(status) ||
                     selectedStatuses.includes(status)
                       ? getBadgeStyle(status)
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      : 'bg-gray-50 dark:bg-gray-900 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                   }`}
                 >
                   <span>{status}</span>
                   <span
-                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                    className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white dark:bg-gray-900/50' : 'bg-gray-200 dark:bg-gray-700'} px-1.5 py-0.5 rounded`}
                   >
                     {count}
                   </span>
@@ -1650,7 +1650,7 @@ export function ManagedJobsTable({
               ))}
               {totalNoFilter > 0 && (
                 <div className="flex items-center ml-2 gap-2">
-                  <span className="text-gray-500">(</span>
+                  <span className="text-gray-500 dark:text-gray-400">(</span>
                   <button
                     onClick={() => {
                       // When showing all jobs, clear all selected statuses
@@ -1664,13 +1664,13 @@ export function ManagedJobsTable({
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'all' && showAllMode
-                        ? 'text-purple-700 underline'
-                        : 'text-gray-600 hover:text-purple-700 hover:underline'
+                        ? 'text-purple-700 dark:text-purple-300 underline'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-purple-700 dark:hover:text-purple-300 hover:underline'
                     }`}
                   >
                     show all jobs
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
+                  <span className="text-gray-500 dark:text-gray-400 mx-1">|</span>
                   <button
                     onClick={() => {
                       // When showing all active jobs, clear all selected statuses
@@ -1684,13 +1684,13 @@ export function ManagedJobsTable({
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'active' && showAllMode
-                        ? 'text-green-700 underline'
-                        : 'text-gray-600 hover:text-green-700 hover:underline'
+                        ? 'text-green-700 dark:text-green-300 underline'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-green-700 hover:underline'
                     }`}
                   >
                     show all active jobs
                   </button>
-                  <span className="text-gray-500 mx-1">|</span>
+                  <span className="text-gray-500 dark:text-gray-400 mx-1">|</span>
                   <button
                     onClick={() => {
                       // When showing all finished jobs, clear all selected statuses
@@ -1704,13 +1704,13 @@ export function ManagedJobsTable({
                     }}
                     className={`text-sm font-medium ${
                       activeTab === 'finished' && showAllMode
-                        ? 'text-blue-700 underline'
-                        : 'text-gray-600 hover:text-blue-700 hover:underline'
+                        ? 'text-blue-700 dark:text-blue-300 underline'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-blue-700 hover:underline'
                     }`}
                   >
                     show all finished jobs
                   </button>
-                  <span className="text-gray-500">)</span>
+                  <span className="text-gray-500 dark:text-gray-400">)</span>
                 </div>
               )}
             </div>
@@ -1719,7 +1719,7 @@ export function ManagedJobsTable({
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+                <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">Loading...</span>
               </div>
             )}
             {!loading && lastFetchedTime && (
@@ -1748,9 +1748,9 @@ export function ManagedJobsTable({
         paginatedData.length === 0 &&
         !loading &&
         !isInitialLoad && (
-          <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
+          <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border">
             <div className="flex flex-col items-center space-y-3">
-              <p className="text-gray-700 text-center text-sm">
+              <p className="text-gray-700 dark:text-gray-300 text-center text-sm">
                 Job controller stopped.
                 <br />
                 Restart to check status.
@@ -1793,7 +1793,7 @@ export function ManagedJobsTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-gray-500 dark:text-gray-400"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -1852,7 +1852,7 @@ export function ManagedJobsTable({
                     return (
                       <React.Fragment key={`group-${jobId}`}>
                         {/* Parent row for job group */}
-                        <TableRow className="hover:bg-gray-50">
+                        <TableRow className="hover:bg-gray-50 dark:hover:bg-gray-800">
                           {visibleColumns.map((col) => {
                             const cell = col.renderCell(firstTask, parentCtx);
                             return cell
@@ -1876,7 +1876,7 @@ export function ManagedJobsTable({
                             };
                             return (
                               <React.Fragment key={task.task_job_id}>
-                                <TableRow className="bg-gray-50/50">
+                                <TableRow className="bg-gray-50 dark:bg-gray-900/50">
                                   {visibleColumns.map((col) => {
                                     const cell = col.renderCell(task, childCtx);
                                     return cell
@@ -1909,23 +1909,23 @@ export function ManagedJobsTable({
                     <div className="flex flex-col items-center space-y-4">
                       {controllerLaunching && (
                         <div className="flex flex-col items-center space-y-2">
-                          <p className="text-gray-700">
+                          <p className="text-gray-700 dark:text-gray-300">
                             The managed job controller is launching. It will be
                             ready shortly.
                           </p>
                           <div className="flex items-center">
                             <CircularProgress size={12} className="mr-2" />
-                            <span className="text-gray-500">Launching...</span>
+                            <span className="text-gray-500 dark:text-gray-400">Launching...</span>
                           </div>
                         </div>
                       )}
                       {!controllerStopped && !controllerLaunching && (
-                        <p className="text-gray-500">No active jobs</p>
+                        <p className="text-gray-500 dark:text-gray-400">No active jobs</p>
                       )}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
                         <div className="flex flex-col items-center space-y-3 px-4">
-                          <p className="text-gray-700 text-center text-sm sm:text-base max-w-md">
+                          <p className="text-gray-700 dark:text-gray-300 text-center text-sm sm:text-base max-w-md">
                             The managed job controller has been stopped. Restart
                             to check the latest job status.
                           </p>
@@ -1960,7 +1960,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls - always show for visual separation */}
-      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700 dark:text-gray-300">
         <div className="flex items-center space-x-4">
           <div className="flex items-center">
             <span className="mr-2">Jobs per page:</span>
@@ -1979,7 +1979,7 @@ export function ManagedJobsTable({
               </select>
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                className="h-4 w-4 text-gray-500 dark:text-gray-400 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -2006,7 +2006,7 @@ export function ManagedJobsTable({
               disabled={
                 currentPage === 1 || !sortedData || sortedData.length === 0
               }
-              className="text-gray-500 h-8 w-8 p-0"
+              className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -2033,7 +2033,7 @@ export function ManagedJobsTable({
                 !sortedData ||
                 sortedData.length === 0
               }
-              className="text-gray-500 h-8 w-8 p-0"
+              className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -2062,7 +2062,7 @@ export function ManagedJobsTable({
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
-        confirmClassName="bg-blue-600 hover:bg-blue-700 text-white"
+        confirmClassName="bg-blue-600 dark:bg-blue-500 hover:bg-blue-700 dark:hover:bg-blue-600 text-white"
       />
     </div>
   );
@@ -2327,7 +2327,7 @@ export function ClusterJobs({
               <TableRow>
                 <TableCell
                   colSpan={8}
-                  className="text-center py-12 text-gray-500"
+                  className="text-center py-12 text-gray-500 dark:text-gray-400"
                 >
                   <div className="flex justify-center items-center">
                     <CircularProgress size={24} className="mr-2" />
@@ -2344,7 +2344,7 @@ export function ClusterJobs({
                     <TableCell>
                       <Link
                         href={`/clusters/${clusterName}/${item.id}`}
-                        className="text-blue-600"
+                        className="text-blue-600 dark:text-blue-400"
                       >
                         {item.id}
                       </Link>
@@ -2352,7 +2352,7 @@ export function ClusterJobs({
                     <TableCell>
                       <Link
                         href={`/clusters/${clusterName}/${item.id}`}
-                        className="text-blue-600"
+                        className="text-blue-600 dark:text-blue-400"
                       >
                         <TruncatedDetails
                           text={item.job || 'Unnamed job'}
@@ -2398,7 +2398,7 @@ export function ClusterJobs({
               <TableRow>
                 <TableCell
                   colSpan={8}
-                  className="text-center py-6 text-gray-500"
+                  className="text-center py-6 text-gray-500 dark:text-gray-400"
                 >
                   No jobs found
                 </TableCell>
@@ -2409,7 +2409,7 @@ export function ClusterJobs({
       </Card>
 
       {sortedData && sortedData.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700 dark:text-gray-300">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -2427,7 +2427,7 @@ export function ClusterJobs({
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-gray-500 dark:text-gray-400 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -2451,7 +2451,7 @@ export function ClusterJobs({
                 size="icon"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -2473,7 +2473,7 @@ export function ClusterJobs({
                 size="icon"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -2503,14 +2503,14 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
     <TableRow className="expanded-details">
       <TableCell colSpan={colSpan}>
         <div
-          className="p-4 bg-gray-50 rounded-md border border-gray-200"
+          className="p-4 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700"
           ref={innerRef}
         >
           <div className="flex justify-between items-start">
             <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900">Full Details</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Full Details</p>
               <p
-                className="mt-1 text-sm text-gray-700"
+                className="mt-1 text-sm text-gray-700 dark:text-gray-300"
                 style={{ whiteSpace: 'pre-wrap' }}
               >
                 {text}
@@ -2545,7 +2545,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           ref={buttonRef}
           type="button"
           onClick={handleClick}
-          className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
           {isExpanded ? '... show less' : '... show more'}
@@ -2722,7 +2722,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableRow>
                 <TableCell
                   colSpan={5}
-                  className="text-center py-6 text-gray-500"
+                  className="text-center py-6 text-gray-500 dark:text-gray-400"
                 >
                   <div className="flex justify-center items-center">
                     <CircularProgress size={20} className="mr-2" />
@@ -2736,7 +2736,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                   <TableCell>
                     <Link
                       href={`/jobs/pools/${pool.name}`}
-                      className="text-blue-600 hover:text-blue-800"
+                      className="text-blue-600 dark:text-blue-400 hover:text-blue-800"
                     >
                       {pool.name}
                     </Link>
@@ -2746,7 +2746,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
                       <JobStatusBadges jobCounts={pool.jobCounts} />
                       <Link
                         href={buildFilterUrl('/jobs', 'pool', ':', pool.name)}
-                        className="text-blue-600 hover:text-blue-800 text-xs"
+                        className="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-xs"
                       >
                         See all jobs
                       </Link>
@@ -2763,7 +2763,7 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
               <TableRow>
                 <TableCell
                   colSpan={5}
-                  className="text-center py-6 text-gray-500"
+                  className="text-center py-6 text-gray-500 dark:text-gray-400"
                 >
                   No pools found
                 </TableCell>
@@ -2775,13 +2775,13 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
 
       {/* Pagination */}
       {paginatedData.length > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200">
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">Rows per page:</span>
+            <span className="text-sm text-gray-700 dark:text-gray-300">Rows per page:</span>
             <select
               value={pageSize}
               onChange={handlePageSizeChange}
-              className="border border-gray-300 rounded px-2 py-1 text-sm"
+              className="border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm"
             >
               <option value={5}>5</option>
               <option value={10}>10</option>
@@ -2790,21 +2790,21 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
             </select>
           </div>
           <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700">
+            <span className="text-sm text-gray-700 dark:text-gray-300">
               {startIndex + 1}-{Math.min(endIndex, sortedData.length)} of{' '}
               {sortedData.length}
             </span>
             <button
               onClick={goToPreviousPage}
               disabled={currentPage === 1}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               Previous
             </button>
             <button
               onClick={goToNextPage}
               disabled={currentPage === totalPages}
-              className="px-2 py-1 text-sm border border-gray-300 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+              className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 dark:hover:bg-gray-800"
             >
               Next
             </button>

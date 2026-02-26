@@ -110,7 +110,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto px-8">
         <DialogHeader>
-          <DialogTitle className="text-xl text-gray-900">
+          <DialogTitle className="text-xl text-gray-900 dark:text-gray-100">
             Edit Recipe: {template.name}
           </DialogTitle>
           <DialogDescription>
@@ -126,7 +126,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Optional description..."
-              className="placeholder:text-gray-500"
+              className="placeholder:text-gray-500 dark:placeholder:text-gray-400"
             />
           </div>
 
@@ -143,9 +143,9 @@ function EditModal({ isOpen, onClose, template, onSave }) {
           </div>
 
           {formError && (
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
-              <AlertTriangleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-800">{formError}</p>
+            <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-3 flex items-start gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-800 dark:text-red-200">{formError}</p>
             </div>
           )}
 
@@ -161,7 +161,7 @@ function EditModal({ isOpen, onClose, template, onSave }) {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="bg-sky-600 hover:bg-sky-700 text-white"
+              className="bg-sky-600 dark:bg-sky-blue hover:bg-sky-700 dark:hover:bg-sky-blue-bright text-white dark:text-black"
             >
               {isSubmitting ? (
                 <>
@@ -201,7 +201,7 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-xl text-red-600">
+          <DialogTitle className="text-xl text-red-600 dark:text-red-400">
             Delete Recipe
           </DialogTitle>
           <DialogDescription>
@@ -217,7 +217,7 @@ function DeleteModal({ isOpen, onClose, template, onDelete }) {
           <Button
             onClick={handleDelete}
             disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700 text-white"
+            className="bg-red-600 dark:bg-red-500 hover:bg-red-700 dark:hover:bg-red-600 text-white"
           >
             {isDeleting ? (
               <>
@@ -387,7 +387,7 @@ export function RecipeDetail() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress size={20} className="mr-2" />
-        <span className="text-gray-500">Loading...</span>
+        <span className="text-gray-500 dark:text-gray-400">Loading...</span>
       </div>
     );
   }
@@ -395,7 +395,7 @@ export function RecipeDetail() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-64">
-        <div className="text-red-500 mb-4">{error}</div>
+        <div className="text-red-500 dark:text-red-400 mb-4">{error}</div>
         <Link href="/recipes">
           <Button variant="outline">
             <ArrowLeftIcon className="w-4 h-4 mr-2" />
@@ -429,14 +429,14 @@ export function RecipeDetail() {
             <TypeIcon
               className={`w-5 h-5 ${
                 typeInfo.color === 'sky'
-                  ? 'text-sky-600'
+                  ? 'text-sky-600 dark:text-sky-400'
                   : typeInfo.color === 'purple'
-                    ? 'text-purple-600'
+                    ? 'text-purple-600 dark:text-purple-400'
                     : typeInfo.color === 'green'
-                      ? 'text-green-600'
+                      ? 'text-green-600 dark:text-green-400'
                       : typeInfo.color === 'orange'
                         ? 'text-orange-600'
-                        : 'text-gray-600'
+                        : 'text-gray-600 dark:text-gray-400'
               }`}
             />
             <div>
@@ -445,10 +445,10 @@ export function RecipeDetail() {
                   {template.name}
                 </h1>
                 {template.pinned && (
-                  <PinIcon className="w-4 h-4 text-amber-500" />
+                  <PinIcon className="w-4 h-4 text-amber-500 dark:text-amber-400" />
                 )}
               </div>
-              <div className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
                 <span>{typeInfo.fullLabel}</span>
               </div>
             </div>
@@ -461,7 +461,7 @@ export function RecipeDetail() {
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
             {copied ? (
-              <CheckIcon className="h-4 w-4 mr-1.5 text-green-600" />
+              <CheckIcon className="h-4 w-4 mr-1.5 text-green-600 dark:text-green-400" />
             ) : (
               <ShareIcon className="h-4 w-4 mr-1.5" />
             )}
@@ -473,7 +473,7 @@ export function RecipeDetail() {
             }
             className={`flex items-center ${
               template.is_pinnable === false
-                ? 'text-gray-400 cursor-not-allowed'
+                ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
                 : 'text-sky-blue hover:text-sky-blue-bright'
             }`}
             title={
@@ -510,7 +510,7 @@ export function RecipeDetail() {
             }
             className={`flex items-center ${
               template.is_editable === false
-                ? 'text-gray-400 cursor-not-allowed'
+                ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
                 : 'text-sky-blue hover:text-sky-blue-bright'
             }`}
             title={
@@ -531,8 +531,8 @@ export function RecipeDetail() {
             }
             className={`flex items-center ${
               template.is_editable === false
-                ? 'text-gray-400 cursor-not-allowed'
-                : 'text-red-600 hover:text-red-700'
+                ? 'text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                : 'text-red-600 dark:text-red-400 hover:text-red-700'
             }`}
             title={
               template.is_editable === false
@@ -556,15 +556,15 @@ export function RecipeDetail() {
           {/* Metadata Grid */}
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div>
-              <div className="text-gray-600 font-medium text-base">Name</div>
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Name</div>
               <div className="text-base mt-1">{template.name}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-base">Type</div>
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Type</div>
               <div className="text-base mt-1">{typeInfo.fullLabel}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-base">
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
                 Authored by
               </div>
               <div className="text-base mt-1">
@@ -572,7 +572,7 @@ export function RecipeDetail() {
               </div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-base">Updated</div>
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Updated</div>
               <div className="text-base mt-1">
                 <TimestampWithTooltip
                   date={
@@ -589,33 +589,33 @@ export function RecipeDetail() {
           {/* Description */}
           {template.description && (
             <div className="mb-6">
-              <div className="text-gray-600 font-medium text-base mb-1">
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base mb-1">
                 Description
               </div>
-              <p className="text-base text-gray-700">{template.description}</p>
+              <p className="text-base text-gray-700 dark:text-gray-300">{template.description}</p>
             </div>
           )}
 
           {/* Launch Command */}
           <div className="mb-6">
             <div className="flex items-center">
-              <div className="text-gray-600 font-medium text-base">
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
                 Launch Command
               </div>
               <button
                 onClick={copyCommandToClipboard}
-                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                className="flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
                 title={commandCopied ? 'Copied!' : 'Copy command'}
               >
                 {commandCopied ? (
-                  <CheckIcon className="w-4 h-4 text-green-600" />
+                  <CheckIcon className="w-4 h-4 text-green-600 dark:text-green-400" />
                 ) : (
                   <CopyIcon className="w-4 h-4" />
                 )}
               </button>
             </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
-              <code className="text-sm text-gray-800 font-mono break-all">
+            <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md p-3 mt-2">
+              <code className="text-sm text-gray-800 dark:text-gray-200 font-mono break-all">
                 {getLaunchCommand(template.recipe_type, template.name)}
               </code>
             </div>
@@ -624,22 +624,22 @@ export function RecipeDetail() {
           {/* YAML Content */}
           <div>
             <div className="flex items-center">
-              <div className="text-gray-600 font-medium text-base">
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
                 YAML Content
               </div>
               <button
                 onClick={copyYamlToClipboard}
-                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                className="flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
                 title={yamlCopied ? 'Copied!' : 'Copy YAML'}
               >
                 {yamlCopied ? (
-                  <CheckIcon className="w-4 h-4 text-green-600" />
+                  <CheckIcon className="w-4 h-4 text-green-600 dark:text-green-400" />
                 ) : (
                   <CopyIcon className="w-4 h-4" />
                 )}
               </button>
             </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto mt-2">
+            <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md p-3 max-h-96 overflow-y-auto mt-2">
               <YamlHighlighter className="whitespace-pre-wrap">
                 {template.content}
               </YamlHighlighter>
