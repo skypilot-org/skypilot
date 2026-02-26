@@ -55,7 +55,9 @@ const SuccessDisplay = ({ message }) => {
   return (
     <Alert className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30">
       <CheckIcon className="h-4 w-4 text-green-600 dark:text-green-400" />
-      <AlertDescription className="text-green-800 dark:text-green-200">{message}</AlertDescription>
+      <AlertDescription className="text-green-800 dark:text-green-200">
+        {message}
+      </AlertDescription>
     </Alert>
   );
 };
@@ -274,7 +276,9 @@ const DetailedAllowedUsers = ({ workspaceConfig, allUsers }) => {
               key={username}
               className="flex items-center justify-between text-xs p-2 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-800 last:border-b-0"
             >
-              <span className="font-medium text-gray-700 dark:text-gray-300">{username}</span>
+              <span className="font-medium text-gray-700 dark:text-gray-300">
+                {username}
+              </span>
               {isAdmin ? (
                 <span className="inline-flex items-center text-blue-600 dark:text-blue-400">
                   <StarIcon className="w-3 h-3 mr-1" />
@@ -747,7 +751,9 @@ export function WorkspaceEditor({ workspaceName, isNewWorkspace = false }) {
                       </h4>
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         {statsLoading ? (
-                          <span className="text-gray-500 dark:text-gray-400">Loading...</span>
+                          <span className="text-gray-500 dark:text-gray-400">
+                            Loading...
+                          </span>
                         ) : workspaceStats.clouds.length > 0 ? (
                           workspaceStats.clouds.map((cloud) => (
                             <div

@@ -378,7 +378,9 @@ export const FilterDropdown = ({
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700 dark:text-gray-300">{option}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {option}
+                </span>
               </div>
             ))}
           </div>

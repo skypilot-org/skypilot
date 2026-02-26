@@ -145,7 +145,9 @@ function EditModal({ isOpen, onClose, template, onSave }) {
           {formError && (
             <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-3 flex items-start gap-2">
               <AlertTriangleIcon className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-800 dark:text-red-200">{formError}</p>
+              <p className="text-sm text-red-800 dark:text-red-200">
+                {formError}
+              </p>
             </div>
           )}
 
@@ -556,11 +558,15 @@ export function RecipeDetail() {
           {/* Metadata Grid */}
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div>
-              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Name</div>
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
+                Name
+              </div>
               <div className="text-base mt-1">{template.name}</div>
             </div>
             <div>
-              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Type</div>
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
+                Type
+              </div>
               <div className="text-base mt-1">{typeInfo.fullLabel}</div>
             </div>
             <div>
@@ -572,7 +578,9 @@ export function RecipeDetail() {
               </div>
             </div>
             <div>
-              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Updated</div>
+              <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
+                Updated
+              </div>
               <div className="text-base mt-1">
                 <TimestampWithTooltip
                   date={
@@ -592,7 +600,9 @@ export function RecipeDetail() {
               <div className="text-gray-600 dark:text-gray-400 font-medium text-base mb-1">
                 Description
               </div>
-              <p className="text-base text-gray-700 dark:text-gray-300">{template.description}</p>
+              <p className="text-base text-gray-700 dark:text-gray-300">
+                {template.description}
+              </p>
             </div>
           )}
 

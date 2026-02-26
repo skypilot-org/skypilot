@@ -212,7 +212,9 @@ const SuccessDisplay = ({ message, onDismiss }) => {
             </svg>
           </div>
           <div className="ml-3">
-            <p className="text-sm font-medium text-green-800 dark:text-green-200">{message}</p>
+            <p className="text-sm font-medium text-green-800 dark:text-green-200">
+              {message}
+            </p>
           </div>
         </div>
         {onDismiss && (
@@ -696,7 +698,9 @@ export function Users() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500 dark:text-gray-400">Loading...</span>
+        <span className="ml-2 text-gray-500 dark:text-gray-400">
+          Loading...
+        </span>
       </div>
     );
   }
@@ -746,7 +750,9 @@ export function Users() {
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 dark:text-gray-400">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400">
+                Loading...
+              </span>
             </div>
           )}
           {activeMainTab === 'users' &&
@@ -862,7 +868,9 @@ export function Users() {
             />
             <div
               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                deduplicateUsers ? 'bg-sky-600 dark:bg-sky-blue' : 'bg-gray-300 dark:bg-gray-600'
+                deduplicateUsers
+                  ? 'bg-sky-600 dark:bg-sky-blue'
+                  : 'bg-gray-300 dark:bg-gray-600'
               }`}
             >
               <span
@@ -1015,7 +1023,9 @@ export function Users() {
               </div>
             </div>
             <div className="grid gap-2">
-              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Role</label>
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Role
+              </label>
               <select
                 className="border rounded px-3 py-2 w-full"
                 value={newUser.role}
@@ -2028,7 +2038,9 @@ function UsersTable({
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500 dark:text-gray-400">Loading users...</span>
+        <span className="ml-2 text-gray-500 dark:text-gray-400">
+          Loading users...
+        </span>
       </div>
     );
   }
@@ -2041,7 +2053,9 @@ function UsersTable({
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500 dark:text-gray-400">Loading filtered data...</span>
+        <span className="ml-2 text-gray-500 dark:text-gray-400">
+          Loading filtered data...
+        </span>
       </div>
     );
   }
@@ -2850,7 +2864,9 @@ function ServiceAccountTokensView({
                       {!token.expires_at ? (
                         'Never'
                       ) : new Date(token.expires_at * 1000) < new Date() ? (
-                        <span className="text-red-600 dark:text-red-400">Expired</span>
+                        <span className="text-red-600 dark:text-red-400">
+                          Expired
+                        </span>
                       ) : (
                         <TimestampWithTooltip
                           date={new Date(token.expires_at * 1000)}

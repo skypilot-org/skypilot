@@ -208,7 +208,9 @@ const StatsSummary = ({
       <div className="p-2">
         <div className="flex items-center">
           <BookDocIcon className="w-5 h-5 mr-2 text-sky-600 dark:text-sky-400" />
-          <span className="text-sm text-gray-600 dark:text-gray-400">Workspaces:</span>
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            Workspaces:
+          </span>
           <span className="ml-1 text-xl font-semibold text-sky-700 dark:text-sky-300">
             {workspaceCount}
           </span>
@@ -231,7 +233,9 @@ const StatsSummary = ({
       <div className="p-2">
         <div className="flex items-center">
           <BriefcaseIcon className="w-5 h-5 mr-2 text-sky-600 dark:text-sky-400" />
-          <span className="text-sm text-gray-600 dark:text-gray-400">Managed Jobs:</span>
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            Managed Jobs:
+          </span>
           <button
             onClick={() => router.push('/jobs')}
             className="ml-1 text-xl font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 hover:underline cursor-pointer"
@@ -755,7 +759,9 @@ export function Workspaces() {
     return (
       <div className="flex justify-center items-center h-64">
         <CircularProgress />
-        <span className="ml-2 text-gray-500 dark:text-gray-400">Loading workspaces...</span>
+        <span className="ml-2 text-gray-500 dark:text-gray-400">
+          Loading workspaces...
+        </span>
       </div>
     );
   }
@@ -826,7 +832,9 @@ export function Workspaces() {
           {(clustersLoading || jobsLoading) && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 dark:text-gray-400 text-xs">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400 text-xs">
+                Loading...
+              </span>
             </div>
           )}
           {!clustersLoading && !jobsLoading && lastFetchedTime && (
@@ -903,7 +911,9 @@ export function Workspaces() {
       {/* Workspaces Table */}
       {workspaceDetails.length === 0 && !isInitialLoad ? (
         <div className="text-center py-10">
-          <p className="text-lg text-gray-600 dark:text-gray-400">No workspaces found.</p>
+          <p className="text-lg text-gray-600 dark:text-gray-400">
+            No workspaces found.
+          </p>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
             Create a cluster to see its workspace here.
           </p>
@@ -1032,7 +1042,9 @@ export function Workspaces() {
                               );
                             })
                           ) : (
-                            <span className="text-gray-500 dark:text-gray-400 text-sm">-</span>
+                            <span className="text-gray-500 dark:text-gray-400 text-sm">
+                              -
+                            </span>
                           )}
                         </TableCell>
                         <TableCell>

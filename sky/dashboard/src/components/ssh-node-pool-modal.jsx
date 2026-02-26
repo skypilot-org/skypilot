@@ -132,7 +132,9 @@ export function SSHNodePoolModal({
               className={`placeholder:text-gray-500 dark:placeholder:text-gray-400 ${errors.poolName ? 'border-red-500' : ''}`}
             />
             {errors.poolName && (
-              <p className="text-sm text-red-500 dark:text-red-400">{errors.poolName}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">
+                {errors.poolName}
+              </p>
             )}
           </div>
 
@@ -148,7 +150,9 @@ export function SSHNodePoolModal({
               className={`placeholder:text-gray-500 dark:placeholder:text-gray-400 ${errors.hosts ? 'border-red-500' : ''}`}
             />
             {errors.hosts && (
-              <p className="text-sm text-red-500 dark:text-red-400">{errors.hosts}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">
+                {errors.hosts}
+              </p>
             )}
           </div>
 
@@ -163,7 +167,9 @@ export function SSHNodePoolModal({
               className={`placeholder:text-gray-500 dark:placeholder:text-gray-400 ${errors.sshUser ? 'border-red-500' : ''}`}
             />
             {errors.sshUser && (
-              <p className="text-sm text-red-500 dark:text-red-400">{errors.sshUser}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">
+                {errors.sshUser}
+              </p>
             )}
           </div>
 
@@ -178,7 +184,9 @@ export function SSHNodePoolModal({
               className="border-0 bg-transparent p-0 shadow-none focus:ring-0 file:mr-2 file:text-sm file:py-1 file:px-3 file:border file:border-gray-300 dark:file:border-gray-600 file:rounded file:bg-gray-50 dark:file:bg-gray-900 hover:file:bg-gray-100 dark:hover:file:bg-gray-800 file:cursor-pointer"
             />
             {errors.keyUpload && (
-              <p className="text-sm text-red-500 dark:text-red-400">{errors.keyUpload}</p>
+              <p className="text-sm text-red-500 dark:text-red-400">
+                {errors.keyUpload}
+              </p>
             )}
           </div>
 
@@ -197,7 +205,11 @@ export function SSHNodePoolModal({
             />
           </div>
 
-          {errors.auth && <p className="text-sm text-red-500 dark:text-red-400">{errors.auth}</p>}
+          {errors.auth && (
+            <p className="text-sm text-red-500 dark:text-red-400">
+              {errors.auth}
+            </p>
+          )}
         </div>
 
         <DialogFooter>

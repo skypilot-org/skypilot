@@ -490,7 +490,9 @@ export function Clusters() {
               />
               <div
                 className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
-                  showHistory ? 'bg-sky-600 dark:bg-sky-blue' : 'bg-gray-300 dark:bg-gray-600'
+                  showHistory
+                    ? 'bg-sky-600 dark:bg-sky-blue'
+                    : 'bg-gray-300 dark:bg-gray-600'
                 }`}
               >
                 <span
@@ -499,7 +501,9 @@ export function Clusters() {
                   }`}
                 />
               </div>
-              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">Show history</span>
+              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                Show history
+              </span>
             </label>
             {showHistory && (
               <Select
@@ -525,7 +529,9 @@ export function Clusters() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
@@ -934,7 +940,10 @@ export function ClusterTable({
             className="text-sm text-muted-foreground"
           >
             <span>
-              <Link href="/infra" className="text-blue-600 dark:text-blue-400 hover:underline">
+              <Link
+                href="/infra"
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
                 {item.cloud}
               </Link>
               {item.infra.includes('(') && (
@@ -1293,8 +1302,12 @@ export const enabledActions = (status) => {
 };
 
 const actionIcons = {
-  connect: <Terminal className="w-4 h-4 text-gray-500 dark:text-gray-400 inline-block" />,
-  VSCode: <SquareCode className="w-4 h-4 text-gray-500 dark:text-gray-400 inline-block" />,
+  connect: (
+    <Terminal className="w-4 h-4 text-gray-500 dark:text-gray-400 inline-block" />
+  ),
+  VSCode: (
+    <SquareCode className="w-4 h-4 text-gray-500 dark:text-gray-400 inline-block" />
+  ),
 };
 
 export function Status2Actions({
@@ -1617,7 +1630,9 @@ const FilterDropdown = ({
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700 dark:text-gray-300">{option}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {option}
+                </span>
               </div>
             ))}
           </div>

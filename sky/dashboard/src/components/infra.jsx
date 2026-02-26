@@ -222,7 +222,9 @@ export function InfrastructureSection({
           <h3 className="text-lg font-semibold mb-4">{title}</h3>
           <div className="flex items-center justify-center py-6">
             <CircularProgress size={24} className="mr-3" />
-            <span className="text-gray-500 dark:text-gray-400">Loading {title}...</span>
+            <span className="text-gray-500 dark:text-gray-400">
+              Loading {title}...
+            </span>
           </div>
         </div>
       </div>
@@ -1176,8 +1178,12 @@ function SSHNodePoolDetails({
   const StatusBadge = ({ status, reason }) => {
     const isReady = status === 'Ready';
     const isNotReady = status === 'Not Ready';
-    const bgColor = isReady ? 'bg-green-100 dark:bg-green-900/40' : 'bg-red-100';
-    const textColor = isReady ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200';
+    const bgColor = isReady
+      ? 'bg-green-100 dark:bg-green-900/40'
+      : 'bg-red-100';
+    const textColor = isReady
+      ? 'text-green-800 dark:text-green-200'
+      : 'text-red-800 dark:text-red-200';
 
     // Show helpful hint for "Not Ready" status
     const displayReason = isNotReady
@@ -1192,7 +1198,9 @@ function SSHNodePoolDetails({
           {status}
         </span>
         {!isReady && displayReason && (
-          <span className="text-sm text-gray-600 dark:text-gray-400">({displayReason})</span>
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            ({displayReason})
+          </span>
         )}
       </div>
     );
@@ -1506,7 +1514,9 @@ function SSHNodePoolDetails({
                 <div className="text-base mt-1">{poolName}</div>
               </div>
               <div>
-                <div className="text-gray-600 dark:text-gray-400 font-medium text-base">Nodes</div>
+                <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
+                  Nodes
+                </div>
                 <div className="text-base mt-1">
                   {nodesInContext ? nodesInContext.length : 0}
                 </div>
@@ -1519,7 +1529,9 @@ function SSHNodePoolDetails({
                   {statusLoading ? (
                     <div className="flex items-center">
                       <CircularProgress size={16} className="mr-2" />
-                      <span className="text-gray-500 dark:text-gray-400">Loading...</span>
+                      <span className="text-gray-500 dark:text-gray-400">
+                        Loading...
+                      </span>
                     </div>
                   ) : statusData ? (
                     <StatusBadge
@@ -1527,7 +1539,9 @@ function SSHNodePoolDetails({
                       reason={statusData.reason}
                     />
                   ) : (
-                    <span className="text-gray-500 dark:text-gray-400">Unknown</span>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Unknown
+                    </span>
                   )}
                 </div>
               </div>
@@ -1627,8 +1641,13 @@ function SSHNodePoolDetails({
               </pre>
               {streamingDialog.isStreaming && (
                 <div className="flex items-center mt-2">
-                  <CircularProgress size={16} className="mr-2 text-green-400 dark:text-green-500" />
-                  <span className="text-green-400 dark:text-green-500">Streaming logs...</span>
+                  <CircularProgress
+                    size={16}
+                    className="mr-2 text-green-400 dark:text-green-500"
+                  />
+                  <span className="text-green-400 dark:text-green-500">
+                    Streaming logs...
+                  </span>
                 </div>
               )}
             </div>
@@ -1712,7 +1731,9 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
       return (
         <div className="flex items-center">
           <CircularProgress size={16} className="mr-2" />
-          <span className="text-gray-500 dark:text-gray-400 text-xs">Loading...</span>
+          <span className="text-gray-500 dark:text-gray-400 text-xs">
+            Loading...
+          </span>
         </div>
       );
     }
@@ -1727,8 +1748,12 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
     }
 
     const isReady = status.status === 'Ready';
-    const bgColor = isReady ? 'bg-green-100 dark:bg-green-900/40' : 'bg-red-100';
-    const textColor = isReady ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200';
+    const bgColor = isReady
+      ? 'bg-green-100 dark:bg-green-900/40'
+      : 'bg-red-100';
+    const textColor = isReady
+      ? 'text-green-800 dark:text-green-200'
+      : 'text-red-800 dark:text-red-200';
 
     return (
       <div className="flex items-center space-x-2">
@@ -1738,7 +1763,10 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
           {status.status}
         </span>
         {!isReady && status.reason && (
-          <span className="text-xs text-gray-600 dark:text-gray-400" title={status.reason}>
+          <span
+            className="text-xs text-gray-600 dark:text-gray-400"
+            title={status.reason}
+          >
             (
             {status.reason.length > 30
               ? status.reason.substring(0, 30) + '...'
@@ -1758,16 +1786,24 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
             <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
               Pool Name
             </th>
-            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">Status</th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              Status
+            </th>
             <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
               Clusters
             </th>
-            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">Jobs</th>
-            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">Nodes</th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              Jobs
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              Nodes
+            </th>
             <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
               GPU Types
             </th>
-            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">GPUs</th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              GPUs
+            </th>
           </tr>
         </thead>
         <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
@@ -2769,7 +2805,9 @@ export function GPUs() {
       return (
         <div className="flex flex-col items-center justify-center h-64">
           <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 dark:text-gray-400 text-lg">Loading Context...</span>
+          <span className="text-gray-500 dark:text-gray-400 text-lg">
+            Loading Context...
+          </span>
         </div>
       );
     }
@@ -2819,7 +2857,9 @@ export function GPUs() {
             <h3 className="text-lg font-semibold mb-4">Cloud</h3>
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
-              <span className="text-gray-500 dark:text-gray-400">Loading Cloud...</span>
+              <span className="text-gray-500 dark:text-gray-400">
+                Loading Cloud...
+              </span>
             </div>
           </div>
         </div>
@@ -2998,7 +3038,9 @@ export function GPUs() {
         return (
           <div className="flex flex-col items-center justify-center h-64">
             <CircularProgress size={32} className="mb-4" />
-            <span className="text-gray-500 dark:text-gray-400 text-lg">Loading Context...</span>
+            <span className="text-gray-500 dark:text-gray-400 text-lg">
+              Loading Context...
+            </span>
           </div>
         );
       }
@@ -3191,7 +3233,9 @@ export function GPUs() {
           {isAnyLoading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 dark:text-gray-400">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400">
+                Loading...
+              </span>
             </div>
           )}
           {!isAnyLoading && lastFetchedTime && (
@@ -3269,7 +3313,9 @@ function CloudGpuTable({ data, title }) {
         <table className="min-w-full text-sm border-b border-gray-200 dark:border-gray-700">
           <thead className="bg-gray-100 dark:bg-gray-800">
             <tr>
-              <th className="p-2 text-left font-medium text-gray-600 dark:text-gray-400">GPU</th>
+              <th className="p-2 text-left font-medium text-gray-600 dark:text-gray-400">
+                GPU
+              </th>
               <th className="p-2 text-left font-medium text-gray-600 dark:text-gray-400">
                 Available Quantities / Node
               </th>

@@ -1086,7 +1086,10 @@ export function ManagedJobsTable({
                       <ChevronRightIcon className="w-4 h-4 text-gray-500 dark:text-gray-400" />
                     )}
                   </button>
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600 dark:text-blue-400">
+                  <Link
+                    href={`/jobs/${jobId}`}
+                    className="text-blue-600 dark:text-blue-400"
+                  >
                     {jobId}
                   </Link>
                 </div>
@@ -1098,7 +1101,9 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap relative">
                 <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-blue-300 dark:bg-blue-700"></div>
-                <span className="text-gray-500 dark:text-gray-400 pl-6">{taskIndex}</span>
+                <span className="text-gray-500 dark:text-gray-400 pl-6">
+                  {taskIndex}
+                </span>
               </TableCell>
             );
           }
@@ -1109,12 +1114,18 @@ export function ManagedJobsTable({
               {hasAnyJobGroups ? (
                 <div className="flex items-center">
                   <span className="w-6 mr-1" aria-hidden="true" />
-                  <Link href={`/jobs/${item.id}`} className="text-blue-600 dark:text-blue-400">
+                  <Link
+                    href={`/jobs/${item.id}`}
+                    className="text-blue-600 dark:text-blue-400"
+                  >
                     {item.id}
                   </Link>
                 </div>
               ) : (
-                <Link href={`/jobs/${item.id}`} className="text-blue-600 dark:text-blue-400">
+                <Link
+                  href={`/jobs/${item.id}`}
+                  className="text-blue-600 dark:text-blue-400"
+                >
                   {item.id}
                 </Link>
               )}
@@ -1141,7 +1152,10 @@ export function ManagedJobsTable({
             return (
               <TableCell className="whitespace-nowrap">
                 <div className="flex items-center">
-                  <Link href={`/jobs/${jobId}`} className="text-blue-600 dark:text-blue-400">
+                  <Link
+                    href={`/jobs/${jobId}`}
+                    className="text-blue-600 dark:text-blue-400"
+                  >
                     {item.name}
                   </Link>
                   <button
@@ -1180,7 +1194,10 @@ export function ManagedJobsTable({
           // Single task
           return (
             <TableCell className="whitespace-nowrap">
-              <Link href={`/jobs/${item.id}`} className="text-blue-600 dark:text-blue-400">
+              <Link
+                href={`/jobs/${item.id}`}
+                className="text-blue-600 dark:text-blue-400"
+              >
                 {item.name}
               </Link>
             </TableCell>
@@ -1627,7 +1644,9 @@ export function ManagedJobsTable({
             <span className="mr-2 text-sm font-medium">Statuses:</span>
             <div className="flex flex-wrap gap-2 items-center">
               {!loading && totalNoFilter === 0 && !isInitialLoad && (
-                <span className="text-gray-500 dark:text-gray-400 mr-2">No jobs found</span>
+                <span className="text-gray-500 dark:text-gray-400 mr-2">
+                  No jobs found
+                </span>
               )}
               {Object.entries(statusCounts).map(([status, count]) => (
                 <button
@@ -1670,7 +1689,9 @@ export function ManagedJobsTable({
                   >
                     show all jobs
                   </button>
-                  <span className="text-gray-500 dark:text-gray-400 mx-1">|</span>
+                  <span className="text-gray-500 dark:text-gray-400 mx-1">
+                    |
+                  </span>
                   <button
                     onClick={() => {
                       // When showing all active jobs, clear all selected statuses
@@ -1690,7 +1711,9 @@ export function ManagedJobsTable({
                   >
                     show all active jobs
                   </button>
-                  <span className="text-gray-500 dark:text-gray-400 mx-1">|</span>
+                  <span className="text-gray-500 dark:text-gray-400 mx-1">
+                    |
+                  </span>
                   <button
                     onClick={() => {
                       // When showing all finished jobs, clear all selected statuses
@@ -1719,7 +1742,9 @@ export function ManagedJobsTable({
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">Loading...</span>
+                <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">
+                  Loading...
+                </span>
               </div>
             )}
             {!loading && lastFetchedTime && (
@@ -1915,12 +1940,16 @@ export function ManagedJobsTable({
                           </p>
                           <div className="flex items-center">
                             <CircularProgress size={12} className="mr-2" />
-                            <span className="text-gray-500 dark:text-gray-400">Launching...</span>
+                            <span className="text-gray-500 dark:text-gray-400">
+                              Launching...
+                            </span>
                           </div>
                         </div>
                       )}
                       {!controllerStopped && !controllerLaunching && (
-                        <p className="text-gray-500 dark:text-gray-400">No active jobs</p>
+                        <p className="text-gray-500 dark:text-gray-400">
+                          No active jobs
+                        </p>
                       )}
                       {/* Desktop controller stopped message stays in table */}
                       {!isMobile && controllerStopped && (
@@ -2508,7 +2537,9 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
         >
           <div className="flex justify-between items-start">
             <div className="flex-1">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Full Details</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                Full Details
+              </p>
               <p
                 className="mt-1 text-sm text-gray-700 dark:text-gray-300"
                 style={{ whiteSpace: 'pre-wrap' }}
@@ -2777,7 +2808,9 @@ function PoolsTable({ refreshInterval, setLoading, refreshDataRef }) {
       {paginatedData.length > 0 && totalPages > 1 && (
         <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 dark:border-gray-700">
           <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-700 dark:text-gray-300">Rows per page:</span>
+            <span className="text-sm text-gray-700 dark:text-gray-300">
+              Rows per page:
+            </span>
             <select
               value={pageSize}
               onChange={handlePageSizeChange}

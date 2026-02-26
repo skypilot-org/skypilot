@@ -131,7 +131,9 @@ export function Volumes() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (

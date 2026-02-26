@@ -141,7 +141,9 @@ function RecipeCard({ recipe, onPin }) {
             {/* Bottom info section with even spacing - always render all 5 lines for consistent height */}
             <div className="space-y-1.5">
               {/* Type */}
-              <div className="text-sm text-gray-500 dark:text-gray-400">{typeInfo.label}</div>
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {typeInfo.label}
+              </div>
 
               {/* Description - always render line, use invisible placeholder if empty */}
               <p
@@ -206,8 +208,12 @@ function TemplateRow({
       <div className="mb-6">
         <div className="flex items-center gap-2 mb-3">
           <Icon className={`w-4 h-4 ${iconColor}`} />
-          <h2 className="text-base text-gray-700 dark:text-gray-300">{title}</h2>
-          <span className="text-sm text-gray-500 dark:text-gray-400">({recipes.length})</span>
+          <h2 className="text-base text-gray-700 dark:text-gray-300">
+            {title}
+          </h2>
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            ({recipes.length})
+          </span>
         </div>
         <div className="text-center py-6 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
           <p className="text-gray-500 dark:text-gray-400">{emptyMessage}</p>
@@ -221,7 +227,9 @@ function TemplateRow({
       <div className="flex items-center gap-2 mb-3">
         <Icon className={`w-4 h-4 ${iconColor}`} />
         <h2 className="text-base text-gray-700 dark:text-gray-300">{title}</h2>
-        <span className="text-sm text-gray-500 dark:text-gray-400">({recipes.length})</span>
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          ({recipes.length})
+        </span>
       </div>
       <div className="flex flex-wrap gap-3">
         {recipes.map((recipe) => (
@@ -307,7 +315,9 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
     <div className="mb-6">
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <span className="text-base text-gray-700 dark:text-gray-300">All Recipes</span>
+        <span className="text-base text-gray-700 dark:text-gray-300">
+          All Recipes
+        </span>
         <div className="w-full sm:w-auto">
           <RecipeFilterDropdown
             propertyList={RECIPE_PROPERTY_OPTIONS}
@@ -397,7 +407,10 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                       : recipe.description
                     : '-';
                   return (
-                    <TableRow key={recipe.name} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    <TableRow
+                      key={recipe.name}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-800"
+                    >
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <TypeIcon
@@ -768,7 +781,9 @@ const RecipeFilterDropdown = ({
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700 dark:text-gray-300">{option}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {option}
+                </span>
               </div>
             ))}
           </div>
@@ -1057,7 +1072,9 @@ function CreateRecipeModal({
           {formError && (
             <div className="rounded-md border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-3 flex items-start gap-2">
               <AlertTriangleIcon className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-800 dark:text-red-200">{formError}</p>
+              <p className="text-sm text-red-800 dark:text-red-200">
+                {formError}
+              </p>
             </div>
           )}
 
@@ -1251,7 +1268,9 @@ export function RecipeHub() {
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={16} />
-              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">Refreshing...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">
+                Refreshing...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
