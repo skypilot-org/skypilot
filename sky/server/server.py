@@ -640,9 +640,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
 class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add security headers to all HTTP responses.
 
-    Adds Content-Security-Policy (in report-only mode for safe rollout) and
-    other security headers to mitigate XSS, clickjacking, and content-type
-    sniffing attacks.
+    Adds Content-Security-Policy and other security headers to mitigate
+    XSS, clickjacking, and content-type sniffing attacks.
 
     Reference: OWASP A02:2025 - Security Misconfiguration (CWE-1021).
     """
@@ -675,11 +674,10 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         response = await call_next(request)
-        # Use report-only mode so violations are logged in the browser
-        # console without breaking functionality. Switch to
-        # 'Content-Security-Policy' to enforce after validation.
-        response.headers['Content-Security-Policy-Report-Only'] = (
-            self._CSP_POLICY)
+        response.headers['Content-Security-Policy'] = self._CSP_POLICY
+        # X-Frame-Options for legacy browsers that don't support CSP
+        # frame-ancestors directive.
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['Referrer-Policy'] = (
             'strict-origin-when-cross-origin')

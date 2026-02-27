@@ -29,17 +29,15 @@ class TestSecurityHeadersMiddleware:
         self.app = _make_app()
         self.client = fastapi.testclient.TestClient(self.app)
 
-    def test_csp_report_only_header_present(self):
-        """CSP should be in report-only mode."""
+    def test_csp_header_present(self):
+        """CSP should be in enforcing mode."""
         response = self.client.get('/test')
-        assert 'Content-Security-Policy-Report-Only' in response.headers
-        # Should NOT be in enforcing mode yet.
-        assert 'Content-Security-Policy' not in response.headers
+        assert 'Content-Security-Policy' in response.headers
 
     def test_csp_policy_directives(self):
         """CSP policy should contain all required directives."""
         response = self.client.get('/test')
-        csp = response.headers['Content-Security-Policy-Report-Only']
+        csp = response.headers['Content-Security-Policy']
         assert 'default-src \'self\'' in csp
         assert 'script-src \'self\' \'unsafe-inline\'' in csp
         assert 'style-src \'self\' \'unsafe-inline\'' in csp
@@ -47,6 +45,10 @@ class TestSecurityHeadersMiddleware:
         assert 'frame-ancestors \'self\'' in csp
         assert 'img-src \'self\' data:' in csp
         assert 'base-uri \'self\'' in csp
+
+    def test_x_frame_options_header(self):
+        response = self.client.get('/test')
+        assert response.headers['X-Frame-Options'] == 'SAMEORIGIN'
 
     def test_x_content_type_options_header(self):
         response = self.client.get('/test')
@@ -65,11 +67,12 @@ class TestSecurityHeadersMiddleware:
     def test_headers_on_dashboard_routes(self):
         """Security headers should also apply to dashboard HTML responses."""
         response = self.client.get('/dashboard/index.html')
-        assert 'Content-Security-Policy-Report-Only' in response.headers
+        assert 'Content-Security-Policy' in response.headers
+        assert response.headers['X-Frame-Options'] == 'SAMEORIGIN'
         assert response.headers['X-Content-Type-Options'] == 'nosniff'
 
     def test_headers_on_json_api_routes(self):
         """Security headers should apply to API JSON responses."""
         response = self.client.get('/test')
         assert response.status_code == 200
-        assert 'Content-Security-Policy-Report-Only' in response.headers
+        assert 'Content-Security-Policy' in response.headers
