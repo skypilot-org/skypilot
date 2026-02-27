@@ -25,6 +25,7 @@ import io
 import os
 import pathlib
 import re
+import subprocess
 import tempfile
 import textwrap
 import time
@@ -2604,7 +2605,8 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
     (no PTY) means no SIGHUP on disconnect, and the retry loop in
     stream_logs_by_id never detects the broken connection, leaking processes.
     """
-    import subprocess
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Not supported in consolidation mode.')
 
     name = smoke_tests_utils.get_cluster_name()
 
