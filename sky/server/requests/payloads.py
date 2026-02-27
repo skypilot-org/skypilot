@@ -997,3 +997,9 @@ class RecipePinBody(RequestBody):
     """The request body for toggling pin status."""
     recipe_name: str
     pinned: bool
+
+
+class DashboardDismissedItemBody(RequestBody):
+    """The request body for dashboard dismissed items."""
+    item_type: str
+    item_id: str

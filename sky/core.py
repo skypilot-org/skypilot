@@ -1713,5 +1713,32 @@ def get_all_contexts() -> List[str]:
     ssh_contexts = clouds.SSH.get_ssh_node_pool_contexts()
     # Ensure ssh_contexts are prefixed appropriately if not already
     # For now, assuming get_ssh_node_pool_contexts already returns them
-    # in the desired format (e.g., 'ssh-my-cluster')
     return sorted(list(set(kube_contexts + ssh_contexts)))
+
+
+# ========================
+# = Dashboard Management =
+# ========================
+
+
+def dashboard_dismiss_item(item_type: str, item_id: str) -> None:
+    """Dismisses an item from the dashboard."""
+    user_hash = common_utils.get_user_hash()
+    global_user_state.add_dashboard_dismissed_item(item_type, item_id,
+                                                   user_hash)
+
+
+def dashboard_restore_item(item_type: str, item_id: str) -> None:
+    """Restores a dismissed item on the dashboard."""
+    global_user_state.remove_dashboard_dismissed_item(item_type, item_id)
+
+
+def dashboard_get_dismissed_items(item_type: str) -> List[str]:
+    """Gets all dismissed items of a type for the dashboard."""
+    return global_user_state.get_dashboard_dismissed_items(item_type)
+
+
+def dashboard_clear_dismissed_items(item_type: str) -> None:
+    """Clears all dismissed items of a type from the dashboard."""
+    global_user_state.clear_dashboard_dismissed_items(item_type)
+

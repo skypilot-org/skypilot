@@ -215,6 +215,15 @@ cluster_history_table = sqlalchemy.Table(
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
 )
 
+dashboard_dismissed_items_table = sqlalchemy.Table(
+    'dashboard_dismissed_items',
+    Base.metadata,
+    sqlalchemy.Column('item_type', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('item_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('user_hash', sqlalchemy.Text),
+    sqlalchemy.Column('dismissed_at', sqlalchemy.Integer),
+)
+
 
 class ClusterEventType(enum.Enum):
     """Type of cluster event."""
@@ -3052,3 +3061,80 @@ def get_max_db_connections() -> Optional[int]:
         if max_connections is None:
             return None
         return int(max_connections)
+
+
+# ================= Dashboard Dismissed Items =================
+
+@_init_db
+@metrics_lib.time_me
+def add_dashboard_dismissed_item(item_type: str, item_id: str,
+                                 user_hash: str) -> None:
+    """Add a dismissed item for the dashboard."""
+    assert _SQLALCHEMY_ENGINE is not None
+    current_time = int(time.time())
+
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        if (_SQLALCHEMY_ENGINE.dialect.name ==
+                db_utils.SQLAlchemyDialect.SQLITE.value):
+            insert_func = sqlite.insert
+        elif (_SQLALCHEMY_ENGINE.dialect.name ==
+              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+            insert_func = postgresql.insert
+        else:
+            raise ValueError('Unsupported database dialect')
+
+        stmnt = insert_func(dashboard_dismissed_items_table).values(
+            item_type=item_type,
+            item_id=item_id,
+            user_hash=user_hash,
+            dismissed_at=current_time)
+
+        upsert = stmnt.on_conflict_do_update(
+            index_elements=[
+                dashboard_dismissed_items_table.c.item_type,
+                dashboard_dismissed_items_table.c.item_id
+            ],
+            set_={
+                dashboard_dismissed_items_table.c.user_hash: user_hash,
+                dashboard_dismissed_items_table.c.dismissed_at: current_time
+            })
+        session.execute(upsert)
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
+def remove_dashboard_dismissed_item(item_type: str, item_id: str) -> None:
+    """Remove a dismissed item."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        stmnt = sqlalchemy.delete(dashboard_dismissed_items_table).where(
+            sqlalchemy.and_(
+                dashboard_dismissed_items_table.c.item_type == item_type,
+                dashboard_dismissed_items_table.c.item_id == item_id))
+        session.execute(stmnt)
+        session.commit()
+
+
+@_init_db
+@metrics_lib.time_me
+def get_dashboard_dismissed_items(item_type: str) -> List[str]:
+    """Get all dismissed items for a given type."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        query = session.query(dashboard_dismissed_items_table.c.item_id).where(
+            dashboard_dismissed_items_table.c.item_type == item_type)
+        rows = query.all()
+        return [row[0] for row in rows]
+
+
+@_init_db
+@metrics_lib.time_me
+def clear_dashboard_dismissed_items(item_type: str) -> None:
+    """Clear all dismissed items for a given type."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with sqlalchemy.orm.Session(_SQLALCHEMY_ENGINE) as session:
+        stmnt = sqlalchemy.delete(dashboard_dismissed_items_table).where(
+            dashboard_dismissed_items_table.c.item_type == item_type)
+        session.execute(stmnt)
+        session.commit()

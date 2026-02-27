@@ -1,86 +1,148 @@
 /**
  * Hook for managing dismissed (soft-deleted) items in the dashboard.
  *
- * Persists dismissed item IDs in localStorage so they survive page refreshes.
- * Items are only hidden from view — never deleted from the backend database.
+ * Persists dismissed item IDs to the backend database so they survive across browsers/devices.
+ * Optimistically updates the UI for immediate feedback and reverts on API failure.
+ * Items are only hidden from view — never deleted from the core tables.
  *
- * @param {string} storageKey - localStorage key (must be stable across renders),
+ * @param {string} storageKey - The type of items being dismissed
  *   e.g. 'sky-dismissed-clusters'
  * @returns {Object} Dismissed items state and actions
  */
-import { useState, useCallback, useEffect } from 'react';
-
-function loadDismissedIds(storageKey) {
-  if (typeof window === 'undefined') return new Set();
-  try {
-    const raw = localStorage.getItem(storageKey);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return new Set(parsed.filter((id) => typeof id === 'string' && id));
-    }
-    return new Set();
-  } catch (e) {
-    console.warn(
-      `Failed to load dismissed items from localStorage key "${storageKey}":`,
-      e
-    );
-    return new Set();
-  }
-}
-
-function saveDismissedIds(storageKey, idSet) {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(storageKey, JSON.stringify([...idSet]));
-  } catch (e) {
-    // localStorage may be full or disabled; log for observability.
-    console.warn(
-      `Failed to save dismissed items to localStorage key "${storageKey}":`,
-      e
-    );
-  }
-}
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { apiClient } from '@/data/connectors/client';
 
 export function useDismissedItems(storageKey) {
-  const [dismissedIds, setDismissedIds] = useState(() =>
-    loadDismissedIds(storageKey)
+  // We use the storageKey as the itemType for the backend (e.g., 'sky-dismissed-clusters')
+  const itemType = storageKey;
+
+  const [dismissedIds, setDismissedIds] = useState(new Set());
+
+  // Ref to track the current state to avoid stale closures in optimistic updates
+  const dismissedIdsRef = useRef(dismissedIds);
+  useEffect(() => {
+    dismissedIdsRef.current = dismissedIds;
+  }, [dismissedIds]);
+
+  // Load from backend on mount or when storageKey changes
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fetchDismissed() {
+      try {
+        const ids = await apiClient.fetch(
+          `/dashboard/dismissed_items/${itemType}`,
+          {},
+          'GET'
+        );
+        if (isMounted && Array.isArray(ids)) {
+          setDismissedIds(new Set(ids.map(String)));
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch dismissed items for ${itemType}:`, e);
+      }
+    }
+
+    fetchDismissed();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [itemType]);
+
+  const dismissItem = useCallback(
+    async (id) => {
+      const stringId = String(id);
+
+      // Optimistic update
+      setDismissedIds((prev) => {
+        const next = new Set(prev);
+        next.add(stringId);
+        return next;
+      });
+
+      try {
+        await apiClient.fetch(
+          '/dashboard/dismissed_items/add',
+          {
+            item_type: itemType,
+            item_id: stringId,
+          },
+          'POST'
+        );
+      } catch (e) {
+        console.warn(`Failed to dismiss item ${stringId}:`, e);
+        // Revert on failure
+        setDismissedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(stringId);
+          return next;
+        });
+      }
+    },
+    [itemType]
   );
 
-  // Reload from localStorage if storageKey changes (defensive).
-  useEffect(() => {
-    setDismissedIds(loadDismissedIds(storageKey));
-  }, [storageKey]);
+  const restoreItem = useCallback(
+    async (id) => {
+      const stringId = String(id);
 
-  // Sync to localStorage whenever the set changes
-  useEffect(() => {
-    saveDismissedIds(storageKey, dismissedIds);
-  }, [storageKey, dismissedIds]);
+      // Optimistic update
+      setDismissedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(stringId);
+        return next;
+      });
 
-  const dismissItem = useCallback((id) => {
-    setDismissedIds((prev) => {
-      const next = new Set(prev);
-      next.add(String(id));
-      return next;
-    });
-  }, []);
-
-  const restoreItem = useCallback((id) => {
-    setDismissedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(String(id));
-      return next;
-    });
-  }, []);
+      try {
+        await apiClient.fetch(
+          '/dashboard/dismissed_items/remove',
+          {
+            item_type: itemType,
+            item_id: stringId,
+          },
+          'POST'
+        );
+      } catch (e) {
+        console.warn(`Failed to restore item ${stringId}:`, e);
+        // Revert on failure
+        setDismissedIds((prev) => {
+          const next = new Set(prev);
+          next.add(stringId);
+          return next;
+        });
+      }
+    },
+    [itemType]
+  );
 
   const isDismissed = useCallback(
     (id) => dismissedIds.has(String(id)),
     [dismissedIds]
   );
 
-  const clearAllDismissed = useCallback(() => {
+  const clearAllDismissed = useCallback(async () => {
+    // Save previous state for revert
+    const prevIds = new Set(dismissedIdsRef.current);
+
+    // Optimistic update
     setDismissedIds(new Set());
-  }, []);
+
+    try {
+      await apiClient.fetch(
+        '/dashboard/dismissed_items/clear_all',
+        {
+          item_type: itemType,
+          item_id: '', // Not used but required by body schema
+        },
+        'POST'
+      );
+    } catch (e) {
+      console.warn(`Failed to clear all dismissed items:`, e);
+      // Revert on failure
+      setDismissedIds(prevIds);
+    }
+  }, [itemType]);
 
   const filterDismissed = useCallback(
     (items, idGetter) => {
