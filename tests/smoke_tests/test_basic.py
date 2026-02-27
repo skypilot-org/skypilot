@@ -1458,14 +1458,14 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
                 f'sky status -v {name}-1 | grep "{context}"',
-                f'sky exec {name}-1 ls /home/sky/.kube',
+                f'sky exec {name}-1 ls /home/sky/.kube || true',
                 f"sky logs {name}-1 2 | grep \"'/home/sky/.kube': No such file or directory\"",
                 # Test failure for launching H100 on other cluster
                 f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --infra kubernetes/{context} echo hi && exit 1 || true',
                 # Test failover
                 f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --infra kubernetes echo hi',
                 f'sky logs {name}-3 --status',
-                f'sky exec {name}-3 ls /home/sky/.kube',
+                f'sky exec {name}-3 ls /home/sky/.kube || true',
                 f"sky logs {name}-3 2 | grep \"'/home/sky/.kube': No such file or directory\"",
                 # Test pods
                 f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
@@ -1481,7 +1481,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
                 f'sky launch -y -c {name}-5 --cpus 1 --infra kubernetes echo hi',
-                f'sky exec {name}-5 ls /home/sky/.kube',
+                f'sky exec {name}-5 ls /home/sky/.kube || true',
                 f"sky logs {name}-5 2 | grep \"'/home/sky/.kube': No such file or directory\"",
                 # switch back to kind-skypilot where GPU cluster is launched
                 f'kubectl config use-context kind-skypilot',
