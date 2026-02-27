@@ -1798,6 +1798,80 @@ class ControllerManager:
             # some data here.
             raise error
 
+    async def _download_logs_for_cancelled_job(self, job_id: int, task_id: int,
+                                               pool: Optional[str]) -> None:
+        """Download logs for a cancelled job before cleanup.
+
+        This ensures that logs remain accessible after job cancellation.
+        The download is best-effort - if the cluster is already down or
+        unreachable, we skip gracefully.
+
+        Args:
+            job_id: The managed job ID.
+            task_id: The task ID within the job.
+            pool: Optional pool name if using a pool.
+        """
+        logger.info(f'Downloading logs for cancelled job {job_id}, '
+                    f'task {task_id}')
+
+        # Get cluster info to download logs from
+        cluster_name: Optional[str] = None
+        job_id_on_pool_cluster: Optional[int] = None
+
+        if pool is not None:
+            cluster_name, job_id_on_pool_cluster = (
+                managed_job_state.get_pool_submit_info(job_id))
+        else:
+            dag = _get_dag(job_id)
+            task = dag.tasks[task_id]
+            assert task.name is not None, task
+            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+                task.name, job_id)
+
+        if cluster_name is None:
+            logger.info(f'No cluster found for job {job_id}. '
+                        'Skipping log download.')
+            return
+
+        # Try to get the cluster handle
+        clusters = await asyncio.to_thread(
+            backend_utils.get_clusters,
+            cluster_names=[cluster_name],
+            refresh=common.StatusRefreshMode.NONE,
+            all_users=True,
+            _include_is_managed=True)
+
+        if not clusters:
+            logger.info(f'Cluster {cluster_name} not found for job {job_id}. '
+                        'Skipping log download.')
+            return
+
+        handle = clusters[0].get('handle')
+        if handle is None:
+            logger.info(f'No handle for cluster {cluster_name}. '
+                        'Skipping log download.')
+            return
+
+        # Download and save the logs
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                            'managed_jobs', f'job-id-{job_id}')
+        log_file = await asyncio.to_thread(
+            controller_utils.download_and_stream_job_log,
+            backend,
+            handle,
+            managed_job_logs_dir,
+            job_ids=[str(job_id_on_pool_cluster)]
+            if job_id_on_pool_cluster is not None else None)
+
+        if log_file is not None:
+            managed_job_state.set_local_log_file(job_id, task_id, log_file)
+            logger.info(f'Logs downloaded for cancelled job {job_id}: '
+                        f'{log_file}')
+        else:
+            logger.warning(f'No log file was downloaded for cancelled job '
+                           f'{job_id}, task {task_id}')
+
     # Use context.contextual to enable per-job output redirection and env var
     # isolation.
     @context.contextual_async
@@ -1899,6 +1973,18 @@ class ControllerManager:
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(
                     job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
+
+            # Download logs before cleanup so they remain accessible after
+            # cancellation. This is best-effort - if the cluster is already
+            # down, we skip gracefully.
+            try:
+                await self._download_logs_for_cancelled_job(
+                    job_id, task_id, pool)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to download logs for cancelled job {job_id}: '
+                    f'{common_utils.format_exception(e)}')
+
             cancelling = True
             raise
         except Exception as e:
