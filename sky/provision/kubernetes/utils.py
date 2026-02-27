@@ -2031,7 +2031,10 @@ def check_credentials(context: Optional[str],
         # (401, 403, etc.) before returning the response, so credential/permission
         # errors are still properly caught by the except blocks below.
         response = kubernetes.core_api(context).list_namespaced_pod(
-            namespace, limit=1, _request_timeout=timeout, _preload_content=False)
+            namespace,
+            limit=1,
+            _request_timeout=timeout,
+            _preload_content=False)
         response.release_conn()
         # This call is "free" because this function is a cached call,
         # and it will not be called again in this function.
@@ -2057,12 +2060,10 @@ def check_credentials(context: Optional[str],
     except ValueError as e:
         return False, common_utils.format_exception(e)
     except OverflowError as e:
-        # OverflowError can occur when the kubernetes client library parses
-        # dates from exec-based auth credentials that have out-of-range
-        # expiry dates (e.g., year 9999 or year 0001). This typically
-        # happens when the exec credential plugin returns an
-        # expirationTimestamp that is outside the range Python's datetime
-        # can handle.
+        # Safety net: most OverflowErrors from out-of-range expiry dates
+        # are handled by _patch_api_client_overflow in sky/adaptors/
+        # kubernetes.py, but this catches any remaining edge cases (e.g.,
+        # errors during config loading before the hook wrapper is applied).
         return False, ('Failed to load kubeconfig: date parsing error. '
                        'If your kubeconfig uses exec-based auth (has "exec:" '
                        'under "users:"), the credential plugin may be '

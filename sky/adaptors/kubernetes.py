@@ -94,6 +94,32 @@ def _get_config_file() -> str:
     return os.environ.get('KUBECONFIG', '~/.kube/config')
 
 
+def _patch_api_client_overflow(api_client: Any) -> Any:
+    """Wrap refresh_api_key_hook to handle OverflowError from date parsing.
+
+    Some exec-based credential plugins return expirationTimestamp values
+    outside Python's datetime range (e.g., 0001-01-01T00:00:00Z). The
+    kubernetes client's _is_expired() subtracts a timedelta which can cause
+    OverflowError. This wraps the hook to catch the error and skip the
+    token refresh. If the token is actually expired, the API server will
+    return 401 which is handled by SkyPilot's error handling.
+    """
+    original_hook = api_client.configuration.refresh_api_key_hook
+    if original_hook is None:
+        return api_client
+
+    def _safe_refresh_hook(config):
+        try:
+            original_hook(config)
+        except OverflowError:
+            logger.debug('OverflowError in kubernetes token expiry check '
+                         '(likely an out-of-range expirationTimestamp from '
+                         'an exec credential plugin). Skipping token refresh.')
+
+    api_client.configuration.refresh_api_key_hook = _safe_refresh_hook
+    return api_client
+
+
 def _get_api_client(context: Optional[str] = None) -> Any:
     """Get an ApiClient for the given context without modifying global config.
 
@@ -184,14 +210,15 @@ def _get_api_client(context: Optional[str] = None) -> Any:
 
             config = kubernetes.client.Configuration()
             kubernetes.config.load_incluster_config(config)
-            return kubernetes.client.ApiClient(configuration=config)
+            return _patch_api_client_overflow(
+                kubernetes.client.ApiClient(configuration=config))
         except kubernetes.config.config_exception.ConfigException:
             if context == in_cluster_context_name():
                 # Explicitly requested in-cluster context but not in a cluster
                 raise
             # Otherwise, if context is None, fall through to kubeconfig
 
-    return _get_api_client_from_kubeconfig(context)
+    return _patch_api_client_overflow(_get_api_client_from_kubeconfig(context))
 
 
 def list_kube_config_contexts():
