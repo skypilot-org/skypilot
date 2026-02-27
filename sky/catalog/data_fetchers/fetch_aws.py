@@ -1,6 +1,7 @@
 """A script that queries AWS API to get instance types and pricing information.
 This script takes about 1 minute to finish.
 """
+
 import argparse
 import collections
 import datetime
@@ -27,7 +28,7 @@ if typing.TYPE_CHECKING:
     from mypy_boto3_ec2 import type_defs as ec2_type_defs
     import pandas as pd
 else:
-    pd = adaptors_common.LazyImport('pandas')
+    pd = adaptors_common.LazyImport("pandas")
 
 # Enable most of the regions. Each user's account may have a subset of these
 # enabled; this is ok because we take the intersection of the list here with
@@ -36,58 +37,58 @@ else:
 # TODO(zhwu): fix the regions with no supported AMI (maybe by finding AMIs
 # similar to the Deep Learning AMI).
 ALL_REGIONS = [
-    'us-east-1',
-    'us-east-2',
-    'us-west-1',
-    'us-west-2',
-    'ca-central-1',
-    'eu-central-1',
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "ca-central-1",
+    "eu-central-1",
     # 'eu-central-2', # no supported AMI
-    'eu-west-1',
-    'eu-west-2',
-    'eu-south-1',
-    'eu-south-2',
-    'eu-west-3',
-    'eu-north-1',
-    'me-south-1',
-    'me-central-1',
-    'af-south-1',
-    'ap-east-1',
-    'ap-southeast-3',
-    'ap-south-1',
+    "eu-west-1",
+    "eu-west-2",
+    "eu-south-1",
+    "eu-south-2",
+    "eu-west-3",
+    "eu-north-1",
+    "me-south-1",
+    "me-central-1",
+    "af-south-1",
+    "ap-east-1",
+    "ap-southeast-3",
+    "ap-south-1",
     # 'ap-south-2', # no supported AMI
-    'ap-northeast-3',
-    'ap-northeast-2',
-    'ap-southeast-1',
-    'ap-southeast-2',
-    'ap-southeast-4',
-    'ap-northeast-1',
+    "ap-northeast-3",
+    "ap-northeast-2",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-southeast-4",
+    "ap-northeast-1",
 ]
-US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
+US_REGIONS = ["us-east-1", "us-east-2", "us-west-1", "us-west-2"]
 
 # The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
-    'InstanceType',
-    'AcceleratorName',
-    'AcceleratorCount',
-    'vCPUs',
-    'MemoryGiB',
-    'GpuInfo',
-    'Price',
-    'SpotPrice',
-    'Region',
-    'AvailabilityZone',
-    'Arch',
-    'LocalDiskType',
-    'NVMeSupported',
-    'LocalDiskSize',
-    'LocalDiskCount',
+    "InstanceType",
+    "AcceleratorName",
+    "AcceleratorCount",
+    "vCPUs",
+    "MemoryGiB",
+    "GpuInfo",
+    "Price",
+    "SpotPrice",
+    "Region",
+    "AvailabilityZone",
+    "Arch",
+    "LocalDiskType",
+    "NVMeSupported",
+    "LocalDiskSize",
+    "LocalDiskCount",
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all
 # regions.
-PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
+PRICING_TABLE_URL_FMT = "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv"  # pylint: disable=line-too-long
 # g6f instances have fractional GPUs, but the API returns Count: 1 under
 # GpuInfo. However, the GPU memory is properly scaled. Taking the instance GPU
 # divided by the total memory of an L4 will give us the fraction of the GPU.
@@ -100,56 +101,54 @@ def get_enabled_regions() -> Set[str]:
     # Should not be called concurrently.
     global regions_enabled
     if regions_enabled is None:
-        aws_client = aws.client('ec2', region_name='us-east-1')
+        aws_client = aws.client("ec2", region_name="us-east-1")
         try:
-            user_cloud_regions = aws_client.describe_regions()['Regions']
+            user_cloud_regions = aws_client.describe_regions()["Regions"]
         except aws.botocore_exceptions().ClientError as e:
-            if e.response['Error']['Code'] == 'UnauthorizedOperation':
+            if e.response["Error"]["Code"] == "UnauthorizedOperation":
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        'Failed to retrieve AWS regions. '
-                        'Please ensure that the `ec2:DescribeRegions` action '
-                        'is enabled for your AWS account in IAM. '
-                        'Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeRegions.html'  # pylint: disable=line-too-long
+                        "Failed to retrieve AWS regions. "
+                        "Please ensure that the `ec2:DescribeRegions` action "
+                        "is enabled for your AWS account in IAM. "
+                        "Ref: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_DescribeRegions.html"  # pylint: disable=line-too-long
                     ) from None
             else:
                 raise
-        regions_enabled = {r['RegionName'] for r in user_cloud_regions}
+        regions_enabled = {r["RegionName"] for r in user_cloud_regions}
         regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
     return regions_enabled
 
 
-def _get_instance_types(region: str) -> 'pd.DataFrame':
-    client = aws.client('ec2', region_name=region)
-    paginator = client.get_paginator('describe_instance_types')
+def _get_instance_types(region: str) -> "pd.DataFrame":
+    client = aws.client("ec2", region_name=region)
+    paginator = client.get_paginator("describe_instance_types")
     items = []
     for i, resp in enumerate(paginator.paginate()):
-        print(f'{region} getting instance types page {i}')
-        items += resp['InstanceTypes']
+        print(f"{region} getting instance types page {i}")
+        items += resp["InstanceTypes"]
 
     return pd.DataFrame(items)
 
 
-def _get_instance_type_offerings(region: str) -> 'pd.DataFrame':
-    client = aws.client('ec2', region_name=region)
-    paginator = client.get_paginator('describe_instance_type_offerings')
+def _get_instance_type_offerings(region: str) -> "pd.DataFrame":
+    client = aws.client("ec2", region_name=region)
+    paginator = client.get_paginator("describe_instance_type_offerings")
     items = []
-    for i, resp in enumerate(
-            paginator.paginate(LocationType='availability-zone')):
-        print(f'{region} getting instance type offerings page {i}')
-        items += resp['InstanceTypeOfferings']
+    for i, resp in enumerate(paginator.paginate(LocationType="availability-zone")):
+        print(f"{region} getting instance type offerings page {i}")
+        items += resp["InstanceTypeOfferings"]
 
-    return pd.DataFrame(items).rename(
-        columns={'Location': 'AvailabilityZoneName'})
+    return pd.DataFrame(items).rename(columns={"Location": "AvailabilityZoneName"})
 
 
-def _get_availability_zones(region: str) -> 'pd.DataFrame':
-    client = aws.client('ec2', region_name=region)
+def _get_availability_zones(region: str) -> "pd.DataFrame":
+    client = aws.client("ec2", region_name=region)
     zones = []
     try:
         response = client.describe_availability_zones()
     except aws.botocore_exceptions().ClientError as e:
-        if e.response['Error']['Code'] == 'AuthFailure':
+        if e.response["Error"]["Code"] == "AuthFailure":
             # The user's AWS account may not have access to this region.
             # The error looks like:
             # botocore.exceptions.ClientError: An error occurred
@@ -158,56 +157,62 @@ def _get_availability_zones(region: str) -> 'pd.DataFrame':
             # access credentials
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.AWSAzFetchingError(
-                    region,
-                    reason=exceptions.AWSAzFetchingError.Reason.AUTH_FAILURE
+                    region, reason=exceptions.AWSAzFetchingError.Reason.AUTH_FAILURE
                 ) from None
-        elif e.response['Error']['Code'] == 'UnauthorizedOperation':
+        elif e.response["Error"]["Code"] == "UnauthorizedOperation":
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.AWSAzFetchingError(
                     region,
-                    reason=exceptions.AWSAzFetchingError.Reason.
-                    AZ_PERMISSION_DENIED) from None
+                    reason=exceptions.AWSAzFetchingError.Reason.AZ_PERMISSION_DENIED,
+                ) from None
         else:
             raise
-    for resp in response['AvailabilityZones']:
-        zones.append({
-            'AvailabilityZoneName': resp['ZoneName'],
-            'AvailabilityZone': resp['ZoneId'],
-        })
+    for resp in response["AvailabilityZones"]:
+        zones.append(
+            {
+                "AvailabilityZoneName": resp["ZoneName"],
+                "AvailabilityZone": resp["ZoneId"],
+            }
+        )
     return pd.DataFrame(zones)
 
 
-def _get_pricing_table(region: str) -> 'pd.DataFrame':
-    print(f'{region} downloading pricing table')
+def _get_pricing_table(region: str) -> "pd.DataFrame":
+    print(f"{region} downloading pricing table")
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
-    df.rename(columns={
-        'Instance Type': 'InstanceType',
-        'PricePerUnit': 'Price',
-    },
-              inplace=True)
-    return df[(df['TermType'] == 'OnDemand') &
-              (df['Operating System'] == 'Linux') &
-              df['Pre Installed S/W'].isnull() &
-              (df['CapacityStatus'] == 'Used') &
-              (df['Tenancy'].isin(['Host', 'Shared'])) & df['Price'] > 0][[
-                  'InstanceType', 'Price', 'vCPU', 'Memory'
-              ]]
+    df.rename(
+        columns={
+            "Instance Type": "InstanceType",
+            "PricePerUnit": "Price",
+        },
+        inplace=True,
+    )
+    return df[
+        (df["TermType"] == "OnDemand")
+        & (df["Operating System"] == "Linux")
+        & df["Pre Installed S/W"].isnull()
+        & (df["CapacityStatus"] == "Used")
+        & (df["Tenancy"].isin(["Host", "Shared"]))
+        & df["Price"]
+        > 0
+    ][["InstanceType", "Price", "vCPU", "Memory"]]
 
 
-def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
+def _get_spot_pricing_table(region: str) -> "pd.DataFrame":
     """Get spot pricing table for a region.
 
     Example output:
         InstanceType  AvailabilityZoneName  SpotPrice
         p3.2xlarge    us-east-1a            1.0000
     """
-    print(f'{region} downloading spot pricing table')
-    client = aws.client('ec2', region_name=region)
-    paginator = client.get_paginator('describe_spot_price_history')
-    response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
-                                           StartTime=datetime.datetime.utcnow())
-    ret: List['ec2_type_defs.SpotPriceTypeDef'] = []
+    print(f"{region} downloading spot pricing table")
+    client = aws.client("ec2", region_name=region)
+    paginator = client.get_paginator("describe_spot_price_history")
+    response_iterator = paginator.paginate(
+        ProductDescriptions=["Linux/UNIX"], StartTime=datetime.datetime.utcnow()
+    )
+    ret: List["ec2_type_defs.SpotPriceTypeDef"] = []
     for response in response_iterator:
         # response['SpotPriceHistory'] is a list of dicts, each dict is like:
         # {
@@ -217,14 +222,14 @@ def _get_spot_pricing_table(region: str) -> 'pd.DataFrame':
         #  'SpotPrice': '0.041900',
         #  'Timestamp': datetime.datetime
         # }
-        ret = ret + response['SpotPriceHistory']
-    df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
-    df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
-    df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
+        ret = ret + response["SpotPriceHistory"]
+    df = pd.DataFrame(ret)[["InstanceType", "AvailabilityZone", "SpotPrice"]]
+    df = df.rename(columns={"AvailabilityZone": "AvailabilityZoneName"})
+    df = df.set_index(["InstanceType", "AvailabilityZoneName"])
     return df
 
 
-def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
+def _get_instance_types_df(region: str) -> Union[str, "pd.DataFrame"]:
     try:
         # Fetch the zone info first to make sure the account has access to the
         # region.
@@ -237,30 +242,32 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 pool.apply_async(_get_instance_types, (region,)),
                 pool.apply_async(_get_instance_type_offerings, (region,)),
                 pool.apply_async(_get_pricing_table, (region,)),
-                pool.apply_async(_get_spot_pricing_table, (region,))
+                pool.apply_async(_get_spot_pricing_table, (region,)),
             ]
             df, offering_df, pricing_df, spot_pricing_df = [
                 future.get() for future in futures
             ]
-        print(f'{region} Processing dataframes')
+        print(f"{region} Processing dataframes")
 
         def get_acc_info(row) -> Tuple[Optional[str], float]:
             accelerator = None
-            for col, info_key in [('GpuInfo', 'Gpus'),
-                                  ('NeuronInfo', 'NeuronDevices'),
-                                  ('FpgaInfo', 'Fpgas')]:
+            for col, info_key in [
+                ("GpuInfo", "Gpus"),
+                ("NeuronInfo", "NeuronDevices"),
+                ("FpgaInfo", "Fpgas"),
+            ]:
                 info = row.get(col)
                 if isinstance(info, dict):
                     accelerator = info[info_key][0]
             if accelerator is None:
                 return None, np.nan
-            return accelerator['Name'], accelerator['Count']
+            return accelerator["Name"], accelerator["Count"]
 
         def get_arch(row) -> Optional[str]:
-            if 'ProcessorInfo' in row:
-                processor = row['ProcessorInfo']
-                if 'SupportedArchitectures' in processor:
-                    archs = processor['SupportedArchitectures']
+            if "ProcessorInfo" in row:
+                processor = row["ProcessorInfo"]
+                if "SupportedArchitectures" in processor:
+                    archs = processor["SupportedArchitectures"]
                     if isinstance(archs, list):
                         return archs[0]
                     elif isinstance(archs, str):
@@ -268,144 +275,151 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
             return None
 
         def get_vcpus(row) -> float:
-            if not np.isnan(row['vCPU']):
-                return float(row['vCPU'])
+            if not np.isnan(row["vCPU"]):
+                return float(row["vCPU"])
             try:
-                return float(row['VCpuInfo']['DefaultVCpus'])
+                return float(row["VCpuInfo"]["DefaultVCpus"])
             except Exception as e:  # pylint: disable=broad-except
-                print('Error occurred for row:', row)
-                print('Error:', e)
+                print("Error occurred for row:", row)
+                print("Error:", e)
                 raise
 
         def get_memory_gib(row) -> float:
-            if isinstance(row['MemoryInfo'], dict):
-                return row['MemoryInfo']['SizeInMiB'] / 1024
-            return float(row['Memory'].split(' GiB')[0])
+            if isinstance(row["MemoryInfo"], dict):
+                return row["MemoryInfo"]["SizeInMiB"] / 1024
+            return float(row["Memory"].split(" GiB")[0])
 
         def get_local_disk_info(row) -> Dict[str, Any]:
             info: Dict[str, Any] = {}
-            local_disk_supported = row['InstanceStorageSupported']
-            info['LocalDiskType'] = None
-            info['NVMeSupported'] = False
-            info['LocalDiskSize'] = None
-            info['LocalDiskCount'] = None
+            local_disk_supported = row["InstanceStorageSupported"]
+            info["LocalDiskType"] = None
+            info["NVMeSupported"] = False
+            info["LocalDiskSize"] = None
+            info["LocalDiskCount"] = None
 
             if local_disk_supported:
-                raw_info = row['InstanceStorageInfo']
-                info['NVMeSupported'] = raw_info['NvmeSupport'] == 'required'
+                raw_info = row["InstanceStorageInfo"]
+                info["NVMeSupported"] = raw_info["NvmeSupport"] == "required"
                 # This is always 1. AWS probably made this as a list
                 # with future changes in consideration.
-                assert len(raw_info['Disks']) == 1, (
-                    f'Instance type {row["InstanceType"]} has '
-                    f'{len(raw_info["Disks"])} disk entries, expected 1.')
-                disk_info = raw_info['Disks'][0]
-                assert disk_info['Type'] in ('ssd', 'hdd'), (
-                    f'Instance type {row["InstanceType"]} has unknown '
-                    f'disk type {disk_info["Type"]}.')
-                info['LocalDiskType'] = disk_info['Type']
-                info['LocalDiskSize'] = disk_info['SizeInGB']
-                info['LocalDiskCount'] = disk_info['Count']
+                assert len(raw_info["Disks"]) == 1, (
+                    f"Instance type {row['InstanceType']} has "
+                    f"{len(raw_info['Disks'])} disk entries, expected 1."
+                )
+                disk_info = raw_info["Disks"][0]
+                assert disk_info["Type"] in ("ssd", "hdd"), (
+                    f"Instance type {row['InstanceType']} has unknown "
+                    f"disk type {disk_info['Type']}."
+                )
+                info["LocalDiskType"] = disk_info["Type"]
+                info["LocalDiskSize"] = disk_info["SizeInGB"]
+                info["LocalDiskCount"] = disk_info["Count"]
             return info
 
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS instance type workarounds for incorrect/missing GPU info.
             # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # pylint: disable=line-too-long
-            if row['InstanceType'] == 'p3dn.24xlarge':
-                acc_name = 'V100-32GB'
-            elif row['InstanceType'] == 'p4de.24xlarge':
-                acc_name = 'A100-80GB'
+            if row["InstanceType"] == "p3dn.24xlarge":
+                acc_name = "V100-32GB"
+            elif row["InstanceType"] == "p4de.24xlarge":
+                acc_name = "A100-80GB"
                 acc_count = 8
-            elif row['InstanceType'] in ('p5e.48xlarge', 'p5en.48xlarge'):
+            elif row["InstanceType"] in ("p5e.48xlarge", "p5en.48xlarge"):
                 # TODO(andyl): Check if this workaround still needed after
                 # v0.10.0 released. Currently, the acc_name returned by the
                 # AWS API is 'NVIDIA', which is incorrect. See #4652.
                 # Both p5e.48xlarge and p5en.48xlarge have 8x H200 GPUs.
-                acc_name = 'H200'
+                acc_name = "H200"
                 acc_count = 8
-            elif (row['InstanceType'].startswith('g6f') or
-                  row['InstanceType'].startswith('gr6f')):
+            elif row["InstanceType"].startswith("g6f") or row[
+                "InstanceType"
+            ].startswith("gr6f"):
                 # These instance actually have only fractional GPUs, but the API
                 # returns Count: 1 or Count: 0 under GpuInfo. We need to
                 # directly check the GPU memory to get the actual fraction of
                 # the GPU. Note that TotalGpuMemoryInMiB seems unreliable here -
                 # sometimes it is unexpectedly 0.
                 # See also Standard_NV{vcpu}ads_A10_v5 support on Azure.
-                assert len(row['GpuInfo']['Gpus']) == 1
-                assert row['GpuInfo']['Gpus'][0]['Name'] == 'L4'
-                fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
-                    'SizeInMiB'] / L4_GPU_MEMORY
+                assert len(row["GpuInfo"]["Gpus"]) == 1
+                assert row["GpuInfo"]["Gpus"][0]["Name"] == "L4"
+                fraction = (
+                    row["GpuInfo"]["Gpus"][0]["MemoryInfo"]["SizeInMiB"] / L4_GPU_MEMORY
+                )
                 acc_count = round(fraction, 3)
-            elif row['InstanceType'] == 'p5.4xlarge':
+            elif row["InstanceType"] == "p5.4xlarge":
                 acc_count = 1
-            elif row['InstanceType'].startswith('g7e'):
+            elif row["InstanceType"].startswith("g7e"):
                 # Change name from "RTX PRO Server 6000" to "RTXPRO6000" for consistency
-                acc_name = 'RTXPRO6000'
-            return pd.Series({
-                'AcceleratorName': acc_name,
-                'AcceleratorCount': acc_count,
-                'vCPUs': get_vcpus(row),
-                'MemoryGiB': get_memory_gib(row),
-                'Arch': get_arch(row),
-                **get_local_disk_info(row)
-            })
+                acc_name = "RTXPRO6000"
+            return pd.Series(
+                {
+                    "AcceleratorName": acc_name,
+                    "AcceleratorCount": acc_count,
+                    "vCPUs": get_vcpus(row),
+                    "MemoryGiB": get_memory_gib(row),
+                    "Arch": get_arch(row),
+                    **get_local_disk_info(row),
+                }
+            )
 
         # The AWS API may not have all the instance types in the pricing table,
         # so we need to merge the two dataframes.
-        df = df.merge(pricing_df, on=['InstanceType'], how='outer')
-        df['Region'] = region
+        df = df.merge(pricing_df, on=["InstanceType"], how="outer")
+        df["Region"] = region
         # An instance type may not be available in all zones. We need to
         # merge the zone info to the instance type info.
-        df = df.merge(offering_df, on=['InstanceType'], how='inner')
+        df = df.merge(offering_df, on=["InstanceType"], how="inner")
         # Add the mapping from zone name to zone id, as the zone id is
         # the real identifier for a zone across different users.
-        df = df.merge(zone_df, on=['AvailabilityZoneName'], how='inner')
+        df = df.merge(zone_df, on=["AvailabilityZoneName"], how="inner")
 
         # Add spot price column, by joining the spot pricing table.
-        df = df.merge(spot_pricing_df,
-                      left_on=['InstanceType', 'AvailabilityZoneName'],
-                      right_index=True,
-                      how='left')
+        df = df.merge(
+            spot_pricing_df,
+            left_on=["InstanceType", "AvailabilityZoneName"],
+            right_index=True,
+            how="left",
+        )
 
         # Extract vCPUs, memory, and accelerator info from the columns.
         df = pd.concat(
-            [df, df.apply(get_additional_columns, axis='columns')],
-            axis='columns')
-        if 'GpuInfo' not in df.columns:
-            df['GpuInfo'] = np.nan
-        if 'NeuronInfo' in df.columns:
+            [df, df.apply(get_additional_columns, axis="columns")], axis="columns"
+        )
+        if "GpuInfo" not in df.columns:
+            df["GpuInfo"] = np.nan
+        if "NeuronInfo" in df.columns:
             # The AWS Neuron API uses 'NeuronDevices' instead of 'Gpus'
             # in its dict; for consistency with GPU handling, rename key.
             def map_neuroninfo(neuroninfo):
-                if isinstance(neuroninfo,
-                              dict) and 'NeuronDevices' in neuroninfo:
+                if isinstance(neuroninfo, dict) and "NeuronDevices" in neuroninfo:
                     # Rename 'NeuronDevices' to 'Gpus'
                     neuroninfo = neuroninfo.copy()
-                    neuroninfo['Gpus'] = neuroninfo.pop('NeuronDevices')
+                    neuroninfo["Gpus"] = neuroninfo.pop("NeuronDevices")
                 return neuroninfo
 
-            df['NeuronInfo'] = df['NeuronInfo'].apply(map_neuroninfo)
-            df['GpuInfo'] = df['GpuInfo'].fillna(df['NeuronInfo'])
+            df["NeuronInfo"] = df["NeuronInfo"].apply(map_neuroninfo)
+            df["GpuInfo"] = df["GpuInfo"].fillna(df["NeuronInfo"])
         df = df[USEFUL_COLUMNS]
     except Exception as e:  # pylint: disable=broad-except
         print(traceback.format_exc())
-        print(f'{region} failed with {e}', file=sys.stderr)
+        print(f"{region} failed with {e}", file=sys.stderr)
         return region
     return df
 
 
-def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
+def get_all_regions_instance_types_df(regions: Set[str]) -> "pd.DataFrame":
     with mp_pool.Pool() as pool:
         df_or_regions = pool.map(_get_instance_types_df, regions)
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
-            print(f'{df_or_region} failed')
+            print(f"{df_or_region} failed")
         else:
             new_dfs.append(df_or_region)
 
     df = pd.concat(new_dfs)
-    df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'], inplace=True)
+    df.sort_values(["InstanceType", "Region", "AvailabilityZone"], inplace=True)
     return df
 
 
@@ -428,91 +442,88 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 #   Nvidia driver: 470.57.02, CUDA Version: 11.4
 #
 # Neuron (Inferentia / Trainium):
-# https://aws.amazon.com/releasenotes/aws-deep-learning-ami-base-neuron-ubuntu-20-04/  # pylint: disable=line-too-long
-# Deep Learning Base Neuron AMI (Ubuntu 20.04) 20240923
-# TODO(tian): find out the driver version.
+# https://aws.amazon.com/releasenotes/aws-deep-learning-ami-base-neuron-ubuntu-22-04/
+# Deep Learning Base Neuron AMI (Ubuntu 22.04) 20260226
 #   Neuron driver:
 _GPU_DESC_UBUNTU_DATE = [
-    ('neuron', '/aws/service/neuron/dlami/multi-framework', '22.04'),
+    ("neuron", "/aws/service/neuron/dlami/base", "22.04"),
 ]
 
 
-def _fetch_image_creation_date(region: str,
-                               image_id: Optional[str]) -> Optional[str]:
+def _fetch_image_creation_date(region: str, image_id: Optional[str]) -> Optional[str]:
     if image_id is None:
         return None
     try:
-        image = subprocess.check_output(f"""\
+        image = subprocess.check_output(
+            f"""\
             aws ec2 describe-images --region {region} --image-ids {image_id} \\
                 --query 'Images[0].Name' --output text
             """,
-                                        shell=True)
+            shell=True,
+        )
     except subprocess.CalledProcessError as e:
-        print(f'Failed to fetch image creation date for {region}, {image_id}')
-        print(f'{type(e)}: {e}')
+        print(f"Failed to fetch image creation date for {region}, {image_id}")
+        print(f"{type(e)}: {e}")
         image_id = None
     else:
         assert image is not None
-        image_name = image.decode('utf-8').strip()
-        match = re.search(r'(\d+)$', image_name)
+        image_name = image.decode("utf-8").strip()
+        match = re.search(r"(\d+)$", image_name)
         if match:
             return match.group(1)
     return None
 
 
 def _fetch_image_id_from_ssm_param(
-        region: str,
-        ssm_prefix: str,
-        ubuntu_version: str = '22.04') -> Optional[str]:
+    region: str, ssm_prefix: str, ubuntu_version: str = "22.04"
+) -> Optional[str]:
     try:
-        image = subprocess.check_output(f"""\
+        image = subprocess.check_output(
+            f"""\
             aws ssm get-parameter --region {region} --name "{ssm_prefix}/ubuntu-{ubuntu_version}/latest/image_id" \\
                 --query 'Parameter.Value' --output text
             """,
-                                        shell=True)
+            shell=True,
+        )
     except subprocess.CalledProcessError as e:
         print(
-            f'Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}'
+            f"Failed to fetch image ID from SSM parameter for {region}, {ssm_prefix}, {ubuntu_version}"
         )
-        print(f'{type(e)}: {e}')
+        print(f"{type(e)}: {e}")
         return None
     else:
         assert image is not None
-        image_id = image.decode('utf-8').strip()
+        image_id = image.decode("utf-8").strip()
     return image_id
 
 
 def _get_image_row(
-    region: str,
-    gpu: str,
-    ssm_prefix: str,
-    ubuntu_version: str = '22.04'
+    region: str, gpu: str, ssm_prefix: str, ubuntu_version: str = "22.04"
 ) -> Tuple[str, str, str, str, Optional[str], Optional[str]]:
-    print(f'Getting image for {region}, {ssm_prefix}, {ubuntu_version}, {gpu}')
-    image_id = _fetch_image_id_from_ssm_param(region, ssm_prefix,
-                                              ubuntu_version)
+    print(f"Getting image for {region}, {ssm_prefix}, {ubuntu_version}, {gpu}")
+    image_id = _fetch_image_id_from_ssm_param(region, ssm_prefix, ubuntu_version)
     if image_id is not None:
         creation_date = _fetch_image_creation_date(region, image_id)
     else:
         creation_date = None
-    tag = f'skypilot:{gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
-    return tag, region, 'ubuntu', ubuntu_version, image_id, creation_date
+    tag = f"skypilot:{gpu}-ubuntu-{ubuntu_version.replace('.', '')}"
+    return tag, region, "ubuntu", ubuntu_version, image_id, creation_date
 
 
-def get_all_regions_images_df(regions: Set[str]) -> 'pd.DataFrame':
+def get_all_regions_images_df(regions: Set[str]) -> "pd.DataFrame":
     image_metas = [
         (r, *i) for r, i in itertools.product(regions, _GPU_DESC_UBUNTU_DATE)
     ]
     with mp_pool.Pool() as pool:
         results = pool.starmap(_get_image_row, image_metas)
     result_df = pd.DataFrame(
-        results,
-        columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
-    result_df.sort_values(['Tag', 'Region'], inplace=True)
+        results, columns=["Tag", "Region", "OS", "OSVersion", "ImageId", "CreationDate"]
+    )
+    result_df.sort_values(["Tag", "Region"], inplace=True)
     return result_df
 
 
-def fetch_availability_zone_mappings() -> 'pd.DataFrame':
+def fetch_availability_zone_mappings() -> "pd.DataFrame":
     """Fetch the availability zone mappings from ID to Name.
 
     Example output:
@@ -525,20 +536,21 @@ def fetch_availability_zone_mappings() -> 'pd.DataFrame':
     errored_region_reasons = []
 
     def _get_availability_zones_with_error_handling(
-            region: str) -> Optional[pd.DataFrame]:
+        region: str,
+    ) -> Optional[pd.DataFrame]:
         try:
             azs = _get_availability_zones(region)
         except exceptions.AWSAzFetchingError as e:
             errored_region_reasons.append(
-                (region, e.reason))  # GIL means it's thread-safe.
+                (region, e.reason)
+            )  # GIL means it's thread-safe.
             return None
         return azs
 
     # Use ThreadPool instead of Pool because this function can be called within
     # a Pool, and Pool cannot be nested.
     with mp_pool.ThreadPool() as pool:
-        az_mappings = pool.map(_get_availability_zones_with_error_handling,
-                               regions)
+        az_mappings = pool.map(_get_availability_zones_with_error_handling, regions)
     # Remove the regions that the user does not have access to.
     az_mappings = [m for m in az_mappings if m is not None]
     errored_regions = collections.defaultdict(set)
@@ -548,52 +560,58 @@ def fetch_availability_zone_mappings() -> 'pd.DataFrame':
         # This could happen if (1) an AWS API glitch happens, (2) permission
         # error happens for specific availability zones. We print those zones to
         # make sure that those zone does not get lost silently.
-        table = log_utils.create_table(['Regions', 'Reason'])
+        table = log_utils.create_table(["Regions", "Reason"])
         for reason, region_set in errored_regions.items():
-            reason_str = '\n'.join(textwrap.wrap(str(reason.message), 80))
-            region_str = '\n'.join(
-                textwrap.wrap(', '.join(region_set), 60,
-                              break_on_hyphens=False))
+            reason_str = "\n".join(textwrap.wrap(str(reason.message), 80))
+            region_str = "\n".join(
+                textwrap.wrap(", ".join(region_set), 60, break_on_hyphens=False)
+            )
             table.add_row([region_str, reason_str])
         if not az_mappings:
-            raise RuntimeError('Failed to fetch availability zone mappings for '
-                               f'all enabled regions.\n{table}')
+            raise RuntimeError(
+                "Failed to fetch availability zone mappings for "
+                f"all enabled regions.\n{table}"
+            )
         else:
-            print('\rAWS: [WARNING] Missing availability zone mappings for the '
-                  f'following enabled regions:\n{table}')
+            print(
+                "\rAWS: [WARNING] Missing availability zone mappings for the "
+                f"following enabled regions:\n{table}"
+            )
     az_mappings = pd.concat(az_mappings)
     return az_mappings
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--az-mappings',
-        dest='az_mappings',
-        action='store_true',
-        help='Fetch the mapping from availability zone IDs to zone names.')
-    parser.add_argument('--no-az-mappings',
-                        dest='az_mappings',
-                        action='store_false')
+        "--az-mappings",
+        dest="az_mappings",
+        action="store_true",
+        help="Fetch the mapping from availability zone IDs to zone names.",
+    )
+    parser.add_argument("--no-az-mappings", dest="az_mappings", action="store_false")
     parser.add_argument(
-        '--check-all-regions-enabled-for-account',
-        action='store_true',
-        help=('Check that this account has enabled "all" global regions '
-              'hardcoded in this script. Useful to ensure our automatic '
-              'fetcher fetches the expected data.'))
+        "--check-all-regions-enabled-for-account",
+        action="store_true",
+        help=(
+            'Check that this account has enabled "all" global regions '
+            "hardcoded in this script. Useful to ensure our automatic "
+            "fetcher fetches the expected data."
+        ),
+    )
     parser.set_defaults(az_mappings=True)
     args, _ = parser.parse_known_args()
 
     user_regions = get_enabled_regions()
-    if args.check_all_regions_enabled_for_account and set(
-            ALL_REGIONS) - user_regions:
-        raise RuntimeError('The following regions are not enabled: '
-                           f'{set(ALL_REGIONS) - user_regions}')
+    if args.check_all_regions_enabled_for_account and set(ALL_REGIONS) - user_regions:
+        raise RuntimeError(
+            f"The following regions are not enabled: {set(ALL_REGIONS) - user_regions}"
+        )
 
-    def _check_regions_integrity(df: 'pd.DataFrame', name: str):
+    def _check_regions_integrity(df: "pd.DataFrame", name: str):
         # Check whether the fetched regions match the requested regions to
         # guard against network issues or glitches in the AWS API.
-        fetched_regions = set(df['Region'].unique())
+        fetched_regions = set(df["Region"].unique())
         if fetched_regions != user_regions:
             # This is a sanity check to make sure that the regions we
             # requested are the same as the ones we fetched.
@@ -601,38 +619,40 @@ if __name__ == '__main__':
             # in the AWS API.
             diff = user_regions - fetched_regions
             raise RuntimeError(
-                f'{name}: Fetched regions {fetched_regions} does not match '
-                f'requested regions {user_regions}; Diff: {diff}')
+                f"{name}: Fetched regions {fetched_regions} does not match "
+                f"requested regions {user_regions}; Diff: {diff}"
+            )
 
     instance_df = get_all_regions_instance_types_df(user_regions)
-    _check_regions_integrity(instance_df, 'instance types')
+    _check_regions_integrity(instance_df, "instance types")
 
-    os.makedirs('aws', exist_ok=True)
-    instance_df.to_csv('aws/vms.csv', index=False)
-    print('AWS Service Catalog saved to aws/vms.csv')
+    os.makedirs("aws", exist_ok=True)
+    instance_df.to_csv("aws/vms.csv", index=False)
+    print("AWS Service Catalog saved to aws/vms.csv")
 
     # Disable refreshing images.csv for skypilot custom AMIs
     # refresh only the neuron based images
     # See sky/clouds/catalog/images/README.md for more details.
     image_df = get_all_regions_images_df(user_regions)
-    _check_regions_integrity(image_df, 'images')
+    _check_regions_integrity(image_df, "images")
     # filter out rows where ImageId is None
-    image_df = image_df[image_df['ImageId'].notna()]
+    image_df = image_df[image_df["ImageId"].notna()]
 
     # check if aws/images.csv exists
-    if os.path.exists('aws/images.csv'):
+    if os.path.exists("aws/images.csv"):
         # load the data from aws/images.csv
-        existing_image_df = pd.read_csv('aws/images.csv')
+        existing_image_df = pd.read_csv("aws/images.csv")
         # filter out the neuron based images
-        existing_image_df = existing_image_df[~existing_image_df['Tag'].
-                                              eq('skypilot:neuron-ubuntu-2204')]
+        existing_image_df = existing_image_df[
+            ~existing_image_df["Tag"].eq("skypilot:neuron-ubuntu-2204")
+        ]
         # concat the new neuron based images with the existing images
         image_df = pd.concat([existing_image_df, image_df])
 
-    image_df.to_csv('aws/images.csv', index=False)
-    print('AWS Images saved to aws/images.csv')
+    image_df.to_csv("aws/images.csv", index=False)
+    print("AWS Images saved to aws/images.csv")
 
     if args.az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()
-        az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
-        print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
+        az_mappings_df.to_csv("aws/az_mappings.csv", index=False)
+        print("AWS Availability Zone mapping saved to aws/az_mappings.csv")
