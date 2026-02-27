@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import enum
+import functools
 import os
 import pathlib
 import sqlite3
@@ -414,6 +415,96 @@ class SQLiteConn(threading.local):
         if self._async_conn is not None:
             await self._async_conn.close()
         self.conn.close()
+
+
+class DatabaseManager:
+    """Encapsulates lazy engine initialization with double-checked locking.
+
+    Replaces the common pattern of module-level globals (_SQLALCHEMY_ENGINE,
+    _SQLALCHEMY_ENGINE_LOCK) and per-module initialize_and_get_db() functions.
+
+    Usage:
+        _db_manager = DatabaseManager('my_db', create_table_fn)
+        initialize_and_get_db = _db_manager.get_engine
+        _init_db = _db_manager.init_db
+
+    For modules that also need async support:
+        initialize_and_get_db_async = _db_manager.get_engine_async
+        _init_db_async = _db_manager.init_db_async
+    """
+
+    def __init__(
+        self,
+        db_name: str,
+        create_table_fn: Callable[[sqlalchemy.engine.Engine], Any],
+        post_init_fn: Optional[Callable[[sqlalchemy.engine.Engine],
+                                        Any]] = None,
+    ):
+        self._db_name = db_name
+        self._create_table_fn = create_table_fn
+        self._post_init_fn = post_init_fn
+        self._lock = threading.Lock()
+        self._engine: Optional[sqlalchemy.engine.Engine] = None
+        self._engine_async: Optional[sqlalchemy_async.AsyncEngine] = None
+
+    @property
+    def engine(self) -> Optional[sqlalchemy.engine.Engine]:
+        """The cached sync engine, or None if not yet initialized."""
+        return self._engine
+
+    @property
+    def engine_async(self) -> Optional[sqlalchemy_async.AsyncEngine]:
+        """The cached async engine, or None if not yet initialized."""
+        return self._engine_async
+
+    def get_engine(self) -> sqlalchemy.engine.Engine:
+        """Lazy sync engine init with double-checked locking."""
+        if self._engine is not None:
+            return self._engine
+        with self._lock:
+            if self._engine is not None:
+                return self._engine
+            engine = get_engine(self._db_name)
+            self._create_table_fn(engine)
+            # Set _engine before post_init_fn so that post_init_fn
+            # can access self.engine (e.g. _sqlite_supports_returning).
+            self._engine = engine
+            if self._post_init_fn is not None:
+                self._post_init_fn(engine)
+            return self._engine
+
+    def get_engine_async(self) -> sqlalchemy_async.AsyncEngine:
+        """Lazy async engine init; delegates table creation to get_engine."""
+        if self._engine_async is not None:
+            return self._engine_async
+        with self._lock:
+            if self._engine_async is not None:
+                return self._engine_async
+            self._engine_async = get_engine(self._db_name, async_engine=True)
+        # Ensure tables are created via the sync path.
+        self.get_engine()
+        return self._engine_async
+
+    def init_db(self, func: Callable) -> Callable:
+        """Sync decorator that ensures the DB is initialized before func."""
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            self.get_engine()
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    def init_db_async(self, func: Callable) -> Callable:
+        """Async decorator that ensures the DB is initialized before func."""
+
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            if self._engine_async is None:
+                await asyncio.to_thread(self.get_engine_async)
+            return await func(*args, **kwargs)
+
+        return wrapper
 
 
 _max_connections = 0
