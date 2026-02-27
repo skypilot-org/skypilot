@@ -520,7 +520,8 @@ def get_instance_type_for_cpus_mem_impl(
         cpus: Optional[str],
         memory_gb_or_ratio: Optional[str],
         region: Optional[str] = None,
-        zone: Optional[str] = None) -> Optional[str]:
+        zone: Optional[str] = None,
+        use_spot: bool = False) -> Optional[str]:
     """Returns the cheapest instance type that satisfies the requirements.
 
     Args:
@@ -535,14 +536,18 @@ def get_instance_type_for_cpus_mem_impl(
             have at least the given number of vCPUs times the given ratio.
         region: The region to filter by.
         zone: The zone to filter by.
+        use_spot: Whether to use spot instance pricing for sorting.
     """
     df = _filter_region_zone(df, region, zone)
     df = _filter_with_cpus(df, cpus)
     df = _filter_with_mem(df, memory_gb_or_ratio)
     if df.empty:
         return None
-    # Sort by the price.
-    df = df.sort_values(by=['Price'], ascending=True)
+    # Sort by the price — use spot price when spot is requested.
+    price_str = 'SpotPrice' if use_spot else 'Price'
+    if price_str not in df.columns or pd.isna(df[price_str]).all():
+        return None
+    df = df.sort_values(by=[price_str], ascending=True)
     return df['InstanceType'].iloc[0]
 
 

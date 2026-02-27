@@ -75,10 +75,11 @@ def get_default_instance_type(cpus: Optional[str] = None,
                                   resources_utils.DiskTier] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+                              zone: Optional[str] = None,
+                              use_spot: bool = False) -> Optional[str]:
     del disk_tier, local_disk  # unused
     result = common.get_instance_type_for_cpus_mem_impl(_get_df(), cpus, memory,
-                                                        region, zone)
+                                                        region, zone, use_spot)
     return result
 
 

@@ -147,7 +147,8 @@ class PrimeIntellect(clouds.Cloud):
                                       resources_utils.DiskTier] = None,
                                   local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+                                  zone: Optional[str] = None,
+                                  use_spot: bool = False) -> Optional[str]:
         """Returns the default instance type for Prime Intellect."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
@@ -155,6 +156,7 @@ class PrimeIntellect(clouds.Cloud):
                                                  local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
+                                                 use_spot=use_spot,
                                                  clouds='primeintellect')
 
     @classmethod
@@ -224,7 +226,8 @@ class PrimeIntellect(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
-                local_disk=resources.local_disk)
+                local_disk=resources.local_disk,
+                use_spot=resources.use_spot)
             if default_instance_type is None:
                 # TODO(pokgak): Add hints to all return values in this method
                 # to help users understand why the resources are not

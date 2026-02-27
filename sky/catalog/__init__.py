@@ -221,6 +221,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None,
+                              use_spot: bool = False,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for given #vCPUs and memory.
 
@@ -234,7 +235,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
     the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory, disk_tier, local_disk, region, zone)
+                               memory, disk_tier, local_disk, region, zone,
+                               use_spot)
 
 
 def get_accelerators_from_instance_type(

@@ -57,7 +57,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
                                   resources_utils.DiskTier] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+                              zone: Optional[str] = None,
+                              use_spot: bool = False) -> Optional[str]:
     del disk_tier, local_disk  # unused
     if cpus is None and memory is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
@@ -67,7 +68,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
         memory_gb_or_ratio = memory
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus,
                                                       memory_gb_or_ratio,
-                                                      region, zone)
+                                                      region, zone, use_spot)
 
 
 def get_accelerators_from_instance_type(
