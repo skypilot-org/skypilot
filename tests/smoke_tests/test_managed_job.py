@@ -2597,6 +2597,7 @@ def test_managed_job_node_names_multi_node(generic_cloud: str):
 
 
 @pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
 def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
     """Test that stream_logs processes are cleaned up on client disconnect.
 
