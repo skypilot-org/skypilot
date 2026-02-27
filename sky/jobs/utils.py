@@ -11,8 +11,12 @@ import enum
 import os
 import pathlib
 import re
+import select
 import shlex
+import signal
+import sys
 import textwrap
+import threading
 import time
 import traceback
 import typing
@@ -946,6 +950,78 @@ def stream_logs_by_id(
         failure of the job. 0 if success, 100 if the job failed.
         See exceptions.JobExitCode for possible exit codes.
     """
+
+    # Start a background watchdog thread that detects when the kubectl
+    # exec connection has been dropped (client disconnect). On Kubernetes,
+    # kubectl exec -i does not allocate a PTY, so no SIGHUP is sent when
+    # the connection drops. The only signal is that stdin reaches EOF
+    # (the kubelet closes the stdin pipe). This thread monitors stdin and
+    # terminates the process when disconnection is detected, preventing
+    # leaked stream_logs processes on the controller. Changing the exec call to
+    # also include -t does not result in the kubelet sending a SIGHUP to the
+    # remote end of the connection.
+    #
+    # The API server now passes stdin=subprocess.PIPE (instead of
+    # DEVNULL) to kubectl exec -i, so stdin on the controller is a live
+    # pipe that only reaches EOF when the connection actually drops.
+    #
+    # For SSH controllers, stdin is a PTY (from ssh -tt), so SIGHUP
+    # handles cleanup natively. For consolidation mode or other local
+    # invocations, stdin may be /dev/null or already closed (EOF). We
+    # check at startup: if stdin is already at EOF, we skip stdin
+    # monitoring entirely to avoid false positives. Only a live stdin
+    # (not yet at EOF) is worth monitoring this is the case for
+    # kubectl exec -i with stdin=subprocess.PIPE.
+    check_stdin_eof = False
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+        if readable:
+            # stdin is immediately readable check if it's already EOF
+            data = os.read(sys.stdin.fileno(), 1)
+            if data:
+                # Got actual data (unexpected but harmless); stdin is live
+                check_stdin_eof = True
+            # else: EOF at startup, don't monitor
+        else:
+            # stdin is not immediately readable it's a live pipe/TTY
+            # waiting for input, meaning we have a real connection
+            check_stdin_eof = True
+    except (ValueError, OSError):
+        # stdin is already closed or invalid — not useful for monitoring
+        pass
+
+    def _orphan_watchdog() -> None:
+        """Background thread that monitors for connection drop."""
+        initial_parent_pid = os.getppid()
+        while True:
+            time.sleep(5)
+            # Check 1: Parent PID changed (reparented to init/subreaper)
+            if os.getppid() != initial_parent_pid:
+                logger.info('Parent process died, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+            # Check 2: stdin EOF (kubectl exec -i connection dropped).
+            # Only checked when stdin is a pipe (Kubernetes), not a TTY
+            # (SSH). With SSH -tt, the PTY delivers SIGHUP on disconnect,
+            # so this check is unnecessary and could cause false positives.
+            if not check_stdin_eof:
+                continue
+            try:
+                readable, _, _ = select.select([sys.stdin], [], [], 0)
+                if readable:
+                    data = os.read(sys.stdin.fileno(), 1)
+                    if not data:
+                        logger.info('stdin EOF detected (connection dropped), '
+                                    'terminating.')
+                        os.kill(os.getpid(), signal.SIGTERM)
+                        return
+            except (ValueError, OSError):
+                logger.info('stdin closed, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+    watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
