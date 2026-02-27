@@ -43,8 +43,10 @@ export function useLogStreamer({
     setHasReceivedFirstChunk(false);
   }, []);
 
+  // progressTick triggers recalc when progress updates (progressMapRef is a ref)
   const displayLines = useMemo(
     () => [...logLines, ...Array.from(progressMapRef.current.values())],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [logLines, progressTick]
   );
 

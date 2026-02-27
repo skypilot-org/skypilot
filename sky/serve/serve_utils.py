@@ -1040,6 +1040,18 @@ def get_next_cluster_name(
 
         managed_job_state.set_current_cluster_name(job_id,
                                                    replica_info.cluster_name)
+
+        # Set infrastructure info for sorting/filtering
+        handle = replica_info.handle()
+        if handle is not None and handle.launched_resources is not None:
+            lr = handle.launched_resources
+            managed_job_state.set_job_infra(
+                job_id,
+                cloud=str(lr.cloud) if lr.cloud is not None else None,
+                region=lr.region,
+                zone=lr.zone,
+            )
+
         return replica_info.cluster_name
 
 
@@ -1302,7 +1314,8 @@ def _process_line(
     # We should tail the detailed logs for user.
     def cluster_is_up() -> bool:
         status = global_user_state.get_status_from_cluster_name(cluster_name)
-        return status == status_lib.ClusterStatus.UP
+        return status in (status_lib.ClusterStatus.UP,
+                          status_lib.ClusterStatus.AUTOSTOPPING)
 
     provision_api_log_prompt = re.match(_SKYPILOT_PROVISION_API_LOG_PATTERN,
                                         line)

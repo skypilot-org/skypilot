@@ -70,6 +70,8 @@ class AutostopConfig:
     idle_minutes: int = 0
     down: bool = False
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
     def to_yaml_config(self) -> Union[Literal[False], Dict[str, Any]]:
         if not self.enabled:
@@ -80,6 +82,10 @@ class AutostopConfig:
         }
         if self.wait_for is not None:
             config['wait_for'] = self.wait_for.value
+        if self.hook is not None:
+            config['hook'] = self.hook
+        if self.hook_timeout is not None:
+            config['hook_timeout'] = self.hook_timeout
         return config
 
     @classmethod
@@ -111,6 +117,10 @@ class AutostopConfig:
             if 'wait_for' in config:
                 autostop_config.wait_for = (
                     autostop_lib.AutostopWaitFor.from_str(config['wait_for']))
+            if 'hook' in config:
+                autostop_config.hook = config['hook']
+            if 'hook_timeout' in config:
+                autostop_config.hook_timeout = config['hook_timeout']
             return autostop_config
 
         return None
@@ -133,7 +143,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 28
+    _VERSION = 29
 
     def __init__(
         self,
@@ -153,6 +163,7 @@ class Resources:
         disk_size: Optional[Union[str, int]] = None,
         disk_tier: Optional[Union[str, resources_utils.DiskTier]] = None,
         network_tier: Optional[Union[str, resources_utils.NetworkTier]] = None,
+        local_disk: Optional[str] = None,
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
@@ -404,6 +415,7 @@ class Resources:
         self._set_autostop_config(autostop)
         self._set_priority(priority)
         self._set_volumes(volumes)
+        self._set_local_disk(local_disk)
 
     def validate(self):
         """Validate the resources and infer the missing fields if possible."""
@@ -417,6 +429,7 @@ class Resources:
         self._try_validate_volumes()
         self._try_validate_ports()
         self._try_validate_labels()
+        self._try_validate_local_disk()
 
     # When querying the accelerators inside this func (we call self.accelerators
     # which is a @property), we will check the cloud's catalog, which can error
@@ -484,6 +497,10 @@ class Resources:
         if self.network_tier is not None:
             network_tier = f', network_tier={self.network_tier.value}'
 
+        local_disk = ''
+        if self._local_disk is not None:
+            local_disk = f', local_disk={self._local_disk}'
+
         disk_size = ''
         if self.disk_size != DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
@@ -503,7 +520,7 @@ class Resources:
         hardware_str = (
             f'{instance_type}{use_spot}'
             f'{cpus}{memory}{accelerators}{accelerator_args}{image_id}'
-            f'{disk_tier}{network_tier}{disk_size}{ports}')
+            f'{disk_tier}{network_tier}{disk_size}{local_disk}{ports}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):
@@ -640,6 +657,15 @@ class Resources:
     @property
     def network_tier(self) -> Optional[resources_utils.NetworkTier]:
         return self._network_tier
+
+    @property
+    def local_disk(self) -> Optional[str]:
+        if self._local_disk is not None:
+            return self._local_disk
+        if self.cloud is not None and self._instance_type is not None:
+            return self.cloud.get_local_disk_spec_from_instance_type(
+                self._instance_type)
+        return None
 
     @property
     def ports(self) -> Optional[List[str]]:
@@ -971,6 +997,13 @@ class Resources:
 
             valid_volumes.append(volume)
         self._volumes = valid_volumes
+
+    def _set_local_disk(self, local_disk: Optional[str]) -> None:
+        if local_disk is None:
+            self._local_disk = None
+            return
+        # Validate and normalize to canonical form: mode:size[+]
+        self._local_disk = resources_utils.normalize_local_disk(local_disk)
 
     def override_autostop_config(
             self,
@@ -1518,6 +1551,44 @@ class Resources:
                     'The following labels are invalid:'
                     '\n\t' + invalid_table.get_string().replace('\n', '\n\t'))
 
+    def _try_validate_local_disk(self) -> None:
+        if self._local_disk is None:
+            return
+
+        if self.cloud is not None:
+            self.cloud.check_features_are_supported(
+                self, {clouds.CloudImplementationFeatures.LOCAL_DISK})
+        else:
+            at_least_one_cloud_supports = False
+            for cloud in sky_check.get_cached_enabled_clouds_or_refresh(
+                    sky_cloud.CloudCapability.COMPUTE,
+                    raise_if_no_cloud_access=True):
+                try:
+                    cloud.check_features_are_supported(
+                        self, {clouds.CloudImplementationFeatures.LOCAL_DISK})
+                    at_least_one_cloud_supports = True
+                except exceptions.NotSupportedError:
+                    pass
+            if not at_least_one_cloud_supports:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'No enabled cloud supports local disk selection. '
+                        'To fix: enable a cloud that supports this feature.')
+        if self._instance_type is not None:
+            # The assertion should be true because we have already executed
+            # _try_validate_instance_type() before this method.
+            # The _try_validate_instance_type() method infers and sets
+            # self.cloud if self.instance_type is not None.
+            assert self.cloud is not None
+            instance_spec = self.cloud.get_local_disk_spec_from_instance_type(
+                self._instance_type)
+            if not resources_utils.local_disk_satisfied(self._local_disk,
+                                                        instance_spec):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Specified instance type {self._instance_type} does '
+                        f'not have specified local disk {self._local_disk}.')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -1743,6 +1814,13 @@ class Resources:
             if not self.network_tier <= other.network_tier:
                 return False
 
+        if self.local_disk is not None:
+            if other.local_disk is None:
+                return False
+            if not resources_utils.local_disk_satisfied(self.local_disk,
+                                                        other.local_disk):
+                return False
+
         if check_ports:
             if self.ports is not None:
                 if other.ports is None:
@@ -1930,7 +2008,10 @@ class Resources:
             instance_type=override.pop('instance_type', self.instance_type),
             cpus=override.pop('cpus', self._cpus),
             memory=override.pop('memory', self._memory),
-            accelerators=override.pop('accelerators', self.accelerators),
+            # Need to pass `self._accelerators` instead of `self.accelerators`
+            # as the latter can auto-infer, causing potential conflicts with
+            # instance_type override.
+            accelerators=override.pop('accelerators', self._accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
@@ -1941,6 +2022,7 @@ class Resources:
             image_id=override.pop('image_id', self.image_id),
             disk_tier=override.pop('disk_tier', self.disk_tier),
             network_tier=override.pop('network_tier', self.network_tier),
+            local_disk=override.pop('local_disk', self._local_disk),
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
@@ -1997,6 +2079,8 @@ class Resources:
                         'disk_tier'] != resources_utils.DiskTier.BEST:
                     features.add(
                         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER)
+        if self._local_disk is not None:
+            features.add(clouds.CloudImplementationFeatures.LOCAL_DISK)
         return features
 
     @staticmethod
@@ -2264,6 +2348,7 @@ class Resources:
         resources_fields['image_id'] = config.pop('image_id', None)
         resources_fields['disk_tier'] = config.pop('disk_tier', None)
         resources_fields['network_tier'] = config.pop('network_tier', None)
+        resources_fields['local_disk'] = config.pop('local_disk', None)
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
@@ -2290,13 +2375,18 @@ class Resources:
             # although it will end up being an int, we don't know at this point
             # if it has units or not, so we store it as a string
             resources_fields['disk_size'] = str(resources_fields['disk_size'])
+        if resources_fields['local_disk'] is not None:
+            # may be integer by only specifying exact size.
+            resources_fields['local_disk'] = str(resources_fields['local_disk'])
         resources_fields['_no_missing_accel_warnings'] = config.pop(
             '_no_missing_accel_warnings', None)
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
 
-    def to_yaml_config(self) -> Dict[str, Union[str, int]]:
+    def to_yaml_config(self,
+                       redact_secrets: bool = False
+                      ) -> Dict[str, Union[str, int]]:
         """Returns a yaml-style dict of config for this resource bundle."""
         config = {}
 
@@ -2323,6 +2413,7 @@ class Resources:
             config['disk_tier'] = self.disk_tier.value
         if self.network_tier is not None:
             config['network_tier'] = self.network_tier.value
+        add_if_not_none('local_disk', self._local_disk)
         add_if_not_none('ports', self.ports)
         add_if_not_none('labels', self.labels)
         if self.volumes is not None:
@@ -2349,6 +2440,8 @@ class Resources:
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
+            if redact_secrets:
+                config['_docker_login_config']['password'] = '<redacted>'
         if self._docker_username_for_runpod is not None:
             config['_docker_username_for_runpod'] = (
                 self._docker_username_for_runpod)
@@ -2520,6 +2613,9 @@ class Resources:
         if version < 28:
             self._no_missing_accel_warnings = state.get(
                 '_no_missing_accel_warnings', None)
+
+        if version < 29:
+            self._local_disk = None
 
         self.__dict__.update(state)
 

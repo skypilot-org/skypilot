@@ -1,0 +1,79 @@
+# RL Experiment Architecture Smoke Test
+# Tests the heterogeneous workload pattern with 4 components:
+# trainer (multi-node), data-processor, replay-buffer, env-worker (multi-node)
+# Resource-scaled version for smoke testing
+---
+name: {{name}}
+execution: parallel
+---
+name: trainer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+num_nodes: 2
+run: |
+  echo "Trainer node ${SKYPILOT_NODE_RANK} starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Master addr: trainer-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Replay buffer: replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379"
+  for i in {1..3}; do
+    echo "Training iteration $i on node ${SKYPILOT_NODE_RANK}"
+    sleep 2
+  done
+  echo "Trainer node ${SKYPILOT_NODE_RANK} done"
+---
+name: data-processor
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Data processor starting"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Output to: replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}:6379"
+  for i in {1..3}; do
+    echo "Processing batch $i"
+    sleep 2
+  done
+  echo "Data processor done"
+---
+name: replay-buffer
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+run: |
+  echo "Replay buffer starting on $(hostname)"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  python3 -m http.server 6379 &
+  SERVER_PID=$!
+  for i in {1..5}; do
+    echo "Replay buffer heartbeat $i"
+    sleep 2
+  done
+  kill $SERVER_PID 2>/dev/null || true
+  echo "Replay buffer done"
+---
+name: env-worker
+resources:
+  cpus: 2
+  memory: 4+
+  infra: {{cloud}}
+num_nodes: 2
+run: |
+  echo "Env worker node ${SKYPILOT_NODE_RANK} starting"
+  echo "JobGroup: ${SKYPILOT_JOBGROUP_NAME}"
+  echo "Testing connectivity to replay-buffer..."
+  sleep 5
+  REPLAY_HOST="replay-buffer-0.${SKYPILOT_JOBGROUP_NAME}"
+  if curl -s --connect-timeout 5 http://$REPLAY_HOST:6379/ > /dev/null 2>&1; then
+    echo "SUCCESS: Connected to replay-buffer at $REPLAY_HOST"
+  else
+    echo "WARNING: Could not connect to replay-buffer (may not be HTTP)"
+  fi
+  for i in {1..3}; do
+    echo "Environment step $i on node ${SKYPILOT_NODE_RANK}"
+    sleep 2
+  done
+  echo "Env worker node ${SKYPILOT_NODE_RANK} done"

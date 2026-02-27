@@ -214,16 +214,10 @@ def _get_pvc_binding_status(namespace: str, context: Optional[str],
                     _request_timeout=kubernetes.API_TIMEOUT)
             if pvc.status.phase == 'Pending':
                 # Get events for the PVC to understand why it's pending
-                pvc_events = kubernetes.core_api(context).list_namespaced_event(
-                    namespace,
-                    field_selector=(
-                        f'involvedObject.name={pvc_name},'
-                        'involvedObject.kind=PersistentVolumeClaim'),
-                    _request_timeout=kubernetes.API_TIMEOUT)
-                # Sort events by creation timestamp to get the most recent
-                sorted_events = sorted(
-                    pvc_events.items,
-                    key=lambda e: e.metadata.creation_timestamp)
+                sorted_events = kubernetes_utils.get_pvc_events(context,
+                                                                namespace,
+                                                                pvc_name,
+                                                                reverse=False)
                 event_messages = []
                 for event in sorted_events:
                     if event.type == 'Warning' or event.reason in (
@@ -321,7 +315,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                          in event_message) and pod.spec.node_selector):
                         if 'gpu' in gpu_resource_key.lower():
                             info_msg = (
-                                ': Run \'sky show-gpus --infra kubernetes\' to '
+                                ': Run \'sky gpus list --infra kubernetes\' to '
                                 'see the available GPUs.')
                         else:
                             info_msg = ': '
@@ -379,22 +373,23 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     insufficent_resources=nice_names,
                 )
 
-            # Check for PVC binding issues
-            pvc_error = _get_pvc_binding_status(namespace, context, pod)
-            has_pvc_issue = ('unbound immediate PersistentVolumeClaims'
-                             in event_message)
-            if pvc_error is not None or has_pvc_issue:
-                pvc_msg = pvc_error if pvc_error else (
-                    _format_pvc_binding_error(
-                        pvc_details=None, pvc_names=[], namespace=namespace))
-                raise config_lib.KubernetesError(
-                    f'{pvc_msg}\n'
-                    f'Pod status: {pod_status} '
-                    f'Details: \'{event_message}\' ')
+        # Check for PVC binding issues
+        pvc_error = _get_pvc_binding_status(namespace, context, pod)
+        has_pvc_issue = (event_message is not None and
+                         'unbound immediate PersistentVolumeClaims'
+                         in event_message)
+        if pvc_error is not None or has_pvc_issue:
+            pvc_msg = pvc_error if pvc_error else (_format_pvc_binding_error(
+                pvc_details=None, pvc_names=[], namespace=namespace))
+            err_msg = f'{pvc_msg}\nPod status: {pod_status}'
+            if event_message:
+                err_msg += f' Details: \'{event_message}\''
+            raise config_lib.KubernetesError(err_msg)
 
-            raise config_lib.KubernetesError(f'{timeout_err_msg} '
-                                             f'Pod status: {pod_status} '
-                                             f'Details: \'{event_message}\' ')
+        err_msg = f'{timeout_err_msg} Pod status: {pod_status}'
+        if event_message:
+            err_msg += f' Details: \'{event_message}\''
+        raise config_lib.KubernetesError(err_msg)
 
     raise config_lib.KubernetesError(f'{timeout_err_msg}')
 
@@ -900,7 +895,8 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
         pod_name = new_node.metadata.name
         logger.info(f'{"-"*20}Start: Pre-init in pod {pod_name!r} {"-"*20}')
         runner = command_runner.KubernetesCommandRunner(
-            ((namespace, context), pod_name))
+            ((namespace, context), pod_name),
+            container=k8s_constants.RAY_NODE_CONTAINER_NAME)
 
         # Run the combined pre-init command
         rc, stdout, _ = runner.run(pre_init_cmd,
@@ -971,10 +967,10 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
             # Remove the AppArmor annotation
             annotations = pod_spec.get('metadata', {}).get('annotations', {})
-            if ('container.apparmor.security.beta.kubernetes.io/ray-node'
-                    in annotations):
-                del annotations[
-                    'container.apparmor.security.beta.kubernetes.io/ray-node']
+            apparmor_key = ('container.apparmor.security.beta.kubernetes.io/'
+                            f'{k8s_constants.RAY_NODE_CONTAINER_NAME}')
+            if apparmor_key in annotations:
+                del annotations[apparmor_key]
                 pod_spec['metadata']['annotations'] = annotations
                 logger.info('AppArmor annotation removed from Pod spec.')
             else:
@@ -1008,6 +1004,44 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
                                    pod_spec,
                                    details=error_message,
                                    extra_msg=extra_message))
+        elif (e.status == 409 and
+              re.match(r'^object is being deleted: pods \".+\" already exists$',
+                       error_message)):
+            # Pod from a previous cluster with the same name is
+            # still being deleted.
+            # Extract pod name from the error message.
+            # The error message is expected to match:
+            # object is being deleted: pods "<podname>" already exists
+            match = re.search(r'pods "([^"]+)"', error_message)
+            assert match, f'Could not extract pod name from: {error_message}'
+            pod_name = match.group(1)
+            logger.info(
+                f'Pod {pod_name} from previous cluster is still being deleted. '
+                'Force deleting it and retrying pod creation.')
+            try:
+                # Since the pod is already being deleted,
+                # we can try force deleting it to make sure it's deleted,
+                # then retry the pod creation.
+                kubernetes.core_api(context).delete_namespaced_pod(
+                    pod_name,
+                    namespace,
+                    _request_timeout=config_lib.DELETION_TIMEOUT,
+                    grace_period_seconds=0)
+            except kubernetes.api_exception() as delete_exception:
+                logger.warning(
+                    f'Failed to force delete pod {pod_name}, but proceeding '
+                    f'to retry creation. Error: {delete_exception}')
+            try:
+                pod = kubernetes.core_api(context).create_namespaced_pod(
+                    namespace, pod_spec)
+                logger.info(
+                    f'Pod {pod.metadata.name} created successfully '
+                    'after force deleting the pod from previous cluster.')
+                return pod
+            except kubernetes.api_exception() as retry_exception:
+                logger.warning(f'Failed to create pod {pod_name} on retry: '
+                               f'{retry_exception}')
+                raise retry_exception
         else:
             # Re-raise the exception if it's a different error
             raise e
@@ -1062,8 +1096,6 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     if to_create_deployment:
         deployment_spec = pod_spec.pop('deployment_spec')
         pvc_spec = pod_spec.pop('pvc_spec')
-        assert len(pod_spec['spec']['containers']) == 1, (
-            'Only one container is supported for deployment')
 
     tags = ray_tag_filter(cluster_name_on_cloud)
 
@@ -1466,12 +1498,37 @@ def _delete_services(name_prefix: str,
             resource_name=service_name)
 
 
+def _delete_cluster_services(cluster_name: str, namespace: str,
+                             context: Optional[str]) -> None:
+    """Delete all services associated with a cluster using label selector.
+
+    This is a fallback cleanup mechanism that works even when pods have been
+    deleted externally. Services are identified by the skypilot-cluster-name
+    label.
+
+    Args:
+        cluster_name: The cluster name used in the skypilot-cluster-name label
+        namespace: Kubernetes namespace
+        context: Kubernetes context
+    """
+    label_selector = f'{constants.TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}'
+    try:
+        kubernetes.core_api(context).delete_collection_namespaced_service(
+            namespace,
+            label_selector=label_selector,
+            _request_timeout=config_lib.DELETION_TIMEOUT)
+    except kubernetes.api_exception() as e:
+        logger.warning(f'Failed to cleanup services for cluster '
+                       f'{cluster_name}: {e}')
+
+
 def _terminate_node(namespace: str,
                     context: Optional[str],
                     pod_name: str,
                     is_head: bool = False) -> None:
     """Terminate a pod and its associated services."""
-    logger.debug('terminate_instances: calling delete_namespaced_pod')
+    logger.debug(f'terminate_instances: namespace: {namespace}, context: '
+                 f'{context}, pod_name: {pod_name}, is_head: {is_head}')
 
     if is_head:
         # Delete services for the head pod
@@ -1558,6 +1615,33 @@ def terminate_instances(
     subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
                                      _NUM_THREADS)
 
+    if not worker_only:
+        # Cleanup all services by label selector as a fallback.
+        # This handles the case where pods were deleted externally.
+        # Only do this when terminating the entire cluster, not when
+        # terminating workers only (head services should remain).
+        _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+
+
+def cleanup_cluster_resources(
+    cluster_name_on_cloud: str,
+    provider_config: Dict[str, Any],
+) -> None:
+    """Cleanup Kubernetes resources for a cluster.
+
+    This function is called during post-teardown cleanup to ensure all cluster
+    resources are deleted even when pods were deleted externally. It uses label
+    selectors to find and delete resources, making it resilient to external
+    deletions.
+
+    Args:
+        cluster_name_on_cloud: The cluster name on cloud
+        provider_config: Provider configuration dictionary
+    """
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+    context = kubernetes_utils.get_context_from_config(provider_config)
+    _delete_cluster_services(cluster_name_on_cloud, namespace, context)
+
 
 def get_cluster_info(
         region: str,
@@ -1584,6 +1668,8 @@ def get_cluster_info(
     cpu_request = None
     for pod_name, pod in running_pods.items():
         internal_ip = pod.status.pod_ip
+        # Get the k8s node name the pod is running on (for dashboard display)
+        k8s_node_name = getattr(pod.spec, 'node_name', None)
         pods[pod_name] = [
             common.InstanceInfo(
                 instance_id=pod_name,
@@ -1594,13 +1680,20 @@ def get_cluster_info(
                 # TODO(hailong): `cluster.local` may need to be configurable
                 # Service name is same as the pod name for now.
                 internal_svc=f'{pod_name}.{namespace}.svc.cluster.local',
+                node_name=k8s_node_name,
             )
         ]
         if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
-            cpu_request = head_spec.containers[0].resources.requests['cpu']
+            primary_container = kubernetes_utils.get_pod_primary_container(pod)
+            resources = getattr(primary_container, 'resources', None)
+            requests = (getattr(resources, 'requests', None)
+                        if resources else None)
+            limits = (getattr(resources, 'limits', None) if resources else None)
+            cpu_request = ((requests or {}).get('cpu') or
+                           (limits or {}).get('cpu'))
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
@@ -1614,7 +1707,8 @@ def get_cluster_info(
     get_k8s_ssh_user_cmd = 'echo "SKYPILOT_SSH_USER: $(whoami)"'
     assert head_pod_name is not None
     runner = command_runner.KubernetesCommandRunner(
-        ((namespace, context), head_pod_name))
+        ((namespace, context), head_pod_name),
+        container=k8s_constants.RAY_NODE_CONTAINER_NAME)
     rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
                                     require_outputs=True,
                                     separate_stderr=True,
@@ -1710,7 +1804,9 @@ def _get_pod_termination_reason(pod: Any, cluster_name: str) -> str:
                     # just in-case reason is None, have default for debugging
                     reason = f'exit({exit_code})'
                 container_reasons.append(reason)
-                latest_timestamp = max(latest_timestamp, terminated.finished_at)
+                if terminated.finished_at is not None:
+                    latest_timestamp = max(latest_timestamp,
+                                           terminated.finished_at)
 
             # TODO (kyuds): later, if needed, query `last_state` too.
 
@@ -2115,7 +2211,10 @@ def get_command_runners(
 
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
-            node_list[0], deployment=deployment, **credentials)
+            node_list[0],
+            deployment=deployment,
+            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
+            **credentials)
         runners.append(head_runner)
 
     node_list = [((namespace, context), pod_name)
@@ -2123,6 +2222,8 @@ def get_command_runners(
                  if pod_name != cluster_info.head_instance_id]
     runners.extend(
         command_runner.KubernetesCommandRunner.make_runner_list(
-            node_list, **credentials))
+            node_list,
+            container=k8s_constants.RAY_NODE_CONTAINER_NAME,
+            **credentials))
 
     return runners

@@ -7,6 +7,13 @@ Managed Jobs
 
   This feature is great for scaling out: running a single job for long durations, or running many jobs in parallel.
 
+.. seealso::
+
+   :doc:`pools` for running batch inference workloads across multiple infrastructure.
+
+   :ref:`job-groups` for running multiple heterogeneous tasks in parallel that
+   can communicate with each other.
+
 SkyPilot supports **managed jobs** (:code:`sky jobs`), which can automatically retry failures, recover from spot instance preemptions, and clean up when done.
 
 To start a managed job, use :code:`sky jobs launch`:
@@ -403,8 +410,12 @@ A pipeline is a managed job that contains a sequence of tasks running one after 
 This is useful for running a sequence of tasks that depend on each other, e.g., training a model and then running inference on it.
 Different tasks can have different resource requirements to use appropriate per-task resources, which saves costs, while  keeping the burden of managing the tasks off the user.
 
+.. seealso::
+
+  :ref:`job-groups` for running multiple tasks **in parallel** instead of sequentially.
+
 .. note::
-  In other words, a managed job is either a single task or a pipeline of tasks. All managed jobs are submitted by :code:`sky jobs launch`.
+  In other words, a managed job is either a single task, a pipeline (sequential tasks), or a :ref:`job group <job-groups>` (parallel tasks). All managed jobs are submitted by :code:`sky jobs launch`.
 
 To run a pipeline, specify the sequence of tasks in a YAML file. Here is an example:
 
@@ -460,6 +471,13 @@ pipeline` names the pipeline. The first task has name :code:`train` and the
 second task has name :code:`eval`. The tasks are separated by a line with three
 dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
 :code:`run` sections. Tasks are executed sequentially. If a task fails, later tasks are skipped.
+
+.. tip::
+
+   To explicitly indicate a pipeline (sequential execution), you can add
+   :code:`execution: serial` to the header. This is optional since pipelines
+   are the default when :code:`execution` is omitted. Use :code:`execution: parallel`
+   for :ref:`job groups <job-groups>` instead.
 
 To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 

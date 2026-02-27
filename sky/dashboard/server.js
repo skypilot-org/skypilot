@@ -24,6 +24,15 @@ app
       })
     );
 
+    // Proxy plugin static assets (JS bundles served by API server)
+    server.use(
+      '/plugins',
+      createProxyMiddleware({
+        target: `${process.env.SKYPILOT_API_SERVER_ENDPOINT || 'http://localhost:46580'}/plugins`,
+        changeOrigin: true,
+      })
+    );
+
     // Proxy Grafana requests
     server.use(
       '/grafana',

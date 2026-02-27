@@ -7,8 +7,10 @@ from sky.utils.plugin_extensions.external_failure_source import (
     ExternalClusterFailure)
 from sky.utils.plugin_extensions.external_failure_source import (
     ExternalFailureSource)
+from sky.utils.plugin_extensions.node_info_source import NodeInfoSource
 
 __all__ = [
     'ExternalClusterFailure',
     'ExternalFailureSource',
+    'NodeInfoSource',
 ]

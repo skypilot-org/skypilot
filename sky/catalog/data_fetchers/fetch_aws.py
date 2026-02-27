@@ -13,7 +13,7 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 
@@ -67,8 +67,21 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 # The following columns will be included in the final catalog.
 USEFUL_COLUMNS = [
-    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Arch'
+    'InstanceType',
+    'AcceleratorName',
+    'AcceleratorCount',
+    'vCPUs',
+    'MemoryGiB',
+    'GpuInfo',
+    'Price',
+    'SpotPrice',
+    'Region',
+    'AvailabilityZone',
+    'Arch',
+    'LocalDiskType',
+    'NVMeSupported',
+    'LocalDiskSize',
+    'LocalDiskCount',
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
@@ -269,23 +282,49 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 return row['MemoryInfo']['SizeInMiB'] / 1024
             return float(row['Memory'].split(' GiB')[0])
 
+        def get_local_disk_info(row) -> Dict[str, Any]:
+            info: Dict[str, Any] = {}
+            local_disk_supported = row['InstanceStorageSupported']
+            info['LocalDiskType'] = None
+            info['NVMeSupported'] = False
+            info['LocalDiskSize'] = None
+            info['LocalDiskCount'] = None
+
+            if local_disk_supported:
+                raw_info = row['InstanceStorageInfo']
+                info['NVMeSupported'] = raw_info['NvmeSupport'] == 'required'
+                # This is always 1. AWS probably made this as a list
+                # with future changes in consideration.
+                assert len(raw_info['Disks']) == 1, (
+                    f'Instance type {row["InstanceType"]} has '
+                    f'{len(raw_info["Disks"])} disk entries, expected 1.')
+                disk_info = raw_info['Disks'][0]
+                assert disk_info['Type'] in ('ssd', 'hdd'), (
+                    f'Instance type {row["InstanceType"]} has unknown '
+                    f'disk type {disk_info["Type"]}.')
+                info['LocalDiskType'] = disk_info['Type']
+                info['LocalDiskSize'] = disk_info['SizeInGB']
+                info['LocalDiskCount'] = disk_info['Count']
+            return info
+
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
-            # AWS p3dn.24xlarge offers a different V100 GPU.
+            # AWS instance type workarounds for incorrect/missing GPU info.
             # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # pylint: disable=line-too-long
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
-            if row['InstanceType'] == 'p4de.24xlarge':
+            elif row['InstanceType'] == 'p4de.24xlarge':
                 acc_name = 'A100-80GB'
                 acc_count = 8
-            if row['InstanceType'] == 'p5en.48xlarge':
+            elif row['InstanceType'] in ('p5e.48xlarge', 'p5en.48xlarge'):
                 # TODO(andyl): Check if this workaround still needed after
                 # v0.10.0 released. Currently, the acc_name returned by the
                 # AWS API is 'NVIDIA', which is incorrect. See #4652.
+                # Both p5e.48xlarge and p5en.48xlarge have 8x H200 GPUs.
                 acc_name = 'H200'
                 acc_count = 8
-            if (row['InstanceType'].startswith('g6f') or
-                    row['InstanceType'].startswith('gr6f')):
+            elif (row['InstanceType'].startswith('g6f') or
+                  row['InstanceType'].startswith('gr6f')):
                 # These instance actually have only fractional GPUs, but the API
                 # returns Count: 1 or Count: 0 under GpuInfo. We need to
                 # directly check the GPU memory to get the actual fraction of
@@ -297,14 +336,18 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 fraction = row['GpuInfo']['Gpus'][0]['MemoryInfo'][
                     'SizeInMiB'] / L4_GPU_MEMORY
                 acc_count = round(fraction, 3)
-            if row['InstanceType'] == 'p5.4xlarge':
+            elif row['InstanceType'] == 'p5.4xlarge':
                 acc_count = 1
+            elif row['InstanceType'].startswith('g7e'):
+                # Change name from "RTX PRO Server 6000" to "RTXPRO6000" for consistency
+                acc_name = 'RTXPRO6000'
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,
                 'vCPUs': get_vcpus(row),
                 'MemoryGiB': get_memory_gib(row),
                 'Arch': get_arch(row),
+                **get_local_disk_info(row)
             })
 
         # The AWS API may not have all the instance types in the pricing table,

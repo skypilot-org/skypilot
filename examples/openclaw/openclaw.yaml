@@ -1,0 +1,88 @@
+# OpenClaw on SkyPilot - Personal AI Assistant in an Isolated Cloud Sandbox
+#
+# OpenClaw (https://github.com/openclaw/openclaw) is a personal AI assistant
+# that connects to messaging platforms (WhatsApp, Telegram, Slack, Discord,
+# and more) while running on your own infrastructure.
+#
+# This example deploys OpenClaw's gateway on a cloud VM via SkyPilot,
+# providing an isolated sandbox environment separate from your local machine.
+# Access the built-in WebChat interface via SSH tunnel for secure access.
+#
+# Prerequisites:
+#   An Anthropic API key (https://console.anthropic.com/)
+#
+# Usage:
+#   # Launch the gateway:
+#   sky launch -c openclaw openclaw.yaml --env ANTHROPIC_API_KEY
+#
+#   # Open an SSH tunnel to access WebChat securely:
+#   ssh -L 18789:localhost:18789 openclaw
+#
+#   # Open WebChat in your browser:
+#   open http://localhost:18789
+#
+#   # SSH in to run the onboarding wizard for additional channels:
+#   ssh openclaw
+#   openclaw onboard
+#
+#   # Stop when done — all state is preserved on disk:
+#   sky stop openclaw
+#
+#   # Resume later — picks up right where you left off:
+#   sky start openclaw
+
+resources:
+  cpus: 2+
+  memory: 4+
+
+secrets:
+  # Anthropic API key (pass via --env ANTHROPIC_API_KEY=sk-ant-...)
+  ANTHROPIC_API_KEY:
+
+setup: |
+  # Install Node.js 22 (required by OpenClaw)
+  if ! node --version 2>/dev/null | grep -q "v22"; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+  fi
+
+  # Install OpenClaw
+  sudo npm install -g openclaw@latest
+
+  # Only write configuration on first launch.
+  # On subsequent launches the existing config is reused.
+  if [ ! -f ~/.openclaw/openclaw.json ]; then
+    mkdir -p ~/.openclaw
+    GATEWAY_TOKEN=$(openssl rand -hex 16)
+    echo "=========================================="
+    echo "First launch — generating new WebChat token: $GATEWAY_TOKEN"
+    echo "=========================================="
+
+    cat > ~/.openclaw/openclaw.json << EOF
+  {
+    "agents": {
+      "defaults": {
+        "model": {
+          "primary": "anthropic/claude-opus-4-6"
+        }
+      }
+    },
+    "gateway": {
+      "mode": "local",
+      "auth": {
+        "mode": "token",
+        "token": "$GATEWAY_TOKEN"
+      }
+    }
+  }
+  EOF
+  else
+    echo "=========================================="
+    echo "Existing configuration found — reusing."
+    echo "All previous state (credentials, sessions, etc.) is intact."
+    echo "=========================================="
+  fi
+
+run: |
+  # Start the OpenClaw gateway
+  openclaw gateway --verbose

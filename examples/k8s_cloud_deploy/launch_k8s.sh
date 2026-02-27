@@ -82,6 +82,5 @@ sky check kubernetes
 set +x
 echo -e "\033[1m===== Kubernetes cluster deployment complete =====\033[0m"
 echo -e "You can now access your k8s cluster with kubectl and skypilot.\n"
-echo -e "• View the list of available GPUs on Kubernetes: \033[1msky show-gpus --cloud kubernetes\033[0m"
+echo -e "• View the list of available GPUs on Kubernetes: \033[1msky gpus list --cloud kubernetes\033[0m"
 echo -e "• To launch a SkyPilot job running nvidia-smi on this cluster: \033[1msky launch --cloud kubernetes --gpus <GPU> -- nvidia-smi\033[0m"
-

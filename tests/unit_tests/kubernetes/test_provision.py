@@ -137,7 +137,7 @@ def test_out_of_gpus(monkeypatch):
 
     assert error_output[0] == '⨯ Insufficient resource capacity on the cluster:'
     assert error_output[
-        1] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky show-gpus --infra kubernetes\' to see the available GPUs.'
+        1] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky gpus list --infra kubernetes\' to see the available GPUs.'
 
     assert len(error_output) == 2
 
@@ -200,7 +200,7 @@ def test_out_of_both_cpus_and_gpus(monkeypatch):
     assert error_output[
         1] == '├── Cluster does not have sufficient CPUs for your request: Run \'kubectl get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.allocatable.cpu\' to check the available CPUs on the node.'
     assert error_output[
-        2] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky show-gpus --infra kubernetes\' to see the available GPUs.'
+        2] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky gpus list --infra kubernetes\' to see the available GPUs.'
 
     assert len(error_output) == 3
 
@@ -268,7 +268,7 @@ def test_out_of_gpus_and_node_selector_failed(monkeypatch):
 
     assert error_output[0] == '⨯ Insufficient resource capacity on the cluster:'
     assert error_output[
-        1] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky show-gpus --infra kubernetes\' to see the available GPUs. Verify if any node matching label nvidia-tesla-a100 and sufficient resource nvidia.com/gpu is available in the cluster.'
+        1] == '└── Cluster does not have sufficient GPUs for your request: Run \'sky gpus list --infra kubernetes\' to see the available GPUs. Verify if any node matching label nvidia-tesla-a100 and sufficient resource nvidia.com/gpu is available in the cluster.'
 
     assert len(error_output) == 2
 
@@ -491,6 +491,54 @@ def test_pod_termination_reason_kueue_preemption(monkeypatch):
         '(Exceeded the PodsReady timeout default/test-pod).\n'
         'Last known state: ContainersNotReady (containers with unready status: [ray-node]).'
     )
+    assert reason == expected
+
+
+def test_pod_termination_reason_null_finished_at(monkeypatch):
+    """Test _get_pod_termination_reason with null finished_at timestamp.
+
+    When pods are in certain failed states (e.g., Unknown status due to
+    ephemeral storage issues), terminated.finished_at can be None.
+    This should not cause a TypeError.
+
+    Regression test for SKY-4423.
+    """
+    import datetime
+
+    now = datetime.datetime(2025, 1, 1, 0, 0, 0)
+
+    pod = mock.MagicMock()
+    pod.metadata.name = 'test-pod'
+    pod.status.start_time = now
+
+    # Ready condition
+    ready_condition = mock.MagicMock()
+    ready_condition.type = 'Ready'
+    ready_condition.reason = 'PodFailed'
+    ready_condition.message = ''
+    ready_condition.last_transition_time = now
+
+    pod.status.conditions = [ready_condition]
+
+    # Container with terminated state but null finished_at
+    container_status = mock.MagicMock()
+    container_status.name = 'ray-node'
+    container_status.state.terminated = mock.MagicMock()
+    container_status.state.terminated.exit_code = 137
+    container_status.state.terminated.reason = 'Unknown'
+    container_status.state.terminated.finished_at = None
+
+    pod.status.container_statuses = [container_status]
+
+    monkeypatch.setattr('sky.provision.kubernetes.instance.global_user_state',
+                        mock.MagicMock())
+
+    # Should not raise TypeError
+    reason = instance._get_pod_termination_reason(pod, 'test-cluster')
+
+    expected = ('Terminated unexpectedly.\n'
+                'Last known state: PodFailed.\n'
+                'Container errors: Unknown')
     assert reason == expected
 
 

@@ -9,8 +9,8 @@ import re
 import subprocess
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
-                    Tuple, TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, Tuple, TypeVar, Union)
 
 import colorama
 from typing_extensions import ParamSpec
@@ -85,6 +85,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
+    'p6-b300.',
 ]
 
 # Docker run options for EFA.
@@ -692,11 +693,13 @@ class AWS(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='aws')
@@ -717,6 +720,14 @@ class AWS(clouds.Cloud):
         instance_type: str,
     ) -> Optional[str]:
         return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
+
+    @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_local_disk_from_instance_type(instance_type,
+                                                         clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -904,6 +915,7 @@ class AWS(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -921,6 +933,7 @@ class AWS(clouds.Cloud):
              use_spot=resources.use_spot,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='aws')
@@ -1654,3 +1667,18 @@ class AWS(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def yield_cloud_specific_failover_overrides(cls,
+                                                region: Optional[str] = None
+                                               ) -> Iterable[Dict[str, Any]]:
+        vpc_names = skypilot_config.get_effective_region_config(
+            cloud='aws', region=region, keys=('vpc_names',), default_value=None)
+        if vpc_names:
+            if isinstance(vpc_names, str):
+                vpc_names = [vpc_names]
+            for vpc_name in vpc_names:
+                yield {'vpc_name': vpc_name}
+        else:
+            yield {}
+        return

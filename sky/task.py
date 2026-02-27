@@ -754,9 +754,19 @@ class Task:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
             task.set_service(service)
         elif pool is not None:
-            pool['pool'] = True
-            pool = service_spec.SkyServiceSpec.from_yaml_config(pool)
-            task.set_service(pool)
+            # When pool is a dict (from top-level pool: in YAML), wrap it
+            # properly The schema expects {'pool': {...}} structure, not
+            # {'workers': 1, 'pool': True}
+            if isinstance(pool, dict):
+                # pool is a dict like {'workers': 1, 'max_workers': 3}
+                # Wrap it as {'pool': {'workers': 1, 'max_workers': 3}}
+                pool_config_dict = {'pool': pool}
+            else:
+                # pool is a boolean True (shouldn't happen, but handle it)
+                pool_config_dict = {'pool': {}}
+            pool_spec = service_spec.SkyServiceSpec.from_yaml_config(
+                pool_config_dict)
+            task.set_service(pool_spec)
 
         volume_mounts = config.pop('volume_mounts', None)
         if volume_mounts is not None:
@@ -1700,6 +1710,10 @@ class Task:
             config = yaml_utils.safe_load(self._user_specified_yaml)
             if config.get('secrets') is not None:
                 config['secrets'] = {k: '<redacted>' for k in config['secrets']}
+            docker_config = config.get('resources',
+                                       {}).get('_docker_login_config', {})
+            if docker_config.get('password') is not None:
+                docker_config['password'] = '<redacted>'
             return config
         return self._to_yaml_config()
 
@@ -1714,7 +1728,8 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        tmp_resource_config = _resources_to_config(self.resources)
+        tmp_resource_config = _resources_to_config(
+            self.resources, redact_secrets=redact_secrets)
 
         add_if_not_none('resources', tmp_resource_config)
 
@@ -1836,20 +1851,21 @@ class Task:
         return s
 
 
-def _resources_to_config(
-        resources: Union[List['resources_lib.Resources'],
-                         Set['resources_lib.Resources']],
-        factor_out_common_fields: bool = False) -> Dict[str, Any]:
+def _resources_to_config(resources: Union[List['resources_lib.Resources'],
+                                          Set['resources_lib.Resources']],
+                         factor_out_common_fields: bool = False,
+                         redact_secrets: bool = False) -> Dict[str, Any]:
     if len(resources) > 1:
         resource_list: List[Dict[str, Union[str, int]]] = []
         for r in resources:
-            resource_list.append(r.to_yaml_config())
+            resource_list.append(
+                r.to_yaml_config(redact_secrets=redact_secrets))
         group_key = 'ordered' if isinstance(resources, list) else 'any_of'
         if factor_out_common_fields:
             return _factor_out_common_resource_fields(resource_list, group_key)
         return {group_key: resource_list}
     else:
-        return list(resources)[0].to_yaml_config()
+        return list(resources)[0].to_yaml_config(redact_secrets=redact_secrets)
 
 
 def _factor_out_common_resource_fields(configs: List[Dict[str, Union[str,

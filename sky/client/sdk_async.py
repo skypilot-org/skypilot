@@ -482,9 +482,12 @@ async def start(
 async def down(
         cluster_name: str,
         purge: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of down() that tears down a cluster."""
-    request_id = await asyncio.to_thread(sdk.down, cluster_name, purge)
+    request_id = await asyncio.to_thread(sdk.down, cluster_name, purge,
+                                         graceful, graceful_timeout)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -496,9 +499,12 @@ async def down(
 async def stop(
         cluster_name: str,
         purge: bool = False,
+        graceful: bool = False,
+        graceful_timeout: Optional[int] = None,
         stream_logs: Optional[StreamConfig] = DEFAULT_STREAM_CONFIG) -> None:
     """Async version of stop() that stops a cluster."""
-    request_id = await asyncio.to_thread(sdk.stop, cluster_name, purge)
+    request_id = await asyncio.to_thread(sdk.stop, cluster_name, purge,
+                                         graceful, graceful_timeout)
     if stream_logs is not None:
         return await _stream_and_get(request_id, stream_logs)
     else:
@@ -783,10 +789,15 @@ async def api_cancel(
 
 @usage_lib.entrypoint
 @annotations.client_api
-async def api_status(request_ids: Optional[List[str]] = None,
-                     all_status: bool = False) -> List[payloads.RequestPayload]:
+async def api_status(
+        request_ids: Optional[List[str]] = None,
+        all_status: bool = False,
+        limit: Optional[int] = None,
+        fields: Optional[List[str]] = None,
+        cluster_name: Optional[str] = None) -> List[payloads.RequestPayload]:
     """Async version of api_status() that lists all requests."""
-    return await asyncio.to_thread(sdk.api_status, request_ids, all_status)
+    return await asyncio.to_thread(sdk.api_status, request_ids, all_status,
+                                   limit, fields, cluster_name)
 
 
 @usage_lib.entrypoint

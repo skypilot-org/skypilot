@@ -70,6 +70,13 @@ _AUTOSTOP_SCHEMA = {
                     'type': 'string',
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
+                },
+                'hook': {
+                    'type': 'string',
+                },
+                'hook_timeout': {
+                    'type': 'integer',
+                    'minimum': 1,
                 }
             },
         },
@@ -300,6 +307,9 @@ def _get_single_resources_schema():
             'network_tier': {
                 'type': 'string',
             },
+            'local_disk': {
+                'type': 'string',
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -337,7 +347,10 @@ def _get_single_resources_schema():
                     },
                     'tpu_vm': {
                         'type': 'boolean',
-                    }
+                    },
+                    'gcp_queued_resource': {
+                        'type': 'boolean',
+                    },
                 }
             },
             '_no_missing_accel_warnings': {
@@ -513,6 +526,17 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
+    # Refer to https://rclone.org/docs/#options for more information
+    # on rclone-specific nomenclature.
+    rclone_memory_units = ('B', 'K', 'M', 'G', 'T', 'P')
+    rclone_memory_pattern = (
+        '^[0-9]+('
+        f'{"|".join([unit.lower() for unit in rclone_memory_units])}|'
+        f'{"|".join([unit.upper() for unit in rclone_memory_units])})?$')
+    rclone_duration_pattern = (
+        r'^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
+        r'(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -567,6 +591,47 @@ def get_storage_schema():
                     },
                     'attach_mode': {
                         'type': 'string',
+                    },
+                    'mount_cached': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'transfers': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'buffer_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_age': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'vfs_read_ahead': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_streams': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'vfs_write_back': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
                     },
                 },
             },
@@ -674,7 +739,35 @@ def get_service_schema():
                 }]
             },
             'pool': {
-                'type': 'boolean',
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'workers': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
+                    'min_workers': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
+                    'queue_length_threshold': {
+                        'type': 'integer',
+                        'minimum': 1,
+                    },
+                    'max_workers': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
+                    'upscale_delay_seconds': {
+                        'type': 'number',
+                        'minimum': 0,
+                    },
+                    'downscale_delay_seconds': {
+                        'type': 'number',
+                        'minimum': 0,
+                    },
+                },
             },
             'replica_policy': {
                 'type': 'object',
@@ -1088,6 +1181,30 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_PRICING_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'cpu': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'memory': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'accelerators': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'type': 'number',
+                'minimum': 0
+            },
+        },
+    },
+}
+
 _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
@@ -1182,7 +1299,20 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         'items': {
             'type': 'string'
         },
-    }
+    },
+    'set_pod_resource_limits': {
+        # Can be:
+        # - false: do not set limits (default)
+        # - true: set limits equal to requests (multiplier of 1)
+        # - number: set limits to requests * multiplier
+        'oneOf': [{
+            'type': 'boolean',
+        }, {
+            'type': 'number',
+            'minimum': 1,
+        }],
+    },
+    'pricing': _PRICING_SCHEMA,
 }
 
 
@@ -1267,6 +1397,18 @@ def get_config_schema():
                         'type': 'string',
                     }, {
                         'type': 'null',
+                    }]
+                },
+                'vpc_names': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
                     }],
                 },
                 'use_ssm': {
@@ -1443,6 +1585,33 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'pricing': _PRICING_SCHEMA,
+                'cluster_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'pricing': _PRICING_SCHEMA,
+                            'partition_configs': {
+                                'type': 'object',
+                                'required': [],
+                                'properties': {},
+                                'additionalProperties': {
+                                    'type': 'object',
+                                    'required': [],
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'pricing': _PRICING_SCHEMA,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             }
         },
         'oci': {
@@ -1515,6 +1684,9 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             'project_id': {
+                                'type': 'string',
+                            },
+                            'subnet_id': {
                                 'type': 'string',
                             },
                             'fabric': {
@@ -1841,6 +2013,9 @@ def get_config_schema():
                 'type': 'integer',
                 'minimum': 1,
             },
+            'install_conda': {
+                'type': 'boolean',
+            },
         }
     }
 
@@ -1908,6 +2083,7 @@ def get_config_schema():
         else:
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
 
+    # TODO (kyuds): deprecated; remove v0.13.0
     data_schema = {
         'type': 'object',
         'required': [],

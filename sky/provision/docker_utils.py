@@ -1,6 +1,7 @@
 """Initialize docker containers on a remote node."""
 
 import dataclasses
+import re
 import shlex
 import time
 from typing import Any, Dict, List, Optional
@@ -47,6 +48,9 @@ INSTALL_AWS_CLI_CMD = (
     '-o "/tmp/awscliv2.zip" && '
     'unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install '
     '&& rm -rf /tmp/awscliv2.zip /tmp/aws)')
+
+# Pattern to extract SSH user from command output, handling MOTD contamination
+_DOCKER_USER_PATTERN = re.compile(r'SKYPILOT_DOCKER_USER: ([^\s\n]+)')
 
 
 def _extract_region_from_ecr_server(server: str) -> str:
@@ -159,8 +163,9 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
-        # SkyPilot: Add following options to enable fuse.
+        # SkyPilot: Add following options to enable fuse and resource limits.
         '--cap-add=SYS_ADMIN',
+        '--cap-add=SYS_RESOURCE',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
         '--entrypoint=/bin/bash',
@@ -434,6 +439,23 @@ class DockerInitializer:
             'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;',
             run_env='host')
 
+        # Detect the container's default user for SSH. We run without -u 0
+        # to get the actual default user not root. This ensures SSH connects
+        # as the correct user whose home directory and SSH keys we've set up.
+        # Pattern matching to prevent MOTD contamination and reliably
+        # parse docker user. Refer to CommandRunner::_get_remote_home_dir.
+        # Note: We use single quotes around the inner command and escape
+        # them to prevent $(whoami) from being expanded on the host VM.
+        docker_user_cmd = (f'{self.docker_cmd} exec {self.container_name} '
+                           'bash -c \'echo SKYPILOT_DOCKER_USER: $(whoami)\'')
+        docker_user_output = self._run(docker_user_cmd, separate_stderr=True)
+        docker_user_match = _DOCKER_USER_PATTERN.search(docker_user_output)
+        if docker_user_match:
+            docker_user = docker_user_match.group(1)
+        else:
+            raise ValueError('Failed to find Docker user identifier: '
+                             f'{docker_user_output}')
+
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
         # Append the host VM's authorized_keys to the container's authorized_keys.
         # This allows any machine that can ssh into the host VM to ssh into the
@@ -450,13 +472,16 @@ class DockerInitializer:
             f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
+            # Set ownership of .ssh to the detected docker user, since these
+            # commands run as root but SSH will connect as the default user
+            # who needs write access to ~/.ssh
+            f'chown -R {shlex.quote(docker_user)} ~/.ssh;'
             'sudo service ssh start;'
             'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
             f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 
         # SkyPilot: End of Setup Commands.
-        docker_user = self._run('whoami', run_env='docker')
         self.initialized = True
         return docker_user
 

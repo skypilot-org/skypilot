@@ -201,7 +201,7 @@ def push_dockerimage(local_tag, remote_name):
 def make_bash_from_multiline(codegen: str) -> str:
     """Makes a bash script from a multi-line string of commands.
 
-    Automatically includes conda setup prefixes.
+    Automatically includes conda setup prefixes if conda is installed.
     Args:
         codegen: str: multiline commands to be converted to a shell script
 

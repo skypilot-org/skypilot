@@ -2,6 +2,7 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import * as ReactDOMAll from 'react-dom';
 import dynamic from 'next/dynamic';
 import PropTypes from 'prop-types';
 import '@/app/globals.css';
@@ -16,10 +17,12 @@ const Layout = dynamic(
   { ssr: false }
 );
 
-// Expose React and ReactDOM to window for plugins to use
+// Expose React and ReactDOM to window for plugins to use.
+// We merge react-dom/client (createRoot, hydrateRoot) with react-dom
+// (createPortal, flushSync, etc.) so plugins have access to all exports.
 if (typeof window !== 'undefined') {
   window.React = React;
-  window.ReactDOM = ReactDOM;
+  window.ReactDOM = { ...ReactDOMAll, ...ReactDOM };
 }
 
 function App({ Component, pageProps }) {

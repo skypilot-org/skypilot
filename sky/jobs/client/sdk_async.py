@@ -36,7 +36,7 @@ async def launch(
     _need_confirmation: bool = False,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
-) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
+) -> Tuple[Optional[List[int]], Optional[backends.ResourceHandle]]:
     """Async version of launch() that launches a managed job."""
     request_id = await asyncio.to_thread(sdk.launch, task, name, pool, num_jobs,
                                          _need_confirmation)
@@ -90,12 +90,16 @@ async def cancel(
     job_ids: Optional[List[int]] = None,
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
+    pool: Optional[str] = None,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
     stream_logs: Optional[
         sdk_async.StreamConfig] = sdk_async.DEFAULT_STREAM_CONFIG,
 ) -> None:
     """Async version of cancel() that cancels managed jobs."""
     request_id = await asyncio.to_thread(sdk.cancel, name, job_ids, all,
-                                         all_users)
+                                         all_users, pool, graceful,
+                                         graceful_timeout)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:

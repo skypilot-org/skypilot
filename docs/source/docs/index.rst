@@ -306,6 +306,7 @@ Read the research:
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
    Using a Pool of Workers <../examples/pools>
+   Job Groups <../examples/job-groups>
 
 .. toctree::
    :hidden:
@@ -343,6 +344,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   SkyPilot Recipes <../reference/recipes>
    Migrating from Slurm <../reference/slurm-migration>
    External Links <../running-jobs/external-links>
    ../reference/async

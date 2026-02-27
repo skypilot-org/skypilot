@@ -79,6 +79,32 @@ def get_or_create_gpu_cluster(name: str, project_id: str, fabric: str) -> str:
     return cluster_id
 
 
+def get_subnet_id(region: str, project_id: str) -> str:
+    #  Check is there subnet if in config
+    subnet_id = skypilot_config.get_effective_region_config(cloud='nebius',
+                                                            region=region,
+                                                            keys=('subnet_id',),
+                                                            default_value=None)
+
+    service = nebius.vpc().SubnetServiceClient(nebius.sdk())
+    sub_nets = nebius.sync_call(
+        service.list(nebius.vpc().ListSubnetsRequest(parent_id=project_id,)))
+
+    # If subnet exists in this region return it else return first subnet
+    if subnet_id is not None:
+        for sub_net in sub_nets.items:
+            if sub_net.metadata.id == subnet_id:
+                return subnet_id
+        logger.warning(
+            f'Subnet ID "{subnet_id}" from config not found for region '
+            f'{region}. Falling back to the first available subnet.')
+
+    if not sub_nets.items:
+        raise ValueError(f'No subnets found for project {project_id} in region '
+                         f'{region}.')
+    return sub_nets.items[0].metadata.id
+
+
 def delete_cluster(name: str, region: str) -> None:
     """Delete a GPU cluster."""
     project_id = get_project_by_region(region)
@@ -276,10 +302,7 @@ def launch(cluster_name_on_cloud: str,
                 existing_filesystem=nebius.compute().ExistingFilesystem(
                     id=fs['filesystem_id'])))
 
-    service = nebius.vpc().SubnetServiceClient(nebius.sdk())
-    sub_net = nebius.sync_call(
-        service.list(nebius.vpc().ListSubnetsRequest(parent_id=project_id,)))
-
+    sub_net_id = get_subnet_id(region, project_id)
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     logger.debug(f'Creating instance {instance_name} in project {project_id}.')
     try:
@@ -303,7 +326,7 @@ def launch(cluster_name_on_cloud: str,
                     filesystems=filesystems_spec if filesystems_spec else None,
                     network_interfaces=[
                         nebius.compute().NetworkInterfaceSpec(
-                            subnet_id=sub_net.items[0].metadata.id,
+                            subnet_id=sub_net_id,
                             ip_address=nebius.compute().IPAddress(),
                             name='network-interface-0',
                             public_ip_address=nebius.compute().PublicIPAddress(

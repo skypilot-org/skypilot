@@ -151,6 +151,7 @@ def run_with_log(
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
     log_cmd: bool = False,
+    timeout: Optional[int] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str], Tuple[int, int]]:
     """Runs a command and logs its output to a file.
@@ -165,9 +166,15 @@ def run_with_log(
             enabled, lines are printed only when '\r' or '\n' is found.
         streaming_prefix: Optional prefix for each log line. Can contain {pid}
             placeholder which will be replaced with the subprocess PID.
+        timeout: Optional timeout in seconds. If the command does not complete
+            within this time, it will be terminated and TimeoutExpired will be
+            raised. None means no timeout (default).
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
+
+    Raises:
+        subprocess.TimeoutExpired: If the command times out.
     """
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
@@ -258,24 +265,65 @@ def run_with_log(
                         _handle_io_stream,
                         args=err_args,
                     )
-            if ctx is not None:
-                # When runs in a coroutine, always process the subprocess
-                # stream to:
-                # 1. handle context cancellation
-                # 2. redirect subprocess stdout/stderr to the contextual
-                #    stdout/stderr of current coroutine.
-                stdout, stderr = context_utils.pipe_and_wait_process(
-                    ctx,
-                    proc,
-                    stdout_stream_handler=stdout_stream_handler,
-                    stderr_stream_handler=stderr_stream_handler)
-            elif process_stream:
-                # When runs in a process, only process subprocess stream if
-                # necessary to avoid unnecessary stream handling overhead.
-                stdout, stderr = process_subprocess_stream(
-                    proc, stdout_stream_handler, stderr_stream_handler)
+            # Use a timer to enforce timeout during stream processing.
+            # Without this, process_subprocess_stream blocks until the process
+            # finishes, making the timeout at proc.wait() ineffective.
+            timeout_triggered = False
+            timer = None
+
+            def _timeout_handler():
+                nonlocal timeout_triggered
+                timeout_triggered = True
+                subprocess_utils.kill_children_processes(proc.pid)
+
+            if timeout is not None:
+                timer = threading.Timer(timeout, _timeout_handler)
+                timer.start()
+
+            try:
+                if ctx is not None:
+                    # When runs in a coroutine, always process the subprocess
+                    # stream to:
+                    # 1. handle context cancellation
+                    # 2. redirect subprocess stdout/stderr to the contextual
+                    #    stdout/stderr of current coroutine.
+                    stdout, stderr = context_utils.pipe_and_wait_process(
+                        ctx,
+                        proc,
+                        stdout_stream_handler=stdout_stream_handler,
+                        stderr_stream_handler=stderr_stream_handler)
+                elif process_stream:
+                    # When runs in a process, only process subprocess stream if
+                    # necessary to avoid unnecessary stream handling overhead.
+                    stdout, stderr = process_subprocess_stream(
+                        proc, stdout_stream_handler, stderr_stream_handler)
+            finally:
+                if timer is not None:
+                    timer.cancel()
+
+            # Check if timeout was triggered during stream processing
+            if timeout_triggered:
+                logger.error(
+                    f'Command timed out after {timeout} seconds: {cmd}')
+                raise subprocess.TimeoutExpired(cmd, timeout)
+
             # Ensure returncode is set.
-            proc.wait()
+            if ctx is not None or process_stream:
+                # Stream processing already waited for process completion, so
+                # proc.wait() will return immediately. We still call it to
+                # ensure proc.returncode is set.
+                proc.wait()
+            else:
+                # No stream processing - use proc.wait with timeout as primary
+                # timeout mechanism.
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Kill the process and all its children
+                    subprocess_utils.kill_children_processes(proc.pid)
+                    logger.error(
+                        f'Command timed out after {timeout} seconds: {cmd}')
+                    raise
             if require_outputs:
                 return proc.returncode, stdout, stderr
             return proc.returncode
@@ -415,13 +463,9 @@ sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = 2
 
 sky_env_vars_dict['SKYPILOT_TASK_ID'] = 'sky-2024-11-17-00-00-00-000001-cluster-2'
 sky_env_vars_dict['MODEL_NAME'] = 'resnet50'
-script = 'python train.py'
-if script is None:
-    script = ''
-rclone_flush_script = '\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi'
+script = 'python train.py\n__skypilot_user_exit_code=$?\n# Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)\n# findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses\n# rclone for normal mounts as well.\nif [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ] &&            [ -d ~/.sky/rclone_log ] &&            [ "$(ls -A ~/.sky/rclone_log)" ]; then\n    FLUSH_START_TIME=$(date +%s)\n    flushed=0\n    # extra second on top of --vfs-cache-poll-interval to\n    # avoid race condition between rclone log line creation and this check.\n    sleep 1\n    while [ $flushed -eq 0 ]; do\n        # sleep for the same interval as --vfs-cache-poll-interval\n        sleep 10\n        flushed=1\n        for file in ~/.sky/rclone_log/*; do\n            exitcode=0\n            tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?\n            if [ $exitcode -ne 0 ]; then\n                ELAPSED=$(($(date +%s) - FLUSH_START_TIME))\n                # Extract the last vfs cache status line to show what we\'re waiting for\n                CACHE_STATUS=$(tac $file | grep "vfs cache: cleaned:" -m 1 | sed \'s/.*vfs cache: cleaned: //\' 2>/dev/null)\n                # Extract currently uploading files from recent log lines (show up to 2 files)\n                UPLOADING_FILES=$(tac $file | head -30 | grep -E "queuing for upload" | head -2 | sed \'s/.*INFO  : //\' | sed \'s/: vfs cache:.*//\' | tr \'\\n\' \',\' | sed \'s/,$//\' | sed \'s/,/, /g\' 2>/dev/null)\n                # Build status message with available info\n                if [ -n "$CACHE_STATUS" ] && [ -n "$UPLOADING_FILES" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}] uploading: ${UPLOADING_FILES}"\n                elif [ -n "$CACHE_STATUS" ]; then\n                    echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) [${CACHE_STATUS}]"\n                else\n                    # Fallback: show last non-empty line from log\n                    LAST_LINE=$(tac $file | grep -v "^$" | head -1 | sed \'s/.*INFO  : //\' | sed \'s/.*ERROR : //\' | sed \'s/.*NOTICE: //\' 2>/dev/null)\n                    if [ -n "$LAST_LINE" ]; then\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s) ${LAST_LINE}"\n                    else\n                        echo "skypilot: cached mount is still uploading (elapsed: ${ELAPSED}s)"\n                    fi\n                fi\n                flushed=0\n                break\n            fi\n        done\n    done\n    TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))\n    echo "skypilot: cached mount upload complete (took ${TOTAL_FLUSH_TIME}s)"\nfi\nexit $__skypilot_user_exit_code'
 
 if script or True:
-    script += rclone_flush_script
     sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = 1
 
     # Signal files for setup/run synchronization:
@@ -439,7 +483,7 @@ if script or True:
     setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
     # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-    gpu_arg = f'--gpus-per-node=1' if 1 > 0 else ''
+    gpu_arg = f'--gpus-per-node=1'
 
     def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                               task_name=None, is_setup=False,
@@ -489,19 +533,36 @@ if script or True:
         # allocation. See:
         # https://support.schedmd.com/show_bug.cgi?id=14298
         # https://github.com/huggingface/datatrove/issues/248
+        cmd_parts = []
+        # Only unset SKY_RUNTIME_DIR for container runs. For non-container
+        # runs, we want to inherit the node-local SKY_RUNTIME_DIR set by
+        # SlurmCommandRunner to avoid SQLite WAL issues on shared filesystems.
+        if False:
+            cmd_parts.append('unset SKY_RUNTIME_DIR;')
+        cmd_parts.extend([
+            constants.SKY_SLURM_PYTHON_CMD,
+            '-m sky.skylet.executor.slurm',
+            runner_args,
+        ])
+        bash_cmd = shlex.quote(' '.join(cmd_parts))
         srun_cmd = (
             "unset $(env | awk -F= '/^SLURM_/ {print $1}') && "
             f'srun --export=ALL --quiet --unbuffered --kill-on-bad-exit --jobid=12345 '
             f'--job-name=sky-2{job_suffix} --ntasks-per-node=1 {extra_flags} '
-            f'{constants.SKY_SLURM_PYTHON_CMD} -m sky.skylet.executor.slurm {runner_args}'
+            f'/bin/bash -c {bash_cmd}'
         )
-        return srun_cmd, script_path
+
+        def cleanup():
+            if script_path is not None:
+                os.remove(script_path)
+
+        return srun_cmd, cleanup
 
     def run_thread_func():
         # This blocks until Slurm allocates resources (--exclusive)
         # --mem=0 to match RayCodeGen's behavior where we don't explicitly request memory.
         run_flags = f'--nodes=1 --cpus-per-task=4 --mem=0 {gpu_arg} --exclusive'
-        srun_cmd, task_script_path = build_task_runner_cmd(
+        srun_cmd, cleanup = build_task_runner_cmd(
             script, run_flags, '/sky/logs/tasks', sky_env_vars_dict,
             task_name='train_task',
             alloc_signal=alloc_signal_file,
@@ -516,8 +577,7 @@ if script or True:
             print(line, end='', flush=True)
         proc.wait()
 
-        if task_script_path is not None:
-            os.remove(task_script_path)
+        cleanup()
         return {'return_code': proc.returncode, 'pid': proc.pid}
 
     run_thread_result = {'result': None}
@@ -558,7 +618,7 @@ if script or True:
         # --overlap as we have already secured allocation with the srun for the run section,
         # and otherwise this srun would get blocked and deadlock.
         setup_flags = f'--overlap --nodes=1'
-        setup_srun, setup_script_path = build_task_runner_cmd(
+        setup_srun, setup_cleanup = build_task_runner_cmd(
             'pip install torch', setup_flags, '/sky/logs', {'SKYPILOT_TASK_ID': 'sky-2024-11-17-00-00-00-000001-cluster-2', 'MODEL_NAME': 'resnet50', 'SKYPILOT_NUM_NODES': '1'},
             is_setup=True
         )
@@ -572,8 +632,7 @@ if script or True:
             print(line, end='', flush=True)
         setup_proc.wait()
 
-        if setup_script_path is not None:
-            os.remove(setup_script_path)
+        setup_cleanup()
 
         setup_returncode = setup_proc.returncode
         if setup_returncode != 0:

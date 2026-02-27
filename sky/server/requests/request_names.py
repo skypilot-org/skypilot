@@ -13,6 +13,7 @@ class RequestName(str, enum.Enum):
     REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
     SLURM_NODE_INFO = 'slurm_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
+    KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'
     LIST_ACCELERATORS = 'list_accelerators'
     LIST_ACCELERATOR_COUNTS = 'list_accelerator_counts'
     OPTIMIZE = 'optimize'
@@ -30,6 +31,7 @@ class RequestName(str, enum.Enum):
     CLUSTER_JOB_CANCEL = 'cancel'
     CLUSTER_JOB_LOGS = 'logs'
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
+    CLUSTER_AUTOSTOP_LOGS = 'autostop_logs'
     CLUSTER_COST_REPORT = 'cost_report'
     CLUSTER_EVENTS = 'cluster_events'
     # Storage requests
@@ -76,6 +78,13 @@ class RequestName(str, enum.Enum):
     # SSH node pools requests
     SSH_NODE_POOLS_UP = 'ssh_node_pools.up'
     SSH_NODE_POOLS_DOWN = 'ssh_node_pools.down'
+    # Recipes requests
+    RECIPE_LIST = 'recipes.list'
+    RECIPE_GET = 'recipes.get'
+    RECIPE_CREATE = 'recipes.create'
+    RECIPE_UPDATE = 'recipes.update'
+    RECIPE_DELETE = 'recipes.delete'
+    RECIPE_PIN = 'recipes.pin'
     # Internal request daemons
     REQUEST_DAEMON_STATUS_REFRESH = 'status-refresh'
     REQUEST_DAEMON_VOLUME_REFRESH = 'volume-refresh'

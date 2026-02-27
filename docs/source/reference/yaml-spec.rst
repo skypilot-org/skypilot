@@ -49,6 +49,12 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`autostop <yaml-spec-resources-autostop>`:
       idle_minutes: 10
       wait_for: none
+      :ref:`hook <auto-stop-hooks>`: |
+        cd my-code-base
+        git add .
+        git commit -m "Auto-commit before shutdown"
+        git push
+      hook_timeout: 300
 
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - infra: aws/us-west-2
@@ -270,6 +276,12 @@ Format:
     - ``jobs_and_ssh`` (default): Wait for in‑progress jobs and SSH connections to finish
     - ``jobs``: Only wait for in‑progress jobs
     - ``none``: Wait for nothing; autostop right after ``idle_minutes``
+  - ``hook``: Optional script to execute before autostop. The script runs on the remote cluster before stopping or tearing down. If the hook fails, autostop will still proceed but a warning will be logged.
+
+    See :ref:`Autostop hooks <auto-stop-hooks>` for detailed explanation and examples.
+
+  - ``hook_timeout``: Timeout in seconds for hook execution (default: 3600 = 1 hour, minimum: 1).
+    If the hook exceeds this timeout, it will be terminated and autostop continues.
 
 ``<unit>`` can be one of:
 - ``m``: minutes (default if not specified)
@@ -317,6 +329,20 @@ OR
       idle_minutes: 10
       wait_for: none  # Stop after 10 minutes, regardless of running jobs or SSH connections
 
+OR
+
+.. code-block:: yaml
+
+  resources:
+    autostop:
+      idle_minutes: 10
+      hook: |
+        cd my-code-base
+        git add .
+        git commit -m "Auto-commit before shutdown"
+        git push
+      hook_timeout: 300
+
 
 .. _yaml-spec-resources-accelerators:
 
@@ -325,7 +351,7 @@ OR
 
 Accelerator name and count per node (optional).
 
-Use ``sky show-gpus`` to view available accelerator configurations.
+Use ``sky gpus list`` to view available accelerator configurations.
 
 The following three ways are valid for specifying accelerators for a cluster:
 
@@ -912,7 +938,7 @@ We can also specify the exit codes that should always trigger recovery, regardle
 
 We can specify multiple exit codes:
 
-.. code-block:: yaml  
+.. code-block:: yaml
 
   resources:
     job_recovery:
@@ -1426,3 +1452,125 @@ Port to run your service on each replica.
 
   resources:
     ports: 8080
+
+.. _pool-yaml-spec:
+
+Job Pools
+=========
+
+To define a YAML for use with :ref:`job pools <pool>`, use previously mentioned fields to describe each worker, then add a pool section to configure the pool's scaling behavior.
+
+Syntax
+
+.. parsed-literal::
+
+  pool:
+    :ref:`workers <yaml-spec-pool-workers>`: 3
+
+  pool:
+    :ref:`min_workers <yaml-spec-pool-min-workers>`: 1
+    :ref:`max_workers <yaml-spec-pool-max-workers>`: 10
+    :ref:`queue_length_threshold <yaml-spec-pool-queue-length-threshold>`: 5
+    :ref:`upscale_delay_seconds <yaml-spec-pool-upscale-delay-seconds>`: 300
+    :ref:`downscale_delay_seconds <yaml-spec-pool-downscale-delay-seconds>`: 1200
+
+
+Fields
+----------
+
+.. _yaml-spec-pool-workers:
+
+``pool.workers``
+~~~~~~~~~~~~~~~~
+
+Number of workers in the pool.
+
+If ``min_workers`` and ``max_workers`` are not specified, the pool maintains a fixed number of workers with no autoscaling. If autoscaling is enabled (``min_workers``/``max_workers`` are set), this serves as the initial number of workers.
+
+.. code-block:: yaml
+
+  pool:
+    workers: 3
+
+
+.. _yaml-spec-pool-min-workers:
+
+``pool.min_workers``
+~~~~~~~~~~~~~~~~~~~~
+
+Minimum number of workers when autoscaling is enabled (required with ``max_workers``).
+
+The pool never scales below this count. Setting to ``0`` enables **scale-to-zero**: the pool terminates all workers when idle, and provisions workers automatically when new jobs are submitted.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+
+
+.. _yaml-spec-pool-max-workers:
+
+``pool.max_workers``
+~~~~~~~~~~~~~~~~~~~~
+
+Maximum number of workers when autoscaling is enabled (required with ``min_workers``).
+
+The pool never scales above this count. Must be greater than or equal to ``min_workers``.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+
+
+.. _yaml-spec-pool-queue-length-threshold:
+
+``pool.queue_length_threshold``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Number of pending jobs that triggers upscaling (default: 1).
+
+When the number of pending jobs exceeds this threshold, the pool scales up. Requires ``max_workers`` to be set.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+    queue_length_threshold: 5
+
+
+.. _yaml-spec-pool-upscale-delay-seconds:
+
+``pool.upscale_delay_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Delay in seconds between upscaling decisions (default: 300).
+
+Controls how frequently the pool evaluates whether to add workers.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+    upscale_delay_seconds: 60
+
+
+.. _yaml-spec-pool-downscale-delay-seconds:
+
+``pool.downscale_delay_seconds``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Delay in seconds between downscaling decisions (default: 1200).
+
+Controls how frequently the pool evaluates whether to remove workers.
+
+.. code-block:: yaml
+
+  pool:
+    min_workers: 1
+    max_workers: 10
+    downscale_delay_seconds: 600

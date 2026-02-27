@@ -23,12 +23,16 @@ import {
   VolumeIcon,
   KueueIcon,
   KeyIcon,
+  ShieldIcon,
+  PieChartIcon,
+  RepeatIcon,
 } from '@/components/elements/icons';
-import { Settings, User, Clock } from 'lucide-react';
+import { Settings, User, Clock, FileCode, Activity } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
   key: KeyIcon,
+  shield: ShieldIcon,
   server: ServerIcon,
   briefcase: BriefcaseIcon,
   chip: ChipIcon,
@@ -37,12 +41,17 @@ const ICON_MAP = {
   volume: VolumeIcon,
   clock: Clock,
   kueue: KueueIcon,
+  filecode: FileCode,
+  repeat: RepeatIcon,
+  piechart: PieChartIcon,
+  activity: Activity,
 };
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { CustomTooltip } from '@/components/utils';
 import { useMobile } from '@/hooks/useMobile';
 import { UpgradeHint } from '@/components/elements/version-display';
 import { useGroupedNavLinks, usePluginRoutes } from '@/plugins/PluginProvider';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 // Create a context for sidebar state management
 const SidebarContext = createContext(null);
@@ -264,6 +273,13 @@ export function TopBar() {
   };
 
   const renderPluginIcon = (icon, className) => {
+    // Handle React elements directly (allows plugins to provide their own icons)
+    if (React.isValidElement(icon)) {
+      return React.cloneElement(icon, {
+        className: [icon.props?.className, className].filter(Boolean).join(' '),
+      });
+    }
+    // Handle string names via ICON_MAP (backward compatible)
     const IconComponent = ICON_MAP[icon];
     if (IconComponent) {
       return React.createElement(IconComponent, { className });
@@ -522,6 +538,15 @@ export function TopBar() {
               <div className="border-l border-gray-200 h-6 mx-1"></div>
 
               <Link
+                href="/recipes"
+                className={getLinkClasses('/recipes')}
+                prefetch={false}
+              >
+                <FileCode className="w-4 h-4" />
+                <span>Recipes</span>
+              </Link>
+
+              <Link
                 href="/infra"
                 className={getLinkClasses('/infra')}
                 prefetch={false}
@@ -567,7 +592,7 @@ export function TopBar() {
                   className="text-sm text-muted-foreground"
                 >
                   <a
-                    href="https://skypilot.readthedocs.io/en/latest/"
+                    href="https://docs.skypilot.co/en/latest/"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center align-middle border-b-2 border-transparent px-1 pt-1 space-x-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
@@ -634,9 +659,9 @@ export function TopBar() {
                   className="text-sm text-muted-foreground"
                 >
                   <Link
-                    href="/config"
+                    href="/settings"
                     className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
-                      isActivePath('/config')
+                      isActivePath('/settings')
                         ? 'text-blue-600 hover:bg-gray-100'
                         : 'text-gray-600 hover:bg-gray-100'
                     }`}
@@ -710,6 +735,13 @@ export function TopBar() {
                     >
                       See all users
                     </Link>
+                    <PluginSlot
+                      name="user-menu"
+                      wrapperClassName="contents"
+                      context={{
+                        closeDropdown: () => setIsDropdownOpen(false),
+                      }}
+                    />
                   </div>
                 )}
               </div>
@@ -783,6 +815,20 @@ export function TopBar() {
                 <div className="border-t border-gray-200 my-4"></div>
 
                 <Link
+                  href="/recipes"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/recipes')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <FileCode className="w-5 h-5 mr-3" />
+                  Recipes
+                </Link>
+
+                <Link
                   href="/infra"
                   className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
                     isActivePath('/infra')
@@ -845,7 +891,7 @@ export function TopBar() {
 
                 {/* External links in mobile */}
                 <a
-                  href="https://skypilot.readthedocs.io/en/latest/"
+                  href="https://docs.skypilot.co/en/latest/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-100 hover:text-blue-600 rounded-md transition-colors"
@@ -878,9 +924,9 @@ export function TopBar() {
                 </a>
 
                 <Link
-                  href="/config"
+                  href="/settings"
                   className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
-                    isActivePath('/config')
+                    isActivePath('/settings')
                       ? 'bg-blue-50 text-blue-600'
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}

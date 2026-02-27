@@ -2,14 +2,29 @@
 
 import collections
 import dataclasses
+import enum
 import getpass
 import os
-from typing import Any, ClassVar, Dict, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 import pydantic
 
 from sky.skylet import constants
 from sky.utils import common_utils
+
+
+class UserType(enum.Enum):
+    """Enum for user types."""
+    # Internal system users (SERVER_ID, SKYPILOT_SYSTEM_USER_ID)
+    SYSTEM = 'system'
+    # Users authenticated by basic auth on the API server that have a password
+    BASIC = 'basic'
+    # Service accounts
+    SA = 'sa'
+    # Users authenticated via SSO
+    SSO = 'sso'
+    # Users authenticated by basic auth on the ingress that have no password
+    LEGACY = 'legacy'
 
 
 @dataclasses.dataclass
@@ -21,26 +36,24 @@ class User:
     name: Optional[str] = None
     password: Optional[str] = None
     created_at: Optional[int] = None
+    user_type: Optional[str] = None
 
     def __init__(
-            self,
-            id: str,  # pylint: disable=redefined-builtin
-            name: Optional[str] = None,
-            password: Optional[str] = None,
-            created_at: Optional[int] = None):
+        self,
+        id: str,  # pylint: disable=redefined-builtin
+        name: Optional[str] = None,
+        password: Optional[str] = None,
+        created_at: Optional[int] = None,
+        user_type: Optional[str] = None,
+    ):
         self.id = id.strip().lower()
         self.name = name
         self.password = password
         self.created_at = created_at
+        self.user_type = user_type
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'id': self.id, 'name': self.name}
-
-    def to_env_vars(self) -> Dict[str, Any]:
-        return {
-            constants.USER_ID_ENV_VAR: self.id,
-            constants.USER_ENV_VAR: self.name,
-        }
+        return {'id': self.id, 'name': self.name, 'user_type': self.user_type}
 
     @classmethod
     def get_current_user(cls) -> 'User':
@@ -79,6 +92,11 @@ class KubernetesNodeInfo:
     memory_free_gb: Optional[float] = None
     # Whether the node is ready (all conditions are satisfied)
     is_ready: bool = True
+    # Whether the node is cordoned (spec.unschedulable is true)
+    is_cordoned: bool = False
+    # List of taints on the node, each taint is a dict with 'key', 'value',
+    # 'effect'
+    taints: Optional[List[Dict[str, Any]]] = None
 
 
 @dataclasses.dataclass

@@ -28,6 +28,7 @@ from typing import Any, Dict
 import uuid
 
 import colorama
+import filelock
 
 from sky import clouds
 from sky import exceptions
@@ -228,9 +229,14 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     with open(public_key_path, 'r', encoding='utf-8') as f:
         public_key = f.read().strip()
     prefix = f'sky-key-{common_utils.get_user_hash()}'
-    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
-    if not exists:
-        lambda_client.register_ssh_key(name, public_key)
+
+    lock_path = os.path.expanduser(
+        '~/.sky/locks/lambda-cloud-ssh-key-registration.lock')
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with filelock.FileLock(lock_path):
+        name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
+        if not exists:
+            lambda_client.register_ssh_key(name, public_key)
 
     config['auth']['remote_key_name'] = name
     return config

@@ -1478,6 +1478,19 @@ def test_resources_add_subtract_with_none():
     assert result.accelerators == {'V100': 1.0}
 
 
+def test_inferred_resource_not_copied():
+    """Test that when accelerator is None and only inferred by machine type,
+    the inferred accelerator values are not copied."""
+    r1 = Resources(instance_type='a2-highgpu-1g', cloud=clouds.GCP())
+    assert r1.accelerators == {'A100': 1}
+    assert r1._accelerators is None
+
+    override = {'instance_type': 'g2-standard-4'}
+    r2 = r1.copy(**override)
+    assert r2.accelerators == {'L4': 1}
+    assert r2._accelerators is None
+
+
 @mock.patch(
     'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies')
 def test_kubernetes_end_to_end_make_deploy_variables(mock_check_deps,

@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 27  # add slurm_cluster_name param to GPU availability API
+API_VERSION = 39  # add graceful flag for managed jobs
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -29,6 +29,9 @@ API_VERSION_HEADER = 'X-SkyPilot-API-Version'
 
 # The HTTP header name for the SkyPilot version of the sender.
 VERSION_HEADER = 'X-SkyPilot-Version'
+
+# Minimum client API version required to launch recipes.
+MIN_RECIPE_LAUNCH_API_VERSION = 33
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -62,9 +65,35 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
 
+# Timeout for CLI authentication sessions (polling-based auth flow).
+# Used by both client (polling timeout) and server (session expiration).
+AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes
+
 # Cookie header for stream request id.
 STREAM_REQUEST_HEADER = 'X-SkyPilot-Stream-Request-ID'
 
 # Valid empty values for pickled fields (base64-encoded pickled None)
 # base64.b64encode(pickle.dumps(None)).decode('utf-8')
 EMPTY_PICKLED_VALUE = 'gAROLg=='
+
+# We do not support setting these in config.yaml because:
+# 1. config.yaml can be updated dynamically, but auth middleware does not
+#    support hot reload yet.
+# 2. If we introduce hot reload for auth middleware, bad config might
+#    invalidate all authenticated sessions and thus cannot be rolled back
+#    by API users.
+# TODO(aylei): we should introduce server.yaml for static server admin config,
+# which is more structured than multiple environment variables and can be less
+# confusing to users.
+OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
+OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
+
+# The websockets library (used by uvicorn for WebSocket upgrades) defaults to
+# MAX_LINE_LENGTH=8192 bytes per header line. Enterprise SSO cookies from
+# oauth2proxy (Azure AD, Okta, etc.) commonly exceed 8KB, causing WebSocket
+# upgrade requests to be rejected with HTTP 400. Regular HTTP requests (parsed
+# by h11 with a 16KB default) are unaffected. These constants raise the limit
+# so that WebSocket upgrades succeed with large auth cookies.
+# The env vars are read by websockets at import time.
+WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
+WEBSOCKETS_MAX_NUM_HEADERS = '256'
