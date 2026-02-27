@@ -31,9 +31,9 @@ export function useDismissedItems(storageKey) {
     async function fetchDismissed() {
       try {
         const ids = await apiClient.fetch(
-          `/dashboard/dismissed_items/${itemType}`,
-          {},
-          'GET'
+          `/dashboard/dismissed_items/get`,
+          { item_type: itemType },
+          'POST'
         );
         if (isMounted && Array.isArray(ids)) {
           setDismissedIds(new Set(ids.map(String)));

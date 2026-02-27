@@ -1002,4 +1002,4 @@ class RecipePinBody(RequestBody):
 class DashboardDismissedItemBody(RequestBody):
     """The request body for dashboard dismissed items."""
     item_type: str
-    item_id: str
+    item_id: Optional[str] = None
