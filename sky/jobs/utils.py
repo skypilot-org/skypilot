@@ -11,8 +11,12 @@ import enum
 import os
 import pathlib
 import re
+import select
 import shlex
+import signal
+import sys
 import textwrap
+import threading
 import time
 import traceback
 import typing
@@ -971,58 +975,68 @@ def stream_logs_by_id(
         See exceptions.JobExitCode for possible exit codes.
     """
 
-    # Record the initial parent PID so we can detect when the parent
-    # process dies (e.g., kubectl exec session disconnects). When the
-    # parent dies, this process gets reparented to init (PID 1) or a
-    # subreaper, and we should exit to avoid leaking processes.
-    initial_parent_pid = os.getppid()
+    # Start a background watchdog thread that detects when the kubectl
+    # exec connection has been dropped (client disconnect). On Kubernetes,
+    # kubectl exec -i does not allocate a PTY, so no SIGHUP is sent when
+    # the connection drops. The only signal is that stdin reaches EOF
+    # (the kubelet closes the stdin pipe). This thread monitors stdin and
+    # terminates the process when disconnection is detected, preventing
+    # leaked stream_logs processes on the controller. Changing the exec call to
+    # also include -t does not result in the kubelet sending a SIGHUP to the
+    # remote end of the connection.
+    #
+    # The API server now passes stdin=subprocess.PIPE (instead of
+    # DEVNULL) to kubectl exec -i, so stdin on the controller is a live
+    # pipe that only reaches EOF when the connection actually drops.
+    #
+    # For SSH controllers, stdin is a PTY (from ssh -tt), so SIGHUP
+    # handles cleanup natively. We only enable stdin EOF monitoring when
+    # stdin is a pipe (not a TTY), to avoid false positives from PTY
+    # edge cases.
+    _check_stdin_eof = False
+    try:
+        _check_stdin_eof = not os.isatty(sys.stdin.fileno())
+    except (ValueError, OSError):
+        # stdin is already closed or invalid — not useful for monitoring
+        pass
 
-    def _is_orphaned() -> bool:
-        """Check if this process has been orphaned.
-
-        Detects two cases:
-        1. Parent PID changed (process reparented to init/subreaper)
-        2. stdin closed/EOF (kubectl exec -i connection dropped). When
-           kubectl exec -i disconnects, stdin gets EOF but no SIGHUP is
-           sent (no PTY), so the process tree stays alive. Checking stdin
-           detects this.
-        """
-        if os.getppid() != initial_parent_pid:
-            return True
-        # Check if stdin has been closed (kubectl exec -i disconnect).
-        # When the kubectl exec connection drops, the kubelet closes the
-        # stdin pipe, making it readable with EOF.
-        import select
-        import sys
-        try:
-            readable, _, _ = select.select([sys.stdin], [], [], 0)
-            if readable:
-                data = os.read(sys.stdin.fileno(), 1)
-                if not data:
-                    # EOF on stdin means the connection was dropped
-                    return True
-        except (ValueError, OSError):
-            # stdin already closed or invalid
-            return True
-        return False
-
-    def _sleep_with_orphan_check(seconds: float) -> None:
-        """Sleep for the given duration, but exit early if orphaned."""
-        check_interval = 5
-        elapsed = 0.0
-        while elapsed < seconds:
-            if _is_orphaned():
+    def _orphan_watchdog() -> None:
+        """Background thread that monitors for connection drop."""
+        initial_parent_pid = os.getppid()
+        while True:
+            time.sleep(5)
+            # Check 1: Parent PID changed (reparented to init/subreaper)
+            if os.getppid() != initial_parent_pid:
+                logger.info('Parent process died, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
                 return
-            sleep_time = min(check_interval, seconds - elapsed)
-            time.sleep(sleep_time)
-            elapsed += sleep_time
+            # Check 2: stdin EOF (kubectl exec -i connection dropped).
+            # Only checked when stdin is a pipe (Kubernetes), not a TTY
+            # (SSH). With SSH -tt, the PTY delivers SIGHUP on disconnect,
+            # so this check is unnecessary and could cause false positives.
+            if not _check_stdin_eof:
+                continue
+            try:
+                readable, _, _ = select.select([sys.stdin], [], [], 0)
+                if readable:
+                    data = os.read(sys.stdin.fileno(), 1)
+                    if not data:
+                        logger.info(
+                            'stdin EOF detected (connection dropped), '
+                            'terminating.')
+                        os.kill(os.getpid(), signal.SIGTERM)
+                        return
+            except (ValueError, OSError):
+                logger.info('stdin closed, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+    watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
         # job will be terminated momentarily anyway so we don't really care.
-        if _is_orphaned():
-            logger.info('Parent process died, exiting log streaming.')
-            return False
         return (not status.is_terminal() and
                 status != managed_job_state.ManagedJobStatus.CANCELLING)
 
@@ -1210,7 +1224,7 @@ def stream_logs_by_id(
                 if msg != prev_msg:
                     status_display.update(msg)
                     prev_msg = msg
-                _sleep_with_orphan_check(JOB_STATUS_CHECK_GAP_SECONDS)
+                time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
@@ -1276,10 +1290,7 @@ def stream_logs_by_id(
                         while not is_managed_job_status_updated(
                                 managed_job_status :=
                                 managed_job_state.get_status(job_id)):
-                            _sleep_with_orphan_check(
-                                JOB_STATUS_CHECK_GAP_SECONDS)
-                            if _is_orphaned():
-                                break
+                            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                         assert managed_job_status is not None, (
                             job_id, managed_job_status)
                         continue
@@ -1311,9 +1322,7 @@ def stream_logs_by_id(
                             managed_job_state.get_latest_task_id_status(job_id))
                         if original_task_id != task_id:
                             break
-                        _sleep_with_orphan_check(JOB_STATUS_CHECK_GAP_SECONDS)
-                        if _is_orphaned():
-                            break
+                        time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                     assert managed_job_status is not None, (job_id, task_id,
                                                             managed_job_status)
                     continue
@@ -1344,7 +1353,7 @@ def stream_logs_by_id(
             # controller, and check the managed job queue again.
             # Wait a bit longer than the controller, so as to make sure the
             # managed job state is updated.
-            _sleep_with_orphan_check(3 * JOB_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, (job_id, managed_job_status)
 
