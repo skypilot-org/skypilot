@@ -57,4 +57,4 @@ dag.set_execution(sky.DagExecution.PARALLEL)
 
 # -- Launch -----------------------------------------------------------
 
-sky.jobs.launch(dag)
+sky.stream_and_get(sky.jobs.launch(dag))

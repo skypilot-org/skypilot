@@ -1,0 +1,1 @@
+../../generated-examples/job-group-sdk.md

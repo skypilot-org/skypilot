@@ -47,4 +47,4 @@ dag.termination_delay = '10s'
 
 # -- Launch -----------------------------------------------------------
 
-sky.jobs.launch(dag)
+sky.stream_and_get(sky.jobs.launch(dag))
