@@ -172,7 +172,8 @@ class Paperspace(clouds.Cloud):
                                       resources_utils.DiskTier] = None,
                                   local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+                                  zone: Optional[str] = None,
+                                  use_spot: bool = False) -> Optional[str]:
         """Returns the default instance type for Paperspace."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
@@ -180,6 +181,7 @@ class Paperspace(clouds.Cloud):
                                                  local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
+                                                 use_spot=use_spot,
                                                  clouds='paperspace')
 
     @classmethod
@@ -250,7 +252,8 @@ class Paperspace(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 local_disk=resources.local_disk,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:

@@ -162,6 +162,7 @@ class Shadeform(clouds.Cloud):
         local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        use_spot: bool = False,
     ) -> Optional[str]:
         """Get default instance type."""
         del disk_tier, local_disk  # Not supported
@@ -170,6 +171,7 @@ class Shadeform(clouds.Cloud):
                                                  disk_tier=None,
                                                  region=region,
                                                  zone=zone,
+                                                 use_spot=use_spot,
                                                  clouds='shadeform')
 
     @classmethod
@@ -375,7 +377,8 @@ class Shadeform(clouds.Cloud):
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
                 region=resources.region,
-                zone=resources.zone)
+                zone=resources.zone,
+                use_spot=resources.use_spot)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.

@@ -157,6 +157,7 @@ class Vast(clouds.Cloud):
             local_disk: Optional[str] = None,
             region: Optional[str] = None,
             zone: Optional[str] = None,
+            use_spot: bool = False,
             datacenter_only: bool = False) -> Optional[str]:
         """Returns the default instance type for Vast."""
         # pylint: disable=import-outside-toplevel
@@ -168,6 +169,7 @@ class Vast(clouds.Cloud):
             local_disk=local_disk,
             region=region,
             zone=zone,
+            use_spot=use_spot,
             datacenter_only=datacenter_only)
 
     @classmethod
@@ -269,6 +271,7 @@ class Vast(clouds.Cloud):
                 local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone,
+                use_spot=resources.use_spot,
                 datacenter_only=datacenter_only)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help

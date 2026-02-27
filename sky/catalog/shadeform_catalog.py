@@ -100,12 +100,13 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               disk_tier: Optional[str] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+                              zone: Optional[str] = None,
+                              use_spot: bool = False) -> Optional[str]:
     """Get default instance type based on requirements."""
     del disk_tier, local_disk  # Shadeform doesn't support custom disk tiers yet
     return _call_or_default(
         lambda: common.get_instance_type_for_cpus_mem_impl(
-            _get_df(), cpus, memory, region, zone), None)
+            _get_df(), cpus, memory, region, zone, use_spot), None)
 
 
 def get_accelerators_from_instance_type(

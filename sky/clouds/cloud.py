@@ -380,7 +380,8 @@ class Cloud:
                                       resources_utils.DiskTier] = None,
                                   local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
-                                  zone: Optional[str] = None) -> Optional[str]:
+                                  zone: Optional[str] = None,
+                                  use_spot: bool = False) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory,
         disk tier, local disk, region, and zone.
 
@@ -399,6 +400,9 @@ class Cloud:
         type that supports NVMe compatible 300GB+ on-instance storage. This is
         different from disk_tier in that local disks are directly attached to
         underlying VMs.
+
+        If use_spot is True, instances are sorted by spot price instead of
+        on-demand price.
 
         When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default

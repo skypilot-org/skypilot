@@ -107,7 +107,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
                                   resources_utils.DiskTier] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+                              zone: Optional[str] = None,
+                              use_spot: bool = False) -> Optional[str]:
     del local_disk  # unused
     if cpus is None:
         cpus = f'{oci_utils.oci_config.DEFAULT_NUM_VCPUS}+'
@@ -132,7 +133,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     logger.debug(f'# get_default_instance_type: {df}')
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio,
-                                                      region, zone)
+                                                      region, zone, use_spot)
 
 
 def get_accelerators_from_instance_type(
