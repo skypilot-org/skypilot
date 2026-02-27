@@ -993,9 +993,9 @@ def stream_logs_by_id(
     # handles cleanup natively. We only enable stdin EOF monitoring when
     # stdin is a pipe (not a TTY), to avoid false positives from PTY
     # edge cases.
-    _check_stdin_eof = False
+    check_stdin_eof = False
     try:
-        _check_stdin_eof = not os.isatty(sys.stdin.fileno())
+        check_stdin_eof = not os.isatty(sys.stdin.fileno())
     except (ValueError, OSError):
         # stdin is already closed or invalid — not useful for monitoring
         pass
@@ -1014,16 +1014,15 @@ def stream_logs_by_id(
             # Only checked when stdin is a pipe (Kubernetes), not a TTY
             # (SSH). With SSH -tt, the PTY delivers SIGHUP on disconnect,
             # so this check is unnecessary and could cause false positives.
-            if not _check_stdin_eof:
+            if not check_stdin_eof:
                 continue
             try:
                 readable, _, _ = select.select([sys.stdin], [], [], 0)
                 if readable:
                     data = os.read(sys.stdin.fileno(), 1)
                     if not data:
-                        logger.info(
-                            'stdin EOF detected (connection dropped), '
-                            'terminating.')
+                        logger.info('stdin EOF detected (connection dropped), '
+                                    'terminating.')
                         os.kill(os.getpid(), signal.SIGTERM)
                         return
             except (ValueError, OSError):
