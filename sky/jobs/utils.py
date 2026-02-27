@@ -990,12 +990,26 @@ def stream_logs_by_id(
     # pipe that only reaches EOF when the connection actually drops.
     #
     # For SSH controllers, stdin is a PTY (from ssh -tt), so SIGHUP
-    # handles cleanup natively. We only enable stdin EOF monitoring when
-    # stdin is a pipe (not a TTY), to avoid false positives from PTY
-    # edge cases.
+    # handles cleanup natively. For consolidation mode or other local
+    # invocations, stdin may be /dev/null or already closed (EOF). We
+    # check at startup: if stdin is already at EOF, we skip stdin
+    # monitoring entirely to avoid false positives. Only a live stdin
+    # (not yet at EOF) is worth monitoring this is the case for
+    # kubectl exec -i with stdin=subprocess.PIPE.
     check_stdin_eof = False
     try:
-        check_stdin_eof = not os.isatty(sys.stdin.fileno())
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+        if readable:
+            # stdin is immediately readable check if it's already EOF
+            data = os.read(sys.stdin.fileno(), 1)
+            if data:
+                # Got actual data (unexpected but harmless); stdin is live
+                check_stdin_eof = True
+            # else: EOF at startup, don't monitor
+        else:
+            # stdin is not immediately readable it's a live pipe/TTY
+            # waiting for input, meaning we have a real connection
+            check_stdin_eof = True
     except (ValueError, OSError):
         # stdin is already closed or invalid — not useful for monitoring
         pass
