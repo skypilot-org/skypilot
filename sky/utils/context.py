@@ -239,8 +239,14 @@ class ContextualEnviron(MutableMapping[str, str]):
     def __iter__(self) -> Iterator[str]:
 
         def iter_from_context(ctx: SkyPilotContext) -> Iterator[str]:
+            # Snapshot env_overrides to avoid RuntimeError: dictionary
+            # changed size during iteration when another thread sharing
+            # the same SkyPilotContext modifies env_overrides between
+            # generator yields. This mirrors the thread-safety pattern
+            # used by os._Environ.__iter__ (which snapshots via list()).
+            overrides_snapshot = list(ctx.env_overrides.items())
             deleted_keys = set()
-            for key, value in ctx.env_overrides.items():
+            for key, value in overrides_snapshot:
                 if value is None:
                     deleted_keys.add(key)
                 else:
@@ -296,14 +302,23 @@ class ContextualEnviron(MutableMapping[str, str]):
         copied = self._environ.copy()
         ctx = get()
         if ctx is not None:
-            for key in ctx.env_overrides:
-                if ctx.env_overrides[key] is None:
-                    copied.pop(key)
+            # Snapshot to avoid RuntimeError from concurrent modification.
+            overrides_snapshot = dict(ctx.env_overrides)
+            for key, value in overrides_snapshot.items():
+                if value is None:
+                    copied.pop(key, None)
                 else:
-                    copied[key] = ctx.env_overrides[key]
+                    copied[key] = value
         return copied
 
     def setdefault(self, key: str, default: str) -> str:
+        ctx = get()
+        if ctx is not None:
+            try:
+                return self[key]
+            except KeyError:
+                self[key] = default
+                return default
         return self._environ.setdefault(key, default)
 
     def __ior__(self, other):
