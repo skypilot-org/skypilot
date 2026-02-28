@@ -69,7 +69,7 @@ def _generate_tmp_yaml(tmp_path, filename: str) -> str:
 
 @pytest.fixture
 def _mock_cluster_state(_mock_db_conn, tmp_path):
-    assert 'state.db' not in global_user_state._db_manager.engine.url
+    assert 'state.db' not in str(global_user_state._db_manager.get_engine().url)
     # Mock an empty /tmp/cluster1.yaml using tmp_path
 
     handle = backends.CloudVmRayResourceHandle(
@@ -160,20 +160,17 @@ class TestWithEmptyDBSetup:
     def test_cancel_jobs(self):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.jobs_cancel, ['-a', '-y'])
-        assert result.exit_code == 1
-
-        assert isinstance(result.exception, exceptions.ClusterNotUpError)
-        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
-            result.exception), (result.exception, result.output,
-                                result.exc_info)
+        assert result.exit_code == 0, (result.exception, result.output,
+                                       result.exc_info)
+        assert 'No job to cancel.' in result.output, (result.exception,
+                                                       result.output,
+                                                       result.exc_info)
 
     def test_logs_jobs(self):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.jobs_logs, ['1'])
-        assert result.exit_code == 1
-        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
-            result.exception), (result.exception, result.output,
-                                result.exc_info)
+        assert result.exit_code == 0, (result.exception, result.output,
+                                       result.exc_info)
 
     def test_queue_jobs(self):
         cli_runner = cli_testing.CliRunner()

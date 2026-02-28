@@ -33,7 +33,7 @@ def _mock_cluster_state(_mock_db_conn, enable_all_clouds):
     - test-disk-tier1: AWS, 1x m6i.2xlarge, with best disk tier
     - test-disk-tier2: GCP, 1x n2-standard-8, with medium disk tier
     """
-    assert 'state.db' not in global_user_state._db_manager.engine.url
+    assert 'state.db' not in str(global_user_state._db_manager.get_engine().url)
 
     handle = backends.CloudVmRayResourceHandle(
         cluster_name='test-cluster1',
