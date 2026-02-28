@@ -115,7 +115,7 @@ export function GPUMetricsSection({
           <div className="flex items-center">
             <button
               onClick={toggleExpanded}
-              className="flex items-center text-left focus:outline-none hover:text-gray-700 transition-colors duration-200"
+              className="flex items-center text-left focus:outline-none hover:text-gray-700 dark:hover:text-gray-300 transition-colors duration-200"
             >
               {isExpanded ? (
                 <ChevronDownIcon className="w-5 h-5 mr-2" />
@@ -129,7 +129,7 @@ export function GPUMetricsSection({
           <Tooltip content="Open in Grafana">
             <button
               onClick={openInGrafana}
-              className="p-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
+              className="p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               aria-label="Open in Grafana"
             >
               <ExternalLinkIcon className="w-4 h-4" />
@@ -139,11 +139,11 @@ export function GPUMetricsSection({
         {isExpanded && (
           <div className="p-5">
             {/* Filtering Controls */}
-            <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+            <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700">
               <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                 {/* Time Range Selection */}
                 <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                  <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                     Time Range:
                   </label>
                   <div className="flex gap-1">
@@ -155,7 +155,7 @@ export function GPUMetricsSection({
                           timeRange.from === `now-${preset.value}` &&
                           timeRange.to === 'now'
                             ? 'bg-sky-blue text-white border-sky-blue'
-                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                            : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       >
                         {preset.label}
@@ -166,7 +166,7 @@ export function GPUMetricsSection({
               </div>
 
               {/* Show current selection info */}
-              <div className="mt-2 text-xs text-gray-500">
+              <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Showing: {displayName} • Time: {timeRange.from} to{' '}
                 {timeRange.to}
               </div>
@@ -177,7 +177,7 @@ export function GPUMetricsSection({
                 {GPU_PANELS.map((panel) => (
                   <div
                     key={panel.id}
-                    className="bg-white rounded-md border border-gray-200 shadow-sm"
+                    className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm"
                   >
                     <div className="p-2">
                       <iframe
@@ -198,7 +198,7 @@ export function GPUMetricsSection({
                 ))}
               </div>
             ) : (
-              <div className="p-4 text-center text-gray-500 bg-gray-50 rounded-md">
+              <div className="p-4 text-center text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 rounded-md">
                 {noMetricsMessage}
               </div>
             )}

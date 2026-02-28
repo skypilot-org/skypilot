@@ -131,7 +131,9 @@ export function Volumes() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
@@ -331,49 +333,49 @@ function VolumesTable({
             <TableHeader>
               <TableRow>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('name')}
                 >
                   Name{getSortDirection('name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('infra')}
                 >
                   Infra{getSortDirection('infra')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('status')}
                 >
                   Status{getSortDirection('status')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('size')}
                 >
                   Size{getSortDirection('size')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('user_name')}
                 >
                   User{getSortDirection('user_name')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('last_attached_at')}
                 >
                   Last Use{getSortDirection('last_attached_at')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('type')}
                 >
                   Type{getSortDirection('type')}
                 </TableHead>
                 <TableHead
-                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50"
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
                   onClick={() => requestSort('usedby_clusters')}
                 >
                   Used By{getSortDirection('usedby_clusters')}
@@ -386,7 +388,7 @@ function VolumesTable({
                 <TableRow>
                   <TableCell
                     colSpan={11}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-gray-500 dark:text-gray-400"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -422,7 +424,7 @@ function VolumesTable({
                         variant="ghost"
                         size="sm"
                         onClick={() => onDeleteVolume(volume)}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/30"
                         title="Delete volume"
                       >
                         <Trash2Icon className="w-4 h-4" />
@@ -434,7 +436,7 @@ function VolumesTable({
                 <TableRow>
                   <TableCell
                     colSpan={11}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-gray-500 dark:text-gray-400"
                   >
                     No volumes found
                   </TableCell>
@@ -447,7 +449,7 @@ function VolumesTable({
 
       {/* Pagination controls */}
       {data.length > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700 dark:text-gray-300">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -466,7 +468,7 @@ function VolumesTable({
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-gray-500 dark:text-gray-400 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -490,7 +492,7 @@ function VolumesTable({
                 size="icon"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -512,7 +514,7 @@ function VolumesTable({
                 size="icon"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages || totalPages === 0}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"

@@ -112,7 +112,7 @@ const GpuUtilizationBar = ({
 
   return (
     <div
-      className={`bg-gray-100 rounded-md flex overflow-hidden shadow-sm ${heightClass} ${wrapperClassName}`.trim()}
+      className={`bg-gray-100 dark:bg-gray-800 rounded-md flex overflow-hidden shadow-sm ${heightClass} ${wrapperClassName}`.trim()}
     >
       {notReadyPercentage > 0 && (
         <div
@@ -121,7 +121,7 @@ const GpuUtilizationBar = ({
             fontSize: 'clamp(8px, 1.2vw, 12px)',
           }}
           title={notReadyLabel}
-          className="bg-gray-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+          className="bg-gray-400 dark:bg-gray-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
         >
           {notReadyPercentage > 15 && notReadyLabel}
         </div>
@@ -133,7 +133,7 @@ const GpuUtilizationBar = ({
             fontSize: 'clamp(8px, 1.2vw, 12px)',
           }}
           title={usedLabel}
-          className="bg-yellow-500 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+          className="bg-yellow-500 dark:bg-yellow-400 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
         >
           {usedPercentage > 15 && usedLabel}
         </div>
@@ -145,7 +145,7 @@ const GpuUtilizationBar = ({
             fontSize: 'clamp(8px, 1.2vw, 12px)',
           }}
           title={freeLabel}
-          className="bg-green-700 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
+          className="bg-green-700 dark:bg-green-600 h-full flex items-center justify-center text-white font-medium overflow-hidden whitespace-nowrap px-1"
         >
           {freePercentage > 15 && freeLabel}
         </div>
@@ -200,7 +200,7 @@ export function InfrastructureSection({
             <h3 className="text-lg font-semibold">{title}</h3>
             {actionButton}
           </div>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             No {title} found or {title} is not configured.
           </p>
         </div>
@@ -222,7 +222,9 @@ export function InfrastructureSection({
           <h3 className="text-lg font-semibold mb-4">{title}</h3>
           <div className="flex items-center justify-center py-6">
             <CircularProgress size={24} className="mr-3" />
-            <span className="text-gray-500">Loading {title}...</span>
+            <span className="text-gray-500 dark:text-gray-400">
+              Loading {title}...
+            </span>
           </div>
         </div>
       </div>
@@ -247,7 +249,7 @@ export function InfrastructureSection({
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
               <h3 className="text-lg font-semibold">{title}</h3>
-              <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+              <span className="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 rounded-full text-xs font-medium">
                 {safeContexts.length}{' '}
                 {safeContexts.length === 1
                   ? isSSH
@@ -272,39 +274,39 @@ export function InfrastructureSection({
                 } ${safeContexts.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
               >
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0 z-10">
+                  <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0 z-10">
                     <tr>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                      <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/4">
                         Name
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/8">
                         Clusters
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/8">
                         Jobs
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/8">
                         Nodes
                       </th>
                       {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/8">
                           CPU
                         </th>
                       )}
                       {!isSlurm && (
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/6">
                           Memory
                         </th>
                       )}
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/6">
+                      <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/6">
                         GPU Types
                       </th>
-                      <th className="p-3 text-left font-medium text-gray-600 w-1/8">
+                      <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/8">
                         GPUs
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
+                  <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                     {safeContexts.map((context) => {
                       const gpus = groupedPerContextGPUs[context] || [];
                       const nodes = groupedPerNodeGPUs[context] || [];
@@ -389,14 +391,14 @@ export function InfrastructureSection({
                                 className="text-sm text-muted-foreground"
                               >
                                 <span
-                                  className="text-blue-600 hover:underline cursor-pointer"
+                                  className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                                   onClick={() => handleContextClick(context)}
                                 >
                                   {displayName.length > NAME_TRUNCATE_LENGTH
                                     ? `${displayName.substring(0, Math.floor((NAME_TRUNCATE_LENGTH - 3) / 2))}...${displayName.substring(displayName.length - Math.ceil((NAME_TRUNCATE_LENGTH - 3) / 2))}`
                                     : displayName}
                                   {workspaceDisplay && (
-                                    <span className="text-xs text-gray-500 ml-1">
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
                                       {workspaceDisplay}
                                     </span>
                                   )}
@@ -407,7 +409,7 @@ export function InfrastructureSection({
                                   content={`Context unreachable: ${contextErrors[context]}`}
                                   className="text-sm text-muted-foreground"
                                 >
-                                  <AlertTriangleIcon className="w-4 h-4 text-yellow-500 flex-shrink-0" />
+                                  <AlertTriangleIcon className="w-4 h-4 text-yellow-500 dark:text-yellow-400 flex-shrink-0" />
                                 </NonCapitalizedTooltip>
                               )}
                             </div>
@@ -416,7 +418,7 @@ export function InfrastructureSection({
                             {isClusterDataLoading ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                 {stats.clusters}
                               </span>
                             )}
@@ -425,7 +427,7 @@ export function InfrastructureSection({
                             {isJobsDataLoading ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                 {jobsData[contextStatsKey]?.jobs || 0}
                               </span>
                             )}
@@ -434,7 +436,7 @@ export function InfrastructureSection({
                             {!hasNodeData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                 {nodes.length}
                               </span>
                             )}
@@ -444,7 +446,7 @@ export function InfrastructureSection({
                               {!hasNodeData ? (
                                 <SkeletonBadge />
                               ) : (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                   {formatCpu(aggregatedCpu)}
                                 </span>
                               )}
@@ -455,7 +457,7 @@ export function InfrastructureSection({
                               {!hasNodeData ? (
                                 <SkeletonBadge />
                               ) : (
-                                <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                   {formatMemory(aggregatedMemory)}
                                 </span>
                               )}
@@ -465,7 +467,7 @@ export function InfrastructureSection({
                             {!hasGpuData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                 {gpuTypes || '-'}
                               </span>
                             )}
@@ -474,7 +476,7 @@ export function InfrastructureSection({
                             {!hasGpuData ? (
                               <SkeletonBadge />
                             ) : (
-                              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                                 {totalGpus}
                               </span>
                             )}
@@ -494,28 +496,28 @@ export function InfrastructureSection({
                   } ${gpus.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
                 >
                   <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 sticky top-0 z-10">
+                    <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0 z-10">
                       <tr>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/4 whitespace-nowrap">
                           GPU
-                          <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-800 rounded-full text-xs font-medium whitespace-nowrap">
+                          <span className="ml-2 px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200 rounded-full text-xs font-medium whitespace-nowrap">
                             {gpus.reduce((sum, gpu) => sum + gpu.gpu_free, 0)}{' '}
                             of{' '}
                             {gpus.reduce((sum, gpu) => sum + gpu.gpu_total, 0)}{' '}
                             free
                           </span>
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/4">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/4">
                           Requestable
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600 w-1/2">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-1/2">
                           <div className="flex items-center">
                             <span>Utilization</span>
                           </div>
                         </th>
                       </tr>
                     </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
+                    <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                       {gpus.map((gpu) => {
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs
@@ -545,7 +547,7 @@ export function InfrastructureSection({
                             <td className="p-3 font-medium w-24 whitespace-nowrap">
                               {canonicalizeGpuName(gpu.gpu_name)}
                             </td>
-                            <td className="p-3 text-xs text-gray-600">
+                            <td className="p-3 text-xs text-gray-600 dark:text-gray-400">
                               {requestableQtys || '-'} / node
                             </td>
                             <td className="p-3 w-2/3">
@@ -722,12 +724,12 @@ export function ContextDetails({
                   return (
                     <div
                       key={gpu.gpu_name}
-                      className="p-3 bg-gray-50 rounded-md border border-gray-200 shadow-sm"
+                      className="p-3 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm"
                     >
                       <div className="flex justify-between items-center mb-1.5 flex-wrap">
-                        <div className="font-medium text-gray-800 text-sm">
+                        <div className="font-medium text-gray-800 dark:text-gray-200 text-sm">
                           {canonicalizeGpuName(gpu.gpu_name)}
-                          <span className="text-xs text-gray-500 ml-2">
+                          <span className="text-xs text-gray-500 dark:text-gray-400 ml-2">
                             (Requestable: {gpu.gpu_requestable_qty_per_node} /
                             node)
                           </span>
@@ -751,38 +753,38 @@ export function ContextDetails({
           )}
 
           {nodesInContext.length > 0 && (
-            <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm">
+            <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-100">
+                <thead className="bg-gray-100 dark:bg-gray-800">
                   <tr>
-                    <th className="p-3 text-left font-medium text-gray-600">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                       Node
                     </th>
                     {!isSlurm && (
                       <>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                           IP Address
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                           vCPU
                         </th>
-                        <th className="p-3 text-left font-medium text-gray-600">
+                        <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                           Memory (GB)
                         </th>
                       </>
                     )}
-                    <th className="p-3 text-left font-medium text-gray-600">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                       GPU
                     </th>
-                    <th className="p-3 text-left font-medium text-gray-600">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                       GPU Utilization
                     </th>
-                    <th className="p-3 text-left font-medium text-gray-600">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
                       Node Status
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
                   {nodesInContext.map((node, index) => {
                     // Format CPU display: "X of Y free" or just "Y" if free is unknown
                     let cpuDisplay = '-';
@@ -868,28 +870,28 @@ export function ContextDetails({
                     return (
                       <tr
                         key={`${node.node_name}-${index}`}
-                        className="hover:bg-gray-50"
+                        className="hover:bg-gray-50 dark:hover:bg-gray-800"
                       >
-                        <td className="p-3 whitespace-nowrap text-gray-700">
+                        <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
                           {node.node_name}
                         </td>
                         {!isSlurm && (
                           <>
-                            <td className="p-3 whitespace-nowrap text-gray-700">
+                            <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
                               {node.ip_address || '-'}
                             </td>
-                            <td className="p-3 whitespace-nowrap text-gray-700">
+                            <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
                               {cpuDisplay}
                             </td>
-                            <td className="p-3 whitespace-nowrap text-gray-700">
+                            <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
                               {memoryDisplay}
                             </td>
                           </>
                         )}
-                        <td className="p-3 whitespace-nowrap text-gray-700">
+                        <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
                           {canonicalizeGpuName(node.gpu_name)}
                         </td>
-                        <td className="p-3 whitespace-nowrap text-gray-700">
+                        <td className="p-3 whitespace-nowrap text-gray-700 dark:text-gray-300">
                           {utilizationStr}
                         </td>
                         <td className="p-3 max-w-xs">
@@ -898,15 +900,15 @@ export function ContextDetails({
                               <span
                                 className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit ${
                                   isNodeHealthy
-                                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20'
-                                    : 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20'
+                                    ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 ring-1 ring-inset ring-emerald-600/20'
+                                    : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 ring-1 ring-inset ring-amber-600/20'
                                 }`}
                               >
                                 {nodeStatusStr}
                               </span>
                             )}
                             {taintInfo && (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 text-gray-700 ring-1 ring-inset ring-gray-600/20">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium w-fit bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 ring-1 ring-inset ring-gray-600/20">
                                 {taintInfo}
                               </span>
                             )}
@@ -930,14 +932,14 @@ export function ContextDetails({
                 <h4 className="text-lg font-semibold mb-4 mt-6">GPU Metrics</h4>
 
                 {/* Filtering Controls */}
-                <div className="mb-4 p-4 bg-gray-50 rounded-md border border-gray-200">
+                <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700">
                   <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                     {/* Host Selection - only show if we have node info */}
                     {nodesInContext && nodesInContext.length > 0 && (
                       <div className="flex items-center gap-2">
                         <label
                           htmlFor="host-select"
-                          className="text-sm font-medium text-gray-700 whitespace-nowrap"
+                          className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap"
                         >
                           Node:
                         </label>
@@ -946,7 +948,7 @@ export function ContextDetails({
                           value={selectedHosts}
                           onChange={handleHostChange}
                           disabled={isLoadingHosts}
-                          className="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
+                          className="px-3 py-1 border border-gray-300 dark:border-gray-600 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-blue focus:border-transparent"
                         >
                           <option value="$__all">All Nodes</option>
                           {availableHosts.map((host) => (
@@ -965,7 +967,7 @@ export function ContextDetails({
 
                     {/* Time Range Selection */}
                     <div className="flex items-center gap-2">
-                      <label className="text-sm font-medium text-gray-700 whitespace-nowrap">
+                      <label className="text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
                         Time Range:
                       </label>
                       <div className="flex gap-1">
@@ -983,7 +985,7 @@ export function ContextDetails({
                               timeRange.from === `now-${preset.value}` &&
                               timeRange.to === 'now'
                                 ? 'bg-sky-blue text-white border-sky-blue'
-                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                : 'bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800'
                             }`}
                           >
                             {preset.label}
@@ -994,7 +996,7 @@ export function ContextDetails({
                   </div>
 
                   {/* Show current selection info */}
-                  <div className="mt-2 text-xs text-gray-500">
+                  <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                     {nodesInContext && nodesInContext.length > 0 ? (
                       <>
                         Showing:{' '}
@@ -1024,7 +1026,7 @@ export function ContextDetails({
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   {/* GPU Utilization */}
-                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('6')}
@@ -1039,7 +1041,7 @@ export function ContextDetails({
                   </div>
 
                   {/* GPU Memory */}
-                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('18')}
@@ -1054,7 +1056,7 @@ export function ContextDetails({
                   </div>
 
                   {/* GPU Power Consumption */}
-                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('10')}
@@ -1069,7 +1071,7 @@ export function ContextDetails({
                   </div>
 
                   {/* GPU Temperature */}
-                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('12')}
@@ -1084,7 +1086,7 @@ export function ContextDetails({
                   </div>
 
                   {/* CPU Utilization */}
-                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('22')}
@@ -1099,7 +1101,7 @@ export function ContextDetails({
                   </div>
 
                   {/* Memory Utilization */}
-                  <div className="bg-white rounded-md border border-gray-200 shadow-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
                     <div className="p-2">
                       <iframe
                         src={buildGrafanaUrlForContext('21')}
@@ -1176,8 +1178,12 @@ function SSHNodePoolDetails({
   const StatusBadge = ({ status, reason }) => {
     const isReady = status === 'Ready';
     const isNotReady = status === 'Not Ready';
-    const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
-    const textColor = isReady ? 'text-green-800' : 'text-red-800';
+    const bgColor = isReady
+      ? 'bg-green-100 dark:bg-green-900/40'
+      : 'bg-red-100';
+    const textColor = isReady
+      ? 'text-green-800 dark:text-green-200'
+      : 'text-red-800 dark:text-red-200';
 
     // Show helpful hint for "Not Ready" status
     const displayReason = isNotReady
@@ -1192,7 +1198,9 @@ function SSHNodePoolDetails({
           {status}
         </span>
         {!isReady && displayReason && (
-          <span className="text-sm text-gray-600">({displayReason})</span>
+          <span className="text-sm text-gray-600 dark:text-gray-400">
+            ({displayReason})
+          </span>
         )}
       </div>
     );
@@ -1479,8 +1487,8 @@ function SSHNodePoolDetails({
               <button
                 className={`px-3 py-1 text-sm border rounded flex items-center ${
                   deployDisabled
-                    ? 'border-gray-300 bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                    ? 'border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed'
+                    : 'border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-100'
                 }`}
                 onClick={deployDisabled ? undefined : handleDeployClick}
                 disabled={deployDisabled}
@@ -1489,7 +1497,7 @@ function SSHNodePoolDetails({
                 Deploy
               </button>
               <button
-                className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center text-red-600 hover:text-red-700"
+                className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center text-red-600 dark:text-red-400 hover:text-red-700"
                 onClick={handleDeleteClick}
               >
                 <TrashIcon className="w-4 h-4 mr-2" />
@@ -1500,26 +1508,30 @@ function SSHNodePoolDetails({
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
                   Pool Name
                 </div>
                 <div className="text-base mt-1">{poolName}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Nodes</div>
+                <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
+                  Nodes
+                </div>
                 <div className="text-base mt-1">
                   {nodesInContext ? nodesInContext.length : 0}
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">
+                <div className="text-gray-600 dark:text-gray-400 font-medium text-base">
                   Status
                 </div>
                 <div className="text-base mt-1">
                   {statusLoading ? (
                     <div className="flex items-center">
                       <CircularProgress size={16} className="mr-2" />
-                      <span className="text-gray-500">Loading...</span>
+                      <span className="text-gray-500 dark:text-gray-400">
+                        Loading...
+                      </span>
                     </div>
                   ) : statusData ? (
                     <StatusBadge
@@ -1527,7 +1539,9 @@ function SSHNodePoolDetails({
                       reason={statusData.reason}
                     />
                   ) : (
-                    <span className="text-gray-500">Unknown</span>
+                    <span className="text-gray-500 dark:text-gray-400">
+                      Unknown
+                    </span>
                   )}
                 </div>
               </div>
@@ -1554,7 +1568,7 @@ function SSHNodePoolDetails({
           </DialogHeader>
 
           <div className="py-4">
-            <div className="text-sm text-gray-600 space-y-1">
+            <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
               <p className="font-medium mb-2">This will:</p>
               {dialogContent.details.map((detail, index) => (
                 <p key={index} className={detail === '' ? 'pt-2' : ''}>
@@ -1578,8 +1592,8 @@ function SSHNodePoolDetails({
               disabled={confirmDialog.loading}
               className={
                 confirmDialog.action === 'deploy'
-                  ? 'bg-green-600 hover:bg-green-700 text-white'
-                  : 'bg-red-600 hover:bg-red-700 text-white'
+                  ? 'bg-green-600 dark:bg-green-500 hover:bg-green-700 dark:hover:bg-green-600 text-white'
+                  : 'bg-red-600 dark:bg-red-500 hover:bg-red-700 dark:hover:bg-red-600 text-white'
               }
             >
               {confirmDialog.loading ? (
@@ -1621,14 +1635,19 @@ function SSHNodePoolDetails({
           </DialogHeader>
 
           <div className="py-4">
-            <div className="bg-black text-green-400 p-4 rounded-md font-mono text-sm max-h-96 overflow-y-auto">
+            <div className="bg-black text-green-400 dark:text-green-500 p-4 rounded-md font-mono text-sm max-h-96 overflow-y-auto">
               <pre className="whitespace-pre-wrap">
                 {cleanSSHDeploymentLogs(streamingDialog.logs)}
               </pre>
               {streamingDialog.isStreaming && (
                 <div className="flex items-center mt-2">
-                  <CircularProgress size={16} className="mr-2 text-green-400" />
-                  <span className="text-green-400">Streaming logs...</span>
+                  <CircularProgress
+                    size={16}
+                    className="mr-2 text-green-400 dark:text-green-500"
+                  />
+                  <span className="text-green-400 dark:text-green-500">
+                    Streaming logs...
+                  </span>
                 </div>
               )}
             </div>
@@ -1640,11 +1659,11 @@ function SSHNodePoolDetails({
               disabled={streamingDialog.isStreaming}
               className={
                 streamingDialog.deploymentSuccess
-                  ? 'bg-green-600 hover:bg-green-700 text-white'
+                  ? 'bg-green-600 dark:bg-green-500 hover:bg-green-700 dark:hover:bg-green-600 text-white'
                   : streamingDialog.deploymentComplete &&
                       !streamingDialog.deploymentSuccess
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-gray-600 hover:bg-gray-700 text-white'
+                    ? 'bg-red-600 dark:bg-red-500 hover:bg-red-700 dark:hover:bg-red-600 text-white'
+                    : 'bg-gray-600 dark:bg-gray-500 hover:bg-gray-700 dark:hover:bg-gray-600 text-white'
               }
             >
               {streamingDialog.isStreaming ? (
@@ -1702,7 +1721,7 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
   const StatusDisplay = ({ pool }) => {
     if (!pool.isDeployed) {
       return (
-        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
           Not Deployed
         </span>
       );
@@ -1712,7 +1731,9 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
       return (
         <div className="flex items-center">
           <CircularProgress size={16} className="mr-2" />
-          <span className="text-gray-500 text-xs">Loading...</span>
+          <span className="text-gray-500 dark:text-gray-400 text-xs">
+            Loading...
+          </span>
         </div>
       );
     }
@@ -1720,15 +1741,19 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
     const status = poolStatuses[pool.name];
     if (!status) {
       return (
-        <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+        <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
           Unknown
         </span>
       );
     }
 
     const isReady = status.status === 'Ready';
-    const bgColor = isReady ? 'bg-green-100' : 'bg-red-100';
-    const textColor = isReady ? 'text-green-800' : 'text-red-800';
+    const bgColor = isReady
+      ? 'bg-green-100 dark:bg-green-900/40'
+      : 'bg-red-100';
+    const textColor = isReady
+      ? 'text-green-800 dark:text-green-200'
+      : 'text-red-800 dark:text-red-200';
 
     return (
       <div className="flex items-center space-x-2">
@@ -1738,7 +1763,10 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
           {status.status}
         </span>
         {!isReady && status.reason && (
-          <span className="text-xs text-gray-600" title={status.reason}>
+          <span
+            className="text-xs text-gray-600 dark:text-gray-400"
+            title={status.reason}
+          >
             (
             {status.reason.length > 30
               ? status.reason.substring(0, 30) + '...'
@@ -1751,26 +1779,34 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
   };
 
   return (
-    <div className="overflow-x-auto rounded-md border border-gray-200 shadow-sm bg-white">
+    <div className="overflow-x-auto rounded-md border border-gray-200 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-900">
       <table className="min-w-full text-sm">
-        <thead className="bg-gray-50">
+        <thead className="bg-gray-50 dark:bg-gray-900">
           <tr>
-            <th className="p-3 text-left font-medium text-gray-600">
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
               Pool Name
             </th>
-            <th className="p-3 text-left font-medium text-gray-600">Status</th>
-            <th className="p-3 text-left font-medium text-gray-600">
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              Status
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
               Clusters
             </th>
-            <th className="p-3 text-left font-medium text-gray-600">Jobs</th>
-            <th className="p-3 text-left font-medium text-gray-600">Nodes</th>
-            <th className="p-3 text-left font-medium text-gray-600">
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              Jobs
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              Nodes
+            </th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
               GPU Types
             </th>
-            <th className="p-3 text-left font-medium text-gray-600">GPUs</th>
+            <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400">
+              GPUs
+            </th>
           </tr>
         </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+        <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
           {pools.map((pool) => {
             // Check if this pool has complete data loaded
             const hasCompleteData =
@@ -1783,10 +1819,10 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
             return (
               <tr
                 key={pool.name}
-                className="hover:bg-gray-50 cursor-pointer"
+                className="hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                 onClick={() => handleContextClick(`ssh-${pool.name}`)}
               >
-                <td className="p-3 font-medium text-gray-700">
+                <td className="p-3 font-medium text-gray-700 dark:text-gray-300">
                   {pool.displayName}
                 </td>
                 <td className="p-3">
@@ -1798,11 +1834,11 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
                       <CircularProgress size={16} />
                     </div>
                   ) : pool.clusters > 0 ? (
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 rounded text-xs font-medium">
                       {pool.clusters}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                       0
                     </span>
                   )}
@@ -1813,11 +1849,11 @@ function SSHNodePoolTable({ pools, handleContextClick }) {
                       <CircularProgress size={16} />
                     </div>
                   ) : pool.jobs > 0 ? (
-                    <span className="px-2 py-0.5 bg-green-100 text-green-800 rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200 rounded text-xs font-medium">
                       {pool.jobs}
                     </span>
                   ) : (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                    <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                       0
                     </span>
                   )}
@@ -1865,24 +1901,24 @@ function InfrastructureHint() {
       <div className="p-5">
         <div className="flex items-start">
           <div className="ml-3 flex-1">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
               No Infrastructure Enabled
             </h3>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
               No cloud providers, Kubernetes contexts, SSH node pools, or Slurm
               clusters are currently enabled or configured.
             </p>
             <div className="space-y-2 mb-4">
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
                 To check enabled infrastructures, you can:
               </p>
-              <ul className="list-disc list-inside text-sm text-gray-600 space-y-1 ml-2">
+              <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-400 space-y-1 ml-2">
                 <li>
                   Click <strong>&quot;Refresh&quot;</strong>.
                 </li>
                 <li>
                   Run{' '}
-                  <code className="bg-gray-100 px-1.5 py-0.5 rounded">
+                  <code className="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
                     sky check
                   </code>{' '}
                   in your CLI.
@@ -2769,7 +2805,9 @@ export function GPUs() {
       return (
         <div className="flex flex-col items-center justify-center h-64">
           <CircularProgress size={32} className="mb-4" />
-          <span className="text-gray-500 text-lg">Loading Context...</span>
+          <span className="text-gray-500 dark:text-gray-400 text-lg">
+            Loading Context...
+          </span>
         </div>
       );
     }
@@ -2819,7 +2857,9 @@ export function GPUs() {
             <h3 className="text-lg font-semibold mb-4">Cloud</h3>
             <div className="flex items-center justify-center py-6">
               <CircularProgress size={24} className="mr-3" />
-              <span className="text-gray-500">Loading Cloud...</span>
+              <span className="text-gray-500 dark:text-gray-400">
+                Loading Cloud...
+              </span>
             </div>
           </div>
         </div>
@@ -2831,12 +2871,12 @@ export function GPUs() {
         <div className="p-5">
           <div className="flex items-center mb-4">
             <h3 className="text-lg font-semibold">Cloud</h3>
-            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+            <span className="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 rounded-full text-xs font-medium">
               {filteredEnabledCloudsCount} of {totalClouds} enabled
             </span>
           </div>
           {!filteredCloudInfraData || filteredCloudInfraData.length === 0 ? (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 dark:text-gray-400">
               {selectedWorkspace === 'all'
                 ? 'No enabled clouds available.'
                 : `No enabled clouds for workspace "${selectedWorkspace}".`}
@@ -2851,20 +2891,20 @@ export function GPUs() {
               }`}
             >
               <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
+                <thead className="bg-gray-50 dark:bg-gray-900">
                   <tr>
-                    <th className="p-3 text-left font-medium text-gray-600 w-32">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-32">
                       Cloud
                     </th>
-                    <th className="p-3 text-left font-medium text-gray-600 w-24">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-24">
                       Clusters
                     </th>
-                    <th className="p-3 text-left font-medium text-gray-600 w-24">
+                    <th className="p-3 text-left font-medium text-gray-600 dark:text-gray-400 w-24">
                       Jobs
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-card divide-y divide-gray-200">
+                <tbody className="bg-card divide-y divide-gray-200 dark:divide-gray-700">
                   {filteredCloudInfraData.map((cloud) => {
                     // Use separate loading states for progressive loading
                     // Clusters and jobs load independently (clusters often ready first)
@@ -2874,14 +2914,14 @@ export function GPUs() {
 
                     return (
                       <tr key={cloud.name} className="hover:bg-muted/50">
-                        <td className="p-3 font-medium text-gray-700">
+                        <td className="p-3 font-medium text-gray-700 dark:text-gray-300">
                           {cloud.name}
                         </td>
                         <td className="p-3">
                           {clusterDataLoading ? (
                             <SkeletonBadge />
                           ) : (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                            <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                               {clusterCount ?? 0}
                             </span>
                           )}
@@ -2890,7 +2930,7 @@ export function GPUs() {
                           {sshAndKubeJobsDataLoading ? (
                             <SkeletonBadge />
                           ) : (
-                            <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                            <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded text-xs font-medium">
                               {jobCount ?? 0}
                             </span>
                           )}
@@ -2931,7 +2971,7 @@ export function GPUs() {
         actionButton={
           // TODO: Add back when SSH Node Pool add operation is more robust
           // <button
-          //   className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 flex items-center"
+          //   className="px-3 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center"
           //   onClick={handleAddSSHPool}
           // >
           //   <PlusIcon className="w-4 h-4 mr-2" />
@@ -2998,7 +3038,9 @@ export function GPUs() {
         return (
           <div className="flex flex-col items-center justify-center h-64">
             <CircularProgress size={32} className="mb-4" />
-            <span className="text-gray-500 text-lg">Loading Context...</span>
+            <span className="text-gray-500 dark:text-gray-400 text-lg">
+              Loading Context...
+            </span>
           </div>
         );
       }
@@ -3130,7 +3172,7 @@ export function GPUs() {
           </Link>
           {selectedContext && (
             <>
-              <span className="mx-2 text-gray-500">›</span>
+              <span className="mx-2 text-gray-500 dark:text-gray-400">›</span>
               {selectedContext.startsWith('ssh-') ? (
                 <Link
                   href="/infra"
@@ -3153,7 +3195,7 @@ export function GPUs() {
                   Kubernetes
                 </Link>
               )}
-              <span className="mx-2 text-gray-500">›</span>
+              <span className="mx-2 text-gray-500 dark:text-gray-400">›</span>
               <span className="text-sky-blue">
                 {selectedContext.startsWith('ssh-')
                   ? selectedContext.replace(/^ssh-/, '')
@@ -3166,7 +3208,7 @@ export function GPUs() {
           {/* Workspace Selector */}
           {availableWorkspaces.length > 0 && (
             <div className="flex items-center mr-4">
-              <label className="text-sm font-medium text-gray-700 mr-2">
+              <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mr-2">
                 Workspace:
               </label>
               <Select
@@ -3191,7 +3233,9 @@ export function GPUs() {
           {isAnyLoading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400">
+                Loading...
+              </span>
             </div>
           )}
           {!isAnyLoading && lastFetchedTime && (
@@ -3238,7 +3282,7 @@ function CloudGpuTable({ data, title }) {
     return (
       <>
         <h3 className="text-lg font-semibold mb-3">{title}</h3>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           No GPUs found for this category.
         </p>
       </>
@@ -3266,22 +3310,24 @@ function CloudGpuTable({ data, title }) {
     <>
       <h3 className="text-lg font-semibold mb-3">{title}</h3>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm border-b border-gray-200">
-          <thead className="bg-gray-100">
+        <table className="min-w-full text-sm border-b border-gray-200 dark:border-gray-700">
+          <thead className="bg-gray-100 dark:bg-gray-800">
             <tr>
-              <th className="p-2 text-left font-medium text-gray-600">GPU</th>
-              <th className="p-2 text-left font-medium text-gray-600">
+              <th className="p-2 text-left font-medium text-gray-600 dark:text-gray-400">
+                GPU
+              </th>
+              <th className="p-2 text-left font-medium text-gray-600 dark:text-gray-400">
                 Available Quantities / Node
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
             {paginatedData.map((gpu, idx) => (
               <tr key={`${gpu.gpu_name}-${idx}`}>
-                <td className="p-2 whitespace-nowrap text-gray-700">
+                <td className="p-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
                   {canonicalizeGpuName(gpu.gpu_name)}
                 </td>
-                <td className="p-2 whitespace-nowrap text-gray-700">
+                <td className="p-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
                   {gpu.gpu_quantities}
                 </td>
               </tr>
@@ -3291,7 +3337,7 @@ function CloudGpuTable({ data, title }) {
       </div>
       {/* Pagination controls */}
       {safeData.length > pageSize && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700 dark:text-gray-300">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -3309,7 +3355,7 @@ function CloudGpuTable({ data, title }) {
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-gray-500 dark:text-gray-400 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -3328,7 +3374,7 @@ function CloudGpuTable({ data, title }) {
             </div>
             <div className="flex items-center space-x-2">
               <button
-                className="p-1 rounded-full hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
                 onClick={goToPreviousPage}
                 disabled={currentPage === 1}
               >
@@ -3347,7 +3393,7 @@ function CloudGpuTable({ data, title }) {
                 </svg>
               </button>
               <button
-                className="p-1 rounded-full hover:bg-gray-200 disabled:opacity-30 disabled:hover:bg-transparent"
+                className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:hover:bg-transparent"
                 onClick={goToNextPage}
                 disabled={currentPage === totalPages || totalPages === 0}
               >

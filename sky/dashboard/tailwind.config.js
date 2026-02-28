@@ -19,8 +19,8 @@ module.exports = {
     extend: {
       colors: {
         gcpgreen: '#188038',
-        'sky-blue': '#0E2E65',
-        'sky-blue-bright': '#1E62CC',
+        'sky-blue': 'var(--sky-blue)',
+        'sky-blue-bright': 'var(--sky-blue-bright)',
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',

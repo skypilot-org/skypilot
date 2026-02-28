@@ -158,7 +158,7 @@ export function Config() {
             {(loading || saving) && (
               <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
-                <span className="ml-2 text-gray-500">
+                <span className="ml-2 text-gray-500 dark:text-gray-400">
                   {saving ? 'Applying...' : 'Loading...'}
                 </span>
               </div>
@@ -209,13 +209,13 @@ export function Config() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-gray-600 mb-3">
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
             Refer to the{' '}
             <a
               href="https://docs.skypilot.co/en/latest/reference/config.html"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
+              className="text-blue-600 dark:text-blue-400 hover:underline"
             >
               SkyPilot Docs
             </a>{' '}
@@ -224,12 +224,12 @@ export function Config() {
 
           {/* Success Message */}
           {saveSuccess && (
-            <div className="bg-green-50 border border-green-200 rounded p-4 mb-6">
+            <div className="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded p-4 mb-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
                     <svg
-                      className="h-5 w-5 text-green-400"
+                      className="h-5 w-5 text-green-400 dark:text-green-500"
                       viewBox="0 0 20 20"
                       fill="currentColor"
                     >
@@ -241,7 +241,7 @@ export function Config() {
                     </svg>
                   </div>
                   <div className="ml-3">
-                    <p className="text-sm font-medium text-green-800">
+                    <p className="text-sm font-medium text-green-800 dark:text-green-200">
                       Configuration saved successfully!
                     </p>
                   </div>
@@ -251,7 +251,7 @@ export function Config() {
                     <button
                       type="button"
                       onClick={handleSuccessDismiss}
-                      className="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                      className="inline-flex rounded-md bg-green-50 dark:bg-green-900/30 p-1.5 text-green-500 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/40 focus:outline-none focus:ring-2 focus:ring-green-600 dark:focus:ring-green-400 focus:ring-offset-2 focus:ring-offset-green-50 dark:focus:ring-offset-green-900"
                     >
                       <span className="sr-only">Dismiss</span>
                       <svg
@@ -287,7 +287,7 @@ export function Config() {
             <textarea
               value={editableConfig}
               onChange={(e) => setEditableConfig(e.target.value)}
-              className="w-full h-96 p-3 border border-gray-300 rounded font-mono text-sm resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full h-96 p-3 border border-gray-300 dark:border-gray-600 rounded font-mono text-sm resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
               placeholder={
                 loading
                   ? 'Loading configuration...'
@@ -301,7 +301,7 @@ export function Config() {
             <Button
               onClick={handleSave}
               disabled={loading || saving}
-              className="inline-flex items-center bg-sky-600 hover:bg-sky-700 text-white"
+              className="inline-flex items-center bg-sky-600 dark:bg-sky-blue hover:bg-sky-700 dark:hover:bg-sky-blue-bright text-white dark:text-black"
             >
               {saving ? (
                 <>

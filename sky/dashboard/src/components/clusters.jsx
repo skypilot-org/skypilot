@@ -490,16 +490,20 @@ export function Clusters() {
               />
               <div
                 className={`relative inline-flex h-5 w-9 items-center rounded-full ${shouldAnimate ? 'transition-colors' : ''} ${
-                  showHistory ? 'bg-sky-600' : 'bg-gray-300'
+                  showHistory
+                    ? 'bg-sky-600 dark:bg-sky-blue'
+                    : 'bg-gray-300 dark:bg-gray-600'
                 }`}
               >
                 <span
-                  className={`inline-block h-3 w-3 transform rounded-full bg-white ${shouldAnimate ? 'transition-transform' : ''} ${
+                  className={`inline-block h-3 w-3 transform rounded-full bg-white dark:bg-gray-900 ${shouldAnimate ? 'transition-transform' : ''} ${
                     showHistory ? 'translate-x-5' : 'translate-x-1'
                   }`}
                 />
               </div>
-              <span className="ml-2 text-sm text-gray-700">Show history</span>
+              <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">
+                Show history
+              </span>
             </label>
             {showHistory && (
               <Select
@@ -525,7 +529,9 @@ export function Clusters() {
           {loading && (
             <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+              <span className="ml-2 text-gray-500 dark:text-gray-400 text-sm">
+                Loading...
+              </span>
             </div>
           )}
           {!loading && lastFetchedTime && (
@@ -855,7 +861,7 @@ export function ClusterTable({
         <TableCell>
           <Link
             href={`/clusters/${item.isHistorical ? item.cluster_hash : item.cluster || item.name}`}
-            className="text-blue-600"
+            className="text-blue-600 dark:text-blue-400"
           >
             {item.cluster || item.name}
           </Link>
@@ -904,7 +910,7 @@ export function ClusterTable({
         <TableCell>
           <Link
             href="/workspaces"
-            className="text-gray-700 hover:text-blue-600 hover:underline"
+            className="text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
           >
             {item.workspace || 'default'}
           </Link>
@@ -934,7 +940,10 @@ export function ClusterTable({
             className="text-sm text-muted-foreground"
           >
             <span>
-              <Link href="/infra" className="text-blue-600 hover:underline">
+              <Link
+                href="/infra"
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
                 {item.cloud}
               </Link>
               {item.infra.includes('(') && (
@@ -1048,15 +1057,15 @@ export function ClusterTable({
       order: 9,
       header: {
         label: 'Actions',
-        className: 'md:sticky md:right-0 md:bg-white',
+        className: 'md:sticky md:right-0 md:bg-white dark:md:bg-gray-900',
       },
       renderHeader: () => (
-        <TableHead className="md:sticky md:right-0 md:bg-white">
+        <TableHead className="md:sticky md:right-0 md:bg-white dark:md:bg-gray-900">
           Actions
         </TableHead>
       ),
       renderCell: (item) => (
-        <TableCell className="text-left md:sticky md:right-0 md:bg-white">
+        <TableCell className="text-left md:sticky md:right-0 md:bg-white dark:md:bg-gray-900">
           {!item.isHistorical && (
             <Status2Actions
               cluster={item.cluster}
@@ -1137,7 +1146,7 @@ export function ClusterTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-gray-500 dark:text-gray-400"
                   >
                     <div className="flex justify-center items-center">
                       <CircularProgress size={20} className="mr-2" />
@@ -1161,7 +1170,7 @@ export function ClusterTable({
                 <TableRow>
                   <TableCell
                     colSpan={totalColSpan}
-                    className="text-center py-6 text-gray-500"
+                    className="text-center py-6 text-gray-500 dark:text-gray-400"
                   >
                     {showHistory ? 'No clusters found' : 'No active clusters'}
                   </TableCell>
@@ -1174,7 +1183,7 @@ export function ClusterTable({
 
       {/* Pagination controls */}
       {displayTotal > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700 dark:text-gray-300">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
@@ -1193,7 +1202,7 @@ export function ClusterTable({
                 </select>
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
-                  className="h-4 w-4 text-gray-500 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
+                  className="h-4 w-4 text-gray-500 dark:text-gray-400 absolute right-0 top-1/2 transform -translate-y-1/2 pointer-events-none"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -1216,7 +1225,7 @@ export function ClusterTable({
                 size="icon"
                 onClick={goToPreviousPage}
                 disabled={isServerPagination ? !hasPrev : page === 1}
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1242,7 +1251,7 @@ export function ClusterTable({
                     ? !hasNext
                     : page === totalPages || totalPages === 0
                 }
-                className="text-gray-500 h-8 w-8 p-0"
+                className="text-gray-500 dark:text-gray-400 h-8 w-8 p-0"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -1293,8 +1302,12 @@ export const enabledActions = (status) => {
 };
 
 const actionIcons = {
-  connect: <Terminal className="w-4 h-4 text-gray-500 inline-block" />,
-  VSCode: <SquareCode className="w-4 h-4 text-gray-500 inline-block" />,
+  connect: (
+    <Terminal className="w-4 h-4 text-gray-500 dark:text-gray-400 inline-block" />
+  ),
+  VSCode: (
+    <SquareCode className="w-4 h-4 text-gray-500 dark:text-gray-400 inline-block" />
+  ),
 };
 
 export function Status2Actions({
@@ -1546,8 +1559,8 @@ const FilterDropdown = ({
   };
 
   return (
-    <div className="flex flex-row border border-gray-300 rounded-md overflow-visible">
-      <div className="border-r border-gray-300 flex-shrink-0">
+    <div className="flex flex-row border border-gray-300 dark:border-gray-600 rounded-md overflow-visible">
+      <div className="border-r border-gray-300 dark:border-gray-600 flex-shrink-0">
         <Select onValueChange={setPropertyValue} value={propertyValue}>
           <SelectTrigger
             aria-label="Filter Property"
@@ -1582,7 +1595,7 @@ const FilterDropdown = ({
               setValue('');
               setIsOpen(false);
             }}
-            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400"
             title="Clear filter"
             tabIndex={-1}
           >
@@ -1604,20 +1617,22 @@ const FilterDropdown = ({
         {isOpen && valueOptions.length > 0 && (
           <div
             ref={dropdownRef}
-            className="absolute z-50 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"
+            className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-y-auto"
             style={{ zIndex: 9999 }}
           >
             {valueOptions.map((option, index) => (
               <div
                 key={`${option}-${index}`}
-                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 text-sm ${
+                className={`px-3 py-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 text-sm ${
                   index !== valueOptions.length - 1
-                    ? 'border-b border-gray-100'
+                    ? 'border-b border-gray-100 dark:border-gray-800'
                     : ''
                 }`}
                 onClick={() => handleOptionSelect(option)}
               >
-                <span className="text-sm text-gray-700">{option}</span>
+                <span className="text-sm text-gray-700 dark:text-gray-300">
+                  {option}
+                </span>
               </div>
             ))}
           </div>
@@ -1661,7 +1676,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
             <>
               <button
                 onClick={clearFilters}
-                className="rounded-full px-4 py-1 text-sm text-gray-700 bg-gray-200 hover:bg-gray-300"
+                className="rounded-full px-4 py-1 text-sm text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600"
               >
                 Clear filters
               </button>
@@ -1676,7 +1691,7 @@ const Filters = ({ filters = [], setFilters, updateURLParams }) => {
 const FilterItem = ({ filter, onRemove }) => {
   return (
     <>
-      <div className="flex items-center text-blue-600 bg-blue-100 px-1 py-1 rounded-full text-sm">
+      <div className="flex items-center text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-1 py-1 rounded-full text-sm">
         <div className="flex items-center gap-1 px-2">
           <span>{`${filter.property} `}</span>
           <span>{`${filter.operator} `}</span>
@@ -1685,7 +1700,7 @@ const FilterItem = ({ filter, onRemove }) => {
 
         <button
           onClick={() => onRemove()}
-          className="p-0.5 ml-1 transform text-gray-400 hover:text-gray-600 bg-blue-500 hover:bg-blue-600 rounded-full flex flex-col items-center"
+          className="p-0.5 ml-1 transform text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-400 bg-blue-500 dark:bg-blue-400 hover:bg-blue-600 rounded-full flex flex-col items-center"
           title="Clear filter"
         >
           <svg

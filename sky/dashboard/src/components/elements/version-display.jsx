@@ -140,7 +140,7 @@ export function UpgradeHint() {
       showCommit={false}
     >
       <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
-        <div className="p-2 rounded-full text-gray-600 hover:bg-gray-100 hover:text-blue-600">
+        <div className="p-2 rounded-full text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-blue-600 dark:hover:text-blue-400">
           <Bell className="w-5 h-5" />
         </div>
       </div>
@@ -154,7 +154,7 @@ export function NewVersionAvailable() {
   if (!latestVersion) return null;
 
   return (
-    <div className="flex items-center mr-4 text-amber-600 animate-pulse">
+    <div className="flex items-center mr-4 text-amber-600 dark:text-amber-400 animate-pulse">
       <ArrowUpCircle className="w-4 h-4 mr-1.5" />
       <span className="text-sm font-medium">
         New version available: {latestVersion}
@@ -177,7 +177,7 @@ export function VersionDisplay() {
       showUpdateInfo={false}
     >
       <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
-        <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
+        <div className="text-sm text-gray-500 dark:text-gray-400 border-b border-dotted border-gray-400 dark:border-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-600 dark:hover:border-blue-400">
           Version: {version}
         </div>
       </div>

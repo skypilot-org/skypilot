@@ -40,7 +40,7 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
         <div className="flex flex-col space-y-4">
           <div>
             <h3 className="text-sm font-medium mb-2">SSH Command</h3>
-            <Card className="p-3 bg-gray-50">
+            <Card className="p-3 bg-gray-50 dark:bg-gray-900">
               <div className="flex items-center justify-between">
                 <pre className="text-sm w-full whitespace-pre-wrap">
                   {sshCommands.map((cmd, index) => (
@@ -93,7 +93,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                 <h3 className="text-sm font-medium mb-2 my-2">
                   Setup SSH access
                 </h3>
-                <Card className="p-3 bg-gray-50">
+                <Card className="p-3 bg-gray-50 dark:bg-gray-900">
                   <div className="flex items-center justify-between">
                     <pre className="text-sm">
                       <code>sky status {cluster}</code>
@@ -117,7 +117,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                 <h3 className="text-sm font-medium mb-2 my-2">
                   Connect with VSCode/Cursor
                 </h3>
-                <Card className="p-3 bg-gray-50">
+                <Card className="p-3 bg-gray-50 dark:bg-gray-900">
                   <div className="flex items-center justify-between">
                     <pre className="text-sm">
                       <code>
