@@ -1,13 +1,9 @@
-# Test YAML for EFA smoke test. Uses any_of to try multiple EFA-capable
-# instance types across all AWS regions for better resource availability.
+# Test YAML for EFA smoke test. Uses accelerators for better resource availability.
+# This allows SkyPilot's optimizer to pick any available EFA-capable instance with L4 or A10G GPUs.
 resources:
   infra: aws
   network_tier: best
-  any_of:
-    - instance_type: g6.8xlarge
-    - instance_type: g6.16xlarge
-    - instance_type: g5.8xlarge
-    - instance_type: g5.16xlarge
+  accelerators: {L4, A10G}
 
 num_nodes: 2
 
