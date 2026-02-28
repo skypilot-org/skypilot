@@ -242,11 +242,10 @@ class ContextualEnviron(MutableMapping[str, str]):
             # Snapshot env_overrides to avoid RuntimeError: dictionary
             # changed size during iteration when another thread sharing
             # the same SkyPilotContext modifies env_overrides between
-            # generator yields. This mirrors the thread-safety pattern
-            # used by os._Environ.__iter__ (which snapshots via list()).
-            overrides_snapshot = list(ctx.env_overrides.items())
+            # generator yields.
+            overrides_snapshot = ctx.env_overrides.copy()
             deleted_keys = set()
-            for key, value in overrides_snapshot:
+            for key, value in overrides_snapshot.items():
                 if value is None:
                     deleted_keys.add(key)
                 else:
