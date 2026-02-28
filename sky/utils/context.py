@@ -312,13 +312,6 @@ class ContextualEnviron(MutableMapping[str, str]):
         return copied
 
     def setdefault(self, key: str, default: str) -> str:
-        ctx = get()
-        if ctx is not None:
-            try:
-                return self[key]
-            except KeyError:
-                self[key] = default
-                return default
         return self._environ.setdefault(key, default)
 
     def __ior__(self, other):
