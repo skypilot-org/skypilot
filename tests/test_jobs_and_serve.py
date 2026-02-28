@@ -160,17 +160,20 @@ class TestWithEmptyDBSetup:
     def test_cancel_jobs(self):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.jobs_cancel, ['-a', '-y'])
-        assert result.exit_code == 0, (result.exception, result.output,
-                                       result.exc_info)
-        assert 'No job to cancel.' in result.output, (result.exception,
-                                                       result.output,
-                                                       result.exc_info)
+        assert result.exit_code == 1
+
+        assert isinstance(result.exception, exceptions.ClusterNotUpError)
+        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
+            result.exception), (result.exception, result.output,
+                                result.exc_info)
 
     def test_logs_jobs(self):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(command.jobs_logs, ['1'])
-        assert result.exit_code == 0, (result.exception, result.output,
-                                       result.exc_info)
+        assert result.exit_code == 1
+        assert controller_utils.Controllers.JOBS_CONTROLLER.value.default_hint_if_non_existent in str(
+            result.exception), (result.exception, result.output,
+                                result.exc_info)
 
     def test_queue_jobs(self):
         cli_runner = cli_testing.CliRunner()
