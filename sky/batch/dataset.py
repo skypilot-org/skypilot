@@ -3,11 +3,12 @@
 Provides a simple interface for loading JSONL data from cloud storage
 and distributing workloads across a pool of workers via managed jobs.
 """
-import datetime
 import logging
 import time
 from typing import Callable, Optional
 import uuid
+
+import tqdm
 
 import sky
 from sky.batch import remote
@@ -31,65 +32,65 @@ def _get_managed_job_record(managed_job_id: int):
 
 
 def _wait_for_managed_job_completion(managed_job_id: int) -> None:
-    """Poll managed job status and report progress from the DB."""
-    start_time = time.time()
-    last_completed = 0
-    last_message_time = time.time()
+    """Poll managed job status and report progress with a tqdm bar."""
     poll_interval = 2.0
+    pbar = None
 
-    def _timestamp() -> str:
-        elapsed = int(time.time() - start_time)
-        mins, secs = divmod(elapsed, 60)
-        now = datetime.datetime.now().strftime('%H:%M:%S')
-        return f'[{now} +{mins:02d}:{secs:02d}]'
+    try:
+        while True:
+            try:
+                record = _get_managed_job_record(managed_job_id)
+            except Exception as e:  # pylint: disable=broad-except
+                # Transient API errors (e.g. request purged before read).
+                # Log and retry on the next poll cycle.
+                logger.debug('Transient error polling job %s: %s',
+                             managed_job_id, e)
+                time.sleep(poll_interval)
+                continue
+            status = record.status
+            if status is None:
+                raise RuntimeError(
+                    f'Managed job {managed_job_id} has no status')
 
-    while True:
-        try:
-            record = _get_managed_job_record(managed_job_id)
-        except Exception as e:
-            # Transient API errors (e.g. request purged before read).
-            # Log and retry on the next poll cycle.
-            logger.debug(f'Transient error polling job {managed_job_id}: {e}')
+            completed = record.batch_completed_batches or 0
+            total = record.batch_total_batches or 0
+
+            if status.is_terminal():
+                # Ensure the bar reaches 100% on success before closing.
+                if pbar is not None and total > 0:
+                    pbar.n = total
+                    pbar.refresh()
+                if status == managed_job_state.ManagedJobStatus.SUCCEEDED:
+                    return
+                raise RuntimeError(f'Managed job {managed_job_id} '
+                                   f'failed with status: {status.value}')
+
+            # Create the progress bar once we know the total.
+            if pbar is None and total > 0:
+                pbar = tqdm.tqdm(
+                    total=total,
+                    initial=completed,
+                    desc=f'Job {managed_job_id}',
+                    unit='batch',
+                    unit_scale=False,
+                    dynamic_ncols=True,
+                )
+            elif pbar is not None:
+                if total != pbar.total:
+                    pbar.total = total
+                    pbar.refresh()
+                if completed > pbar.n:
+                    pbar.update(completed - pbar.n)
+
+            # While waiting for total to appear, show status.
+            if pbar is None and total == 0:
+                logger.info('Job %s: %s (waiting for batches...)',
+                            managed_job_id, status.value)
+
             time.sleep(poll_interval)
-            continue
-        status = record.status
-        if status is None:
-            raise RuntimeError(f'Managed job {managed_job_id} has no status')
-
-        if status.is_terminal():
-            if status == managed_job_state.ManagedJobStatus.SUCCEEDED:
-                elapsed = time.time() - start_time
-                logger.info(f'{_timestamp()} Managed job '
-                            f'{managed_job_id} completed successfully '
-                            f'in {elapsed:.1f}s')
-                return
-            raise RuntimeError(f'{_timestamp()} Managed job {managed_job_id} '
-                               f'failed with status: {status.value}')
-
-        # Read progress from DB (pushed by coordinator via API).
-        completed = record.batch_completed_batches or 0
-        total = record.batch_total_batches or 0
-
-        if completed > last_completed:
-            percent = (completed / total * 100) if total > 0 else 0
-            elapsed = time.time() - start_time
-            rate = completed / elapsed if elapsed > 0 else 0
-            eta = (total - completed) / rate if rate > 0 else 0
-            logger.info(f'{_timestamp()} Job {managed_job_id}: '
-                        f'{completed}/{total} batches ({percent:.1f}%) | '
-                        f'Rate: {rate:.2f} batches/s | ETA: {eta:.0f}s')
-            last_completed = completed
-            last_message_time = time.time()
-        elif time.time() - last_message_time >= 10:
-            if total > 0:
-                logger.info(f'{_timestamp()} Job {managed_job_id}: '
-                            f'{status.value} ({completed}/{total} batches)')
-            else:
-                logger.info(f'{_timestamp()} Job {managed_job_id}: '
-                            f'{status.value}')
-            last_message_time = time.time()
-
-        time.sleep(poll_interval)
+    finally:
+        if pbar is not None:
+            pbar.close()
 
 
 class Dataset:
