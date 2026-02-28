@@ -41,11 +41,20 @@ metadata:
     nginx.ingress.kubernetes.io/configuration-snippet: |
       # Set X-Skypilot-Auth-Mode header to the value from the auth request.
       proxy_set_header X-Skypilot-Auth-Mode $x_skypilot_auth_mode;
+      {{- if and $unifiedIngress .Values.grafana.enabled }}
+      # Grafana proxy auth header for unified ingress
+      proxy_set_header X-WEBAUTH-USER admin;
+      {{- end }}
     {{- else if and (not .Values.auth.oauth.enabled) (not $enableBasicAuthInAPIServer) (or .Values.ingress.authSecret .Values.ingress.authCredentials) }}
     # Basic authentication
     nginx.ingress.kubernetes.io/auth-type: basic
     nginx.ingress.kubernetes.io/auth-realm: "SkyPilot API Server"
     nginx.ingress.kubernetes.io/auth-secret: {{ .Values.ingress.authSecret | default (printf "%s-basic-auth" $fullName) }}
+    {{- end }}
+    {{- if and $unifiedIngress .Values.grafana.enabled (not (and (index .Values.ingress "oauth2-proxy" "enabled") (not .Values.auth.oauth.enabled))) }}
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      # Grafana proxy auth header for unified ingress
+      proxy_set_header X-WEBAUTH-USER admin;
     {{- end }}
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"

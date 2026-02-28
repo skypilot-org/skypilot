@@ -25,7 +25,7 @@ import {
   KeyIcon,
   ShieldIcon,
 } from '@/components/elements/icons';
-import { Settings, User, Clock, FileCode } from 'lucide-react';
+import { Settings, User, Clock, FileCode, Globe } from 'lucide-react';
 
 // Map icon names to icon components for plugin nav links
 const ICON_MAP = {
@@ -515,6 +515,15 @@ export function TopBar() {
               </Link>
 
               <Link
+                href="/services"
+                className={getLinkClasses('/services')}
+                prefetch={false}
+              >
+                <Globe className="w-4 h-4" />
+                <span>Services</span>
+              </Link>
+
+              <Link
                 href="/volumes"
                 className={getLinkClasses('/volumes')}
                 prefetch={false}
@@ -784,6 +793,20 @@ export function TopBar() {
                 >
                   <BriefcaseIcon className="w-5 h-5 mr-3" />
                   Jobs
+                </Link>
+
+                <Link
+                  href="/services"
+                  className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
+                    isActivePath('/services')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
+                  }`}
+                  onClick={toggleMobileSidebar}
+                  prefetch={false}
+                >
+                  <Globe className="w-5 h-5 mr-3" />
+                  Services
                 </Link>
 
                 <Link

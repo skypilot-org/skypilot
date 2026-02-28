@@ -35,7 +35,7 @@ export const checkGrafanaAvailability = async () => {
       });
 
       // Consider Grafana available if we get any 200 response from the Grafana API
-      const grafanaAvailabilityCache = response.status == 200;
+      grafanaAvailabilityCache = response.status == 200;
       return grafanaAvailabilityCache;
     } catch (error) {
       console.debug('Grafana availability check failed:', error);
