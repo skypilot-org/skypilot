@@ -2,7 +2,6 @@
 import asyncio
 import contextlib
 import enum
-import functools
 import os
 import pathlib
 import sqlite3
@@ -425,12 +424,6 @@ class DatabaseManager:
 
     Usage:
         _db_manager = DatabaseManager('my_db', create_table_fn)
-        initialize_and_get_db = _db_manager.get_engine
-        _init_db = _db_manager.init_db
-
-    For modules that also need async support:
-        initialize_and_get_db_async = _db_manager.get_engine_async
-        _init_db_async = _db_manager.init_db_async
     """
 
     def __init__(

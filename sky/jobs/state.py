@@ -239,7 +239,6 @@ def force_no_postgres() -> bool:
 
 
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
-initialize_and_get_db = _db_manager.get_engine
 
 
 def _init_db_async(func):
@@ -280,7 +279,7 @@ def _init_db(func):
             # this may happen multiple times since there is no locking
             # here but thats fine, this is just a short circuit for the
             # common case.
-            initialize_and_get_db()
+            _db_manager.get_engine()
 
         backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=10)
         last_exc = None

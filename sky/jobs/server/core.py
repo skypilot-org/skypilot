@@ -412,6 +412,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
 
     workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
     entrypoint = common_utils.get_current_command()
+    assert pool is not None, 'pool must be set'
     pool_hash = serve_state.get_service_hash(pool)
     user_hash = common_utils.get_user_hash()
 
