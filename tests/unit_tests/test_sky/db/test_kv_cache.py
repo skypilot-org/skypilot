@@ -15,7 +15,7 @@ def isolated_database(tmp_path):
 
     kv_cache._db_manager._engine = sqlalchemy.create_engine(
         f'sqlite:///{temp_db_path}')
-    kv_cache.create_table(kv_cache._db_manager.engine)
+    kv_cache.create_table(kv_cache._db_manager.get_engine())
     yield
     kv_cache._db_manager._engine = None
 
