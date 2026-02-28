@@ -433,7 +433,7 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> 'pd.DataFrame':
 # TODO(tian): find out the driver version.
 #   Neuron driver:
 _GPU_DESC_UBUNTU_DATE = [
-    ('neuron', '/aws/service/neuron/dlami/base', '22.04'),
+    ('neuron', '/aws/service/neuron/dlami/multi-framework', '22.04'),
 ]
 
 
