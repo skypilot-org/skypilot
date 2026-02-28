@@ -447,16 +447,6 @@ class DatabaseManager:
         self._engine: Optional[sqlalchemy.engine.Engine] = None
         self._engine_async: Optional[sqlalchemy_async.AsyncEngine] = None
 
-    @property
-    def engine(self) -> Optional[sqlalchemy.engine.Engine]:
-        """The cached sync engine, or None if not yet initialized."""
-        return self._engine
-
-    @property
-    def engine_async(self) -> Optional[sqlalchemy_async.AsyncEngine]:
-        """The cached async engine, or None if not yet initialized."""
-        return self._engine_async
-
     def get_engine(self) -> sqlalchemy.engine.Engine:
         """Lazy sync engine init with double-checked locking."""
         if self._engine is not None:
@@ -473,7 +463,7 @@ class DatabaseManager:
                 self._post_init_fn(engine)
             return self._engine
 
-    def get_engine_async(self) -> sqlalchemy_async.AsyncEngine:
+    def get_async_engine(self) -> sqlalchemy_async.AsyncEngine:
         """Lazy async engine init; delegates table creation to get_engine."""
         if self._engine_async is not None:
             return self._engine_async
@@ -484,27 +474,6 @@ class DatabaseManager:
         # Ensure tables are created via the sync path.
         self.get_engine()
         return self._engine_async
-
-    def init_db(self, func: Callable) -> Callable:
-        """Sync decorator that ensures the DB is initialized before func."""
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            self.get_engine()
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    def init_db_async(self, func: Callable) -> Callable:
-        """Async decorator that ensures the DB is initialized before func."""
-
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            if self._engine_async is None:
-                await asyncio.to_thread(self.get_engine_async)
-            return await func(*args, **kwargs)
-
-        return wrapper
 
 
 _max_connections = 0

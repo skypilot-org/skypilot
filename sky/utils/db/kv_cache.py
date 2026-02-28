@@ -52,13 +52,8 @@ def create_table(engine: sqlalchemy.engine.Engine):
 
 
 _db_manager = db_utils.DatabaseManager('kv_cache', create_table)
-initialize_and_get_db = _db_manager.get_engine
-_init_db = _db_manager.init_db
-
-initialize_and_get_db()
 
 
-@_init_db
 @metrics_lib.time_me
 def add_or_update_cache_entry(
     key: str,
@@ -72,17 +67,17 @@ def add_or_update_cache_entry(
         value: The value of the cache entry.
         expires_at: The timestamp when the cache entry expires.
     """
-    assert _db_manager.engine is not None
-    if (_db_manager.engine.dialect.name ==
+    assert _db_manager.get_engine() is not None
+    if (_db_manager.get_engine().dialect.name ==
             db_utils.SQLAlchemyDialect.SQLITE.value):
         insert_func = sqlite.insert
-    elif (_db_manager.engine.dialect.name ==
+    elif (_db_manager.get_engine().dialect.name ==
           db_utils.SQLAlchemyDialect.POSTGRESQL.value):
         insert_func = postgresql.insert
     else:
         raise ValueError('Unsupported database dialect')
 
-    with orm.Session(_db_manager.engine) as session:
+    with orm.Session(_db_manager.get_engine()) as session:
         insert_stmt = insert_func(kv_cache_table).values(key=key,
                                                          value=value,
                                                          expires_at=expires_at)
@@ -97,7 +92,6 @@ def add_or_update_cache_entry(
         session.commit()
 
 
-@_init_db
 @metrics_lib.time_me
 def get_cache_entry(key: str) -> Optional[str]:
     """Get the value of the cache entry.
@@ -105,8 +99,8 @@ def get_cache_entry(key: str) -> Optional[str]:
     Args:
         key: The key of the cache entry.
     """
-    assert _db_manager.engine is not None
-    with orm.Session(_db_manager.engine) as session:
+    assert _db_manager.get_engine() is not None
+    with orm.Session(_db_manager.get_engine()) as session:
         result = session.execute(
             sqlalchemy.select(kv_cache_table.c.value).where(
                 kv_cache_table.c.key == key).where(
