@@ -3065,6 +3065,7 @@ def get_max_db_connections() -> Optional[int]:
 
 # ================= Dashboard Dismissed Items =================
 
+
 @_init_db
 @metrics_lib.time_me
 def add_dashboard_dismissed_item(item_type: str, item_id: str,

@@ -1720,7 +1720,6 @@ def get_all_contexts() -> List[str]:
 # = Dashboard Management =
 # ========================
 
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 def dashboard_dismiss_item(item_type: str, item_id: str) -> None:
     """Dismisses an item from the dashboard."""
@@ -1734,12 +1733,13 @@ def dashboard_restore_item(item_type: str, item_id: str) -> None:
     global_user_state.remove_dashboard_dismissed_item(item_type, item_id)
 
 
-def dashboard_get_dismissed_items(item_type: str, item_id: Optional[str] = None) -> List[str]:
+def dashboard_get_dismissed_items(item_type: str,
+                                  _item_id: Optional[str] = None) -> List[str]:
     """Gets all dismissed items of a type for the dashboard."""
     return global_user_state.get_dashboard_dismissed_items(item_type)
 
 
-def dashboard_clear_dismissed_items(item_type: str, item_id: Optional[str] = None) -> None:
+def dashboard_clear_dismissed_items(item_type: str,
+                                    _item_id: Optional[str] = None) -> None:
     """Clears all dismissed items of a type from the dashboard."""
     global_user_state.clear_dashboard_dismissed_items(item_type)
-

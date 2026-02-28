@@ -2770,6 +2770,7 @@ async def dashboard_dismissed_items_clear_all(
         auth_user=request.state.auth_user,
     )
 
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.

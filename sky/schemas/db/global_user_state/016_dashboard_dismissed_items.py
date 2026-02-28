@@ -17,6 +17,7 @@ down_revision: Union[str, Sequence[str], None] = '015'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+
 def upgrade():
     """Create dashboard_dismissed_items table."""
     op.create_table(
@@ -26,6 +27,7 @@ def upgrade():
         sa.Column('user_hash', sa.Text()),
         sa.Column('dismissed_at', sa.Integer()),
     )
+
 
 def downgrade():
     """Drop dashboard_dismissed_items table."""
