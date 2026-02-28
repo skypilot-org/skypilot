@@ -1,9 +1,13 @@
-# Test YAML for EFA smoke test. Uses accelerators for better resource availability.
-# This allows SkyPilot's optimizer to pick any available EFA-capable instance with L4 or A10G GPUs.
+# Test YAML for EFA smoke test. Uses any_of to try multiple EFA-capable
+# instance types across all AWS regions for better resource availability.
 resources:
   infra: aws
   network_tier: best
-  accelerators: {L4, A10G}
+  any_of:
+    - instance_type: g6.8xlarge
+    - instance_type: g6.16xlarge
+    - instance_type: g5.8xlarge
+    - instance_type: g5.16xlarge
 
 num_nodes: 2
 
@@ -25,9 +29,9 @@ run: |
     /opt/amazon/openmpi/bin/mpirun \
       --allow-run-as-root \
       --tag-output \
-      -H $nodes \
-      -np $NP \
-      -N $SKYPILOT_NUM_GPUS_PER_NODE \
+      -H "$nodes" \
+      -np "$NP" \
+      -N "$SKYPILOT_NUM_GPUS_PER_NODE" \
       --bind-to none \
       -x LD_LIBRARY_PATH \
       -x NCCL_DEBUG=INFO \
