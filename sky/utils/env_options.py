@@ -26,7 +26,8 @@ class Options(enum.Enum):
     RUNNING_IN_BUILDKITE = ('BUILDKITE', False)
     # Internal: This is used for testing to enable grpc for communication
     # between the API server and the Skylet.
-    ENABLE_GRPC = ('SKYPILOT_ENABLE_GRPC', False)
+    # TODO(kevin): Remove the flag once it is confirmed to be stable.
+    ENABLE_GRPC = ('SKYPILOT_ENABLE_GRPC', True)
     # Allow all contexts for Kubernetes if allowed_contexts is not set in
     # config.
     ALLOW_ALL_KUBERNETES_CONTEXTS = ('SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS',
