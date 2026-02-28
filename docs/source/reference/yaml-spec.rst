@@ -365,7 +365,7 @@ The following ways are valid for specifying accelerators for a cluster:
 
   Format: ``<memory>:<count>`` or ``<memory>+:<count>``
 
-  This selects any GPU with the specified memory (or at least that memory with ``+``).
+  This selects any GPU with the specified memory (or at least that memory with ``+``). The ``count`` is optional and defaults to 1.
   Optionally, prefix with a manufacturer name to filter by manufacturer.
 
   Examples:
