@@ -431,58 +431,6 @@ def test_graceful_job_cancel_multi_node(mock_flush_script, mock_run_parallel):
     _, kwargs = mock_run_parallel.call_args
     assert kwargs['num_threads'] == 3
 
-# Tests for handle serialization in managed job queue
-
-
-class TestHandleSerialization:
-    """Tests for handle serialization/deserialization in job queue."""
-
-    def test_serialize_handle_for_json_none(self):
-        """Test that None handle returns None."""
-        result = utils._serialize_handle_for_json(None)
-        assert result is None
-
-    def test_serialize_handle_for_json_dict(self):
-        """Test serialization of a dict object (picklable)."""
-        # Use a dict instead of a local class since dicts are always picklable
-        handle = {
-            'stable_internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-            'cluster_name_on_cloud': 'test-cluster',
-        }
-        result = utils._serialize_handle_for_json(handle)
-
-        # Should return a base64-encoded string
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_deserialize_handle_from_json_none(self):
-        """Test that None string returns None."""
-        result = utils._deserialize_handle_from_json(None)
-        assert result is None
-
-    def test_serialize_deserialize_roundtrip(self):
-        """Test that serialize/deserialize is a proper roundtrip."""
-        # Use a dict since it's always picklable
-        original = {
-            'stable_internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-            'cluster_name_on_cloud': 'test-cluster',
-            'launched_nodes': 1,
-        }
-
-        # Serialize
-        serialized = utils._serialize_handle_for_json(original)
-        assert isinstance(serialized, str)
-
-        # Deserialize
-        deserialized = utils._deserialize_handle_from_json(serialized)
-
-        # Check attributes are preserved
-        assert deserialized['stable_internal_external_ips'] == original[
-            'stable_internal_external_ips']
-        assert deserialized['cluster_name_on_cloud'] == original[
-            'cluster_name_on_cloud']
-        assert deserialized['launched_nodes'] == original['launched_nodes']
-
 
 class TestPopulateJobRecordFromHandle:
     """Tests for _populate_job_record_from_handle."""
