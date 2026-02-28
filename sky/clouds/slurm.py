@@ -444,6 +444,20 @@ class Slurm(clouds.Cloud):
                 # are a lot of pending jobs to be processed.
                 provision_timeout = 2 * 60  # 2 minutes
 
+        # Read sbatch_options with three-level merge:
+        # global < cluster < partition.
+        sbatch_options: Dict[str, Any] = {}
+        for config_keys in [
+            ('slurm', 'sbatch_options'),
+            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
+            ('slurm', 'cluster_configs', cluster, 'partition_configs',
+             partition, 'sbatch_options'),
+        ]:
+            level_config = skypilot_config.get_nested(config_keys,
+                                                      default_value=None)
+            if level_config is not None:
+                sbatch_options.update(level_config)
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -470,6 +484,7 @@ class Slurm(clouds.Cloud):
             'slurm_cluster_name_env_var':
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
+            'sbatch_options': sbatch_options,
         }
 
         return deploy_vars

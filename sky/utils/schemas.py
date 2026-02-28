@@ -1181,6 +1181,30 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_SBATCH_OPTIONS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'oneOf': [
+            {
+                'type': 'string',
+                # Disallow newlines to prevent script injection in
+                # #SBATCH directives.
+                'pattern': r'^[^\n]*$'
+            },
+            {
+                'type': 'number'
+            },
+            {
+                'type': 'boolean'
+            },
+            {
+                'type': 'null'
+            },
+        ]
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1586,6 +1610,7 @@ def get_config_schema():
                     'type': 'integer',
                 },
                 'pricing': _PRICING_SCHEMA,
+                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1596,6 +1621,7 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             'pricing': _PRICING_SCHEMA,
+                            'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -1606,6 +1632,7 @@ def get_config_schema():
                                     'additionalProperties': False,
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
+                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                                     },
                                 },
                             },
