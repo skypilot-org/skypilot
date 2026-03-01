@@ -1,0 +1,39 @@
+# Coding Agent Template
+# Launches a cluster with Claude Code pre-installed for AI-assisted development.
+#
+# Usage:
+#   sky launch -c dev recipes:agent
+#   ssh dev
+#   claude  # Start Claude Code
+#
+# To resume after stopping:
+#   sky launch -c dev recipes:agent
+
+resources:
+  cpus: 4+
+  memory: 8+
+  disk_size: 256
+  autostop:
+    idle_minutes: 30
+    down: false
+    wait_for: jobs_and_ssh
+
+secrets:
+  ANTHROPIC_API_KEY:
+
+setup: |
+  #!/bin/bash
+  set -e
+  if ! command -v node &> /dev/null; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+    sudo apt-get install -y -qq nodejs
+  fi
+  sudo npm install -g @anthropic-ai/claude-code
+  if ! command -v tmux &> /dev/null; then
+    sudo apt-get install -y -qq tmux
+  fi
+
+run: |
+  echo "Coding agent cluster is ready!"
+  echo "Connect: ssh $SKYPILOT_CLUSTER_NAME"
+  echo "Resume:  sky launch -c $SKYPILOT_CLUSTER_NAME recipes:agent"

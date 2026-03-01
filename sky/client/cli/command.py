@@ -61,6 +61,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
+from sky.client.cli import agent as agent_cli
 from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
@@ -7472,6 +7473,9 @@ def api_info():
                f'{ux_utils.INDENT_LAST_SYMBOL}{location}')
     # Show upgrade hint if available
     server_common.check_and_print_upgrade_hint(api_server_info, url)
+
+
+agent_cli.register_agent_commands(cli)
 
 
 @cli.group(cls=_NaturalOrderGroup)

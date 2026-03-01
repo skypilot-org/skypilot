@@ -84,6 +84,11 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
         'description': 'A starting point for a k8s volume',
         'recipe_type': 'volume',
     },
+    'agent': {
+        'name': 'agent',
+        'description': 'A cluster with Claude Code for AI-assisted development',
+        'recipe_type': 'cluster',
+    },
 }
 
 
@@ -124,39 +129,48 @@ def _create_table(engine: sqlalchemy.engine.Engine) -> None:
 
 
 def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
-    """Insert default templates if the table is empty.
+    """Insert default templates, skipping any that already exist.
 
     Loads recipe content from example files in sky/recipes/examples/ and
-    populates the database with the default templates.
+    populates the database with default templates. Skips templates whose
+    names already exist so new defaults are added on upgrade without
+    affecting existing ones.
     """
     with orm.Session(engine) as session:
-        # Check if table is empty
-        # pylint: disable=not-callable
-        count = session.execute(
-            sqlalchemy.select(
-                sqlalchemy.func.count()).select_from(recipes_table)).scalar()
-        if count == 0:
-            now = time.time()
-            for filename, metadata in DEFAULT_TEMPLATES.items():
-                try:
-                    content = _load_example_content(filename)
-                except FileNotFoundError:
-                    logger.warning(f'Example file not found: {filename}.yaml')
-                    continue
+        # Get names of existing recipes to skip them
+        existing_names = set()
+        result = session.execute(
+            sqlalchemy.select(recipes_table.c.name))
+        for row in result:
+            existing_names.add(row.name)
 
-                session.execute(recipes_table.insert().values(
-                    name=metadata['name'],
-                    description=metadata['description'],
-                    content=content,
-                    recipe_type=metadata['recipe_type'],
-                    pinned=1,
-                    user_id='system',
-                    user_name='SkyPilot',
-                    created_at=now,
-                    updated_at=now,
-                    is_editable=0,
-                    is_pinnable=1,
-                ))
+        now = time.time()
+        inserted = False
+        for filename, metadata in DEFAULT_TEMPLATES.items():
+            if metadata['name'] in existing_names:
+                continue
+
+            try:
+                content = _load_example_content(filename)
+            except FileNotFoundError:
+                logger.warning(f'Example file not found: {filename}.yaml')
+                continue
+
+            session.execute(recipes_table.insert().values(
+                name=metadata['name'],
+                description=metadata['description'],
+                content=content,
+                recipe_type=metadata['recipe_type'],
+                pinned=1,
+                user_id='system',
+                user_name='SkyPilot',
+                created_at=now,
+                updated_at=now,
+                is_editable=0,
+                is_pinnable=1,
+            ))
+            inserted = True
+        if inserted:
             session.commit()
 
 
