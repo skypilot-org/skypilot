@@ -19,20 +19,19 @@ workload, or follow explicit priority ordering. The key mechanisms are:
 Use `any_of` when you have multiple acceptable resource configurations and
 want SkyPilot to pick the cheapest one available across all of them.
 
+Note: If all options use the same accelerator, you can simply specify
+`accelerators:` without `any_of` — SkyPilot will automatically search
+across all enabled clouds. Use `any_of` when mixing different GPU types:
+
 ```yaml
-# cheapest-gpu.yaml
+# cheapest-gpu.yaml — mix different GPU types, SkyPilot picks cheapest
 name: cheapest-gpu-training
 
 resources:
   any_of:
-    - infra: aws
-      accelerators: A100:8
-    - infra: gcp
-      accelerators: A100:8
-    - infra: azure
-      accelerators: A100:8
-    - infra: lambda
-      accelerators: A100:8
+    - accelerators: H100:8
+    - accelerators: A100-80GB:8
+    - accelerators: A100:8
 
 run: |
   torchrun --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE train.py

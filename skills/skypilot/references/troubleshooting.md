@@ -734,8 +734,8 @@ sky jobs launch myjob.yaml
 ```yaml
 resources:
   use_spot: true
-  job_recovery: failover
-  # Options: failover (default for spot), none
+  job_recovery: eager_next_region
+  # Options: eager_next_region (default for spot), failover, none
 ```
 
 2. If `job_recovery: none` is set (or the task uses on-demand instances), recovery is disabled by design.

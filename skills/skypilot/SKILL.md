@@ -72,6 +72,7 @@ This shows which clouds are configured. If the user's target cloud is not enable
 | `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle) |
 | `sky serve up serve.yaml -n NAME` | Start a model serving service |
 | `sky status` | Show all clusters |
+| `sky logs NAME` | Stream job logs from a cluster |
 | `sky down NAME` | Tear down a cluster |
 
 For complete CLI reference, see [CLI Reference](references/cli-reference.md).
