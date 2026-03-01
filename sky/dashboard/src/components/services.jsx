@@ -343,7 +343,18 @@ function ServicesTable({
                               <CopyIcon className="w-3.5 h-3.5" />
                             )}
                           </button>
+                          {service.service_type && service.service_type !== 'ClusterIP' && (
+                            <span className={`ml-1 px-1.5 py-0.5 text-xs font-medium rounded ${
+                              service.service_type === 'LoadBalancer'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {service.service_type}
+                            </span>
+                          )}
                         </div>
+                      ) : service.service_type === 'LoadBalancer' ? (
+                        <span className="text-amber-600 text-sm">Pending external IP...</span>
                       ) : (
                         <span className="text-gray-400">-</span>
                       )}

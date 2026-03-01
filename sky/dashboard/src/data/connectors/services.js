@@ -33,6 +33,8 @@ async function getV2Services() {
       model: svc.model || null,
       context: svc.context,
       namespace: svc.namespace,
+      service_type: svc.service_type || 'ClusterIP',
+      proxy_endpoint: svc.proxy_endpoint || null,
     }));
   } catch (error) {
     console.error('Error fetching v2 services:', error);

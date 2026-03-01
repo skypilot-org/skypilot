@@ -52,12 +52,39 @@ def _run_kubectl(args: List[str], timeout: int = 60,
     return result.returncode, result.stdout, result.stderr
 
 
+def _wait_for_loadbalancer_ip(
+    svc_name: str,
+    namespace: str,
+    context: Optional[str] = None,
+    timeout: int = 120,
+) -> Optional[str]:
+    """Poll until a LoadBalancer Service gets an external IP/hostname."""
+    for _ in range(timeout // 5):
+        # Try IP first
+        rc, out, _ = _run_kubectl([
+            'get', 'svc', svc_name, '-n', namespace,
+            '-o', 'jsonpath={.status.loadBalancer.ingress[0].ip}',
+        ], context=context)
+        if rc == 0 and out.strip():
+            return out.strip()
+        # Try hostname (AWS ELBs use hostname instead of IP)
+        rc, out, _ = _run_kubectl([
+            'get', 'svc', svc_name, '-n', namespace,
+            '-o', 'jsonpath={.status.loadBalancer.ingress[0].hostname}',
+        ], context=context)
+        if rc == 0 and out.strip():
+            return out.strip()
+        time.sleep(5)
+    return None
+
+
 def up(yaml_path: str,
        namespace: str = 'skyserve-v2',
        hf_token: Optional[str] = None,
        force_direct: bool = False,
        context: Optional[str] = None,
-       auto_install: bool = True) -> Dict[str, Any]:
+       auto_install: bool = True,
+       service_type: Optional[str] = None) -> Dict[str, Any]:
     """Deploy a model service.
 
     Args:
@@ -67,12 +94,18 @@ def up(yaml_path: str,
         force_direct: Force direct Deployment mode (skip KServe).
         context: Target Kubernetes context. None for default.
         auto_install: Auto-install missing prerequisites.
+        service_type: Override K8s Service type (ClusterIP/LoadBalancer/NodePort).
 
     Returns:
         Dict with deployment info (service_name, namespace, mode, etc.)
     """
     # Parse spec
     spec = serve_spec_v2.parse_spec(yaml_path)
+
+    # CLI flag overrides YAML spec
+    if service_type is not None:
+        spec.service.service_type = service_type
+
     errors = serve_spec_v2.validate_spec(spec)
     if errors:
         raise ValueError(f'Invalid spec: {"; ".join(errors)}')
@@ -127,6 +160,8 @@ def up(yaml_path: str,
     print(f'  GPU: {model_config.num_gpus}x {model_config.gpu_type}')
     print(f'  Tensor Parallelism: {model_config.tensor_parallel}')
     print(f'  Replicas: {spec.service.replicas}')
+    if spec.service.service_type != 'ClusterIP':
+        print(f'  Service Type: {spec.service.service_type}')
 
     # Write to temp file and apply
     with tempfile.NamedTemporaryFile(
@@ -168,6 +203,24 @@ def up(yaml_path: str,
             }),
         ], context=context)
 
+    # Wait for LoadBalancer external IP if applicable
+    endpoint = None
+    if spec.service.service_type == 'LoadBalancer':
+        # Determine the Service name to watch
+        if mode == 'kserve':
+            lb_svc_name = f'{service_name}-endpoint'
+        else:
+            lb_svc_name = service_name
+        print(f'\nWaiting for LoadBalancer external IP...')
+        external_host = _wait_for_loadbalancer_ip(
+            lb_svc_name, namespace, context=context)
+        if external_host:
+            endpoint = f'http://{external_host}:8000'
+            print(f'  Endpoint: {endpoint}')
+        else:
+            print(f'  External IP not yet assigned. Check with: '
+                  f'kubectl get svc {lb_svc_name} -n {namespace}')
+
     return {
         'service_name': service_name,
         'namespace': namespace,
@@ -176,6 +229,8 @@ def up(yaml_path: str,
         'gpu_type': model_config.gpu_type,
         'num_gpus': model_config.num_gpus,
         'replicas': spec.service.replicas,
+        'service_type': spec.service.service_type,
+        'endpoint': endpoint,
     }
 
 
@@ -395,9 +450,47 @@ def endpoint(service_name: str,
              context: Optional[str] = None) -> Optional[str]:
     """Get the service endpoint URL.
 
-    Returns the ClusterIP service URL for port-forwarding, or the
-    external URL if available.
+    Checks for LoadBalancer/NodePort endpoints first, then falls back
+    to ClusterIP service URL for port-forwarding.
     """
+    # Check for endpoint Service (created for non-ClusterIP types)
+    # Also check KServe workload service naming convention
+    for svc_name in [f'{service_name}-endpoint', service_name,
+                     f'{service_name}-kserve-workload-svc']:
+        rc, out, _ = _run_kubectl([
+            'get', 'svc', svc_name, '-n', namespace,
+            '-o', 'jsonpath={.spec.type}',
+        ], context=context)
+        if rc != 0:
+            continue
+        svc_type = out.strip()
+
+        if svc_type == 'LoadBalancer':
+            # Try external IP
+            rc, out, _ = _run_kubectl([
+                'get', 'svc', svc_name, '-n', namespace,
+                '-o', ('jsonpath={.status.loadBalancer'
+                       '.ingress[0].ip}'),
+            ], context=context)
+            if rc == 0 and out.strip():
+                return f'http://{out.strip()}:8000'
+            # Try hostname (AWS ELBs)
+            rc, out, _ = _run_kubectl([
+                'get', 'svc', svc_name, '-n', namespace,
+                '-o', ('jsonpath={.status.loadBalancer'
+                       '.ingress[0].hostname}'),
+            ], context=context)
+            if rc == 0 and out.strip():
+                return f'http://{out.strip()}:8000'
+
+        elif svc_type == 'NodePort':
+            rc, out, _ = _run_kubectl([
+                'get', 'svc', svc_name, '-n', namespace,
+                '-o', 'jsonpath={.spec.ports[0].nodePort}',
+            ], context=context)
+            if rc == 0 and out.strip():
+                return f'<node-ip>:{out.strip()}'
+
     # Check for LLMInferenceService URL
     rc, out, _ = _run_kubectl([
         'get', 'llminferenceservice', service_name, '-n', namespace,
@@ -406,13 +499,14 @@ def endpoint(service_name: str,
     if rc == 0 and out.strip():
         return out.strip()
 
-    # Fall back to ClusterIP service
-    rc, out, _ = _run_kubectl([
-        'get', 'svc', service_name, '-n', namespace,
-        '-o', 'jsonpath={.spec.clusterIP}',
-    ], context=context)
-    if rc == 0 and out.strip():
-        return f'http://{out.strip()}:8000'
+    # Fall back to ClusterIP service (try direct name and KServe workload name)
+    for svc_name in [service_name, f'{service_name}-kserve-workload-svc']:
+        rc, out, _ = _run_kubectl([
+            'get', 'svc', svc_name, '-n', namespace,
+            '-o', 'jsonpath={.spec.clusterIP}',
+        ], context=context)
+        if rc == 0 and out.strip():
+            return f'http://{out.strip()}:8000'
 
     return None
 

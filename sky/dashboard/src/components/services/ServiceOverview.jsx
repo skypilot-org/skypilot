@@ -94,7 +94,18 @@ export function ServiceOverview({ serviceData }) {
                         <CopyIcon className="w-3.5 h-3.5" />
                       )}
                     </button>
+                    {serviceData.service_type && serviceData.service_type !== 'ClusterIP' && (
+                      <span className={`ml-1 px-1.5 py-0.5 text-xs font-medium rounded ${
+                        serviceData.service_type === 'LoadBalancer'
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {serviceData.service_type}
+                      </span>
+                    )}
                   </div>
+                ) : serviceData.service_type === 'LoadBalancer' ? (
+                  <span className="text-amber-600 text-sm">Pending external IP...</span>
                 ) : (
                   <span className="text-gray-400">-</span>
                 )}

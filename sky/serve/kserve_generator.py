@@ -134,7 +134,15 @@ def generate_resources(
         spec, model_config, service_name, namespace, hf_token is not None)
     resources.append(llmisvc)
 
-    # 3. KEDA ScaledObject (if autoscaling configured)
+    # 3. Endpoint Service (if non-ClusterIP type requested)
+    # KServe always creates ClusterIP services; we create a separate one
+    # with the user-specified type for external access.
+    if spec.service.service_type != 'ClusterIP':
+        endpoint_svc = _generate_endpoint_service(
+            spec, service_name, namespace)
+        resources.append(endpoint_svc)
+
+    # 4. KEDA ScaledObject (if autoscaling configured)
     if spec.service.autoscaling and spec.service.max_replicas:
         scaled_obj = _generate_keda_scaled_object(
             spec, service_name, namespace)
@@ -335,6 +343,55 @@ def _generate_llm_inference_service(
         }
 
     return llmisvc
+
+
+def _generate_endpoint_service(
+    spec: serve_spec_v2.SkyServeSpec,
+    service_name: str,
+    namespace: str,
+) -> Dict[str, Any]:
+    """Generate a K8s Service for the LLMInferenceService endpoint.
+
+    KServe always creates ClusterIP services for its workloads.
+    This generates an additional Service with the user-specified type
+    (e.g. LoadBalancer, NodePort) that targets the same pods.
+    """
+    metadata: Dict[str, Any] = {
+        'name': f'{service_name}-endpoint',
+        'namespace': namespace,
+        'labels': {
+            'app.kubernetes.io/managed-by': 'skypilot-serve',
+            'skypilot.co/service': service_name,
+            'app.kubernetes.io/component':
+                'llminferenceservice-workload',
+        },
+    }
+    # CoreWeave requires an annotation for public LoadBalancer IPs
+    if spec.service.service_type == 'LoadBalancer':
+        metadata['annotations'] = {
+            'service.beta.kubernetes.io/coreweave-load-balancer-type':
+                'public',
+        }
+    return {
+        'apiVersion': 'v1',
+        'kind': 'Service',
+        'metadata': metadata,
+        'spec': {
+            'selector': {
+                # Match the labels KServe applies to workload pods
+                'app.kubernetes.io/name': service_name,
+                'app.kubernetes.io/part-of': 'llminferenceservice',
+                'kserve.io/component': 'workload',
+            },
+            'ports': [{
+                'name': 'http',
+                'port': 8000,
+                'targetPort': 8000,
+                'protocol': 'TCP',
+            }],
+            'type': spec.service.service_type,
+        },
+    }
 
 
 def _generate_keda_scaled_object(
@@ -543,14 +600,21 @@ def generate_direct_deployment(
     resources.append(deployment)
 
     # Service
+    svc_metadata: Dict[str, Any] = {
+        'name': service_name,
+        'namespace': namespace,
+        'labels': labels,
+    }
+    # CoreWeave requires an annotation for public LoadBalancer IPs
+    if spec.service.service_type == 'LoadBalancer':
+        svc_metadata['annotations'] = {
+            'service.beta.kubernetes.io/coreweave-load-balancer-type':
+                'public',
+        }
     svc = {
         'apiVersion': 'v1',
         'kind': 'Service',
-        'metadata': {
-            'name': service_name,
-            'namespace': namespace,
-            'labels': labels,
-        },
+        'metadata': svc_metadata,
         'spec': {
             'selector': {'app': service_name},
             'ports': [{
@@ -559,7 +623,7 @@ def generate_direct_deployment(
                 'targetPort': 8000,
                 'protocol': 'TCP',
             }],
-            'type': 'ClusterIP',
+            'type': spec.service.service_type,
         },
     }
     resources.append(svc)

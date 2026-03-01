@@ -365,7 +365,7 @@ def _get_v2_services_for_context(
         logger.debug(f'Error listing v2 deployments for context '
                      f'{context}: {e}')
 
-    # Get ClusterIP endpoints for workload services
+    # Get endpoints for workload services (ClusterIP, LoadBalancer, NodePort)
     workload_label = ('app.kubernetes.io/component='
                       'llminferenceservice-workload')
     try:
@@ -377,28 +377,132 @@ def _get_v2_services_for_context(
             svc_labels = svc.metadata.labels or {}
             svc_name = svc_labels.get('app.kubernetes.io/name',
                                       svc.metadata.name)
+            # For endpoint services named <name>-endpoint, extract base name
+            raw_name = svc.metadata.name
+            if raw_name.endswith('-endpoint'):
+                base_name = raw_name[:-len('-endpoint')]
+                if base_name in services:
+                    svc_name = base_name
             port = 8000
             if svc.spec.ports:
                 port = svc.spec.ports[0].port
             if svc_name not in services:
                 continue
+
+            svc_type = svc.spec.type or 'ClusterIP'
+
+            # Don't let ClusterIP overwrite a previously resolved
+            # LoadBalancer or NodePort endpoint for the same service.
+            existing_type = services[svc_name].get('service_type')
+            if (svc_type == 'ClusterIP' and
+                    existing_type in ('LoadBalancer', 'NodePort')):
+                continue
+            services[svc_name]['service_type'] = svc_type
+
+            # Always set up port-forward for cross-cluster proxy access
             if context is not None:
-                # Remote context: ClusterIP not reachable, use port-forward
                 local_url = _ensure_port_forward(
                     context, namespace, svc.metadata.name, port)
                 if local_url:
-                    services[svc_name]['endpoint'] = local_url
+                    services[svc_name]['proxy_endpoint'] = local_url
+
+            if svc_type == 'LoadBalancer':
+                ingress = (svc.status.load_balancer.ingress
+                           if svc.status and svc.status.load_balancer
+                           else None)
+                if ingress:
+                    host = ingress[0].ip or ingress[0].hostname
+                    services[svc_name][
+                        'endpoint'] = f'http://{host}:{port}'
                 else:
+                    services[svc_name]['endpoint'] = ''
+            elif svc_type == 'NodePort':
+                node_port = (svc.spec.ports[0].node_port
+                             if svc.spec.ports else None)
+                if node_port:
+                    services[svc_name][
+                        'endpoint'] = f'<node-ip>:{node_port}'
+                else:
+                    services[svc_name]['endpoint'] = ''
+            else:
+                # ClusterIP - use port-forward as the endpoint
+                proxy = services[svc_name].get('proxy_endpoint')
+                if proxy:
+                    services[svc_name]['endpoint'] = proxy
+                elif context is None:
                     cluster_ip = svc.spec.cluster_ip
                     services[svc_name][
                         'endpoint'] = f'http://{cluster_ip}:{port}'
-            else:
-                # In-cluster: ClusterIP is directly reachable
-                cluster_ip = svc.spec.cluster_ip
-                services[svc_name][
-                    'endpoint'] = f'http://{cluster_ip}:{port}'
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Error listing v2 service endpoints for context '
+                     f'{context}: {e}')
+
+    # Also check skypilot-serve managed services (direct mode)
+    skypilot_label = 'app.kubernetes.io/managed-by=skypilot-serve'
+    try:
+        core_api = k8s_adaptor.core_api(context)
+        svc_list = core_api.list_namespaced_service(
+            namespace=namespace,
+            label_selector=skypilot_label)
+        for svc in svc_list.items:
+            svc_labels = svc.metadata.labels or {}
+            svc_name = svc_labels.get('skypilot.co/service',
+                                      svc.metadata.name)
+            if svc_name not in services:
+                continue
+            port = 8000
+            if svc.spec.ports:
+                port = svc.spec.ports[0].port
+            svc_type = svc.spec.type or 'ClusterIP'
+
+            # Don't let ClusterIP overwrite a previously resolved
+            # LoadBalancer or NodePort.
+            existing_type = services[svc_name].get('service_type')
+            if (svc_type == 'ClusterIP' and
+                    existing_type in ('LoadBalancer', 'NodePort')):
+                continue
+            # Skip if endpoint already resolved with same or better type
+            if (services[svc_name].get('endpoint') and
+                    svc_type == 'ClusterIP'):
+                continue
+            services[svc_name]['service_type'] = svc_type
+
+            # Always set up port-forward for cross-cluster proxy access
+            if context is not None:
+                local_url = _ensure_port_forward(
+                    context, namespace, svc.metadata.name, port)
+                if local_url:
+                    services[svc_name]['proxy_endpoint'] = local_url
+
+            if svc_type == 'LoadBalancer':
+                ingress = (svc.status.load_balancer.ingress
+                           if svc.status and svc.status.load_balancer
+                           else None)
+                if ingress:
+                    host = ingress[0].ip or ingress[0].hostname
+                    services[svc_name][
+                        'endpoint'] = f'http://{host}:{port}'
+                else:
+                    services[svc_name]['endpoint'] = ''
+            elif svc_type == 'NodePort':
+                node_port = (svc.spec.ports[0].node_port
+                             if svc.spec.ports else None)
+                if node_port:
+                    services[svc_name][
+                        'endpoint'] = f'<node-ip>:{node_port}'
+                else:
+                    services[svc_name]['endpoint'] = ''
+            else:
+                # ClusterIP - use port-forward as the endpoint
+                proxy = services[svc_name].get('proxy_endpoint')
+                if proxy:
+                    services[svc_name]['endpoint'] = proxy
+                elif context is None:
+                    cluster_ip = svc.spec.cluster_ip
+                    services[svc_name][
+                        'endpoint'] = f'http://{cluster_ip}:{port}'
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Error listing skypilot-serve services for context '
                      f'{context}: {e}')
 
     return list(services.values())
@@ -460,7 +564,10 @@ async def chat_proxy(request: fastapi.Request) -> fastapi.responses.StreamingRes
         ...rest: dict - The OpenAI-compatible chat completion payload
     """
     body = await request.json()
-    endpoint = body.pop('endpoint', None)
+    # Prefer proxy_endpoint (port-forward) for server-side routing;
+    # fall back to endpoint (which may be an external LB IP).
+    endpoint = (body.pop('proxy_endpoint', None) or
+                body.pop('endpoint', None))
     if not endpoint:
         return fastapi.responses.JSONResponse(
             status_code=400,

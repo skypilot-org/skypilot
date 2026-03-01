@@ -36,8 +36,11 @@ def cmd_up(args):
         force_direct=args.direct,
         context=args.context,
         auto_install=not args.no_auto_install,
+        service_type=args.service_type,
     )
     print(f'\nService deployed: {result["service_name"]}')
+    if result.get('endpoint'):
+        print(f'Endpoint: {result["endpoint"]}')
     print(f'To check status: python -m sky.serve.skyserve_v2_cli status '
           f'{result["service_name"]} --namespace {args.namespace}')
 
@@ -159,6 +162,10 @@ def main():
                      help='Target Kubernetes context')
     p_up.add_argument('--no-auto-install', action='store_true',
                      help='Skip auto-installing prerequisites')
+    p_up.add_argument('--service-type', default=None,
+                     choices=['ClusterIP', 'LoadBalancer', 'NodePort'],
+                     help='K8s Service type for endpoint exposure '
+                          '(overrides YAML spec)')
     p_up.set_defaults(func=cmd_up)
 
     # status

@@ -58,6 +58,7 @@ export function ServicePlayground({ serviceData }) {
 
     const requestBody = {
       endpoint: endpoint,
+      proxy_endpoint: serviceData?.proxy_endpoint || null,
       messages: chatMessages,
       temperature,
       max_tokens: maxTokens,

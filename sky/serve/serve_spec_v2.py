@@ -48,12 +48,17 @@ class PrefillConfig:
     replicas: int = 1
 
 
+_VALID_SERVICE_TYPES = ('ClusterIP', 'LoadBalancer', 'NodePort')
+
+
 @dataclasses.dataclass
 class ServiceConfig:
     """Service-level configuration."""
     name: Optional[str] = None
     replicas: int = 1
     max_replicas: Optional[int] = None
+    # K8s Service type: ClusterIP, LoadBalancer, NodePort
+    service_type: str = 'ClusterIP'
     routing: RoutingConfig = dataclasses.field(
         default_factory=RoutingConfig)
     autoscaling: Optional[AutoscalingConfig] = None
@@ -158,6 +163,7 @@ def parse_spec_from_dict(data: Dict[str, Any]) -> SkyServeSpec:
         name=service_data.get('name'),
         replicas=service_data.get('replicas', 1),
         max_replicas=service_data.get('max_replicas'),
+        service_type=service_data.get('service_type', 'ClusterIP'),
     )
 
     # Routing
@@ -226,6 +232,11 @@ def validate_spec(spec: SkyServeSpec) -> List[str]:
 
     if spec.service.replicas < 1:
         errors.append('replicas must be >= 1')
+
+    if spec.service.service_type not in _VALID_SERVICE_TYPES:
+        errors.append(
+            f'service_type must be one of {_VALID_SERVICE_TYPES}, '
+            f'got {spec.service.service_type!r}')
 
     if (spec.service.max_replicas is not None and
             spec.service.max_replicas < spec.service.replicas):
