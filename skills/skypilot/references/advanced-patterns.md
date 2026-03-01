@@ -778,8 +778,8 @@ sky serve status my-llm
 # Get the service endpoint
 sky serve status my-llm --endpoint
 
-# Tail logs
-sky serve logs my-llm
+# Tail controller logs
+sky serve logs --controller my-llm
 ```
 
 ### 4.2 Rolling Updates vs Blue-Green Updates
