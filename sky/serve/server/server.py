@@ -220,6 +220,36 @@ def _get_v2_services_for_context(
     Discovers services via LLMInferenceService CRDs (KServe mode) and
     Deployments with the skypilot-serve or llminferenceservice labels.
     """
+    def _normalize_gpu_label(label: str) -> str:
+        """Normalize K8s GPU class label to SkyPilot notation.
+
+        E.g., 'H200_NVLINK_80GB' -> 'H200', 'H100_PCIE' -> 'H100'.
+        """
+        if not label:
+            return label
+        return label.split('_')[0]
+
+    # Cache node GPU labels to avoid repeated API calls
+    _node_gpu_cache: Dict[str, str] = {}
+
+    def _get_gpu_type_from_node(node_name: str) -> str:
+        """Look up GPU type from a node's labels."""
+        if not node_name:
+            return ''
+        if node_name in _node_gpu_cache:
+            return _node_gpu_cache[node_name]
+        try:
+            core_api = k8s_adaptor.core_api(context)
+            node = core_api.read_node(node_name)
+            labels = node.metadata.labels or {}
+            gpu_label = labels.get('gpu.nvidia.com/class', '')
+            result = _normalize_gpu_label(gpu_label)
+            _node_gpu_cache[node_name] = result
+            return result
+        except Exception:  # pylint: disable=broad-except
+            _node_gpu_cache[node_name] = ''
+            return ''
+
     services = {}  # keyed by service name to deduplicate
 
     # Strategy 1: Query LLMInferenceService CRDs
@@ -260,7 +290,8 @@ def _get_v2_services_for_context(
             if 'nvidia.com/gpu' in limits:
                 gpus = int(limits['nvidia.com/gpu'])
             node_sel = model_spec.get('nodeSelector', {})
-            gpu_type = node_sel.get('gpu.nvidia.com/class', '')
+            gpu_type = _normalize_gpu_label(
+                node_sel.get('gpu.nvidia.com/class', ''))
 
             services[name] = {
                 'name': name,
@@ -269,7 +300,8 @@ def _get_v2_services_for_context(
                 'uptime': 0,
                 'replica_info': [],
                 'requested_resources_str': (
-                    f'{gpu_type}:{gpus}' if gpus > 0 else '-'),
+                    f'{gpu_type}:{gpus}' if gpu_type and gpus > 0
+                    else f'GPU:{gpus}' if gpus > 0 else '-'),
                 'model': model,
                 'context': context or 'in-cluster',
                 'namespace': namespace,
@@ -326,7 +358,8 @@ def _get_v2_services_for_context(
                 svc_status = 'READY' if ready == spec_replicas else (
                     'PROVISIONING' if ready > 0 else 'PENDING')
                 node_sel = d.spec.template.spec.node_selector or {}
-                gpu_type = node_sel.get('gpu.nvidia.com/class', '')
+                gpu_type = _normalize_gpu_label(
+                    node_sel.get('gpu.nvidia.com/class', ''))
                 if gpus > 0:
                     res_str = (f'{gpu_type}:{gpus}'
                                if gpu_type else f'GPU:{gpus}')
@@ -358,12 +391,41 @@ def _get_v2_services_for_context(
             if gpus > 0 and svc_entry.get(
                     'requested_resources_str', '-') == '-':
                 node_sel = d.spec.template.spec.node_selector or {}
-                gpu_type = node_sel.get('gpu.nvidia.com/class', '')
+                gpu_type = _normalize_gpu_label(
+                    node_sel.get('gpu.nvidia.com/class', ''))
                 svc_entry['requested_resources_str'] = (
                     f'{gpu_type}:{gpus}' if gpu_type else f'GPU:{gpus}')
     except Exception as e:  # pylint: disable=broad-except
         logger.debug(f'Error listing v2 deployments for context '
                      f'{context}: {e}')
+
+    # Resolve GPU type from pod node labels for services showing 'GPU:N'
+    needs_gpu_resolution = [
+        name for name, svc in services.items()
+        if svc.get('requested_resources_str', '').startswith('GPU:')
+    ]
+    if needs_gpu_resolution:
+        try:
+            core_api = k8s_adaptor.core_api(context)
+            pods = core_api.list_namespaced_pod(
+                namespace=namespace,
+                label_selector=kserve_label)
+            for pod in pods.items:
+                pod_labels = pod.metadata.labels or {}
+                svc_name = pod_labels.get('app.kubernetes.io/name', '')
+                if svc_name in needs_gpu_resolution and pod.spec.node_name:
+                    gpu_type = _get_gpu_type_from_node(pod.spec.node_name)
+                    if gpu_type:
+                        old_str = services[svc_name][
+                            'requested_resources_str']
+                        gpu_count = old_str.split(':')[1] if ':' in (
+                            old_str) else '1'
+                        services[svc_name][
+                            'requested_resources_str'] = (
+                                f'{gpu_type}:{gpu_count}')
+                        needs_gpu_resolution.remove(svc_name)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(f'Error resolving GPU types from nodes: {e}')
 
     # Get endpoints for workload services (ClusterIP, LoadBalancer, NodePort)
     workload_label = ('app.kubernetes.io/component='
@@ -425,12 +487,9 @@ def _get_v2_services_for_context(
                 else:
                     services[svc_name]['endpoint'] = ''
             else:
-                # ClusterIP - use port-forward as the endpoint
-                proxy = services[svc_name].get('proxy_endpoint')
-                if proxy:
-                    services[svc_name]['endpoint'] = proxy
-                elif context is None:
-                    cluster_ip = svc.spec.cluster_ip
+                # ClusterIP - show internal cluster IP as endpoint
+                cluster_ip = svc.spec.cluster_ip
+                if cluster_ip:
                     services[svc_name][
                         'endpoint'] = f'http://{cluster_ip}:{port}'
     except Exception as e:  # pylint: disable=broad-except
@@ -493,12 +552,9 @@ def _get_v2_services_for_context(
                 else:
                     services[svc_name]['endpoint'] = ''
             else:
-                # ClusterIP - use port-forward as the endpoint
-                proxy = services[svc_name].get('proxy_endpoint')
-                if proxy:
-                    services[svc_name]['endpoint'] = proxy
-                elif context is None:
-                    cluster_ip = svc.spec.cluster_ip
+                # ClusterIP - show internal cluster IP as endpoint
+                cluster_ip = svc.spec.cluster_ip
+                if cluster_ip:
                     services[svc_name][
                         'endpoint'] = f'http://{cluster_ip}:{port}'
     except Exception as e:  # pylint: disable=broad-except

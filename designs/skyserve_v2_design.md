@@ -1,7 +1,7 @@
 # SkyServe v2: K8s-Native LLM Serving via KServe + llm-d
 
-**Status:** Phase 2 Implemented & Validated (Auto-Install, LLMInferenceService, PD Disaggregation, Cross-Cluster Metrics)
-**Date:** 2026-02-28 (Phase 2) | 2026-02-07 (Phase 1)
+**Status:** Phase 2.5 Implemented & Validated (Service Types, Dashboard Endpoint Resolution)
+**Date:** 2026-03-01 (Phase 2.5) | 2026-02-28 (Phase 2) | 2026-02-07 (Phase 1)
 
 ---
 
@@ -15,8 +15,9 @@
 6. [Implementation Plan](#6-implementation-plan)
 7. [Phase 1 Implementation Results](#7-phase-1-implementation-results)
 8. [Phase 2 Implementation Results](#8-phase-2-implementation-results)
-9. [Open Questions](#9-open-questions)
-10. [Sources](#10-sources)
+9. [Phase 2.5: Configurable K8s Service Type](#9-phase-25-configurable-k8s-service-type)
+10. [Open Questions](#10-open-questions)
+11. [Sources](#11-sources)
 
 ---
 
@@ -238,6 +239,7 @@ resources:
 service:
   replicas: 2
   max_replicas: 8
+  service_type: LoadBalancer             # ClusterIP (default) | LoadBalancer | NodePort
 ```
 
 ### Tier 3: Full control
@@ -531,6 +533,11 @@ The `router.scheduler` field in LLMInferenceService enables the llm-d inference 
 | `sky/metrics/utils.py` | 2 | **Modify** | Added `vllm:.*` to federation match patterns for cross-cluster metrics |
 | `charts/skypilot/manifests/vllm-serving-dashboard.json` | 2 | **Modify** | Added `cluster` template variable; all queries filter by `cluster=~"$cluster"` |
 | `sky/dashboard/src/app/services/` | 2 | **New** | Dashboard services section with Grafana integration |
+| `sky/serve/server/server.py` | 2.5 | **Modify** | Endpoint resolution by service type, `proxy_endpoint` field, chat proxy routing |
+| `sky/dashboard/src/components/services.jsx` | 2.5 | **Modify** | Service type badges (LB/NP/ClusterIP), pending LB state |
+| `sky/dashboard/src/components/services/ServiceOverview.jsx` | 2.5 | **Modify** | Service type badge on detail page |
+| `sky/dashboard/src/components/services/ServicePlayground.jsx` | 2.5 | **Modify** | `proxy_endpoint` in chat proxy requests |
+| `sky/dashboard/src/data/connectors/services.js` | 2.5 | **Modify** | Pass through `service_type` and `proxy_endpoint` |
 
 ---
 
@@ -712,7 +719,159 @@ All tests run against `Qwen/Qwen2.5-3B-Instruct` deployed via KServe LLMInferenc
 
 ---
 
-## 9. Open Questions
+## 9. Phase 2.5: Configurable K8s Service Type
+
+**Status:** Implemented & Validated (2026-03-01)
+
+**Goal**: Allow users to specify the K8s Service type (`ClusterIP`, `LoadBalancer`, `NodePort`) for SkyServe v2 endpoints, so services can be exposed externally without manual `kubectl` patching.
+
+### Problem
+
+SkyServe v2 services previously always created ClusterIP K8s Services, which are only accessible within the cluster. The API server created port-forwards to expose them as `http://localhost:18102`, which is meaningless to end users viewing the dashboard. Users needed a way to specify the Service type directly, and the dashboard needed to display the actual endpoint address (external IP for LoadBalancer, cluster IP for ClusterIP).
+
+### Changes
+
+#### 9.1 Spec: `service_type` Field
+
+**File: `sky/serve/serve_spec_v2.py`**
+
+Added `service_type` field to `ServiceConfig`:
+
+```python
+_VALID_SERVICE_TYPES = ('ClusterIP', 'LoadBalancer', 'NodePort')
+
+@dataclasses.dataclass
+class ServiceConfig:
+    replicas: int = 1
+    service_type: str = 'ClusterIP'  # K8s Service type
+    ...
+```
+
+Parsed from YAML under `service.service_type`. Validated in `validate_spec()`.
+
+**YAML usage** (Tier 2+):
+```yaml
+model: Qwen/Qwen2.5-3B-Instruct
+service:
+  replicas: 1
+  service_type: LoadBalancer
+```
+
+#### 9.2 K8s Resource Generation
+
+**File: `sky/serve/kserve_generator.py`**
+
+**Direct mode** (`generate_direct_deployment`): Changed the Service `type` from hardcoded `'ClusterIP'` to `spec.service.service_type`.
+
+**KServe mode** (`generate_resources`): KServe's LLMInferenceService CRD always creates ClusterIP Services for workloads. Instead of patching KServe's Service (which its controller may revert), a new `_generate_endpoint_service()` function creates a separate K8s Service with the user-specified type when non-ClusterIP:
+
+```python
+def _generate_endpoint_service(spec, service_name, namespace):
+    """Separate Service targeting KServe workload pods."""
+    return {
+        'apiVersion': 'v1',
+        'kind': 'Service',
+        'metadata': {
+            'name': f'{service_name}-endpoint',
+            'labels': {
+                'app.kubernetes.io/component': 'llminferenceservice-workload',
+                ...
+            },
+        },
+        'spec': {
+            'selector': {
+                'app.kubernetes.io/name': service_name,
+                'app.kubernetes.io/part-of': 'llminferenceservice',
+                'kserve.io/component': 'workload',
+            },
+            'ports': [{'name': 'http', 'port': 8000, 'targetPort': 8000}],
+            'type': spec.service.service_type,
+        },
+    }
+```
+
+**CoreWeave public LoadBalancer annotation**: CoreWeave requires `service.beta.kubernetes.io/coreweave-load-balancer-type: public` for externally-accessible LoadBalancer IPs. Without it, the LB gets an internal IP (e.g., `10.16.x.x`) that is unreachable from other clusters. The generator adds this annotation automatically for LoadBalancer type on both KServe and direct mode.
+
+#### 9.3 Deployment Flow
+
+**File: `sky/serve/serve_v2.py`**
+
+- Added `service_type: Optional[str] = None` parameter to `up()`. CLI flag overrides YAML spec.
+- Added `_wait_for_loadbalancer_ip()`: polls Service status for external IP/hostname assignment (supports both IP and hostname for AWS ELBs). Timeout 120s.
+- Updated `endpoint()` to check services in precedence order: `[<name>-endpoint, <name>, <name>-kserve-workload-svc]`, handling LoadBalancer, NodePort, and ClusterIP resolution.
+- Returns `service_type` and `endpoint` in result dict.
+
+#### 9.4 CLI
+
+**File: `sky/serve/skyserve_v2_cli.py`**
+
+Added `--service-type` flag:
+```
+python -m sky.serve.skyserve_v2_cli up spec.yaml --service-type LoadBalancer
+```
+
+CLI flag overrides the YAML spec's `service_type` when provided.
+
+#### 9.5 Server-Side Endpoint Resolution
+
+**File: `sky/serve/server/server.py`**
+
+Updated `_get_v2_services_for_context()` to detect Service type and resolve endpoints accordingly:
+
+| Service Type | Endpoint Display | Proxy Endpoint |
+|---|---|---|
+| **LoadBalancer** | External IP/hostname (`http://166.19.9.90:8000`) | Port-forward URL (for cross-cluster chat proxy) |
+| **NodePort** | `<node-ip>:<nodePort>` | Port-forward URL |
+| **ClusterIP** | Internal cluster IP (`http://10.16.0.139:8000`) | Port-forward URL |
+
+**Key implementation details:**
+- `proxy_endpoint` field: always sets up a port-forward for cross-cluster proxy access (used by chat playground). This is separate from the display `endpoint`.
+- Precedence logic prevents ClusterIP from overwriting a previously resolved LoadBalancer or NodePort endpoint for the same service (KServe creates multiple Services per workload).
+- Chat proxy (`/serve/chat_proxy`) prefers `proxy_endpoint` over `endpoint` for routing, ensuring cross-cluster requests always go through the port-forward regardless of display endpoint.
+
+#### 9.6 Dashboard
+
+**Files:**
+- `sky/dashboard/src/data/connectors/services.js`: Passes through `service_type` and `proxy_endpoint` fields.
+- `sky/dashboard/src/components/services.jsx`: Shows service type badge in list table (green for LoadBalancer, yellow for NodePort, gray for ClusterIP). Handles "Pending external IP..." state.
+- `sky/dashboard/src/components/services/ServiceOverview.jsx`: Shows service type badge next to endpoint on detail page.
+- `sky/dashboard/src/components/services/ServicePlayground.jsx`: Sends `proxy_endpoint` in chat proxy requests, enabling the chat playground to work for services on remote clusters regardless of service type.
+
+### What Was Tested
+
+All tests run on CoreWeave K8s cluster with services exposed through a GKE API server dashboard at `34.173.140.55`.
+
+#### LoadBalancer Service
+- Deployed `Qwen/Qwen2.5-3B-Instruct` with `--service-type LoadBalancer`
+- External public IP assigned: `166.19.9.90:8000`
+- Dashboard shows LoadBalancer badge (green) with public IP
+- Chat playground working via public IP
+- Metrics flowing (8 Grafana panels)
+
+#### ClusterIP Service
+- Deployed `Qwen/Qwen2.5-3B-Instruct` with default ClusterIP
+- Dashboard shows ClusterIP badge with internal cluster IP
+- Chat playground working via port-forward proxy
+- Metrics flowing (8 Grafana panels)
+
+#### Autoscaling
+- KEDA ScaledObject active with Prometheus trigger on `vllm:gpu_cache_usage_perc`
+- HPA: min=1, max=2, threshold=80% GPU cache usage
+- All dashboard tabs verified (Overview, Metrics, Logs, Playground)
+
+### Key Design Decisions
+
+1. **Separate endpoint Service for KServe**: Rather than patching KServe's auto-created ClusterIP Service (which the controller may revert), we create a parallel `<name>-endpoint` Service. This is only created for non-ClusterIP types; for ClusterIP, KServe's auto-created workload Service suffices.
+
+2. **`proxy_endpoint` vs `endpoint`**: The `endpoint` field shows the user-facing address (external IP for LB, cluster IP for ClusterIP). The `proxy_endpoint` field is the port-forward URL used internally by the chat proxy for cross-cluster communication. This separation ensures the display is meaningful while the proxy always works.
+
+3. **CoreWeave public LB annotation**: CoreWeave's LoadBalancer implementation defaults to internal IPs. The annotation `service.beta.kubernetes.io/coreweave-load-balancer-type: public` is required for external access. This is added automatically in the generator -- other cloud providers ignore unknown annotations.
+
+4. **Endpoint precedence in `endpoint()`**: The function checks `<name>-endpoint` (user-created LB/NP Service) before `<name>` (direct mode) before `<name>-kserve-workload-svc` (KServe auto-created). This ensures the most specific service type is returned.
+
+---
+
+## 10. Open Questions
 
 1. ~~**Prerequisite installation**: Should `sky serve up` auto-install KServe + GIE + KEDA if not present?~~ **Resolved (Phase 2)**: Yes. `sky serve up` auto-installs all prerequisites by default. Users can opt out with `--no-auto-install`. Explicit installation available via `sky serve install`.
 
@@ -731,7 +890,7 @@ All tests run against `Qwen/Qwen2.5-3B-Instruct` deployed via KServe LLMInferenc
 
 ---
 
-## 10. Sources
+## 11. Sources
 
 - [KServe LLMInferenceService Overview](https://kserve.github.io/website/docs/model-serving/generative-inference/llmisvc/llmisvc-overview) -- CRD docs, architecture, YAML examples
 - [KServe CRD API Reference](https://kserve.github.io/website/docs/reference/crd-api) -- Full field definitions
