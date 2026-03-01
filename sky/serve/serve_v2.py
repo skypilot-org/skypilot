@@ -36,9 +36,13 @@ SKYPILOT_LABEL = 'app.kubernetes.io/managed-by=skypilot-serve'
 
 
 def _run_kubectl(args: List[str], timeout: int = 60,
-                 input_data: Optional[str] = None) -> Tuple[int, str, str]:
+                 input_data: Optional[str] = None,
+                 context: Optional[str] = None) -> Tuple[int, str, str]:
     """Run kubectl and return (returncode, stdout, stderr)."""
-    cmd = ['kubectl'] + args
+    cmd = ['kubectl']
+    if context:
+        cmd.extend(['--context', context])
+    cmd.extend(args)
     logger.debug('Running: %s', ' '.join(cmd))
     result = subprocess.run(
         cmd, capture_output=True, text=True,
@@ -51,7 +55,9 @@ def _run_kubectl(args: List[str], timeout: int = 60,
 def up(yaml_path: str,
        namespace: str = 'skyserve-v2',
        hf_token: Optional[str] = None,
-       force_direct: bool = False) -> Dict[str, Any]:
+       force_direct: bool = False,
+       context: Optional[str] = None,
+       auto_install: bool = True) -> Dict[str, Any]:
     """Deploy a model service.
 
     Args:
@@ -59,6 +65,8 @@ def up(yaml_path: str,
         namespace: K8s namespace to deploy into.
         hf_token: HuggingFace token for gated models.
         force_direct: Force direct Deployment mode (skip KServe).
+        context: Target Kubernetes context. None for default.
+        auto_install: Auto-install missing prerequisites.
 
     Returns:
         Dict with deployment info (service_name, namespace, mode, etc.)
@@ -74,20 +82,29 @@ def up(yaml_path: str,
         hf_token = os.environ.get('HF_TOKEN') or os.environ.get(
             'HUGGING_FACE_HUB_TOKEN')
 
+    # Auto-install prerequisites if needed
+    if auto_install and not force_direct:
+        try:
+            from sky.serve import kserve_installer
+            print('\nChecking and installing prerequisites...')
+            install_results = kserve_installer.ensure_all_prerequisites(
+                context=context)
+            print()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning('Auto-install failed: %s. Continuing...', e)
+
     # Create namespace if needed
-    _run_kubectl([
-        'create', 'namespace', namespace,
-        '--dry-run=client', '-o', 'yaml',
-    ])
     rc, out, _ = _run_kubectl([
         'create', 'namespace', namespace,
         '--dry-run=client', '-o', 'yaml',
-    ])
+    ], context=context)
     if rc == 0:
-        _run_kubectl(['apply', '-f', '-'], input_data=out)
+        _run_kubectl(['apply', '-f', '-'], input_data=out,
+                     context=context)
 
     # Check prerequisites and choose deployment mode
-    use_kserve = (not force_direct and kserve_prereqs.can_use_kserve())
+    use_kserve = (not force_direct and
+                  kserve_prereqs.can_use_kserve(context))
 
     if use_kserve:
         mode = 'kserve'
@@ -118,7 +135,8 @@ def up(yaml_path: str,
         temp_path = f.name
 
     try:
-        rc, out, err = _run_kubectl(['apply', '-f', temp_path])
+        rc, out, err = _run_kubectl(['apply', '-f', temp_path],
+                                    context=context)
         if rc != 0:
             raise RuntimeError(f'Failed to apply resources: {err}')
         print(f'\nResources applied successfully.')
@@ -126,6 +144,29 @@ def up(yaml_path: str,
             print(f'  {line}')
     finally:
         os.unlink(temp_path)
+
+    # For KServe mode, add Prometheus scrape annotations to the Deployment
+    # (LLMInferenceService template is PodSpec, doesn't support pod annotations)
+    if mode == 'kserve':
+        deploy_name = f'{service_name}-kserve'
+        _run_kubectl([
+            'patch', 'deployment', deploy_name,
+            '-n', namespace,
+            '--type=merge',
+            '-p', json.dumps({
+                'spec': {
+                    'template': {
+                        'metadata': {
+                            'annotations': {
+                                'prometheus.io/scrape': 'true',
+                                'prometheus.io/port': '8000',
+                                'prometheus.io/path': '/metrics',
+                            }
+                        }
+                    }
+                }
+            }),
+        ], context=context)
 
     return {
         'service_name': service_name,
@@ -139,7 +180,8 @@ def up(yaml_path: str,
 
 
 def status(service_name: Optional[str] = None,
-           namespace: str = 'skyserve-v2') -> List[Dict[str, Any]]:
+           namespace: str = 'skyserve-v2',
+           context: Optional[str] = None) -> List[Dict[str, Any]]:
     """Get status of deployed services.
 
     Args:
@@ -160,7 +202,7 @@ def status(service_name: Optional[str] = None,
     rc, out, _ = _run_kubectl([
         'get', 'deployments', '-n', namespace,
         '-l', label_selector, '-o', 'json',
-    ])
+    ], context=context)
     if rc == 0:
         try:
             data = json.loads(out)
@@ -187,7 +229,7 @@ def status(service_name: Optional[str] = None,
     rc, out, _ = _run_kubectl([
         'get', 'llminferenceservice', '-n', namespace,
         '-l', label_selector, '-o', 'json',
-    ])
+    ], context=context)
     if rc == 0:
         try:
             data = json.loads(out)
@@ -216,7 +258,7 @@ def status(service_name: Optional[str] = None,
     rc, out, _ = _run_kubectl([
         'get', 'pods', '-n', namespace,
         '-l', label_selector, '-o', 'json',
-    ])
+    ], context=context)
     if rc == 0:
         try:
             data = json.loads(out)
@@ -252,7 +294,8 @@ def status(service_name: Optional[str] = None,
     return results
 
 
-def down(service_name: str, namespace: str = 'skyserve-v2') -> bool:
+def down(service_name: str, namespace: str = 'skyserve-v2',
+         context: Optional[str] = None) -> bool:
     """Tear down a service.
 
     Deletes all resources with the skypilot.co/service label.
@@ -272,13 +315,13 @@ def down(service_name: str, namespace: str = 'skyserve-v2') -> bool:
     _run_kubectl([
         'delete', 'llminferenceservice', '-n', namespace,
         '-l', label_selector, '--ignore-not-found',
-    ])
+    ], context=context)
 
     for rt in resource_types:
         rc, out, _ = _run_kubectl([
             'delete', rt, '-n', namespace,
             '-l', label_selector, '--ignore-not-found',
-        ])
+        ], context=context)
         if rc == 0 and out.strip():
             for line in out.strip().split('\n'):
                 print(f'  {line}')
@@ -289,7 +332,8 @@ def down(service_name: str, namespace: str = 'skyserve-v2') -> bool:
 
 def logs(service_name: str, namespace: str = 'skyserve-v2',
          follow: bool = False, tail: int = 100,
-         replica: Optional[int] = None) -> str:
+         replica: Optional[int] = None,
+         context: Optional[str] = None) -> str:
     """Get logs from a service.
 
     Args:
@@ -298,6 +342,7 @@ def logs(service_name: str, namespace: str = 'skyserve-v2',
         follow: Follow log output.
         tail: Number of lines to show.
         replica: Specific replica index (0-based). None for all.
+        context: Target Kubernetes context. None for default.
 
     Returns:
         Log output string.
@@ -309,7 +354,7 @@ def logs(service_name: str, namespace: str = 'skyserve-v2',
     rc, out, _ = _run_kubectl([
         'get', 'pods', '-n', namespace,
         '-l', label_selector, '-o', 'json',
-    ])
+    ], context=context)
     if rc != 0:
         return f'Failed to get pods for service {service_name}'
 
@@ -336,7 +381,7 @@ def logs(service_name: str, namespace: str = 'skyserve-v2',
         if follow:
             args.append('-f')
 
-        rc, out, err = _run_kubectl(args, timeout=30)
+        rc, out, err = _run_kubectl(args, timeout=30, context=context)
         if rc == 0:
             all_logs.append(f'=== {pod_name} ===\n{out}')
         else:
@@ -346,7 +391,8 @@ def logs(service_name: str, namespace: str = 'skyserve-v2',
 
 
 def endpoint(service_name: str,
-             namespace: str = 'skyserve-v2') -> Optional[str]:
+             namespace: str = 'skyserve-v2',
+             context: Optional[str] = None) -> Optional[str]:
     """Get the service endpoint URL.
 
     Returns the ClusterIP service URL for port-forwarding, or the
@@ -356,7 +402,7 @@ def endpoint(service_name: str,
     rc, out, _ = _run_kubectl([
         'get', 'llminferenceservice', service_name, '-n', namespace,
         '-o', 'jsonpath={.status.url}',
-    ])
+    ], context=context)
     if rc == 0 and out.strip():
         return out.strip()
 
@@ -364,7 +410,7 @@ def endpoint(service_name: str,
     rc, out, _ = _run_kubectl([
         'get', 'svc', service_name, '-n', namespace,
         '-o', 'jsonpath={.spec.clusterIP}',
-    ])
+    ], context=context)
     if rc == 0 and out.strip():
         return f'http://{out.strip()}:8000'
 
@@ -372,16 +418,20 @@ def endpoint(service_name: str,
 
 
 def port_forward(service_name: str, namespace: str = 'skyserve-v2',
-                 local_port: int = 8000) -> subprocess.Popen:
+                 local_port: int = 8000,
+                 context: Optional[str] = None) -> subprocess.Popen:
     """Start port forwarding to a service.
 
     Returns the subprocess.Popen object.
     """
-    cmd = [
-        'kubectl', 'port-forward',
+    cmd = ['kubectl']
+    if context:
+        cmd.extend(['--context', context])
+    cmd.extend([
+        'port-forward',
         f'svc/{service_name}', f'{local_port}:8000',
         '-n', namespace,
-    ]
+    ])
     proc = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Give it a moment to start
@@ -393,7 +443,8 @@ def port_forward(service_name: str, namespace: str = 'skyserve-v2',
 
 
 def wait_for_ready(service_name: str, namespace: str = 'skyserve-v2',
-                   timeout: int = 600, poll_interval: int = 10) -> bool:
+                   timeout: int = 600, poll_interval: int = 10,
+                   context: Optional[str] = None) -> bool:
     """Wait for a service to become ready.
 
     Args:
@@ -401,13 +452,14 @@ def wait_for_ready(service_name: str, namespace: str = 'skyserve-v2',
         namespace: K8s namespace.
         timeout: Max time to wait in seconds.
         poll_interval: Time between status checks.
+        context: Target Kubernetes context. None for default.
 
     Returns:
         True if service became ready, False if timed out.
     """
     start_time = time.time()
     while time.time() - start_time < timeout:
-        statuses = status(service_name, namespace)
+        statuses = status(service_name, namespace, context=context)
         if statuses:
             for s in statuses:
                 if s.get('ready'):
@@ -426,7 +478,8 @@ def wait_for_ready(service_name: str, namespace: str = 'skyserve-v2',
 
 
 def _query_prometheus(query: str,
-                      prometheus_url: Optional[str] = None) -> Optional[Any]:
+                      prometheus_url: Optional[str] = None,
+                      context: Optional[str] = None) -> Optional[Any]:
     """Query Prometheus for a metric value.
 
     Auto-discovers Prometheus URL from well-known service names.
@@ -446,7 +499,7 @@ def _query_prometheus(query: str,
                 '-n', 'skypilot',
                 '--', 'curl', '-s', '--connect-timeout', '2',
                 f'{url}/api/v1/query?query=up',
-            ], timeout=15)
+            ], timeout=15, context=context)
             if rc == 0 and '"success"' in out:
                 prometheus_url = url
                 break
@@ -458,7 +511,7 @@ def _query_prometheus(query: str,
         '--', 'curl', '-s', '-G',
         f'{prometheus_url}/api/v1/query',
         '--data-urlencode', f'query={query}',
-    ], timeout=15)
+    ], timeout=15, context=context)
     if rc != 0:
         return None
     try:
@@ -472,6 +525,7 @@ def _get_service_metrics(
     service_name: str,
     prometheus_url: str = ('http://skypilot-prometheus-server'
                            '.skypilot.svc.cluster.local:80'),
+    context: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Get observability metrics for a service from Prometheus."""
     metrics = {}
@@ -494,7 +548,7 @@ def _get_service_metrics(
     }
 
     for name, query in queries.items():
-        result = _query_prometheus(query, prometheus_url)
+        result = _query_prometheus(query, prometheus_url, context=context)
         if result:
             # Sum values across replicas
             total = sum(float(r['value'][1]) for r in result)
@@ -505,9 +559,10 @@ def _get_service_metrics(
 
 def print_status(service_name: Optional[str] = None,
                  namespace: str = 'skyserve-v2',
-                 show_metrics: bool = True):
+                 show_metrics: bool = True,
+                 context: Optional[str] = None):
     """Print formatted service status."""
-    statuses = status(service_name, namespace)
+    statuses = status(service_name, namespace, context=context)
 
     if not statuses:
         print('No SkyServe v2 services found.')
@@ -537,7 +592,7 @@ def print_status(service_name: Optional[str] = None,
 
         # Observability metrics from Prometheus
         if show_metrics and svc.get('ready'):
-            metrics = _get_service_metrics(svc['name'])
+            metrics = _get_service_metrics(svc['name'], context=context)
             if metrics:
                 print(f'  Metrics:')
                 if 'kv_cache_usage' in metrics:

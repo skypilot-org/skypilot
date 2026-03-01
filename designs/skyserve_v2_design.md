@@ -1,7 +1,7 @@
 # SkyServe v2: K8s-Native LLM Serving via KServe + llm-d
 
-**Status:** Phase 1 Implemented & Validated
-**Date:** 2026-02-07
+**Status:** Phase 2 Implemented & Validated (Auto-Install, LLMInferenceService, PD Disaggregation, Cross-Cluster Metrics)
+**Date:** 2026-02-28 (Phase 2) | 2026-02-07 (Phase 1)
 
 ---
 
@@ -14,8 +14,9 @@
 5. [User-Facing Spec](#5-user-facing-spec)
 6. [Implementation Plan](#6-implementation-plan)
 7. [Phase 1 Implementation Results](#7-phase-1-implementation-results)
-8. [Open Questions](#8-open-questions)
-9. [Sources](#9-sources)
+8. [Phase 2 Implementation Results](#8-phase-2-implementation-results)
+9. [Open Questions](#9-open-questions)
+10. [Sources](#10-sources)
 
 ---
 
@@ -414,42 +415,76 @@ This lets `sky serve status` work without querying every cluster.
 
 ---
 
-### Phase 2: Smart Defaults + Autoscaling + Dashboard
+### Phase 2: Auto-Install + KServe Native + Dashboard + Cross-Cluster Metrics
 
-**Goal**: Comprehensive model registry, KEDA-based autoscaling, dashboard integration.
+**Status:** Implemented & Validated (2026-02-28)
 
-#### 2.1 Comprehensive Model Registry
+**Goal**: Prerequisite auto-installation, KServe LLMInferenceService native mode, PD disaggregation, KEDA autoscaling, dashboard integration, cross-cluster vLLM metrics.
 
-Expand the built-in model database. For unknown models, fetch HF model card via API and compute requirements automatically.
+#### 2.1 Prerequisite Auto-Installer
 
-Key models to include: Llama 3.x (8B-405B), Mistral/Mixtral, Qwen 2.5, Gemma 2, DeepSeek-R1, Command R+, Phi-3/4.
+**New file**: `sky/serve/kserve_installer.py`
 
-#### 2.2 KEDA ScaledObject Generation
+Auto-installs all components needed for KServe LLMInferenceService mode. Runs transparently during `sky serve up` (or explicitly via `sky serve install`). Idempotent -- skips already-installed components.
 
-Generate KEDA ScaledObjects that autoscale based on vLLM Prometheus metrics:
-- `vllm:gpu_cache_usage_perc` (KV cache utilization)
-- `vllm:num_requests_waiting` (queue depth)
-- Custom metrics via user-provided Prometheus queries
+**Components installed** (4-phase ordering for dependency resolution):
+| Phase | Component | Version | Install Method |
+|-------|-----------|---------|----------------|
+| 1 (parallel) | cert-manager | v1.16.3 | kubectl apply |
+| 1 (parallel) | KEDA | v2.16.1 | Helm (fallback: kubectl apply) |
+| 1 (parallel) | Prometheus | latest | Helm (prometheus-community/prometheus) |
+| 1 (parallel) | LeaderWorkerSet | v0.7.0 | kubectl apply |
+| 2 | KServe | v0.15.1 | kubectl apply --server-side |
+| 3 (parallel) | Gateway API CRDs | v1.2.0 | kubectl apply |
+| 3 (parallel) | Gateway Inference Extension | v1.3.0 | kubectl apply |
+| 3 (parallel) | Envoy Gateway | v1.6.3 | Helm |
+| 4 | LLMInferenceService CRD + controller | v0.16.0 | Helm template + kubectl apply |
 
-#### 2.3 Cluster Selection
+**Key implementation details:**
+- KServe manifest uses `--server-side --force-conflicts` (annotations exceed 262KB limit)
+- KEDA has Helm-first with kubectl fallback (Helm not available in all environments)
+- All functions accept `context: Optional[str]` for multi-cluster targeting
+- All prerequisite checks in `kserve_prereqs.py` also accept `context` parameter
 
-When multiple K8s clusters are registered with SkyPilot, pick the best one:
-- Check GPU availability (node allocatable GPUs)
-- Check GPU pricing (from SkyPilot catalog)
-- Check cluster health
-- Respect user preferences (if specified)
+#### 2.2 KServe LLMInferenceService Mode
 
-#### 2.4 Dashboard Integration
+The generator (`kserve_generator.py`) now produces native KServe `LLMInferenceService` resources instead of plain Deployments when prerequisites are available:
 
-Add a "Services" tab to the SkyPilot dashboard (Next.js app in `sky/dashboard/`):
-- List all deployed services across clusters
-- Per-service view: replicas, endpoint URL, status
-- Metrics (requires Prometheus on cluster): TTFT, TPOT, throughput, KV cache util, GPU util
-- Cost tracking (from SkyPilot catalog pricing)
+- **Template format**: LLMInferenceService uses PodSpec (not PodTemplateSpec) -- `template.containers` directly, no `template.metadata` or `template.spec` wrapper
+- **Main container**: Overrides the controller-injected `main` container (llm-d image) with GPU resources and vLLM args
+- **Model download**: Uses KServe's `storage-initializer` init container with `hf://` URI prefix. ConfigMap `inferenceservice-config` in `kserve` namespace controls memory limits (increased to 8Gi for LLM models)
+- **Prometheus annotations**: Applied post-deploy via `kubectl patch` on the Deployment (LLMInferenceService PodSpec doesn't support pod annotations)
 
-New files:
-- `sky/dashboard/src/app/services/` (frontend)
-- `sky/server/serve_metrics.py` (backend: Prometheus query proxy)
+#### 2.3 PD Disaggregation
+
+Deployed and validated with separate prefill and decode pools:
+
+- **Decode pod**: 2 containers -- `main` (vLLM on port 8001) + `llm-d-routing-sidecar` (port 8000, proxies to 8001)
+- **Prefill pod**: 1 container -- `main` (vLLM on port 8000, no sidecar)
+- Generator automatically handles port assignment based on `spec.service.routing.disaggregated`
+
+#### 2.4 KEDA Autoscaling
+
+KEDA ScaledObjects now target the underlying `apps/v1.Deployment` (not LLMInferenceService, which doesn't expose `/scale` subresource). Prometheus queries use `model_name` label (matching vLLM's actual metric labels).
+
+#### 2.5 Cross-Cluster vLLM Metrics
+
+Added `vllm:.*` match pattern to the existing Prometheus federation mechanism in `sky/metrics/utils.py`:
+- API server `/gpu-metrics` endpoint now federates vLLM metrics alongside DCGM GPU metrics
+- All metrics get `cluster="<context-name>"` label from the federation layer
+- GKE Prometheus scrapes the federated endpoint; Grafana queries GKE Prometheus
+
+#### 2.6 Dashboard Integration
+
+- **Services section**: Added to SkyPilot dashboard with Grafana integration
+- **vLLM Serving Dashboard**: Updated with `cluster` template variable for multi-cluster filtering
+- All Grafana panel queries include `cluster=~"$cluster"` alongside `model_name` filter
+
+#### 2.7 CLI Enhancements
+
+- `--context` flag on all subcommands for multi-cluster targeting
+- `--no-auto-install` flag on `up` to skip prerequisite installation
+- New `install` subcommand for explicit prerequisite installation
 
 ---
 
@@ -476,30 +511,26 @@ New files:
 - Shift traffic incrementally (via GIE InferenceModel traffic weights)
 - Monitor metrics, auto-promote or rollback
 
-#### 3.4 Prerequisite Auto-Installation
+#### 3.4 KV Cache-Aware Routing via llm-d Scheduler
 
-`sky serve up --setup-cluster` installs KServe + GIE + KEDA via Helm if not present.
+The `router.scheduler` field in LLMInferenceService enables the llm-d inference scheduler, but requires the `InferenceModel` CRD (`inference.networking.x-k8s.io/v1alpha2`) which is not yet available in any released Gateway API Inference Extension version (checked v1.3.0 and v1.3.1). This is a gap between KServe v0.16.0 controller expectations and upstream CRD availability. Will be unblocked when the CRD is released.
 
 ---
 
 ### File Change Summary
 
-| File | Action | Description |
-|------|--------|-------------|
-| `sky/serve/serve_spec_v2.py` | **New** | New YAML spec parser for v2 format |
-| `sky/serve/model_registry.py` | **New** | Model ID → resource requirements mapping |
-| `sky/serve/kserve_generator.py` | **New** | SkyPilot spec → LLMInferenceService YAML generation |
-| `sky/serve/kserve_prereqs.py` | **New** | Prerequisite checker for KServe/GIE/KEDA on cluster |
-| `sky/serve/serve_state.py` | **Modify** | Add service tracking for KServe-backed services |
-| `sky/serve/client/sdk.py` | **Modify** | Update `up()`, `down()`, `status()` for KServe backend |
-| `sky/serve/server/core.py` | **Modify** | Server-side serve operations (apply/delete K8s resources) |
-| `sky/client/cli/command.py` | **Modify** | Update serve CLI subcommands |
-| `sky/serve/constants.py` | **Modify** | Add KServe-related constants |
-| `sky/serve/controller.py` | Keep (legacy) | Existing controller for backward compat |
-| `sky/serve/load_balancer.py` | Keep (legacy) | Existing LB for backward compat |
-| `sky/serve/autoscalers.py` | Keep (legacy) | Existing autoscalers for backward compat |
-| `sky/dashboard/src/app/services/` | **New** (Phase 2) | Dashboard services tab |
-| `sky/server/serve_metrics.py` | **New** (Phase 2) | Prometheus metrics proxy for dashboard |
+| File | Phase | Action | Description |
+|------|-------|--------|-------------|
+| `sky/serve/serve_spec_v2.py` | 1 | **New** | 4-tier YAML spec parser. Handles `model: "id"` and `model: {id: "..."}` formats. Autoscaling shorthand (`target_metric`/`target_value`). |
+| `sky/serve/model_registry.py` | 1 | **New** | Model ID → resource requirements mapping (~15 popular models) |
+| `sky/serve/kserve_generator.py` | 1+2 | **New** | SkyPilot spec → LLMInferenceService + KEDA ScaledObject + Secrets. KServe native mode + direct Deployment fallback. PD disagg port handling. |
+| `sky/serve/kserve_prereqs.py` | 1+2 | **New** | Prerequisite checker with `context` parameter for multi-cluster |
+| `sky/serve/kserve_installer.py` | 2 | **New** | Auto-install module: cert-manager, KServe, LLMInferenceService, KEDA, Gateway API, Envoy Gateway, LWS, Prometheus. 4-phase dependency ordering. |
+| `sky/serve/serve_v2.py` | 1+2 | **New** | Main orchestration with `context` param on all functions. Post-deploy Prometheus annotation patching for KServe mode. |
+| `sky/serve/skyserve_v2_cli.py` | 1+2 | **New** | CLI: `--context`, `--no-auto-install` flags; `install` subcommand |
+| `sky/metrics/utils.py` | 2 | **Modify** | Added `vllm:.*` to federation match patterns for cross-cluster metrics |
+| `charts/skypilot/manifests/vllm-serving-dashboard.json` | 2 | **Modify** | Added `cluster` template variable; all queries filter by `cluster=~"$cluster"` |
+| `sky/dashboard/src/app/services/` | 2 | **New** | Dashboard services section with Grafana integration |
 
 ---
 
@@ -613,9 +644,77 @@ All tests were run against a real Qwen 2.5 7B Instruct model deployed on 1x H100
 
 ---
 
-## 8. Open Questions
+## 8. Phase 2 Implementation Results
 
-1. **Prerequisite installation**: Should `sky serve up` auto-install KServe + GIE + KEDA if not present? Or require them as prerequisites with a setup guide?
+Phase 2 has been implemented and validated on a live CoreWeave K8s cluster (1x 8xH200 GPU node).
+
+### Additional Infrastructure Installed on Cluster
+
+| Component | Version | Namespace | Purpose |
+|-----------|---------|-----------|---------|
+| KServe LLMInferenceService CRD + controller | v0.16.0 | kserve | Native LLM serving CRD with PD disaggregation support |
+| Gateway API CRDs | v1.2.0 | (cluster-scoped) | Gateway, HTTPRoute, GatewayClass CRDs |
+| Gateway Inference Extension | v1.3.0 | (cluster-scoped) | InferencePool, InferencePoolImport CRDs |
+| Envoy Gateway | v1.6.3 | envoy-gateway-system | Gateway API implementation (GatewayClass controller) |
+| LeaderWorkerSet | v0.7.0 | lws-system | Multi-node inference support |
+
+### What Was Tested End-to-End
+
+All tests run against `Qwen/Qwen2.5-3B-Instruct` deployed via KServe LLMInferenceService on CoreWeave H200.
+
+#### Auto-Install Prerequisites
+- `kserve_installer.ensure_all_prerequisites(context='coreweave-dev')` successfully installed all components
+- Idempotent: second run detects all components already installed, skips
+- KServe install uses `--server-side --force-conflicts` to handle >262KB annotation limit
+- KEDA falls back to kubectl when Helm is not available in the environment
+
+#### KServe LLMInferenceService Deployment
+- LLMInferenceService created with `hf://` model URI → storage-initializer downloads model weights
+- Controller injects `main` container from `ghcr.io/llm-d/llm-d-dev:v0.2.2` image
+- Generator overrides `main` container with GPU resources and vLLM args
+- `inferenceservice-config` ConfigMap patched to 8Gi memory for storage-initializer (default 1Gi OOMs for LLM models)
+- LLMInferenceService status shows `Ready: True` with all conditions met
+
+#### PD Disaggregation
+- Two separate Deployments created: `*-kserve` (decode) and `*-kserve-prefill` (prefill)
+- Decode pod: 2 containers (`main` vLLM on port 8001 + `llm-d-routing-sidecar` on port 8000)
+- Prefill pod: 1 container (`main` vLLM on port 8000, no sidecar)
+- Both pods healthy, LLMInferenceService shows `PrefillWorkloadReady: True` and `MainWorkloadReady: True`
+- OpenAI-compatible API accessible through the routing sidecar (port 8000)
+
+#### KEDA Autoscaling
+- ScaledObject targets `apps/v1.Deployment` (LLMInferenceService doesn't expose `/scale` subresource)
+- Prometheus trigger on `vllm:gpu_cache_usage_perc{model_name="Qwen/Qwen2.5-3B-Instruct"}`
+- HPA created: min=1, max=2, threshold=0.8 (80% KV cache utilization)
+- ScaledObject status: `Ready: True`, `Active: False` (no load → metric at 0)
+
+#### Cross-Cluster vLLM Metrics
+- vLLM metrics federated from CoreWeave Prometheus → GKE API server `/gpu-metrics` → GKE Prometheus → Grafana
+- All metrics carry `cluster="coreweave-dev"` label
+- Verified in GKE Prometheus: `vllm:gpu_cache_usage_perc{model_name="Qwen/Qwen2.5-3B-Instruct", cluster="coreweave-dev"}`
+- Grafana dashboard shows vLLM metrics with cluster filter
+
+#### KV Cache-Aware Routing
+- **Blocked**: `router.scheduler` in LLMInferenceService requires `InferenceModel` CRD (`inference.networking.x-k8s.io/v1alpha2`) which is not available in any released Gateway API Inference Extension version (v1.3.0 or v1.3.1)
+- PD disaggregation works without the scheduler; the llm-d routing sidecar handles proxying
+
+### Key Design Decisions Made During Phase 2
+
+1. **Port assignment for PD disaggregation**: The llm-d-routing-sidecar (injected by controller on decode pods) occupies port 8000 and proxies to vLLM on port 8001. Prefill pods don't get the sidecar, so they use port 8000 directly. The generator handles this automatically based on `spec.service.routing.disaggregated`.
+
+2. **KEDA targets Deployment, not LLMInferenceService**: The LLMInferenceService CRD doesn't expose the `/scale` subresource needed by KEDA. The ScaledObject targets the underlying `apps/v1.Deployment` created by the controller (named `{service_name}-kserve`).
+
+3. **Prometheus annotations via post-deploy patch**: LLMInferenceService's `template` field is a PodSpec (not PodTemplateSpec), so pod-level annotations can't be set in the spec. Instead, `serve_v2.up()` patches the Deployment after creation to add `prometheus.io/scrape` annotations.
+
+4. **Federation match pattern**: A single `{__name__=~"vllm:.*"}` pattern captures all vLLM metrics (latency, throughput, TTFT, KV cache, queue depth). No new API endpoint needed -- reuses the existing `/gpu-metrics` federation mechanism.
+
+5. **Helm fallback for environments without Helm**: KEDA installation tries Helm first, falls back to `kubectl apply` with the release manifest URL. The manifest URL format uses `keda-{version}.yaml` (without `v` prefix).
+
+---
+
+## 9. Open Questions
+
+1. ~~**Prerequisite installation**: Should `sky serve up` auto-install KServe + GIE + KEDA if not present?~~ **Resolved (Phase 2)**: Yes. `sky serve up` auto-installs all prerequisites by default. Users can opt out with `--no-auto-install`. Explicit installation available via `sky serve install`.
 
 2. **Scope**: Current SkyServe supports any HTTP service. Should v2 be LLM-only (cleaner, simpler) or maintain generality (use KServe's `InferenceService` for non-LLM, `LLMInferenceService` for LLM)?
 
@@ -624,13 +723,15 @@ All tests were run against a real Qwen 2.5 7B Instruct model deployed on 1x H100
    - (b) Detect old format and run via legacy code path
    - (c) Translate old format to new (where possible)
 
-4. **Namespace management**: Should SkyPilot create a dedicated namespace per service, or deploy into a user-specified namespace?
+4. **Namespace management**: Should SkyPilot create a dedicated namespace per service, or deploy into a user-specified namespace? Currently uses a shared `skyserve-v2` namespace with label-based resource isolation.
 
 5. **LLMInferenceService is v1alpha1**: It could change. How tightly should we couple to the current API? Should we abstract behind our own spec and regenerate if the CRD changes?
 
+6. **InferenceModel CRD gap**: KServe v0.16.0 controller expects `InferenceModel` CRD at `inference.networking.x-k8s.io/v1alpha2` for `router.scheduler` support, but this CRD is not available in any released Gateway API Inference Extension version (v1.3.0/v1.3.1). KV cache-aware routing via the scheduler is blocked until this CRD is released upstream.
+
 ---
 
-## 9. Sources
+## 10. Sources
 
 - [KServe LLMInferenceService Overview](https://kserve.github.io/website/docs/model-serving/generative-inference/llmisvc/llmisvc-overview) -- CRD docs, architecture, YAML examples
 - [KServe CRD API Reference](https://kserve.github.io/website/docs/reference/crd-api) -- Full field definitions

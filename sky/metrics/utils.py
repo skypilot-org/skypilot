@@ -434,7 +434,8 @@ async def get_metrics_for_context(context: str) -> str:
     match_patterns = [
         '{__name__=~"node_memory_MemAvailable_bytes|node_memory_MemTotal_bytes|DCGM_.*"}',  # pylint: disable=line-too-long
         'kube_pod_labels',
-        'node_cpu_seconds_total{mode="idle"}'
+        'node_cpu_seconds_total{mode="idle"}',
+        '{__name__=~"vllm:.*"}',  # vLLM serving metrics
     ]
 
     # TODO(rohan): don't hardcode the namespace and service name

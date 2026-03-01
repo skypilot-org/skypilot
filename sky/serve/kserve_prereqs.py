@@ -37,9 +37,13 @@ class PrereqStatus:
         return f'  [{status}] {self.name}{ver}{msg}{hint}'
 
 
-def _run_kubectl(args: List[str], timeout: int = 30) -> Tuple[int, str, str]:
+def _run_kubectl(args: List[str], timeout: int = 30,
+                 context: Optional[str] = None) -> Tuple[int, str, str]:
     """Run a kubectl command and return (returncode, stdout, stderr)."""
-    cmd = ['kubectl'] + args
+    cmd = ['kubectl']
+    if context:
+        cmd.extend(['--context', context])
+    cmd.extend(args)
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout)
@@ -50,9 +54,10 @@ def _run_kubectl(args: List[str], timeout: int = 30) -> Tuple[int, str, str]:
         return 1, '', 'kubectl not found'
 
 
-def check_kubectl() -> PrereqStatus:
+def check_kubectl(context: Optional[str] = None) -> PrereqStatus:
     """Check if kubectl is available and configured."""
-    rc, out, err = _run_kubectl(['version', '--client', '-o', 'json'])
+    rc, out, err = _run_kubectl(['version', '--client', '-o', 'json'],
+                                context=context)
     if rc != 0:
         return PrereqStatus('kubectl', False,
                            message='kubectl not found or not configured',
@@ -66,20 +71,20 @@ def check_kubectl() -> PrereqStatus:
     return PrereqStatus('kubectl', True, version=version)
 
 
-def check_cluster_connection() -> PrereqStatus:
+def check_cluster_connection(context: Optional[str] = None) -> PrereqStatus:
     """Check if we can connect to the K8s cluster."""
-    rc, out, err = _run_kubectl(['cluster-info'])
+    rc, out, err = _run_kubectl(['cluster-info'], context=context)
     if rc != 0:
         return PrereqStatus('K8s cluster', False,
                            message=f'Cannot connect: {err.strip()[:200]}')
     return PrereqStatus('K8s cluster', True, message='Connected')
 
 
-def check_gpu_nodes() -> PrereqStatus:
+def check_gpu_nodes(context: Optional[str] = None) -> PrereqStatus:
     """Check if the cluster has GPU nodes."""
     rc, out, err = _run_kubectl([
         'get', 'nodes', '-o', 'json',
-    ])
+    ], context=context)
     if rc != 0:
         return PrereqStatus('GPU nodes', False, message='Cannot list nodes')
 
@@ -108,13 +113,13 @@ def check_gpu_nodes() -> PrereqStatus:
         message=f'{gpu_nodes} node(s) with {total_gpus} total GPUs')
 
 
-def check_kserve() -> PrereqStatus:
+def check_kserve(context: Optional[str] = None) -> PrereqStatus:
     """Check if KServe is installed."""
     # Check for LLMInferenceService CRD
     rc, out, _ = _run_kubectl([
         'get', 'crd', 'llminferenceservices.serving.kserve.io',
         '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus(
             'KServe (LLMInferenceService)', True,
@@ -124,7 +129,7 @@ def check_kserve() -> PrereqStatus:
     rc, out, _ = _run_kubectl([
         'get', 'crd', 'inferenceservices.serving.kserve.io',
         '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus(
             'KServe', True,
@@ -139,12 +144,12 @@ def check_kserve() -> PrereqStatus:
                     'v0.15.1/kserve.yaml')
 
 
-def check_gateway_api() -> PrereqStatus:
+def check_gateway_api(context: Optional[str] = None) -> PrereqStatus:
     """Check if Gateway API Inference Extension is installed."""
     rc, out, _ = _run_kubectl([
         'get', 'crd', 'inferencepools.inference.networking.x-k8s.io',
         '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus('Gateway API Inference Extension', True)
 
@@ -152,7 +157,7 @@ def check_gateway_api() -> PrereqStatus:
     rc, out, _ = _run_kubectl([
         'get', 'crd', 'gateways.gateway.networking.k8s.io',
         '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus(
             'Gateway API', True,
@@ -166,11 +171,11 @@ def check_gateway_api() -> PrereqStatus:
                     'standard-install.yaml')
 
 
-def check_keda() -> PrereqStatus:
+def check_keda(context: Optional[str] = None) -> PrereqStatus:
     """Check if KEDA is installed."""
     rc, out, _ = _run_kubectl([
         'get', 'crd', 'scaledobjects.keda.sh', '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus('KEDA', True)
 
@@ -181,20 +186,20 @@ def check_keda() -> PrereqStatus:
                     '--create-namespace')
 
 
-def check_prometheus() -> PrereqStatus:
+def check_prometheus(context: Optional[str] = None) -> PrereqStatus:
     """Check if Prometheus is available."""
     rc, out, _ = _run_kubectl([
         'get', 'svc', '-A', '-l',
         'app.kubernetes.io/name=prometheus',
         '--no-headers',
-    ])
+    ], context=context)
     if rc == 0 and out.strip():
         return PrereqStatus('Prometheus', True, message='Found')
 
     # Also check victoria-metrics (common alternative)
     rc, out, _ = _run_kubectl([
         'get', 'namespace', 'cw-victoria-metrics', '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus('Metrics', True,
                            message='Victoria Metrics found')
@@ -206,11 +211,11 @@ def check_prometheus() -> PrereqStatus:
                     'kube-prometheus-stack -n monitoring --create-namespace')
 
 
-def check_cert_manager() -> PrereqStatus:
+def check_cert_manager(context: Optional[str] = None) -> PrereqStatus:
     """Check if cert-manager is installed."""
     rc, out, _ = _run_kubectl([
         'get', 'namespace', 'cert-manager', '--no-headers',
-    ])
+    ], context=context)
     if rc == 0:
         return PrereqStatus('cert-manager', True)
     return PrereqStatus(
@@ -221,20 +226,20 @@ def check_cert_manager() -> PrereqStatus:
                     'cert-manager.yaml')
 
 
-def check_all() -> Dict[str, PrereqStatus]:
+def check_all(context: Optional[str] = None) -> Dict[str, PrereqStatus]:
     """Run all prerequisite checks.
 
     Returns dict of check_name -> PrereqStatus.
     """
     checks = {
-        'kubectl': check_kubectl(),
-        'cluster': check_cluster_connection(),
-        'gpu_nodes': check_gpu_nodes(),
-        'cert_manager': check_cert_manager(),
-        'kserve': check_kserve(),
-        'gateway_api': check_gateway_api(),
-        'keda': check_keda(),
-        'prometheus': check_prometheus(),
+        'kubectl': check_kubectl(context),
+        'cluster': check_cluster_connection(context),
+        'gpu_nodes': check_gpu_nodes(context),
+        'cert_manager': check_cert_manager(context),
+        'kserve': check_kserve(context),
+        'gateway_api': check_gateway_api(context),
+        'keda': check_keda(context),
+        'prometheus': check_prometheus(context),
     }
     return checks
 
@@ -284,20 +289,20 @@ def print_prereq_report(checks: Optional[Dict[str, PrereqStatus]] = None):
     return all_required_ok
 
 
-def can_use_kserve() -> bool:
+def can_use_kserve(context: Optional[str] = None) -> bool:
     """Quick check if KServe LLMInferenceService is available."""
     rc, _, _ = _run_kubectl([
         'get', 'crd', 'llminferenceservices.serving.kserve.io',
         '--no-headers',
-    ])
+    ], context=context)
     return rc == 0
 
 
-def can_use_direct_deployment() -> bool:
+def can_use_direct_deployment(context: Optional[str] = None) -> bool:
     """Check if we can do a direct Deployment (without KServe)."""
     checks = {
-        'kubectl': check_kubectl(),
-        'cluster': check_cluster_connection(),
-        'gpu_nodes': check_gpu_nodes(),
+        'kubectl': check_kubectl(context),
+        'cluster': check_cluster_connection(context),
+        'gpu_nodes': check_gpu_nodes(context),
     }
     return all(c.installed for c in checks.values())

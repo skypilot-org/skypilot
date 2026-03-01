@@ -207,14 +207,26 @@ def _generate_llm_inference_service(
     gpu_resource = GPU_K8S_RESOURCE.get(model_config.gpu_type,
                                         'nvidia.com/gpu')
 
-    # Build container spec
-    vllm_args = _build_vllm_args(model_config, spec)
+    # Build extra vLLM args (beyond what the template provides)
+    extra_args = []
+    if model_config.max_model_len:
+        extra_args.extend(['--max-model-len', str(model_config.max_model_len)])
+    if model_config.default_dtype != 'bfloat16':
+        extra_args.extend(['--dtype', model_config.default_dtype])
+    if model_config.tensor_parallel > 1:
+        extra_args.extend(
+            ['--tensor-parallel-size', str(model_config.tensor_parallel)])
+    for k, v in model_config.engine_args.items():
+        arg_name = f'--{k.replace("_", "-")}'
+        if isinstance(v, bool):
+            if v:
+                extra_args.append(arg_name)
+        else:
+            extra_args.extend([arg_name, str(v)])
 
-    container = {
-        'name': 'vllm',
-        'image': model_config.image,
-        'args': vllm_args,
-        'ports': [{'containerPort': 8000, 'protocol': 'TCP'}],
+    # Override the main container with GPU resources + extra args
+    main_container = {
+        'name': 'main',
         'resources': {
             'requests': {
                 gpu_resource: str(model_config.num_gpus),
@@ -225,26 +237,16 @@ def _generate_llm_inference_service(
                 gpu_resource: str(model_config.num_gpus),
             },
         },
-        'readinessProbe': {
-            'httpGet': {
-                'path': '/health',
-                'port': 8000,
-            },
-            'initialDelaySeconds': 60,
-            'periodSeconds': 10,
-            'timeoutSeconds': 5,
-            'failureThreshold': 30,
-        },
-        'livenessProbe': {
-            'httpGet': {
-                'path': '/health',
-                'port': 8000,
-            },
-            'initialDelaySeconds': 120,
-            'periodSeconds': 30,
-            'timeoutSeconds': 5,
-        },
     }
+    # When PD disaggregation is enabled, the llm-d-routing-sidecar uses
+    # port 8000 and proxies to vLLM on port 8001
+    vllm_port = '8001' if spec.service.routing.disaggregated else '8000'
+    if extra_args:
+        main_container['args'] = [
+            '--served-model-name', model_config.model_id,
+            '--port', vllm_port,
+            '--disable-log-requests',
+        ] + extra_args
 
     # Add HF token env vars if secret exists
     if has_hf_secret:
@@ -256,7 +258,7 @@ def _generate_llm_inference_service(
                 },
             },
         }
-        container['env'] = [
+        main_container['env'] = [
             {'name': 'HF_TOKEN', **hf_env},
             {'name': 'HUGGING_FACE_HUB_TOKEN', **hf_env},
         ]
@@ -280,9 +282,7 @@ def _generate_llm_inference_service(
             },
             'replicas': spec.service.replicas,
             'template': {
-                'spec': {
-                    'containers': [container],
-                },
+                'containers': [main_container],
             },
         },
     }
@@ -311,7 +311,14 @@ def _generate_llm_inference_service(
     # Add prefill for PD disaggregation
     if (spec.service.routing.disaggregated and
             spec.service.prefill is not None):
-        prefill_container = copy.deepcopy(container)
+        prefill_container = copy.deepcopy(main_container)
+        # Prefill pod doesn't get routing sidecar, so use port 8000
+        if prefill_container.get('args'):
+            prefill_args = list(prefill_container['args'])
+            for i, arg in enumerate(prefill_args):
+                if arg == '--port' and i + 1 < len(prefill_args):
+                    prefill_args[i + 1] = '8000'
+            prefill_container['args'] = prefill_args
         if spec.service.prefill.accelerators:
             parts = spec.service.prefill.accelerators.split(':')
             gpu_count = int(parts[1]) if len(parts) > 1 else 1
@@ -323,9 +330,7 @@ def _generate_llm_inference_service(
         llmisvc['spec']['prefill'] = {
             'replicas': spec.service.prefill.replicas,
             'template': {
-                'spec': {
-                    'containers': [prefill_container],
-                },
+                'containers': [prefill_container],
             },
         }
 
@@ -344,11 +349,12 @@ def _generate_keda_scaled_object(
             triggers.append({
                 'type': 'prometheus',
                 'metadata': {
-                    'serverAddress': 'http://prometheus.monitoring:9090',
+                    'serverAddress': ('http://skypilot-prometheus-server'
+                                        '.skypilot.svc.cluster.local:80'),
                     'metricName': 'vllm_gpu_cache_usage_perc',
                     'query': (
                         f'avg(vllm:gpu_cache_usage_perc'
-                        f'{{service="{service_name}"}})'),
+                        f'{{model_name="{spec.model}"}})'),
                     'threshold': str(metric.target),
                 },
             })
@@ -356,11 +362,12 @@ def _generate_keda_scaled_object(
             triggers.append({
                 'type': 'prometheus',
                 'metadata': {
-                    'serverAddress': 'http://prometheus.monitoring:9090',
+                    'serverAddress': ('http://skypilot-prometheus-server'
+                                        '.skypilot.svc.cluster.local:80'),
                     'metricName': 'vllm_num_requests_waiting',
                     'query': (
                         f'sum(vllm:num_requests_waiting'
-                        f'{{service="{service_name}"}})'),
+                        f'{{model_name="{spec.model}"}})'),
                     'threshold': str(metric.target),
                 },
             })
@@ -368,11 +375,12 @@ def _generate_keda_scaled_object(
             triggers.append({
                 'type': 'prometheus',
                 'metadata': {
-                    'serverAddress': 'http://prometheus.monitoring:9090',
+                    'serverAddress': ('http://skypilot-prometheus-server'
+                                        '.skypilot.svc.cluster.local:80'),
                     'metricName': 'requests_per_second',
                     'query': (
                         f'sum(rate(vllm:request_success_total'
-                        f'{{service="{service_name}"}}[1m]))'),
+                        f'{{model_name="{spec.model}"}}[1m]))'),
                     'threshold': str(metric.target),
                 },
             })
@@ -390,9 +398,9 @@ def _generate_keda_scaled_object(
         },
         'spec': {
             'scaleTargetRef': {
-                'apiVersion': 'serving.kserve.io/v1alpha1',
-                'kind': 'LLMInferenceService',
-                'name': service_name,
+                'apiVersion': 'apps/v1',
+                'kind': 'Deployment',
+                'name': f'{service_name}-kserve',
             },
             'minReplicaCount': spec.service.replicas,
             'maxReplicaCount': spec.service.max_replicas,

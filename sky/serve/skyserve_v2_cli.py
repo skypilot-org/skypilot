@@ -2,12 +2,13 @@
 """SkyServe v2 CLI - standalone entry point for testing.
 
 Usage:
-    python -m sky.serve.skyserve_v2_cli up <yaml_path> [--namespace NS] [--direct]
-    python -m sky.serve.skyserve_v2_cli status [SERVICE_NAME] [--namespace NS]
-    python -m sky.serve.skyserve_v2_cli down SERVICE_NAME [--namespace NS]
-    python -m sky.serve.skyserve_v2_cli logs SERVICE_NAME [--namespace NS] [--tail N]
-    python -m sky.serve.skyserve_v2_cli endpoint SERVICE_NAME [--namespace NS]
-    python -m sky.serve.skyserve_v2_cli prereqs
+    python -m sky.serve.skyserve_v2_cli up <yaml_path> [--namespace NS] [--direct] [--context CTX]
+    python -m sky.serve.skyserve_v2_cli status [SERVICE_NAME] [--namespace NS] [--context CTX]
+    python -m sky.serve.skyserve_v2_cli down SERVICE_NAME [--namespace NS] [--context CTX]
+    python -m sky.serve.skyserve_v2_cli logs SERVICE_NAME [--namespace NS] [--tail N] [--context CTX]
+    python -m sky.serve.skyserve_v2_cli endpoint SERVICE_NAME [--namespace NS] [--context CTX]
+    python -m sky.serve.skyserve_v2_cli prereqs [--context CTX]
+    python -m sky.serve.skyserve_v2_cli install [--context CTX]
     python -m sky.serve.skyserve_v2_cli generate <yaml_path> [--mode kserve|direct]
 """
 import argparse
@@ -33,6 +34,8 @@ def cmd_up(args):
         namespace=args.namespace,
         hf_token=args.hf_token,
         force_direct=args.direct,
+        context=args.context,
+        auto_install=not args.no_auto_install,
     )
     print(f'\nService deployed: {result["service_name"]}')
     print(f'To check status: python -m sky.serve.skyserve_v2_cli status '
@@ -44,6 +47,7 @@ def cmd_status(args):
     serve_v2.print_status(
         service_name=args.service_name,
         namespace=args.namespace,
+        context=args.context,
     )
 
 
@@ -52,6 +56,7 @@ def cmd_down(args):
     serve_v2.down(
         service_name=args.service_name,
         namespace=args.namespace,
+        context=args.context,
     )
 
 
@@ -62,6 +67,7 @@ def cmd_logs(args):
         namespace=args.namespace,
         tail=args.tail,
         replica=args.replica,
+        context=args.context,
     )
     print(output)
 
@@ -71,12 +77,14 @@ def cmd_endpoint(args):
     url = serve_v2.endpoint(
         service_name=args.service_name,
         namespace=args.namespace,
+        context=args.context,
     )
     if url:
         print(f'Endpoint: {url}')
         print(f'\nTo access locally:')
+        ctx_flag = f' --context {args.context}' if args.context else ''
         print(f'  kubectl port-forward svc/{args.service_name} '
-              f'8000:8000 -n {args.namespace}')
+              f'8000:8000 -n {args.namespace}{ctx_flag}')
         print(f'  curl http://localhost:8000/v1/models')
     else:
         print('No endpoint found (service may still be starting)')
@@ -84,7 +92,27 @@ def cmd_endpoint(args):
 
 def cmd_prereqs(args):
     """Check prerequisites."""
-    kserve_prereqs.print_prereq_report()
+    checks = kserve_prereqs.check_all(context=args.context)
+    kserve_prereqs.print_prereq_report(checks)
+
+
+def cmd_install(args):
+    """Auto-install all prerequisites."""
+    from sky.serve import kserve_installer
+    print('Installing SkyServe v2 prerequisites...')
+    results = kserve_installer.ensure_all_prerequisites(context=args.context)
+
+    print('\n\nInstallation Summary:')
+    print('=' * 50)
+    for name, status in results.items():
+        print(f'  {status}')
+
+    all_ok = all(s.installed for s in results.values())
+    if all_ok:
+        print('\nAll prerequisites installed successfully.')
+    else:
+        failed = [n for n, s in results.items() if not s.installed]
+        print(f'\nSome components failed: {", ".join(failed)}')
 
 
 def cmd_generate(args):
@@ -127,18 +155,26 @@ def main():
                      help='HuggingFace token (or set HF_TOKEN env)')
     p_up.add_argument('--direct', action='store_true',
                      help='Force direct Deployment mode (skip KServe)')
+    p_up.add_argument('--context', default=None,
+                     help='Target Kubernetes context')
+    p_up.add_argument('--no-auto-install', action='store_true',
+                     help='Skip auto-installing prerequisites')
     p_up.set_defaults(func=cmd_up)
 
     # status
     p_status = subparsers.add_parser('status', help='Check service status')
     p_status.add_argument('service_name', nargs='?', default=None)
     p_status.add_argument('--namespace', default='skyserve-v2')
+    p_status.add_argument('--context', default=None,
+                         help='Target Kubernetes context')
     p_status.set_defaults(func=cmd_status)
 
     # down
     p_down = subparsers.add_parser('down', help='Tear down a service')
     p_down.add_argument('service_name')
     p_down.add_argument('--namespace', default='skyserve-v2')
+    p_down.add_argument('--context', default=None,
+                       help='Target Kubernetes context')
     p_down.set_defaults(func=cmd_down)
 
     # logs
@@ -147,17 +183,30 @@ def main():
     p_logs.add_argument('--namespace', default='skyserve-v2')
     p_logs.add_argument('--tail', type=int, default=100)
     p_logs.add_argument('--replica', type=int, default=None)
+    p_logs.add_argument('--context', default=None,
+                       help='Target Kubernetes context')
     p_logs.set_defaults(func=cmd_logs)
 
     # endpoint
     p_ep = subparsers.add_parser('endpoint', help='Get service endpoint')
     p_ep.add_argument('service_name')
     p_ep.add_argument('--namespace', default='skyserve-v2')
+    p_ep.add_argument('--context', default=None,
+                     help='Target Kubernetes context')
     p_ep.set_defaults(func=cmd_endpoint)
 
     # prereqs
     p_prereqs = subparsers.add_parser('prereqs', help='Check prerequisites')
+    p_prereqs.add_argument('--context', default=None,
+                          help='Target Kubernetes context')
     p_prereqs.set_defaults(func=cmd_prereqs)
+
+    # install
+    p_install = subparsers.add_parser(
+        'install', help='Install all prerequisites')
+    p_install.add_argument('--context', default=None,
+                          help='Target Kubernetes context')
+    p_install.set_defaults(func=cmd_install)
 
     # generate
     p_gen = subparsers.add_parser('generate',

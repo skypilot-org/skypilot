@@ -135,8 +135,12 @@ def parse_spec_from_dict(data: Dict[str, Any]) -> SkyServeSpec:
 
     spec = SkyServeSpec()
 
-    # Model
-    spec.model = data.get('model')
+    # Model - supports both 'model: "id"' and 'model: {id: "..."}'
+    model_data = data.get('model')
+    if isinstance(model_data, dict):
+        spec.model = model_data.get('id')
+    else:
+        spec.model = model_data
 
     # Engine
     spec.engine = data.get('engine', 'vllm')
@@ -167,16 +171,26 @@ def parse_spec_from_dict(data: Dict[str, Any]) -> SkyServeSpec:
     autoscaling_data = service_data.get('autoscaling')
     if autoscaling_data:
         metrics = []
+        # Support both explicit metrics list and shorthand
         for m in autoscaling_data.get('metrics', []):
             metrics.append(AutoscalingMetric(
                 type=m['type'],
                 target=m['target'],
+            ))
+        # Shorthand: target_metric + target_value
+        if not metrics and 'target_metric' in autoscaling_data:
+            metrics.append(AutoscalingMetric(
+                type=autoscaling_data['target_metric'],
+                target=autoscaling_data.get('target_value', 0.8),
             ))
         spec.service.autoscaling = AutoscalingConfig(
             metrics=metrics,
             upscale_delay=autoscaling_data.get('upscale_delay', 60),
             downscale_delay=autoscaling_data.get('downscale_delay', 300),
         )
+        # Also set max_replicas from autoscaling if not set at service level
+        if spec.service.max_replicas is None:
+            spec.service.max_replicas = autoscaling_data.get('max_replicas')
 
     # Prefill (PD disaggregation)
     prefill_data = service_data.get('prefill')
