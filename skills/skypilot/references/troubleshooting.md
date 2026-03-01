@@ -176,7 +176,7 @@ Azure Portal > Subscriptions > Usage + quotas > Request increase
 sky gpus list --all
 
 # Check availability for a specific GPU on a cloud
-sky gpus list H100 --cloud aws
+sky gpus list H100 --infra aws
 
 # Check all regions for a GPU
 sky gpus list H100 --all-regions
@@ -214,10 +214,10 @@ resources:
 
 ```bash
 # List valid instance types for a cloud
-sky gpus list --cloud aws --all
+sky gpus list --infra aws --all
 
 # Check a specific accelerator's available instance types
-sky gpus list A100 --cloud gcp
+sky gpus list A100 --infra gcp
 ```
 
 Ensure the instance type matches the region. Not all instance types are available in all regions.
@@ -401,7 +401,6 @@ run: |
 SkyPilot caches the setup commands and only reruns them when:
 
 - The `setup` field in the YAML changes.
-- You explicitly force a rerun with `sky launch --force-setup`.
 - The cluster was fully torn down (`sky down`) and relaunched.
 
 Setup is NOT rerun when:
@@ -412,8 +411,9 @@ Setup is NOT rerun when:
 To force setup to rerun:
 
 ```bash
-# Force setup rerun on next launch
-sky launch --force-setup mycluster.yaml
+# Tear down and relaunch (setup will run fresh)
+sky down mycluster
+sky launch mycluster.yaml
 ```
 
 ### Debugging setup failures
@@ -841,7 +841,7 @@ Check your autoscaling config:
 
 ```yaml
 service:
-  replicas:
+  replica_policy:
     min_replicas: 1
     max_replicas: 4
     target_qps_per_replica: 10
@@ -1051,7 +1051,7 @@ sky api status
 | `ResourceExhausted` | Cloud provider capacity is exhausted in the requested region | Try a different region/zone, use `any_of` with multiple regions, or try a different cloud. |
 | `NCCL timeout` / `Watchdog caught collective operation timeout` | Distributed training nodes cannot communicate | Check firewall rules between nodes. Set `NCCL_SOCKET_IFNAME=eth0`. Enable `NCCL_DEBUG=INFO` for diagnostics. |
 | `CUDA out of memory` | GPU memory insufficient for the workload | Reduce batch size, enable gradient checkpointing, use mixed precision, or request a larger GPU. |
-| `No module named 'xxx'` | Package not installed, or setup did not run | Check your `setup` commands. Force rerun with `sky launch --force-setup`. SSH in and verify the environment. |
+| `No module named 'xxx'` | Package not installed, or setup did not run | Check your `setup` commands. Tear down and relaunch to force setup rerun. SSH in and verify the environment. |
 | `Connection refused` (API server) | SkyPilot API server is not running | Run `sky api start`. Check `sky api status` for details. |
 | `FileNotFoundError` on file mounts | Source path does not exist or bucket name is wrong | Verify the local path or bucket name. For buckets, check `aws s3 ls` / `gsutil ls`. |
 | `sky.exceptions.ResourcesUnavailableError` | The optimizer could not find any cloud/region that satisfies the resource request | Check `sky gpus list` for the accelerator. Broaden your `infra` or add `any_of` fallbacks. |
