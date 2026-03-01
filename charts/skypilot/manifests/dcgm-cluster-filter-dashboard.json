@@ -601,6 +601,7 @@
           "uid": "prometheus"
         },
         "definition": "label_values(kube_pod_labels, label_skypilot_cluster_name)",
+        "allValue": ".*",
         "includeAll": true,
         "name": "cluster",
         "options": [],
@@ -621,6 +622,7 @@
           "uid": "prometheus"
         },
         "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"node\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"node\", \"$1\", \"hostname\", \"(.*)\"))",
+        "allValue": ".*",
         "includeAll": true,
         "multi": true,
         "name": "node",
@@ -641,6 +643,7 @@
           "uid": "prometheus"
         },
         "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$node\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$node\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
+        "allValue": ".*",
         "includeAll": true,
         "multi": true,
         "name": "gpu",

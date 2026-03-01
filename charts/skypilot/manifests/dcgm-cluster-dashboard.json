@@ -1395,6 +1395,7 @@
           "uid": "prometheus"
         },
         "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL, \"host\", \"$1\", \"node\", \"(.*)\") or label_replace(amd_gpu_gfx_activity, \"host\", \"$1\", \"hostname\", \"(.*)\"))",
+        "allValue": ".*",
         "includeAll": true,
         "label": "Host",
         "multi": true,
@@ -1420,6 +1421,7 @@
           "uid": "prometheus"
         },
         "definition": "query_result(label_replace(DCGM_FI_DEV_GPU_UTIL{node=~\"$host\"}, \"gpu\", \"$1\", \"gpu\", \"(.*)\") or label_replace(amd_gpu_gfx_activity{hostname=~\"$host\"}, \"gpu\", \"$1\", \"gpu_id\", \"(.*)\"))",
+        "allValue": ".*",
         "includeAll": true,
         "label": "GPU ID",
         "multi": true,
