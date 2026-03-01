@@ -16,6 +16,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 from smoke_tests.docker import docker_utils
 
+import sky
 from sky import skypilot_config
 from sky.client import sdk
 from sky.server import common as server_common
@@ -215,3 +216,206 @@ def test_storage_delete(generic_cloud: str):
                                       timeout=smoke_tests_utils.get_timeout(
                                           generic_cloud))
         smoke_tests_utils.run_one_test(test, check_sky_status=False)
+
+
+def test_debug_dump_recent(generic_cloud: str):
+    """Test sky debug-dump --recent flag creates a valid dump."""
+    test = smoke_tests_utils.Test(
+        'debug_dump_recent',
+        [
+            # Create a debug dump with --recent (no clusters/jobs needed)
+            'sky debug-dump --recent 1 -o /tmp/test_debug_dump_recent.zip',
+            # Verify the zip file was created and is a valid zip
+            'test -f /tmp/test_debug_dump_recent.zip',
+            's=$(unzip -l /tmp/test_debug_dump_recent.zip) && echo "$s" && '
+            'echo "$s" | grep "summary.json" && '
+            'echo "$s" | grep "server_info.json" && '
+            'echo "$s" | grep "errors.json"',
+            # Extract and verify summary.json structure
+            'unzip -o /tmp/test_debug_dump_recent.zip'
+            ' -d /tmp/test_debug_dump_recent && '
+            'cd /tmp/test_debug_dump_recent/debug_dump_* && '
+            's=$(cat summary.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            'assert \\\"requested\\\" in d; '
+            'assert \\\"collected\\\" in d; '
+            'assert d[\\\"collected\\\"][\\\"request_count\\\"] > 0, '
+            '\\\"system daemon requests should always be collected\\\"; '
+            '"',
+            # Verify server_info.json has enriched fields
+            'cd /tmp/test_debug_dump_recent/debug_dump_* && '
+            's=$(cat server_info.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            'assert \\\"skypilot_version\\\" in d; '
+            'assert \\\"python_version\\\" in d; '
+            'assert \\\"os_platform\\\" in d; '
+            'assert \\\"dump_timestamp_human\\\" in d; '
+            '"',
+        ],
+        teardown='rm -f /tmp/test_debug_dump_recent.zip && '
+        'rm -rf /tmp/test_debug_dump_recent',
+        timeout=2 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_debug_dump_cluster(generic_cloud: str):
+    """Test sky debug-dump -c flag with a real cluster."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'debug_dump_cluster',
+        [
+            # Launch a minimal cluster
+            f'sky launch -y -c {name}'
+            f' {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            f' --infra {generic_cloud} tests/test_yamls/minimal.yaml',
+            # Create a debug dump for the cluster
+            f'sky debug-dump -c {name}'
+            ' -o /tmp/test_debug_dump_cluster.zip',
+            # Verify the cluster directory exists in the dump
+            's=$(unzip -l /tmp/test_debug_dump_cluster.zip) && echo "$s" && '
+            f'echo "$s" | grep "clusters/{name}/cluster_info.json" && '
+            'echo "$s" | grep "requests/" && '
+            'echo "$s" | grep "summary.json"',
+            # Extract and verify cluster_info.json
+            'unzip -o /tmp/test_debug_dump_cluster.zip'
+            ' -d /tmp/test_debug_dump_cluster && '
+            'cd /tmp/test_debug_dump_cluster/debug_dump_* && '
+            f's=$(cat clusters/{name}/cluster_info.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            'assert \\\"cluster_name\\\" in d; '
+            'assert \\\"status\\\" in d; '
+            '"',
+            # Verify summary shows the cluster was collected
+            'cd /tmp/test_debug_dump_cluster/debug_dump_* && '
+            's=$(cat summary.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            f'assert \\\"{name}\\\" in d[\\\"collected\\\"][\\\"cluster_names\\\"]; '
+            'assert d[\\\"collected\\\"][\\\"cluster_count\\\"] >= 1; '
+            # Cross-linked requests from the launch should be present
+            'assert d[\\\"collected\\\"][\\\"request_count\\\"] > 0; '
+            '"',
+        ],
+        teardown=f'sky down -y {name} && '
+        'rm -f /tmp/test_debug_dump_cluster.zip && '
+        'rm -rf /tmp/test_debug_dump_cluster',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_debug_dump_request_id(generic_cloud: str):
+    """Test sky debug-dump -r flag with a real request ID."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'debug_dump_request_id',
+        [
+            # Launch a cluster and capture the request ID
+            f'sky launch -y -c {name} --async'
+            f' {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            f' --infra {generic_cloud} tests/test_yamls/minimal.yaml'
+            ' | tee /tmp/test_debug_dump_reqid_launch.txt',
+            # Extract request ID from async output
+            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*Request ID: //") && '
+            'echo "Captured request ID: $req_id" && '
+            'test -n "$req_id" && '
+            # Wait for the request to finish
+            f'sky launch -y -c {name}'
+            f' {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            f' --infra {generic_cloud} tests/test_yamls/minimal.yaml',
+            # Create a debug dump for the request ID
+            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*Request ID: //") && '
+            'sky debug-dump -r "$req_id"'
+            ' -o /tmp/test_debug_dump_reqid.zip',
+            # Verify the request directory exists in the dump
+            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*Request ID: //") && '
+            's=$(unzip -l /tmp/test_debug_dump_reqid.zip) && echo "$s" && '
+            'echo "$s" | grep "requests/$req_id/request_info.json"',
+            # Verify request_info.json contents
+            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*Request ID: //") && '
+            'unzip -o /tmp/test_debug_dump_reqid.zip'
+            ' -d /tmp/test_debug_dump_reqid && '
+            'cd /tmp/test_debug_dump_reqid/debug_dump_* && '
+            's=$(cat requests/$req_id/request_info.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            'assert \\\"request_id\\\" in d; '
+            'assert \\\"name\\\" in d; '
+            'assert \\\"status\\\" in d; '
+            '"',
+        ],
+        teardown=f'sky down -y {name} && '
+        'rm -f /tmp/test_debug_dump_reqid.zip '
+        '/tmp/test_debug_dump_reqid_launch.txt && '
+        'rm -rf /tmp/test_debug_dump_reqid',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_debug_dump_job(generic_cloud: str):
+    """Test sky debug-dump -j flag with a real managed job."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'debug_dump_job',
+        [
+            # Launch a managed job
+            f'sky jobs launch -y -n {name}'
+            f' {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            f' --infra {generic_cloud} -- echo hello',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=smoke_tests_utils.get_timeout(generic_cloud)),
+            # Get the job ID
+            f'job_id=$(sky jobs queue | grep {name}'
+            ' | head -1 | awk \'{print $1}\') && '
+            'echo "Job ID: $job_id" && test -n "$job_id" && '
+            # Create a debug dump for the managed job
+            'sky debug-dump -j "$job_id"'
+            ' -o /tmp/test_debug_dump_job.zip',
+            # Verify the managed_jobs directory exists in the dump
+            f'job_id=$(sky jobs queue | grep {name}'
+            ' | head -1 | awk \'{print $1}\') && '
+            's=$(unzip -l /tmp/test_debug_dump_job.zip) && echo "$s" && '
+            'echo "$s" | grep "managed_jobs/" && '
+            'echo "$s" | grep "summary.json"',
+            # Verify summary shows the managed job was collected
+            'unzip -o /tmp/test_debug_dump_job.zip'
+            ' -d /tmp/test_debug_dump_job && '
+            'cd /tmp/test_debug_dump_job/debug_dump_* && '
+            's=$(cat summary.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            'assert d[\\\"collected\\\"][\\\"managed_job_count\\\"] >= 1; '
+            '"',
+        ],
+        teardown=f'sky jobs cancel -y -n {name} || true && '
+        'rm -f /tmp/test_debug_dump_job.zip && '
+        'rm -rf /tmp/test_debug_dump_job',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + 2 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_debug_dump_no_args(generic_cloud: str):
+    """Test that sky debug-dump with no arguments shows usage error."""
+    test = smoke_tests_utils.Test(
+        'debug_dump_no_args',
+        [
+            'sky debug-dump > /tmp/test_debug_dump_noargs.txt 2>&1;'
+            ' grep -qi "at least one of" /tmp/test_debug_dump_noargs.txt',
+        ],
+        teardown='rm -f /tmp/test_debug_dump_noargs.txt',
+        timeout=30,
+    )
+    smoke_tests_utils.run_one_test(test)

@@ -308,3 +308,35 @@ class StreamLogsResponse(_message.Message):
     log_line: str
     exit_code: int
     def __init__(self, log_line: _Optional[str] = ..., exit_code: _Optional[int] = ...) -> None: ...
+
+class GetDebugDumpDataRequest(_message.Message):
+    __slots__ = ("job_ids",)
+    JOB_IDS_FIELD_NUMBER: _ClassVar[int]
+    job_ids: _containers.RepeatedScalarFieldContainer[int]
+    def __init__(self, job_ids: _Optional[_Iterable[int]] = ...) -> None: ...
+
+class DebugDumpFileEntry(_message.Message):
+    __slots__ = ("relative_path", "content")
+    RELATIVE_PATH_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    relative_path: str
+    content: bytes
+    def __init__(self, relative_path: _Optional[str] = ..., content: _Optional[bytes] = ...) -> None: ...
+
+class DebugDumpError(_message.Message):
+    __slots__ = ("component", "resource", "error")
+    COMPONENT_FIELD_NUMBER: _ClassVar[int]
+    RESOURCE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FIELD_NUMBER: _ClassVar[int]
+    component: str
+    resource: str
+    error: str
+    def __init__(self, component: _Optional[str] = ..., resource: _Optional[str] = ..., error: _Optional[str] = ...) -> None: ...
+
+class GetDebugDumpDataResponse(_message.Message):
+    __slots__ = ("files", "errors")
+    FILES_FIELD_NUMBER: _ClassVar[int]
+    ERRORS_FIELD_NUMBER: _ClassVar[int]
+    files: _containers.RepeatedCompositeFieldContainer[DebugDumpFileEntry]
+    errors: _containers.RepeatedCompositeFieldContainer[DebugDumpError]
+    def __init__(self, files: _Optional[_Iterable[_Union[DebugDumpFileEntry, _Mapping]]] = ..., errors: _Optional[_Iterable[_Union[DebugDumpError, _Mapping]]] = ...) -> None: ...

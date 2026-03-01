@@ -14,6 +14,7 @@ from http import cookiejar
 import json
 import logging
 import os
+import platform
 import subprocess
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
@@ -3048,3 +3049,129 @@ def slurm_node_info(
         json=json.loads(body.model_dump_json()),
     )
     return server_common.get_request_id(response)
+
+
+# =====================
+# = Debug Dump =
+# =====================
+
+
+def _build_client_info() -> Dict[str, Any]:
+    """Build client-side info for debug dumps."""
+    import sky  # pylint: disable=import-outside-toplevel
+    # pylint: disable-next=import-outside-toplevel
+    from sky.utils import config_utils
+
+    # Sensitive config paths to redact, following the same pattern as
+    # provision/common.py:ProvisionConfig.get_redacted_config().
+    sensitive_fields = [
+        ('api_server', 'endpoint'),
+    ]
+
+    def _redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        config_copy = config_utils.Config(config)
+        for field_path in sensitive_fields:
+            val = config_copy.get_nested(field_path, default_value=None)
+            if val is not None:
+                config_copy.set_nested(field_path, '<redacted>')
+        return dict(**config_copy)
+
+    # Get configs
+    user_config: Dict[str, Any] = {}
+    merged_config: Dict[str, Any] = {}
+    try:
+        user_config = _redact_config(dict(skypilot_config.get_user_config()))
+        merged_config = _redact_config(dict(skypilot_config.to_dict()))
+    except Exception:  # pylint: disable=broad-except
+        pass  # Config may not be available
+
+    return {
+        'skypilot_version': sky.__version__,
+        'skypilot_commit': getattr(sky, '__commit__', 'unknown'),
+        'api_version': server_constants.API_VERSION,
+        'python_version': platform.python_version(),
+        'platform': platform.platform(),
+        'user_hash': common_utils.get_user_hash(),
+        'environment': {
+            'SKYPILOT_DEBUG': os.environ.get('SKYPILOT_DEBUG', ''),
+            'SKYPILOT_DEV': os.environ.get('SKYPILOT_DEV', ''),
+        },
+        'user_config': user_config,
+        'merged_config': merged_config,
+    }
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(40)
+@annotations.client_api
+def create_debug_dump(
+    request_ids: Optional[List[str]] = None,
+    cluster_names: Optional[List[str]] = None,
+    managed_job_ids: Optional[List[int]] = None,
+    recent_hours: Optional[float] = None,
+) -> server_common.RequestId[str]:
+    """Create a debug dump for troubleshooting.
+
+    Args:
+        request_ids: List of request IDs to include in the dump.
+        cluster_names: List of cluster names to include in the dump.
+        managed_job_ids: List of managed job IDs to include in the dump.
+        recent_hours: If specified, include all resources active within
+            this many hours.
+
+    Returns:
+        The request ID of the debug dump creation request.
+
+    Request Returns:
+        Path to the created zip file on the server.
+    """
+    body = payloads.CreateDebugDumpBody(
+        request_ids=request_ids,
+        cluster_names=cluster_names,
+        managed_job_ids=managed_job_ids,
+        recent_hours=recent_hours,
+        client_info=_build_client_info(),
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/debug/dump-create',
+        json=json.loads(body.model_dump_json()),
+    )
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(40)
+@annotations.client_api
+def download_debug_dump(dump_filename: str,
+                        local_path: Optional[str] = None) -> str:
+    """Download a debug dump from the server.
+
+    Args:
+        dump_filename: The filename of the dump to download.
+        local_path: Local path to save the dump. If None, saves to
+            current directory with the original filename.
+
+    Returns:
+        Path to the downloaded file.
+    """
+    response = server_common.make_authenticated_request(
+        'GET',
+        f'/debug/dump-download/{dump_filename}',
+        stream=True,
+    )
+
+    if response.status_code != 200:
+        detail = response.json().get('detail', 'Unknown error')
+        raise exceptions.ClientError(f'Failed to download debug dump: {detail}')
+
+    if local_path is None:
+        local_path = dump_filename
+
+    with open(local_path, 'wb') as f:
+        for chunk in response.iter_content(chunk_size=8192):
+            f.write(chunk)
+
+    return local_path

@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 39  # add graceful flag for managed jobs
+API_VERSION = 40  # debug dump endpoints
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -97,3 +97,6 @@ OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 # The env vars are read by websockets at import time.
 WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
 WEBSOCKETS_MAX_NUM_HEADERS = '256'
+
+# Request ID for the on-boot sky check request.
+ON_BOOT_CHECK_REQUEST_ID = 'skypilot-server-on-boot-check'
