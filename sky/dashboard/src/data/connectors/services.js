@@ -12,7 +12,9 @@ import dashboardCache from '@/lib/cache';
 async function getV2Services() {
   try {
     const baseUrl = window.location.origin;
-    const resp = await fetch(`${baseUrl}${ENDPOINT}/serve/v2_status`);
+    const resp = await fetch(`${baseUrl}${ENDPOINT}/serve/v2_status`, {
+      credentials: 'include',
+    });
     if (!resp.ok) return [];
     const data = await resp.json();
     return (data || []).map((svc) => ({
@@ -28,6 +30,7 @@ async function getV2Services() {
       tls_encrypted: false,
       replica_info: svc.replica_info || [],
       is_v2: true,
+      model: svc.model || null,
       context: svc.context,
       namespace: svc.namespace,
     }));

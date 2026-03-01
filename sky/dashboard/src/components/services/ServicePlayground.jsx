@@ -75,6 +75,7 @@ export function ServicePlayground({ serviceData }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
         signal: controller.signal,
+        credentials: 'include',
       });
 
       if (!response.ok) {

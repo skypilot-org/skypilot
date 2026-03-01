@@ -35,7 +35,7 @@ const VLLM_PANELS = [
 /**
  * Build Grafana panel URL with service filter
  */
-const buildGrafanaMetricsUrl = (panelId, timeRange) => {
+const buildGrafanaMetricsUrl = (panelId, timeRange, modelName) => {
   const grafanaUrl = getGrafanaUrl();
   const params = new URLSearchParams({
     orgId: GRAFANA_ORG_ID,
@@ -45,6 +45,9 @@ const buildGrafanaMetricsUrl = (panelId, timeRange) => {
     theme: 'light',
     panelId: panelId,
   });
+  if (modelName) {
+    params.set('var-model_name', modelName);
+  }
   return `${grafanaUrl}/d-solo/${GRAFANA_DASHBOARD_SLUG}?${params.toString()}`;
 };
 
@@ -167,7 +170,8 @@ export function ServiceMetrics({
                   <iframe
                     src={buildGrafanaMetricsUrl(
                       panel.id,
-                      timeRange
+                      timeRange,
+                      serviceData?.model
                     )}
                     width="100%"
                     height="400"
