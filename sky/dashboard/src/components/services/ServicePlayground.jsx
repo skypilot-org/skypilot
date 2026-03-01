@@ -2,13 +2,13 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { SendIcon, TrashIcon, Loader2Icon } from 'lucide-react';
+import { ENDPOINT } from '@/data/connectors/constants';
 
 /**
  * Chat/completion playground UI for testing a model endpoint served by SkyServe.
  *
- * Sends streaming requests to the OpenAI-compatible /v1/chat/completions
- * endpoint exposed by the service, parses SSE responses, and renders the
- * conversation in a chat-bubble layout.
+ * Sends requests through the API server's /serve/chat_proxy endpoint to avoid
+ * CORS issues. The server proxies requests to the actual service endpoint.
  *
  * @param {Object} props
  * @param {Object} props.serviceData - Service data with name and endpoint
@@ -57,6 +57,7 @@ export function ServicePlayground({ serviceData }) {
     }));
 
     const requestBody = {
+      endpoint: endpoint,
       messages: chatMessages,
       temperature,
       max_tokens: maxTokens,
@@ -67,8 +68,9 @@ export function ServicePlayground({ serviceData }) {
     abortControllerRef.current = controller;
 
     try {
-      const url = `${endpoint.replace(/\/$/, '')}/v1/chat/completions`;
-      const response = await fetch(url, {
+      // Route through the API server proxy to avoid CORS
+      const proxyUrl = `${window.location.origin}${ENDPOINT}/serve/chat_proxy`;
+      const response = await fetch(proxyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
@@ -142,20 +144,11 @@ export function ServicePlayground({ serviceData }) {
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
-        const isCors =
-          error.message === 'Failed to fetch' ||
-          error.message.includes('NetworkError');
         setMessages((prev) => [
           ...prev,
           {
             role: 'assistant',
-            content: isCors
-              ? `Unable to reach the service endpoint directly from the browser (CORS). ` +
-                `Try using curl instead:\n\ncurl ${endpoint.replace(/\/$/, '')}/v1/chat/completions ` +
-                `-H "Content-Type: application/json" ` +
-                `-d '{"messages": [{"role": "user", "content": "${input.trim().replace(/'/g, "\\'")}"}], ` +
-                `"temperature": ${temperature}, "max_tokens": ${maxTokens}}'`
-              : `Error: ${error.message}`,
+            content: `Error: ${error.message}`,
           },
         ]);
       }

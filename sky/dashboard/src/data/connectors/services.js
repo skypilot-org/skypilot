@@ -2,36 +2,77 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/data/connectors/client';
+import { ENDPOINT } from '@/data/connectors/constants';
 import { getErrorMessageFromResponse } from '@/data/utils';
 import dashboardCache from '@/lib/cache';
 
 /**
- * Fetch all SkyServe services via the /serve/status endpoint.
- * Uses the two-phase request-ID pattern via apiClient.fetch().
+ * Fetch v2 (K8s-native) services via the /serve/v2_status endpoint.
  */
-export async function getServices() {
+async function getV2Services() {
   try {
-    const data = await apiClient.fetch('/serve/status', {
-      service_names: null,
-    });
-    // data is an array of service status dicts
+    const baseUrl = window.location.origin;
+    const resp = await fetch(`${baseUrl}${ENDPOINT}/serve/v2_status`);
+    if (!resp.ok) return [];
+    const data = await resp.json();
     return (data || []).map((svc) => ({
       name: svc.name,
       status: svc.status,
-      uptime: svc.uptime,
-      endpoint: svc.endpoint,
-      controller_job_id: svc.controller_job_id,
-      active_versions: svc.active_versions,
-      policy: svc.policy,
-      requested_resources_str: svc.requested_resources_str,
-      load_balancing_policy: svc.load_balancing_policy,
-      tls_encrypted: svc.tls_encrypted,
+      uptime: svc.uptime || 0,
+      endpoint: svc.endpoint || '',
+      controller_job_id: null,
+      active_versions: [],
+      policy: svc.model ? `Model: ${svc.model}` : '-',
+      requested_resources_str: svc.requested_resources_str || '-',
+      load_balancing_policy: null,
+      tls_encrypted: false,
       replica_info: svc.replica_info || [],
+      is_v2: true,
+      context: svc.context,
+      namespace: svc.namespace,
     }));
   } catch (error) {
-    console.error('Error fetching services:', error);
-    throw error;
+    console.error('Error fetching v2 services:', error);
+    return [];
   }
+}
+
+/**
+ * Fetch all SkyServe services (v1 + v2).
+ * v1: via /serve/status (two-phase request-ID pattern)
+ * v2: via /serve/v2_status (direct K8s query)
+ */
+export async function getServices() {
+  // Fetch v1 and v2 in parallel
+  const [v1Services, v2Services] = await Promise.all([
+    (async () => {
+      try {
+        const data = await apiClient.fetch('/serve/status', {
+          service_names: null,
+        });
+        return (data || []).map((svc) => ({
+          name: svc.name,
+          status: svc.status,
+          uptime: svc.uptime,
+          endpoint: svc.endpoint,
+          controller_job_id: svc.controller_job_id,
+          active_versions: svc.active_versions,
+          policy: svc.policy,
+          requested_resources_str: svc.requested_resources_str,
+          load_balancing_policy: svc.load_balancing_policy,
+          tls_encrypted: svc.tls_encrypted,
+          replica_info: svc.replica_info || [],
+        }));
+      } catch (error) {
+        console.error('Error fetching v1 services:', error);
+        return [];
+      }
+    })(),
+    getV2Services(),
+  ]);
+
+  // Merge, with v2 services appended (no name collisions expected)
+  return [...v1Services, ...v2Services];
 }
 
 /**
