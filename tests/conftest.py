@@ -123,7 +123,6 @@ cloud_to_pytest_keyword = {
     'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
-    'runpod': 'runpod',
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
     'shadeform': 'shadeform',
