@@ -285,7 +285,6 @@ available_node_types:
             # TODO (kyuds): remove this label for v0.12.0, as skypilot-cluster label is deprecated in favor of skypilot-cluster-name.
             skypilot-cluster: {{cluster_name_on_cloud}}
             skypilot-user: {{ user }}
-            skypilot-workspace: {{ workspace | default('default') }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
@@ -302,6 +301,7 @@ available_node_types:
             {% endif %}
         {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
         annotations:
+          skypilot-workspace: {{ workspace }}
           {% if k8s_kueue_local_queue_name %}
           kueue.x-k8s.io/retriable-in-group: "false"
           kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
