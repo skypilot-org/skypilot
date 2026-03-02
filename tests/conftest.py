@@ -130,11 +130,8 @@ cloud_to_pytest_keyword = {
     'seeweb': 'seeweb',
     'coreweave': 'coreweave',
     'slurm': 'slurm',
-<<<<<<< HEAD
     'mithril': 'mithril',
-=======
     'verda': 'verda',
->>>>>>> 53c5c73f4 (fix: rebase)
 }
 
 
