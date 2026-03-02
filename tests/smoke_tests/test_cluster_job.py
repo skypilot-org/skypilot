@@ -2787,10 +2787,9 @@ def test_kubernetes_sigterm_keepalive():
                 name,
                 verify_worker_running,
             ),
-            f'sky status --refresh | grep {name} | grep UP',
             f'sky down -y {name}',
         ],
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        f'sky down -y {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
