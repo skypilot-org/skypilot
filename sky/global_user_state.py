@@ -815,8 +815,8 @@ def add_or_update_cluster(cluster_name: str,
             conditional_values.update({
                 'workspace': active_workspace,
             })
-        if (is_launch and not cluster_row or
-                cluster_row.status != status_lib.ClusterStatus.UP.value):
+        if is_launch and (cluster_row is None or
+                          cluster_row.status != status_lib.ClusterStatus.UP.value):
             conditional_values.update({
                 'last_creation_yaml': yaml_utils.dump_yaml_str(task_config)
                                       if task_config else None,
