@@ -16,6 +16,7 @@ import sky
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.skylet import constants as skylet_constants
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -82,6 +83,10 @@ class UsageMessageToReport(MessageToReport):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
         self.user: str = common_utils.get_user_hash()
+        # The end-user hash for per-user aggregation. Only set when basic
+        # auth is enabled at the API server level.
+        self.end_user: Optional[str] = os.environ.get(
+            skylet_constants.END_USER_ID_ENV_VAR)
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
         self.sky_commit: str = sky.__commit__
