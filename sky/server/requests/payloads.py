@@ -89,7 +89,8 @@ def request_body_env_vars() -> dict:
     # can include it in its own usage report.
     if common.is_basic_auth_enabled():
         end_user = common.end_user_hash()
-        env_vars[constants.END_USER_ID_ENV_VAR] = end_user or ''
+        assert end_user is not None
+        env_vars[constants.END_USER_ID_ENV_VAR] = end_user
     if not common.is_api_server_local():
         # Used in job controller, for local API server, keep the
         # SKYPILOT_CONFIG env var to use the config for the managed job.

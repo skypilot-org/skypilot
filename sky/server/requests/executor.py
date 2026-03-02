@@ -746,10 +746,6 @@ async def prepare_request_async(
         # Fallback to legacy environment variable based identity if no
         # authentication is set.
         user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
-    # Only keep end_user for basic auth at API server case.
-    if not (os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH,
-                           'false').lower() == 'true'):
-        request_body.env_vars.pop(constants.END_USER_ID_ENV_VAR, None)
     if is_skypilot_system:
         user_id = constants.SKYPILOT_SYSTEM_USER_ID
         global_user_state.add_or_update_user(
