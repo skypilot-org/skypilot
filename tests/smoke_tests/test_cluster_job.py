@@ -3157,6 +3157,66 @@ def test_kubernetes_ssh_proxy_performance():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- RBAC 409 Race Condition Test ----------
+@pytest.mark.kubernetes
+def test_kubernetes_rbac_concurrent_launch():
+    """Test that concurrent cluster launches handle RBAC 409 Conflict.
+
+    This tests the fix for the 409 Conflict error that occurs when two
+    clusters launch simultaneously and both try to create the same RBAC
+    resources (ServiceAccount, Role, RoleBinding, ClusterRole,
+    ClusterRoleBinding). Both list the resources as "not found", then both
+    attempt to create them, causing one to get a 409 Conflict.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+
+    # Clean up any existing RBAC resources so both launches will attempt
+    # to create them fresh, maximizing the chance of a race.
+    cleanup_rbac_cmd = (
+        'kubectl delete clusterrolebinding '
+        'skypilot-service-account-cluster-role-binding 2>/dev/null || true; '
+        'kubectl delete clusterrole '
+        'skypilot-service-account-cluster-role 2>/dev/null || true; '
+        'kubectl delete rolebinding '
+        'skypilot-service-account-role-binding -n default 2>/dev/null || true; '
+        'kubectl delete role '
+        'skypilot-service-account-role -n default 2>/dev/null || true; '
+        'kubectl delete serviceaccount '
+        'skypilot-service-account -n default 2>/dev/null || true'
+    )
+
+    # Launch two clusters concurrently. Both will try to create the same
+    # RBAC resources, triggering the TOCTOU race condition.
+    concurrent_launch_cmd = (
+        f'sky launch -y -c {name}-1 --infra kubernetes '
+        f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo rbac-test-1 '
+        f'> /tmp/{name}-1.log 2>&1 & '
+        f'PID1=$!; '
+        f'sky launch -y -c {name}-2 --infra kubernetes '
+        f'{smoke_tests_utils.LOW_RESOURCE_ARG} echo rbac-test-2 '
+        f'> /tmp/{name}-2.log 2>&1 & '
+        f'PID2=$!; '
+        f'wait $PID1; RC1=$?; '
+        f'wait $PID2; RC2=$?; '
+        f'cat /tmp/{name}-1.log; cat /tmp/{name}-2.log; '
+        f'[ $RC1 -eq 0 ] && [ $RC2 -eq 0 ]'
+    )
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_rbac_concurrent_launch',
+        [
+            cleanup_rbac_cmd,
+            concurrent_launch_cmd,
+            # Verify both clusters are up
+            f'sky status {name}-1 && sky status {name}-2',
+        ],
+        (f'sky down -y {name}-1 {name}-2; '
+         f'rm -f /tmp/{name}-1.log /tmp/{name}-2.log'),
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
     """Test that canceling sky logs doesn't break the process pool.
 
