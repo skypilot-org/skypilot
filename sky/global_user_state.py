@@ -338,11 +338,10 @@ def _sqlite_supports_returning() -> bool:
     if sqlalchemy_major < 2:
         return False
 
-    assert _db_manager.get_engine() is not None
-    if (_db_manager.get_engine().dialect.name !=
-            db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    if (engine.dialect.name != db_utils.SQLAlchemyDialect.SQLITE.value):
         return False
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
         version_str = result.scalar()
         version_parts = version_str.split('.')
@@ -369,16 +368,14 @@ def add_or_update_user(
         If return_user=False: bool (whether the user is newly added)
         If return_user=True: Tuple[bool, models.User]
     """
-    assert _db_manager.get_engine() is not None
-
     if user.name is None:
         return (False, user) if return_user else False
-
+    engine = _db_manager.get_engine()
     # Set created_at if not already set
     created_at = user.created_at
     if created_at is None:
         created_at = int(time.time())
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         # Check for duplicate names if not allowed (within the same transaction)
         if not allow_duplicate_name:
             existing_user = session.query(user_table).filter(
@@ -386,8 +383,7 @@ def add_or_update_user(
             if existing_user is not None:
                 return (False, user) if return_user else False
 
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
             # vs existing
             insert_func = sqlite.insert
@@ -463,8 +459,8 @@ def add_or_update_user(
             else:
                 return was_inserted
 
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             # For PostgreSQL, use INSERT ... ON CONFLICT with RETURNING to
             # detect insert vs update
             insert_func = postgresql.insert
@@ -521,8 +517,8 @@ def add_or_update_user(
 
 @metrics_lib.time_me
 def get_user(user_id: str) -> Optional[models.User]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(user_table).filter_by(id=user_id).first()
     if row is None:
         return None
@@ -537,8 +533,8 @@ def get_user(user_id: str) -> Optional[models.User]:
 
 @metrics_lib.time_me
 def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(user_table).filter(
             user_table.c.id.in_(user_ids)).all()
     return {
@@ -554,7 +550,8 @@ def get_users(user_ids: Set[str]) -> Dict[str, models.User]:
 
 @metrics_lib.time_me
 def get_user_by_name(username: str) -> List[models.User]:
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(user_table).filter_by(name=username).all()
     if len(rows) == 0:
         return []
@@ -571,7 +568,8 @@ def get_user_by_name(username: str) -> List[models.User]:
 
 @metrics_lib.time_me
 def get_user_by_name_match(username_match: str) -> List[models.User]:
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(user_table).filter(
             user_table.c.name.like(f'%{username_match}%')).all()
     return [
@@ -586,15 +584,16 @@ def get_user_by_name_match(username_match: str) -> List[models.User]:
 
 @metrics_lib.time_me
 def delete_user(user_id: str) -> None:
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(user_table).filter_by(id=user_id).delete()
         session.commit()
 
 
 @metrics_lib.time_me
 def get_all_users() -> List[models.User]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(user_table).all()
     return [
         models.User(
@@ -637,7 +636,7 @@ def add_or_update_cluster(cluster_name: str,
             only if the cluster_hash matches. If a cluster does not exist,
             it will not be inserted and an error will be raised.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
 
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
@@ -711,7 +710,7 @@ def add_or_update_cluster(cluster_name: str,
             'config_hash': config_hash,
         })
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         # with_for_update() locks the row until commit() or rollback()
         # is called, or until the code escapes the with block.
         cluster_row = session.query(cluster_table).filter_by(
@@ -748,11 +747,10 @@ def add_or_update_cluster(cluster_name: str,
                 'provision_log_path': provision_log_path,
             })
 
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             session.rollback()
@@ -898,7 +896,7 @@ def add_cluster_event(cluster_name: str,
             duplicate. Only used if nop_if_duplicate is True.
         transitioned_at: If provided, use this timestamp for the event.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     if cluster_hash is None:
         logger.debug(f'Hash for cluster {cluster_name} not found. '
@@ -906,12 +904,11 @@ def add_cluster_event(cluster_name: str,
         return
     if transitioned_at is None:
         transitioned_at = int(time.time())
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             session.rollback()
@@ -958,8 +955,8 @@ def add_cluster_event(cluster_name: str,
 
 def get_last_cluster_event(cluster_hash: str,
                            event_type: ClusterEventType) -> Optional[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(cluster_event_table).filter_by(
             cluster_hash=cluster_hash, type=event_type.value).order_by(
                 cluster_event_table.c.transitioned_at.desc()).first()
@@ -970,8 +967,8 @@ def get_last_cluster_event(cluster_hash: str,
 
 def get_terminal_or_last_status_change_event(
         cluster_hash: str) -> Optional[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         # Order by type (TERMINAL first, STATUS_CHANGE after),
         # then by transitioned_at desc.
         # Use a CASE expression for ordering type.
@@ -993,8 +990,8 @@ def get_terminal_or_last_status_change_event(
 def _get_last_or_terminal_cluster_event_multiple(
         cluster_hashes: Set[str]) -> Dict[str, str]:
     """Returns the last or terminal cluster event for each cluster."""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         # Create a priority expression: TERMINAL (0) before STATUS_CHANGE (1)
         type_priority = sqlalchemy.case(
             (cluster_event_table.c.type == ClusterEventType.TERMINAL.value, 0),
@@ -1028,9 +1025,9 @@ def _get_last_or_terminal_cluster_event_multiple(
 
 def cleanup_cluster_events_with_retention(retention_hours: float,
                                           event_type: ClusterEventType) -> None:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     # Once for events with type STATUS_CHANGE.
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         query = session.query(cluster_event_table).filter(
             cluster_event_table.c.transitioned_at <
             time.time() - retention_hours * 3600,
@@ -1144,13 +1141,13 @@ def get_cluster_events(
             'transitioned_at' (unix timestamp) fields.
         Events are ordered from oldest to newest.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
 
     cluster_hash = _resolve_cluster_hash(cluster_hash, cluster_name)
     if cluster_hash is None:
         raise ValueError(f'Hash for cluster {cluster_name} not found.')
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         if limit is not None:
             # To get the most recent N events in ASC order, we use a subquery:
             # 1. Get most recent N events (ORDER BY DESC LIMIT N)
@@ -1189,7 +1186,7 @@ def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
 @metrics_lib.time_me
 def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     handle = pickle.dumps(cluster_handle)
 
     # Extract current node names and merge with existing lineage
@@ -1201,7 +1198,7 @@ def update_cluster_handle(cluster_name: str,
 
     update_dict: Dict[Any, Any] = {cluster_table.c.handle: handle}
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         if current_names is not None:
             row = session.query(cluster_table.c.node_names).filter_by(
                 name=cluster_name).with_for_update().first()
@@ -1218,7 +1215,8 @@ def update_cluster_handle(cluster_name: str,
 @metrics_lib.time_me
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(cluster_table).filter_by(name=cluster_name).update(
             {cluster_table.c.last_use: common_utils.get_current_command()})
         session.commit()
@@ -1227,12 +1225,12 @@ def update_last_use(cluster_name: str):
 @metrics_lib.time_me
 def remove_cluster(cluster_name: str, terminate: bool) -> None:
     """Removes cluster_name mapping."""
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
     provision_log_path = get_cluster_provision_log_path(cluster_name)
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         # usage_intervals is not None and not empty
         if usage_intervals:
             assert cluster_hash is not None, cluster_name
@@ -1275,9 +1273,9 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
 @metrics_lib.time_me
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.ResourceHandle']:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         row = (session.query(
             cluster_table.c.handle).filter_by(name=cluster_name).first())
     if row is None:
@@ -1289,8 +1287,8 @@ def get_handle_from_cluster_name(
 def get_handles_from_cluster_names(
         cluster_names: Set[str]
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(cluster_table.c.name,
                              cluster_table.c.handle).filter(
                                  cluster_table.c.name.in_(cluster_names)).all()
@@ -1304,8 +1302,8 @@ def get_handles_from_cluster_names(
 def get_cluster_name_to_handle_map(
     is_managed: Optional[bool] = None,
 ) -> Dict[str, Optional['backends.ResourceHandle']]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         query = session.query(cluster_table.c.name, cluster_table.c.handle)
         if is_managed is not None:
             query = query.filter(cluster_table.c.is_managed == int(is_managed))
@@ -1323,10 +1321,9 @@ def get_cluster_name_to_handle_map(
 async def get_status_from_cluster_name_async(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
     """Get the status of a cluster."""
-    assert _db_manager.get_async_engine() is not None
+    engine = _db_manager.get_async_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
-    async with sql_async.AsyncSession(
-            _db_manager.get_async_engine()) as session:
+    async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.select(cluster_table.c.status).where(
                 cluster_table.c.name == cluster_name))
@@ -1340,9 +1337,9 @@ async def get_status_from_cluster_name_async(
 @metrics_lib.time_me
 def get_status_from_cluster_name(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         row = session.query(
             cluster_table.c.status).filter_by(name=cluster_name).first()
     if row is None:
@@ -1354,15 +1351,14 @@ def get_status_from_cluster_name(
 def get_glob_cluster_names(
         cluster_name: str,
         workspaces_filter: Optional[Set[str]] = None) -> List[str]:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             query = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('GLOB')(cluster_name))
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             query = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('SIMILAR TO')(
                     _glob_to_similar(cluster_name)))
@@ -1378,9 +1374,9 @@ def get_glob_cluster_names(
 @metrics_lib.time_me
 def set_cluster_status(cluster_name: str,
                        status: status_lib.ClusterStatus) -> None:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     current_time = int(time.time())
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update({
                 cluster_table.c.status: status.value,
@@ -1395,8 +1391,8 @@ def set_cluster_status(cluster_name: str,
 @metrics_lib.time_me
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update({
                 cluster_table.c.autostop: idle_minutes,
@@ -1410,8 +1406,8 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
 
 @metrics_lib.time_me
 def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(
             cluster_table.c.launched_at).filter_by(name=cluster_name).first()
     if row is None or row.launched_at is None:
@@ -1421,8 +1417,8 @@ def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
 
 @metrics_lib.time_me
 def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(
             cluster_table.c.metadata).filter_by(name=cluster_name).first()
     if row is None or row.metadata is None:
@@ -1433,8 +1429,8 @@ def get_cluster_info(cluster_name: str) -> Optional[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_cluster_provision_log_path(cluster_name: str) -> Optional[str]:
     """Returns provision_log_path from clusters table, if recorded."""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(cluster_table).filter_by(name=cluster_name).first()
     if row is None:
         return None
@@ -1449,8 +1445,8 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
     historical rows by name and choose the most recent one based on
     usage_intervals.
     """
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         # Try current cluster first (fast path)
         cluster_hash = _get_hash_for_existing_cluster(cluster_name)
         if cluster_hash is not None:
@@ -1484,8 +1480,8 @@ def get_cluster_history_provision_log_path(cluster_name: str) -> Optional[str]:
 
 @metrics_lib.time_me
 def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update(
                 {cluster_table.c.metadata: json.dumps(metadata)})
@@ -1498,8 +1494,8 @@ def set_cluster_info(cluster_name: str, metadata: Dict[str, Any]) -> None:
 @metrics_lib.time_me
 def get_cluster_storage_mounts_metadata(
         cluster_name: str) -> Optional[Dict[str, Any]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = (session.query(cluster_table.c.storage_mounts_metadata).filter_by(
             name=cluster_name).first())
     if row is None or row.storage_mounts_metadata is None:
@@ -1510,8 +1506,8 @@ def get_cluster_storage_mounts_metadata(
 @metrics_lib.time_me
 def set_cluster_storage_mounts_metadata(
         cluster_name: str, storage_mounts_metadata: Dict[str, Any]) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update({
                 cluster_table.c.storage_mounts_metadata:
@@ -1526,8 +1522,8 @@ def set_cluster_storage_mounts_metadata(
 @metrics_lib.time_me
 def get_cluster_skylet_ssh_tunnel_metadata(
         cluster_name: str) -> Optional[Tuple[int, int]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(
             cluster_table.c.skylet_ssh_tunnel_metadata).filter_by(
                 name=cluster_name).first()
@@ -1540,8 +1536,8 @@ def get_cluster_skylet_ssh_tunnel_metadata(
 def set_cluster_skylet_ssh_tunnel_metadata(
         cluster_name: str,
         skylet_ssh_tunnel_metadata: Optional[Tuple[int, int]]) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         value = pickle.dumps(
             skylet_ssh_tunnel_metadata
         ) if skylet_ssh_tunnel_metadata is not None else None
@@ -1558,10 +1554,10 @@ def set_cluster_skylet_ssh_tunnel_metadata(
 def _get_cluster_usage_intervals(
         cluster_hash: Optional[str]
 ) -> Optional[List[Tuple[int, Optional[int]]]]:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     if cluster_hash is None:
         return None
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         row = session.query(cluster_history_table.c.usage_intervals).filter_by(
             cluster_hash=cluster_hash).first()
     if row is None or row.usage_intervals is None:
@@ -1611,12 +1607,12 @@ def _get_cluster_last_activity_time(
 def _set_cluster_usage_intervals(
         cluster_hash: str, usage_intervals: List[Tuple[int,
                                                        Optional[int]]]) -> None:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
 
     # Calculate last_activity_time from usage_intervals
     last_activity_time = _get_cluster_last_activity_time(usage_intervals)
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         count = session.query(cluster_history_table).filter_by(
             cluster_hash=cluster_hash).update({
                 cluster_history_table.c.usage_intervals:
@@ -1632,11 +1628,11 @@ def _set_cluster_usage_intervals(
 @metrics_lib.time_me
 def set_owner_identity_for_cluster(cluster_name: str,
                                    owner_identity: Optional[List[str]]) -> None:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     if owner_identity is None:
         return
     owner_identity_str = json.dumps(owner_identity)
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         count = session.query(cluster_table).filter_by(
             name=cluster_name).update(
                 {cluster_table.c.owner: owner_identity_str})
@@ -1648,8 +1644,8 @@ def set_owner_identity_for_cluster(cluster_name: str,
 
 @metrics_lib.time_me
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = (session.query(
             cluster_table.c.cluster_hash).filter_by(name=cluster_name).first())
     if row is None or row.cluster_hash is None:
@@ -1692,8 +1688,8 @@ def _resolve_cluster_hash(cluster_hash: Optional[str] = None,
 @metrics_lib.time_me
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(
             cluster_history_table.c.num_nodes,
             cluster_history_table.c.launched_resources).filter_by(
@@ -1744,7 +1740,7 @@ def get_cluster_from_name(
         *,
         include_user_info: bool = True,
         summary_response: bool = False) -> Optional[Dict[str, Any]]:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     query_fields = [
         cluster_table.c.name,
         cluster_table.c.launched_at,
@@ -1768,7 +1764,7 @@ def get_cluster_from_name(
             cluster_table.c.last_creation_yaml,
             cluster_table.c.last_creation_command,
         ])
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         query = session.query(*query_fields)
         row = query.filter_by(name=cluster_name).first()
     if row is None:
@@ -1811,8 +1807,8 @@ def get_cluster_from_name(
 @metrics_lib.time_me
 @context_utils.cancellation_guard
 def cluster_with_name_exists(cluster_name: str) -> bool:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(
             cluster_table.c.name).filter_by(name=cluster_name).first()
     if row is None:
@@ -1844,7 +1840,7 @@ def get_clusters(
     # is a cluster has a null user_hash,
     # we treat it as belonging to the current user.
     current_user_hash = common_utils.get_user_hash()
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     query_fields = [
         cluster_table.c.name,
         cluster_table.c.launched_at,
@@ -1871,7 +1867,7 @@ def get_clusters(
         ])
     if not exclude_managed_clusters:
         query_fields.append(cluster_table.c.is_managed)
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         query = session.query(*query_fields).outerjoin(
             user_table, cluster_table.c.user_hash == user_table.c.id)
         if exclude_managed_clusters:
@@ -1953,8 +1949,8 @@ def get_clusters(
 
 @metrics_lib.time_me
 def get_cluster_names(exclude_managed_clusters: bool = False,) -> List[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         query = session.query(cluster_table.c.name)
         if exclude_managed_clusters:
             query = query.filter(cluster_table.c.is_managed == int(False))
@@ -1978,7 +1974,7 @@ def get_clusters_from_history(
     Returns:
         List of cluster records with history information.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
 
     current_user_hash = common_utils.get_user_hash()
 
@@ -1987,7 +1983,7 @@ def get_clusters_from_history(
     if days is not None:
         cutoff_time = int(time.time()) - (days * 24 * 60 * 60)
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         # Explicitly select columns from both tables to avoid ambiguity
         if abbreviate_response:
             query = session.query(
@@ -2117,8 +2113,8 @@ def get_clusters_from_history(
 
 @metrics_lib.time_me
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(cluster_table.c.name).filter(
             cluster_table.c.name.like(f'{starts_with}%')).all()
     return [row[0] for row in rows]
@@ -2127,8 +2123,8 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 @metrics_lib.time_me
 def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
                               workspace: str) -> List['clouds.Cloud']:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(config_table).filter_by(
             key=_get_enabled_clouds_key(cloud_capability, workspace)).first()
     ret = []
@@ -2153,13 +2149,12 @@ def get_cached_enabled_clouds(cloud_capability: 'cloud.CloudCapability',
 def set_enabled_clouds(enabled_clouds: List[str],
                        cloud_capability: 'cloud.CloudCapability',
                        workspace: str) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2180,8 +2175,8 @@ def _get_enabled_clouds_key(cloud_capability: 'cloud.CloudCapability',
 
 @metrics_lib.time_me
 def get_allowed_clouds(workspace: str) -> List[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(config_table).filter_by(
             key=_get_allowed_clouds_key(workspace)).first()
     if row:
@@ -2191,13 +2186,12 @@ def get_allowed_clouds(workspace: str) -> List[str]:
 
 @metrics_lib.time_me
 def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2219,7 +2213,7 @@ def _get_allowed_clouds_key(workspace: str) -> str:
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
                           storage_status: status_lib.StorageStatus):
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
     last_use = common_utils.get_current_command()
@@ -2230,12 +2224,11 @@ def add_or_update_storage(storage_name: str,
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2260,8 +2253,8 @@ def add_or_update_storage(storage_name: str,
 @metrics_lib.time_me
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(storage_table).filter_by(name=storage_name).delete()
         session.commit()
 
@@ -2269,8 +2262,8 @@ def remove_storage(storage_name: str):
 @metrics_lib.time_me
 def set_storage_status(storage_name: str,
                        status: status_lib.StorageStatus) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         count = session.query(storage_table).filter_by(
             name=storage_name).update({storage_table.c.status: status.value})
         session.commit()
@@ -2281,9 +2274,9 @@ def set_storage_status(storage_name: str,
 
 @metrics_lib.time_me
 def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     assert storage_name is not None, 'storage_name cannot be None'
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         row = session.query(storage_table).filter_by(name=storage_name).first()
     if row:
         return status_lib.StorageStatus[row.status]
@@ -2293,8 +2286,8 @@ def get_storage_status(storage_name: str) -> Optional[status_lib.StorageStatus]:
 @metrics_lib.time_me
 def set_storage_handle(storage_name: str,
                        handle: 'Storage.StorageMetadata') -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         count = session.query(storage_table).filter_by(
             name=storage_name).update(
                 {storage_table.c.handle: pickle.dumps(handle)})
@@ -2307,10 +2300,10 @@ def set_storage_handle(storage_name: str,
 @metrics_lib.time_me
 def get_handle_from_storage_name(
         storage_name: Optional[str]) -> Optional['Storage.StorageMetadata']:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     if storage_name is None:
         return None
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         row = session.query(storage_table).filter_by(name=storage_name).first()
     if row:
         return pickle.loads(row.handle)
@@ -2319,15 +2312,14 @@ def get_handle_from_storage_name(
 
 @metrics_lib.time_me
 def get_glob_storage_name(storage_name: str) -> List[str]:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     assert storage_name is not None, 'storage_name cannot be None'
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             rows = session.query(storage_table).filter(
                 storage_table.c.name.op('GLOB')(storage_name)).all()
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             rows = session.query(storage_table).filter(
                 storage_table.c.name.op('SIMILAR TO')(
                     _glob_to_similar(storage_name))).all()
@@ -2338,8 +2330,8 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
 
 @metrics_lib.time_me
 def get_storage_names_start_with(starts_with: str) -> List[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(storage_table).filter(
             storage_table.c.name.like(f'{starts_with}%')).all()
     return [row.name for row in rows]
@@ -2347,8 +2339,8 @@ def get_storage_names_start_with(starts_with: str) -> List[str]:
 
 @metrics_lib.time_me
 def get_storage() -> List[Dict[str, Any]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(storage_table).all()
     records = []
     for row in rows:
@@ -2365,8 +2357,8 @@ def get_storage() -> List[Dict[str, Any]]:
 
 @metrics_lib.time_me
 def get_volume_names_start_with(starts_with: str) -> List[str]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(volume_table).filter(
             volume_table.c.name.like(f'{starts_with}%')).all()
     return [row.name for row in rows]
@@ -2374,8 +2366,8 @@ def get_volume_names_start_with(starts_with: str) -> List[str]:
 
 @metrics_lib.time_me
 def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         if is_ephemeral is None:
             rows = session.query(volume_table).all()
         else:
@@ -2406,8 +2398,8 @@ def get_volumes(is_ephemeral: Optional[bool] = None) -> List[Dict[str, Any]]:
 
 @metrics_lib.time_me
 def get_volume_by_name(name: str) -> Optional[Dict[str, Any]]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(volume_table).filter_by(name=name).first()
     if row:
         # Decode JSON-encoded usedby fields
@@ -2437,7 +2429,7 @@ def add_volume(
     status: status_lib.VolumeStatus,
     is_ephemeral: bool = False,
 ) -> None:
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     volume_launched_at = int(time.time())
     handle = pickle.dumps(config)
     last_use = common_utils.get_current_command()
@@ -2449,12 +2441,11 @@ def add_volume(
     else:
         last_attached_at = None
 
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2476,8 +2467,8 @@ def add_volume(
 
 @metrics_lib.time_me
 def update_volume_config(name: str, config: models.VolumeConfig) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(volume_table).filter_by(name=name).update({
             volume_table.c.handle: pickle.dumps(config),
         })
@@ -2487,8 +2478,8 @@ def update_volume_config(name: str, config: models.VolumeConfig) -> None:
 @metrics_lib.time_me
 def update_volume(name: str, last_attached_at: int,
                   status: status_lib.VolumeStatus) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(volume_table).filter_by(name=name).update({
             volume_table.c.last_attached_at: last_attached_at,
             volume_table.c.status: status.value,
@@ -2511,8 +2502,8 @@ def update_volume_status(name: str,
         usedby_pods: List of pods using the volume (None keeps existing value).
         usedby_clusters: List of clusters using the volume (None keeps it).
     """
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         update_dict: Dict[str, Any] = {
             volume_table.c.status: status.value,
         }
@@ -2530,16 +2521,16 @@ def update_volume_status(name: str,
 
 @metrics_lib.time_me
 def delete_volume(name: str) -> None:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(volume_table).filter_by(name=name).delete()
         session.commit()
 
 
 @metrics_lib.time_me
 def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(ssh_key_table).filter_by(
             user_hash=user_hash).first()
     if row:
@@ -2549,13 +2540,12 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
 
 @metrics_lib.time_me
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2581,15 +2571,14 @@ def add_service_account_token(token_id: str,
                               service_account_user_id: str,
                               expires_at: Optional[int] = None) -> None:
     """Add a service account token to the database."""
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     created_at = int(time.time())
 
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2609,8 +2598,8 @@ def add_service_account_token(token_id: str,
 @metrics_lib.time_me
 def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
     """Get a service account token by token_id."""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(service_account_token_table).filter_by(
             token_id=token_id).first()
     if row is None:
@@ -2630,8 +2619,8 @@ def get_service_account_token(token_id: str) -> Optional[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
     """Get all service account tokens for a user (as creator)."""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(service_account_token_table).filter_by(
             creator_user_hash=user_hash).all()
     return [{
@@ -2649,10 +2638,10 @@ def get_user_service_account_tokens(user_hash: str) -> List[Dict[str, Any]]:
 @metrics_lib.time_me
 def update_service_account_token_last_used(token_id: str) -> None:
     """Update the last_used_at timestamp for a service account token."""
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     last_used_at = int(time.time())
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         session.query(service_account_token_table).filter_by(
             token_id=token_id).update(
                 {service_account_token_table.c.last_used_at: last_used_at})
@@ -2666,8 +2655,8 @@ def delete_service_account_token(token_id: str) -> bool:
     Returns:
         True if token was found and deleted.
     """
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         result = session.query(service_account_token_table).filter_by(
             token_id=token_id).delete()
         session.commit()
@@ -2685,10 +2674,10 @@ def rotate_service_account_token(token_id: str,
         new_token_hash: The new hashed token value.
         new_expires_at: New expiration timestamp, or None for no expiration.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     current_time = int(time.time())
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         count = session.query(service_account_token_table).filter_by(
             token_id=token_id
         ).update({
@@ -2712,12 +2701,12 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
 
     It is assumed that the cluster yaml file is named as <cluster_name>.yml.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     if cluster_yaml_path is None:
         raise ValueError('Attempted to read a None YAML.')
     cluster_file_name = os.path.basename(cluster_yaml_path)
     cluster_name, _ = os.path.splitext(cluster_file_name)
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         row = session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).first()
     if row is None:
@@ -2728,14 +2717,14 @@ def get_cluster_yaml_str(cluster_yaml_path: Optional[str]) -> Optional[str]:
 def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
     """Get the cluster yaml from the database or the local file system.
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     cluster_names_to_yaml_paths = {}
     for cluster_yaml_path in cluster_yaml_paths:
         cluster_name, _ = os.path.splitext(os.path.basename(cluster_yaml_path))
         cluster_names_to_yaml_paths[cluster_name] = cluster_yaml_path
 
     cluster_names = list(cluster_names_to_yaml_paths.keys())
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         rows = session.query(cluster_yaml_table).filter(
             cluster_yaml_table.c.cluster_name.in_(cluster_names)).all()
     row_cluster_names_to_yaml = {row.cluster_name: row.yaml for row in rows}
@@ -2804,13 +2793,12 @@ def get_cluster_yaml_dict_multiple(
 @metrics_lib.time_me
 def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
     """Set the cluster yaml in the database."""
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2825,8 +2813,8 @@ def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
 
 @metrics_lib.time_me
 def remove_cluster_yaml(cluster_name: str):
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.query(cluster_yaml_table).filter_by(
             cluster_name=cluster_name).delete()
         session.commit()
@@ -2835,8 +2823,8 @@ def remove_cluster_yaml(cluster_name: str):
 @metrics_lib.time_me
 def get_all_service_account_tokens() -> List[Dict[str, Any]]:
     """Get all service account tokens across all users (for admin access)."""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         rows = session.query(service_account_token_table).all()
     return [{
         'token_id': row.token_id,
@@ -2853,8 +2841,8 @@ def get_all_service_account_tokens() -> List[Dict[str, Any]]:
 @metrics_lib.time_me
 def get_system_config(config_key: str) -> Optional[str]:
     """Get a system configuration value by key."""
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         row = session.query(system_config_table).filter_by(
             config_key=config_key).first()
     if row is None:
@@ -2865,15 +2853,14 @@ def get_system_config(config_key: str) -> Optional[str]:
 @metrics_lib.time_me
 def set_system_config(config_key: str, config_value: str) -> None:
     """Set a system configuration value."""
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
     current_time = int(time.time())
 
-    with orm.Session(_db_manager.get_engine()) as session:
-        if (_db_manager.get_engine().dialect.name ==
-                db_utils.SQLAlchemyDialect.SQLITE.value):
+    with orm.Session(engine) as session:
+        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
             insert_func = sqlite.insert
-        elif (_db_manager.get_engine().dialect.name ==
-              db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+        elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
+             ):
             insert_func = postgresql.insert
         else:
             raise ValueError('Unsupported database dialect')
@@ -2896,11 +2883,10 @@ def set_system_config(config_key: str, config_value: str) -> None:
 
 def get_max_db_connections() -> Optional[int]:
     """Get the maximum number of connections for the engine."""
-    assert _db_manager.get_engine() is not None
-    if (_db_manager.get_engine().dialect.name ==
-            db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
         return None
-    with sqlalchemy.orm.Session(_db_manager.get_engine()) as session:
+    with sqlalchemy.orm.Session(engine) as session:
         max_connections = session.execute(
             sqlalchemy.text('SHOW max_connections')).scalar()
         if max_connections is None:
