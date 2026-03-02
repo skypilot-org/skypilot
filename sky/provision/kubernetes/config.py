@@ -270,8 +270,17 @@ def _configure_autoscaler_service_account(
 
     logger.info(f'{log_prefix}: '
                 f'{not_found_msg(resource_field, name)}')
-    kubernetes.core_api(context).create_namespaced_service_account(
-        namespace, account)
+    try:
+        kubernetes.core_api(context).create_namespaced_service_account(
+            namespace, account)
+    except kubernetes.api_exception() as e:
+        # Handle case where resource already exists (409) - could be from
+        # concurrent request or previous run. Treat as success.
+        if e.status == 409:
+            logger.info(f'{log_prefix}: '
+                        f'{using_existing_msg(resource_field, name)}')
+            return
+        raise
     logger.info(f'{log_prefix}: '
                 f'{created_msg(resource_field, name)}')
 
@@ -319,7 +328,16 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
 
     logger.info(f'{log_prefix}: '
                 f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role(namespace, resource)
+    try:
+        kubernetes.auth_api(context).create_namespaced_role(namespace, resource)
+    except kubernetes.api_exception() as e:
+        # Handle case where resource already exists (409) - could be from
+        # concurrent request or previous run. Treat as success.
+        if e.status == 409:
+            logger.info(f'{log_prefix}: '
+                        f'{using_existing_msg(resource_field, name)}')
+            return
+        raise
     logger.info(f'{log_prefix}: {created_msg(resource_field, name)}')
 
 
@@ -385,8 +403,17 @@ def _configure_autoscaler_role_binding(
 
     logger.info(f'{log_prefix}: '
                 f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role_binding(
-        rb_namespace, resource)
+    try:
+        kubernetes.auth_api(context).create_namespaced_role_binding(
+            rb_namespace, resource)
+    except kubernetes.api_exception() as e:
+        # Handle case where resource already exists (409) - could be from
+        # concurrent request or previous run. Treat as success.
+        if e.status == 409:
+            logger.info(f'{log_prefix}: '
+                        f'{using_existing_msg(resource_field, name)}')
+            return
+        raise
     logger.info(f'{log_prefix}: '
                 f'{created_msg(resource_field, name)}')
 
@@ -425,7 +452,16 @@ def _configure_autoscaler_cluster_role(namespace, context,
 
     logger.info(f'{log_prefix}: '
                 f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_cluster_role(resource)
+    try:
+        kubernetes.auth_api(context).create_cluster_role(resource)
+    except kubernetes.api_exception() as e:
+        # Handle case where resource already exists (409) - could be from
+        # concurrent request or previous run. Treat as success.
+        if e.status == 409:
+            logger.info(f'{log_prefix}: '
+                        f'{using_existing_msg(resource_field, name)}')
+            return
+        raise
     logger.info(f'{log_prefix}: {created_msg(resource_field, name)}')
 
 
@@ -472,7 +508,16 @@ def _configure_autoscaler_cluster_role_binding(
 
     logger.info(f'{log_prefix}: '
                 f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_cluster_role_binding(resource)
+    try:
+        kubernetes.auth_api(context).create_cluster_role_binding(resource)
+    except kubernetes.api_exception() as e:
+        # Handle case where resource already exists (409) - could be from
+        # concurrent request or previous run. Treat as success.
+        if e.status == 409:
+            logger.info(f'{log_prefix}: '
+                        f'{using_existing_msg(resource_field, name)}')
+            return
+        raise
     logger.info(f'{log_prefix}: '
                 f'{created_msg(resource_field, name)}')
 
