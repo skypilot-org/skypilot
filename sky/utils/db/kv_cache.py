@@ -67,17 +67,15 @@ def add_or_update_cache_entry(
         value: The value of the cache entry.
         expires_at: The timestamp when the cache entry expires.
     """
-    assert _db_manager.get_engine() is not None
-    if (_db_manager.get_engine().dialect.name ==
-            db_utils.SQLAlchemyDialect.SQLITE.value):
+    engine = _db_manager.get_engine()
+    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
         insert_func = sqlite.insert
-    elif (_db_manager.get_engine().dialect.name ==
-          db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+    elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value):
         insert_func = postgresql.insert
     else:
         raise ValueError('Unsupported database dialect')
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         insert_stmt = insert_func(kv_cache_table).values(key=key,
                                                          value=value,
                                                          expires_at=expires_at)
@@ -99,8 +97,8 @@ def get_cache_entry(key: str) -> Optional[str]:
     Args:
         key: The key of the cache entry.
     """
-    assert _db_manager.get_engine() is not None
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         result = session.execute(
             sqlalchemy.select(kv_cache_table.c.value).where(
                 kv_cache_table.c.key == key).where(

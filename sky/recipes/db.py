@@ -269,8 +269,7 @@ def create_recipe(
         exceptions.InvalidRecipeNameError: If the name format is invalid.
         exceptions.RecipeAlreadyExistsError: If a recipe with this name exists.
     """
-    assert _db_manager.get_engine() is not None
-
+    engine = _db_manager.get_engine()
     # Validate name format
     common_utils.check_recipe_name_is_valid(name)
 
@@ -280,7 +279,7 @@ def create_recipe(
     # uniqueness. Catching IntegrityError avoids race conditions between
     # check and insert, and works for both SQLite and PostgreSQL.
     try:
-        with orm.Session(_db_manager.get_engine()) as session:
+        with orm.Session(engine) as session:
             session.execute(recipes_table.insert().values(
                 name=name,
                 description=description,
@@ -321,9 +320,8 @@ def get_recipe(recipe_name: str) -> Optional[Recipe]:
     Returns:
         The Recipe if found, None otherwise.
     """
-    assert _db_manager.get_engine() is not None
-
-    with orm.Session(_db_manager.get_engine()) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         result = session.execute(
             sqlalchemy.select(recipes_table).where(
                 recipes_table.c.name == recipe_name))
@@ -353,8 +351,7 @@ def list_recipes(
     Returns:
         List of matching YamlTemplate objects.
     """
-    assert _db_manager.get_engine() is not None
-
+    engine = _db_manager.get_engine()
     query = sqlalchemy.select(recipes_table)
 
     if pinned_only:
@@ -368,7 +365,7 @@ def list_recipes(
     query = query.order_by(recipes_table.c.pinned.desc(),
                            recipes_table.c.name.asc())
 
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         result = session.execute(query)
         rows = result.fetchall()
 
@@ -400,11 +397,9 @@ def update_recipe(
     Raises:
         ValueError: If the recipe is not found or not editable.
     """
-    assert _db_manager.get_engine() is not None
-
+    engine = _db_manager.get_engine()
     # TODO(lloyd): We might want to change this in the future to change who is
     # allowed to update a recipe.
-
     updates: Dict[str, Any] = {}
     if description is not None:
         updates['description'] = description
@@ -422,7 +417,7 @@ def update_recipe(
     # Atomic update with editability check in WHERE clause.
     # This avoids race conditions between check and update, and works
     # for both SQLite and PostgreSQL.
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         result = session.execute(recipes_table.update().where(
             recipes_table.c.name == recipe_name).where(
                 recipes_table.c.is_editable == 1).values(**updates))
@@ -455,12 +450,12 @@ def delete_recipe(recipe_name: str, user_id: str) -> bool:
     Raises:
         ValueError: If the recipe is not editable (e.g., default recipes).
     """
-    assert _db_manager.get_engine() is not None
+    engine = _db_manager.get_engine()
 
     # Atomic delete with ownership and editability checks in WHERE clause.
     # This avoids race conditions between check and delete, and works
     # for both SQLite and PostgreSQL.
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         result = session.execute(recipes_table.delete().where(
             recipes_table.c.name == recipe_name).where(
                 recipes_table.c.is_editable == 1).where(
@@ -497,12 +492,11 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
     Raises:
         ValueError: If the recipe is not pinnable (e.g., default recipes).
     """
-    assert _db_manager.get_engine() is not None
-
+    engine = _db_manager.get_engine()
     # Atomic update with pinnable check in WHERE clause.
     # This avoids race conditions between check and update, and works
     # for both SQLite and PostgreSQL.
-    with orm.Session(_db_manager.get_engine()) as session:
+    with orm.Session(engine) as session:
         result = session.execute(recipes_table.update().where(
             recipes_table.c.name == recipe_name).where(
                 recipes_table.c.is_pinnable == 1).values(
