@@ -17,19 +17,8 @@ import tempfile
 import threading
 import time
 import typing
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
+                    Set, Tuple, TypeVar, Union)
 import uuid
 
 import aiohttp

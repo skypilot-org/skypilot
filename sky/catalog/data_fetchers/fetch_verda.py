@@ -234,7 +234,6 @@ def create_catalog(output_path: str) -> None:
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     base_url: Optional[str] = None
-    default_region: Optional[str] = None
 
     config_file_path = os.path.expanduser('~/.verda/config.json')
     if os.path.exists(config_file_path):
@@ -243,18 +242,13 @@ def create_catalog(output_path: str) -> None:
             client_id = config.get('client_id', client_id)
             client_secret = config.get('client_secret', client_secret)
             base_url = config.get('base_url', base_url)
-            default_region = config.get('default_region', default_region)
 
     client_id = os.environ.get('VERDA_CLIENT_ID', client_id)
     client_secret = os.environ.get('VERDA_CLIENT_SECRET', client_secret)
     base_url = os.environ.get('VERDA_BASE_URL', base_url)
-    default_region = os.environ.get('VERDA_DEFAULT_REGION', default_region)
 
     if not base_url:
         base_url = 'https://api.verda.com/v1'
-
-    if not default_region:
-        default_region = 'FIN-03'
 
     if not client_id or not client_secret:
         raise Exception('Verda Cloud configuration not found. '
@@ -323,52 +317,43 @@ def create_catalog(output_path: str) -> None:
                                  if gpu_memory_data else 0)
 
                 # Extract and format GPU model
-                gpu_model = _extract_gpu_model(instance)
-                accelerator_name = _format_accelerator_name(
-                    gpu_model, int(gpu_memory_gb / num_gpus))
-
-                # Build GpuInfo JSON string
-                gpu_info = _build_gpu_info(accelerator_name, num_gpus,
-                                           gpu_memory_gb)
+                if num_gpus > 0:
+                    gpu_model = _extract_gpu_model(instance)
+                    accelerator_name = _format_accelerator_name(
+                        gpu_model, int(gpu_memory_gb / num_gpus))
+                    gpu_info = _build_gpu_info(accelerator_name, num_gpus,
+                                               gpu_memory_gb)
+                else:
+                    accelerator_name = ''
+                    gpu_info = ''
 
                 # Get available regions for this instance type
                 available_regions = availability_map.get(instance_type_id, {})
 
-                # If no availability data, use default region
+                # Only include regions reported by the availability API
                 if not available_regions:
-                    available_regions = {
-                        default_region: (
-                            True,
-                            bool(spot_price and spot_price > 0),
-                        )
-                    }
+                    continue
 
                 # Write row(s) for each available region
                 for region, availability_tuple in available_regions.items():
                     on_demand_available, spot_available = availability_tuple
-                    # Only write if on-demand is available
-                    if not on_demand_available:
-                        continue
 
-                    # Use empty string if no spot pricing is available
-                    effective_spot_price = (spot_price if
-                                            (spot_available and
-                                             spot_price != price) else '')
+                    effective_price = price if on_demand_available else ''
+                    effective_spot_price = (spot_price
+                                            if spot_available else '')
 
-                    # Write formatted name entry
-                    if num_gpus > 0 and accelerator_name and gpu_memory_gb > 0:
-                        writer.writerow([
-                            instance_type_id,
-                            instance_type_id,
-                            vcpus,
-                            memory_gib,
-                            accelerator_name,
-                            float(num_gpus),
-                            gpu_info,
-                            region,
-                            price,
-                            effective_spot_price,
-                        ])
+                    writer.writerow([
+                        instance_type_id,
+                        instance_type_id,
+                        vcpus,
+                        memory_gib,
+                        accelerator_name,
+                        float(num_gpus) if num_gpus > 0 else '',
+                        gpu_info,
+                        region,
+                        effective_price,
+                        effective_spot_price,
+                    ])
             except Exception as e:  # pylint: disable=broad-except
                 instance_type_id = instance.get('instance_type', 'unknown')
                 logger.warning(

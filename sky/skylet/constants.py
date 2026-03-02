@@ -41,8 +41,7 @@ SKY_REMOTE_RAY_DASHBOARD_PORT = 8266
 # value which causes the yaml parser to fail.
 SKY_REMOTE_RAY_PORT_DICT_STR = (
     f'{{"ray_port":{SKY_REMOTE_RAY_PORT}, '
-    f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}'
-)
+    f'"ray_dashboard_port":{SKY_REMOTE_RAY_DASHBOARD_PORT}}}')
 # The file contains the ports of the Ray cluster that SkyPilot launched,
 # i.e. the PORT_DICT_STR above.
 SKY_REMOTE_RAY_PORT_FILE = ".sky/ray_port.json"
@@ -69,11 +68,9 @@ SKY_UNSET_PYTHONPATH_AND_SET_CWD = "env -u PYTHONPATH -C $HOME"
 # used for installing SkyPilot runtime (ray and skypilot).
 SKY_PYTHON_PATH_FILE = f"{SKY_RUNTIME_DIR}/.sky/python_path"
 SKY_RAY_PATH_FILE = f"{SKY_RUNTIME_DIR}/.sky/ray_path"
-SKY_GET_PYTHON_PATH_CMD = (
-    f"[ -s {SKY_PYTHON_PATH_FILE} ] && "
-    f"cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || "
-    "which python3"
-)
+SKY_GET_PYTHON_PATH_CMD = (f"[ -s {SKY_PYTHON_PATH_FILE} ] && "
+                           f"cat {SKY_PYTHON_PATH_FILE} 2> /dev/null || "
+                           "which python3")
 # Python executable, e.g., /opt/conda/bin/python3
 SKY_PYTHON_CMD = f"{SKY_UNSET_PYTHONPATH_AND_SET_CWD} " f"$({SKY_GET_PYTHON_PATH_CMD})"
 # Prefer SKY_UV_PIP_CMD, which is faster.
@@ -83,18 +80,15 @@ SKY_PIP_CMD = f"{SKY_PYTHON_CMD} -m pip"
 # We need to add SKY_PYTHON_CMD before ray executable because:
 # The ray executable is a python script with a header like:
 #   #!/opt/conda/bin/python3
-SKY_RAY_CMD = (
-    f"{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && "
-    f"cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)"
-)
+SKY_RAY_CMD = (f"{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && "
+               f"cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)")
 
 # Use $(which env) to find env, falling back to /usr/bin/env if which is
 # unavailable. This works around a Slurm quirk where srun's execvp() doesn't
 # check execute permissions, failing when $HOME/.local/bin/env (non-executable,
 # from uv installation) shadows /usr/bin/env.
-SKY_SLURM_UNSET_PYTHONPATH = (
-    "$(which env 2>/dev/null || echo /usr/bin/env) " "-u PYTHONPATH"
-)
+SKY_SLURM_UNSET_PYTHONPATH = ("$(which env 2>/dev/null || echo /usr/bin/env) "
+                              "-u PYTHONPATH")
 SKY_SLURM_PYTHON_CMD = f"{SKY_SLURM_UNSET_PYTHONPATH} " f"$({SKY_GET_PYTHON_PATH_CMD})"
 
 # Separate env for SkyPilot runtime dependencies.
@@ -111,28 +105,22 @@ SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # unset PYTHONPATH in case the user provided docker image set it.
 # UV_LINK_MODE=copy avoids a uv >=0.10.5 bug where clone/reflink mode
 # strips execute permissions on XFS filesystems, breaking Ray binaries.
-SKY_UV_CMD = (
-    "UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false "
-    f"{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv"
-)
+SKY_UV_CMD = ("UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false "
+              f"{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv")
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
-SKY_UV_INSTALL_CMD = (
-    f"{SKY_UV_CMD} -V >/dev/null 2>&1 || "
-    "curl -LsSf https://astral.sh/uv/install.sh "
-    f"| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh"
-)
+SKY_UV_INSTALL_CMD = (f"{SKY_UV_CMD} -V >/dev/null 2>&1 || "
+                      "curl -LsSf https://astral.sh/uv/install.sh "
+                      f"| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh")
 SKY_UV_PIP_CMD: str = f"VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip"
-SKY_UV_RUN_CMD: str = (
-    f"VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run " "--no-project --no-config"
-)
+SKY_UV_RUN_CMD: str = (f"VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} run "
+                       "--no-project --no-config")
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH and unsetting relevant
 # VIRTUAL_ENV envvars to deactivate the environment. `deactivate` command does
 # not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     "export PATH="
     f'$(echo $PATH | sed "s|$(echo {SKY_REMOTE_PYTHON_ENV})/bin:||") && '
-    "unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT"
-)
+    "unset VIRTUAL_ENV && unset VIRTUAL_ENV_PROMPT")
 
 # Prefix for SkyPilot environment variables
 SKYPILOT_ENV_VAR_PREFIX = "SKYPILOT_"
@@ -205,14 +193,11 @@ DISABLE_GPU_ECC_COMMAND = (
     "sudo nvidia-smi -e 0 && "
     # Reboot the machine to apply the changes.
     '{ sudo reboot || echo "Failed to reboot. ECC mode may not be disabled"; } '
-    "|| true; "
-)
+    "|| true; ")
 
-SETUP_SKY_DIRS_COMMANDS = (
-    f"mkdir -p ~/sky_workdir && "
-    f"mkdir -p ~/.sky/sky_app && "
-    f"mkdir -p {SKY_RUNTIME_DIR}/.sky;"
-)
+SETUP_SKY_DIRS_COMMANDS = (f"mkdir -p ~/sky_workdir && "
+                           f"mkdir -p ~/.sky/sky_app && "
+                           f"mkdir -p {SKY_RUNTIME_DIR}/.sky;")
 
 # Install conda on the remote cluster if it is not already installed.
 # We use conda with python 3.10 to be consistent across multiple clouds with
@@ -251,8 +236,7 @@ CONDA_INSTALLATION_COMMANDS = (
     'if [ "{is_custom_docker}" = "false" ]; then '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     "{ conda init && source ~/.bashrc; };"
-    "fi;"
-)
+    "fi;")
 
 UV_INSTALLATION_COMMANDS = (
     # Install uv for venv management and pip installation.
@@ -317,8 +301,7 @@ RAY_INSTALLATION_COMMANDS = (
     # Writes ray path to file if it does not exist or the file is empty.
     f"[ -s {SKY_RAY_PATH_FILE} ] || "
     f"{{ {SKY_UV_RUN_CMD} "
-    f"which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; "
-)
+    f"which ray > {SKY_RAY_PATH_FILE} || exit 1; }}; ")
 
 # Copy SkyPilot templates from the installed wheel to ~/sky_templates.
 # This must run after the skypilot wheel is installed.
@@ -338,8 +321,7 @@ COPY_SKYPILOT_TEMPLATES_COMMANDS = (
     'print(f"Templates copied successfully")\'; '
     # Make scripts executable.
     f'find {SKY_TEMPLATES_DIRECTORY} -type f ! -name "*.py" ! -name "*.md" '
-    "-exec chmod +x {} + ; "
-)
+    "-exec chmod +x {} + ; ")
 
 SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f"{SKY_UV_INSTALL_CMD};"
@@ -360,8 +342,7 @@ SKYPILOT_WHEEL_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} install "$(echo ~/.sky/wheels/{{sky_wheel_hash}}/'
     f'skypilot-{_sky_version}*.whl)[{{cloud}}, remote]" && '
     'echo "{sky_wheel_hash}" > ~/.sky/wheels/current_sky_wheel_hash || '
-    "exit 1; }; "
-)
+    "exit 1; }; ")
 
 # Install ray and skypilot on the remote cluster if they are not already
 # installed. {var} will be replaced with the actual value in
@@ -376,8 +357,7 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
     f'{SKY_UV_PIP_CMD} list | grep "ray " | '
     f"grep {SKY_REMOTE_RAY_VERSION} 2>&1 > /dev/null && "
     f"{{ {SKY_PYTHON_CMD} -c "
-    '"from sky.skylet.ray_patches import patch; patch()" || exit 1; }; '
-)
+    '"from sky.skylet.ray_patches import patch; patch()" || exit 1; }; ')
 
 # The name for the environment variable that stores SkyPilot user hash, which
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
@@ -411,8 +391,7 @@ SET_SSH_MAX_SESSIONS_CONFIG_CMD = (
     'echo "MaxSessions 200" >> /etc/ssh/sshd_config; '
     'echo "MaxStartups 150:30:200" >> /etc/ssh/sshd_config; '
     "(systemctl reload sshd || service ssh reload); "
-    "'"
-)
+    "'")
 
 # Internal: Env var indicating the system is running with a remote API server.
 # It is used for internal purposes, including the jobs controller to mark
@@ -553,8 +532,7 @@ WAIT_FOR_STORAGE_ACCOUNT_ROLE_ASSIGNMENT = 180
 RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     "Failed to assign Storage Blob Data Owner role to the "
-    "storage account {storage_account_name}."
-)
+    "storage account {storage_account_name}.")
 
 # Constants for path in K8S pod to store persistent setup and run scripts
 # so that we can run them again after the pod restarts.
@@ -590,8 +568,7 @@ SKYPILOT_ROLLING_UPDATE_ENABLED = "SKYPILOT_ROLLING_UPDATE_ENABLED"
 SKYPILOT_API_SERVER_STORAGE_ENABLED = "SKYPILOT_API_SERVER_STORAGE_ENABLED"
 
 SERVE_OVERRIDE_CONCURRENT_LAUNCHES = (
-    f"{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES"
-)
+    f"{SKYPILOT_ENV_VAR_PREFIX}SERVE_OVERRIDE_CONCURRENT_LAUNCHES")
 
 # Environment variable that is set to 'true' if metrics are enabled.
 ENV_VAR_SERVER_METRICS_ENABLED = "SKY_API_SERVER_METRICS_ENABLED"
@@ -613,8 +590,7 @@ ENV_VAR_ENABLE_SERVICE_ACCOUNTS = "ENABLE_SERVICE_ACCOUNTS"
 
 # Enable debug logging for requests.
 ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING = (
-    f"{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING"
-)
+    f"{SKYPILOT_SERVER_ENV_VAR_PREFIX}ENABLE_REQUEST_DEBUG_LOGGING")
 
 SKYPILOT_DEFAULT_WORKSPACE = "default"
 
@@ -679,9 +655,8 @@ TIME_UNITS_SECONDS = {
 
 def _make_time_pattern(units: dict) -> str:
     """Create a regex pattern for time duration strings."""
-    unit_pattern = "|".join(
-        [unit.lower() for unit in units] + [unit.upper() for unit in units]
-    )
+    unit_pattern = "|".join([unit.lower() for unit in units] +
+                            [unit.upper() for unit in units])
     return f"^[0-9]+({unit_pattern})?$"
 
 
@@ -706,8 +681,7 @@ MEMORY_SIZE_PATTERN = (
     f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
     f'{"|".join([unit.upper() for unit in MEMORY_SIZE_UNITS])}|'
     f'{"|".join([unit[0].upper() + unit[1:] for unit in MEMORY_SIZE_UNITS if len(unit) > 1])}'  # pylint: disable=line-too-long
-    ")?$"
-)
+    ")?$")
 
 LAST_USE_TRUNC_LENGTH = 25
 USED_BY_TRUNC_LENGTH = 25
@@ -730,8 +704,7 @@ X86_64_ARCH = "x86_64"
 SLURM_PROCTRACK_TYPE_FILE = ".sky_proctrack_type"
 
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
-    f"{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT"
-)
+    f"{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT")
 
 # Maximum number of node name entries to keep per node in the lineage.
 MAX_NODE_NAME_LINEAGE = 10
