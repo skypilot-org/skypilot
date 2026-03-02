@@ -32,3 +32,15 @@ def test_request_body_env_vars_includes_expected_keys(monkeypatch):
     assert skypilot_config.ENV_VAR_SKYPILOT_CONFIG not in remote_env
     assert skypilot_config.ENV_VAR_GLOBAL_CONFIG not in remote_env
     assert skypilot_config.ENV_VAR_PROJECT_CONFIG not in remote_env
+    assert constants.END_USER_ID_ENV_VAR not in remote_env
+
+
+def test_request_body_env_vars_end_user_with_basic_auth(monkeypatch):
+    """end_user env var is included when basic auth is enabled."""
+    monkeypatch.setattr(usage_lib.messages.usage, 'run_id', 'run-id')
+    monkeypatch.setattr(payloads.common, 'is_api_server_local', lambda: True)
+    monkeypatch.setattr(payloads.common, 'is_basic_auth_enabled', lambda: True)
+    monkeypatch.setattr(payloads.common, 'end_user_hash', lambda: 'abcd1234')
+
+    env_vars = payloads.request_body_env_vars()
+    assert env_vars[constants.END_USER_ID_ENV_VAR] == 'abcd1234'
