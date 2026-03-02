@@ -37,7 +37,7 @@ class PermissionService:
     """Permission service for SkyPilot API Server."""
 
     def __init__(self):
-        self.enforcer: Optional[casbin.Enforcer] = None
+        self.enforcer: Optional[casbin.SyncedEnforcer] = None
         self._lock = threading.Lock()
 
     def initialize(self):
@@ -59,7 +59,13 @@ class PermissionService:
                     engine, db_class=sqlalchemy_adapter.CasbinRule)
                 model_path = os.path.join(os.path.dirname(__file__),
                                           'model.conf')
-                enforcer = casbin.Enforcer(model_path, adapter)
+                # Use SyncedEnforcer for thread safety. It uses a
+                # read-write lock internally: concurrent reads (enforce,
+                # get_roles_for_user) take a shared read lock, while
+                # writes (load_policy, add_policy) take an exclusive
+                # write lock. This prevents the RuntimeError from
+                # concurrent iteration/mutation of RoleManager.all_roles.
+                enforcer = casbin.SyncedEnforcer(model_path, adapter)
                 self.enforcer = enforcer
                 # Only set the enforcer instance once the enforcer
                 # is successfully initialized, if we change it and then fail
@@ -73,7 +79,7 @@ class PermissionService:
                 assert _enforcer_instance is not None
                 self.enforcer = _enforcer_instance.enforcer
 
-    def _ensure_enforcer(self) -> casbin.Enforcer:
+    def _ensure_enforcer(self) -> casbin.SyncedEnforcer:
         """Ensure enforcer is initialized and return it."""
         self._lazy_initialize()
         assert self.enforcer is not None, (
@@ -237,9 +243,7 @@ class PermissionService:
     def delete_user(self, user_id: str) -> None:
         """Delete user role relationship."""
         with _policy_lock():
-            # Get current roles
             self._load_policy_no_lock()
-            # Avoid calling get_user_roles, as it will require the lock.
             enforcer = self._ensure_enforcer()
             current_roles = enforcer.get_roles_for_user(user_id)
             if not current_roles:
@@ -251,9 +255,7 @@ class PermissionService:
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
         with _policy_lock():
-            # Get current roles
             self._load_policy_no_lock()
-            # Avoid calling get_user_roles, as it will require the lock.
             enforcer = self._ensure_enforcer()
             current_roles = enforcer.get_roles_for_user(user_id)
             if not current_roles:
