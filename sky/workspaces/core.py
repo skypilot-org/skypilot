@@ -1,7 +1,7 @@
 """Workspace management core."""
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 import filelock
 
@@ -67,6 +67,26 @@ class WorkspaceConfigComparison:
 def get_workspaces() -> Dict[str, Any]:
     """Returns the workspace config."""
     return workspaces_for_user(common_utils.get_current_user().id)
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def _accessible_workspace_names_for_user(user_id: str) -> Set[str]:
+    """Batch-compute accessible workspace names (cached per request)."""
+    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
+    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
+        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    return permission.permission_service.get_accessible_workspace_names(
+        user_id, list(workspaces.keys()))
+
+
+def get_accessible_workspace_names() -> Set[str]:
+    """Returns workspace names the current user can access (no config dict).
+
+    Use this when only workspace names are needed (e.g. filtering clusters/jobs)
+    to avoid building the full workspace config dict.
+    """
+    return _accessible_workspace_names_for_user(
+        common_utils.get_current_user().id)
 
 
 def _update_workspaces_config(
@@ -637,6 +657,9 @@ def is_workspace_private(workspace_config: Dict[str, Any]) -> bool:
 def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     """Returns the workspaces that the user has access to.
 
+    Uses a single batch permission check instead of N per-workspace checks,
+    so the API server stays fast with many workspaces.
+
     Args:
         user_id: The user id to check.
 
@@ -646,10 +669,5 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
     if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
         workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
-    user_workspaces = {}
-
-    for workspace_name, workspace_config in workspaces.items():
-        if permission.permission_service.check_workspace_permission(
-                user_id, workspace_name):
-            user_workspaces[workspace_name] = workspace_config
-    return user_workspaces
+    accessible_names = _accessible_workspace_names_for_user(user_id)
+    return {name: workspaces[name] for name in accessible_names}

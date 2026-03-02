@@ -1092,7 +1092,8 @@ def queue_v2(
             return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
-    accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+    accessible_workspaces = list(
+        workspaces_core.get_accessible_workspace_names())
 
     if handle.is_grpc_enabled_with_flag:
         try:

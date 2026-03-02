@@ -1941,8 +1941,8 @@ def get_clusters(
     Args:
         exclude_managed_clusters: If True, exclude clusters that have
             is_managed field set to True.
-        workspaces_filter: If specified, only include clusters
-            that has workspace field set to one of the values.
+        workspaces_filter: If specified, only include clusters whose
+            workspace is in this set/list (or dict keys). Use workspace names.
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
         cluster_names: If specified, only include clusters

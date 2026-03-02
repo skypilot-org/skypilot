@@ -4,7 +4,7 @@ import hashlib
 import logging
 import os
 import threading
-from typing import Generator, List, Optional
+from typing import Generator, List, Optional, Set
 
 import casbin
 import filelock
@@ -293,6 +293,29 @@ class PermissionService:
         enforcer = self._ensure_enforcer()
         return enforcer.get_users_for_role(role)
 
+    def get_accessible_workspace_names(self, user_id: str,
+                                       workspace_names: List[str]) -> Set[str]:
+        """Return workspace names the user can access (batch, O(1) enforcer).
+
+        Use instead of check_workspace_permission in a loop when filtering
+        many workspaces, to avoid N enforcer calls.
+        """
+        if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+            return set(workspace_names)
+        roles = self.get_user_roles(user_id)
+        if rbac.RoleName.ADMIN.value in roles:
+            return set(workspace_names)
+        enforcer = self._ensure_enforcer()
+        # Workspace policies: (sub, obj, act) with act=='*'; sub is user or '*'
+        names_set = set(workspace_names)
+        accessible = set()
+        for rule in enforcer.get_policy():
+            if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
+                                                      rule[0] == '*'):
+                if rule[1] in names_set:
+                    accessible.add(rule[1])
+        return accessible
+
     def check_endpoint_permission(self, user_id: str, path: str,
                                   method: str) -> bool:
         """Check permission."""
@@ -315,9 +338,9 @@ class PermissionService:
         with _policy_lock():
             self._load_policy_no_lock()
 
-    # Right now, not a lot of users are using multiple workspaces,
-    # so 5 should be more than enough.
-    @annotations.lru_cache(scope='request', maxsize=5)
+    # Allow many cached (user, workspace) pairs so hot paths with many
+    # workspaces stay fast when batch get_accessible_workspace_names isn't used.
+    @annotations.lru_cache(scope='request', maxsize=256)
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
         """Check workspace permission.
