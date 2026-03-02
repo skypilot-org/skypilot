@@ -836,13 +836,19 @@ def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):
 # ---------- RBAC 409 Conflict Handling Tests ----------
 
 
+class FakeApiException(Exception):
+    """A real exception that mimics kubernetes.client.rest.ApiException."""
+
+    def __init__(self, status, reason='', body=''):
+        super().__init__(status, reason, body)
+        self.status = status
+        self.reason = reason
+        self.body = body
+
+
 def _make_api_exception(status, reason='', body=''):
-    """Create a mock Kubernetes ApiException with the given status code."""
-    exc = mock.MagicMock()
-    exc.status = status
-    exc.reason = reason
-    exc.body = body
-    return exc
+    """Create a fake Kubernetes ApiException with the given status code."""
+    return FakeApiException(status, reason, body)
 
 
 def _make_provider_config_for_rbac():
@@ -943,14 +949,7 @@ class TestRbac409ConflictHandling:
 
     def test_service_account_other_error_raised(self, monkeypatch):
         """Test that non-409 errors are still raised."""
-
-        class FakeApiException(Exception):
-
-            def __init__(self, status, reason=''):
-                self.status = status
-                self.reason = reason
-
-        api_exc = FakeApiException(500, 'Internal Server Error')
+        api_exc = _make_api_exception(500, 'Internal Server Error')
 
         core_api_mock = mock.MagicMock()
         core_api_mock.list_namespaced_service_account.return_value = (
