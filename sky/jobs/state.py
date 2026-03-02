@@ -752,7 +752,7 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
     await add_job_event_async(job_id, task_id, ManagedJobStatus.PENDING,
                               'Job is in backoff')
 
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
@@ -792,7 +792,7 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
 
     await add_job_event_async(job_id, task_id, target_status,
                               'Job is restarting')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
@@ -1805,7 +1805,7 @@ def update_job_full_resources(job_id: int,
 async def set_job_id_on_pool_cluster_async(job_id: int,
                                            job_id_on_pool_cluster: int) -> None:
     """Set the job id on the pool cluster for a job."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         await session.execute(
             sqlalchemy.update(job_info_table).
@@ -1832,7 +1832,7 @@ def get_pool_submit_info(job_id: int) -> Tuple[Optional[str], Optional[int]]:
 async def get_pool_submit_info_async(
         job_id: int) -> Tuple[Optional[str], Optional[int]]:
     """Get the cluster name and job id on the pool from the managed job id."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.select(job_info_table.c.current_cluster_name,
@@ -1845,7 +1845,7 @@ async def get_pool_submit_info_async(
 
 
 async def scheduler_set_launching_async(job_id: int):
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         await session.execute(
             sqlalchemy.update(job_info_table).where(
@@ -1859,7 +1859,7 @@ async def scheduler_set_launching_async(job_id: int):
 
 async def scheduler_set_alive_async(job_id: int) -> None:
     """Do not call without holding the scheduler lock."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(job_info_table).where(
@@ -2084,7 +2084,7 @@ async def get_waiting_job_async(
     Backwards compatibility note: jobs submitted before #4485 will have no
     schedule_state and will be ignored by this SQL query.
     """
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         # Select the highest priority waiting job for update (locks the row)
         select_query = sqlalchemy.select(
@@ -2153,7 +2153,7 @@ def get_workspace(job_id: int) -> str:
 async def get_latest_task_id_status_async(
         job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
     """Returns the (task id, status) of the latest task of a job."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.select(
@@ -2186,7 +2186,7 @@ async def set_starting_async(job_id: int,
     """Set the task to starting state."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.STARTING,
                               'Job is starting')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     logger.info('Launching the spot cluster...')
     async with sql_async.AsyncSession(engine) as session:
         values = {
@@ -2224,7 +2224,7 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
     """Set the task to started state."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has started')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     logger.info('Job started.')
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
@@ -2256,7 +2256,7 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
 
 async def get_job_status_with_task_id_async(
         job_id: int, task_id: int) -> Optional[ManagedJobStatus]:
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.select(spot_table.c.status).where(
@@ -2292,7 +2292,7 @@ async def set_recovering_async(
 
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RECOVERING,
                               reason, code)
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     logger.info('=== Recovering... ===')
     current_time = time.time()
 
@@ -2341,7 +2341,7 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
     """Set the task to recovered."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.RUNNING,
                               'Job has recovered')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
@@ -2374,7 +2374,7 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
     """Set the task to succeeded, if it is in a non-terminal state."""
     await add_job_event_async(job_id, task_id, ManagedJobStatus.SUCCEEDED,
                               'Job has succeeded')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
@@ -2412,7 +2412,7 @@ async def set_failed_async(
     """Set an entire job or task to failed."""
     await add_job_event_async(job_id, task_id, failure_type,
                               f'Job failed: {failure_reason}')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
@@ -2474,7 +2474,7 @@ async def update_links_async(job_id: int, task_id: int,
     supported, so we rely on SQLite's database-level write locking which
     provides serializable isolation for write transactions.
     """
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     logger.info(f'Updating external links with: {links}')
     async with sql_async.AsyncSession(engine) as session:
         async with session.begin():
@@ -2513,7 +2513,7 @@ async def set_cancelling_async(job_id: int, callback_func: AsyncCallbackType):
     states."""
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLING,
                               'Job is cancelling')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(spot_table).where(
@@ -2536,7 +2536,7 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
     """Set tasks in the job as cancelled, if they are in CANCELLING state."""
     await add_job_event_async(job_id, None, ManagedJobStatus.CANCELLED,
                               'Job has been cancelled')
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     updated = False
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
@@ -2560,7 +2560,7 @@ async def set_cancelled_async(job_id: int, callback_func: AsyncCallbackType):
 
 async def remove_ha_recovery_script_async(job_id: int) -> None:
     """Remove the HA recovery script for a job."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         await session.execute(
             sqlalchemy.delete(ha_recovery_script_table).where(
@@ -2574,7 +2574,7 @@ async def get_status_async(job_id: int) -> Optional[ManagedJobStatus]:
 
 
 async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.select(job_info_table.c.schedule_state).where(
@@ -2586,7 +2586,7 @@ async def get_job_schedule_state_async(job_id: int) -> ManagedJobScheduleState:
 async def scheduler_set_done_async(job_id: int,
                                    idempotent: bool = False) -> None:
     """Do not call without holding the scheduler lock."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.update(job_info_table).where(
@@ -2839,7 +2839,7 @@ def add_job_event(job_id: int,
 
 async def _get_all_task_ids_async(job_id: int) -> List[int]:
     """Get all task IDs for a job (async version)."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
             sqlalchemy.select(spot_table.c.task_id).where(
@@ -2872,7 +2872,7 @@ async def add_job_event_async(
 
     status_value = new_status.value
 
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         await session.execute(job_events_table.insert().values(
             spot_job_id=job_id,
@@ -2944,7 +2944,7 @@ async def cleanup_job_events_with_retention_async(
     Args:
         retention_hours: Number of hours to retain job events.
     """
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     cutoff_time = datetime.datetime.now() - datetime.timedelta(
         hours=retention_hours)
 

@@ -456,7 +456,7 @@ class DatabaseManager:
                 self._post_init_fn(engine)
             return self._engine
 
-    def get_async_engine(self) -> sqlalchemy_async.AsyncEngine:
+    async def get_async_engine(self) -> sqlalchemy_async.AsyncEngine:
         """Lazy async engine init; delegates table creation to get_engine."""
         if self._engine_async is not None:
             return self._engine_async
@@ -465,7 +465,9 @@ class DatabaseManager:
                 return self._engine_async
             self._engine_async = get_engine(self._db_name, async_engine=True)
         # Ensure tables are created via the sync path.
-        self.get_engine()
+        # Use asyncio.to_thread to avoid blocking the event loop, matching the
+        # original _init_db_async pattern.
+        await asyncio.to_thread(self.get_engine)
         return self._engine_async
 
 

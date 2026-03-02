@@ -1321,7 +1321,7 @@ def get_cluster_name_to_handle_map(
 async def get_status_from_cluster_name_async(
         cluster_name: str) -> Optional[status_lib.ClusterStatus]:
     """Get the status of a cluster."""
-    engine = _db_manager.get_async_engine()
+    engine = await _db_manager.get_async_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
