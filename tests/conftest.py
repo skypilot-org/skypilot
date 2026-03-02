@@ -98,6 +98,7 @@ all_clouds_in_smoke_tests = [
     'coreweave',
     'slurm',
     'mithril',
+    'verda',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -129,7 +130,11 @@ cloud_to_pytest_keyword = {
     'seeweb': 'seeweb',
     'coreweave': 'coreweave',
     'slurm': 'slurm',
+<<<<<<< HEAD
     'mithril': 'mithril',
+=======
+    'verda': 'verda',
+>>>>>>> 53c5c73f4 (fix: rebase)
 }
 
 

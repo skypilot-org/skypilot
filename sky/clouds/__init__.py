@@ -35,6 +35,7 @@ from sky.clouds.shadeform import Shadeform
 from sky.clouds.slurm import Slurm
 from sky.clouds.ssh import SSH
 from sky.clouds.vast import Vast
+from sky.clouds.verda import Verda
 from sky.clouds.vsphere import Vsphere
 from sky.clouds.yotta import Yotta
 
@@ -56,6 +57,7 @@ __all__ = [
     'Shadeform',
     'Vast',
     'OCI',
+    'Verda',
     'Vsphere',
     'Kubernetes',
     'SSH',
