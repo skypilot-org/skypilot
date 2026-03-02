@@ -257,6 +257,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
     'yotta': [],  # No dependencies needed for Yotta
+    'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.

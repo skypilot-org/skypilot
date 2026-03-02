@@ -291,7 +291,11 @@ def _get_cluster_config_template(cloud):
         clouds.Hyperbolic: 'hyperbolic-ray.yml.j2',
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
+<<<<<<< HEAD
         clouds.Mithril: 'mithril-ray.yml.j2',
+=======
+        clouds.Verda: 'verda-ray.yml.j2',
+>>>>>>> 53c5c73f4 (fix: rebase)
     }
     return cloud_to_template[type(cloud)]
 
