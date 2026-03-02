@@ -68,9 +68,9 @@ def add_or_update_cache_entry(
         expires_at: The timestamp when the cache entry expires.
     """
     engine = _db_manager.get_engine()
-    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
         insert_func = sqlite.insert
-    elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value):
+    elif engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value:
         insert_func = postgresql.insert
     else:
         raise ValueError('Unsupported database dialect')

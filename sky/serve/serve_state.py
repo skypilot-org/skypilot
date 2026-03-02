@@ -300,7 +300,7 @@ def add_service(name: str, controller_job_id: int, policy: str,
     engine = _db_manager.get_engine()
     try:
         with orm.Session(engine) as session:
-            if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+            if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
                 insert_func = sqlite.insert
             elif (engine.dialect.name ==
                   db_utils.SQLAlchemyDialect.POSTGRESQL.value):
@@ -561,7 +561,7 @@ def add_or_update_replica(service_name: str, replica_id: int,
     """Adds a replica to the database."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -684,7 +684,7 @@ def add_or_update_version(service_name: str, version: int,
                           yaml_content: str) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -806,7 +806,7 @@ def set_ha_recovery_script(service_name: str, script: str) -> None:
     """Sets the HA recovery script for a service."""
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):

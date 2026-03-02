@@ -5,10 +5,8 @@ import asyncio
 import collections
 import datetime
 import enum
-import functools
 import ipaddress
 import json
-import sqlite3
 import time
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
@@ -681,7 +679,7 @@ def set_job_info_without_job_id(name: str,
                                 execution: Optional[str] = None) -> int:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -700,7 +698,7 @@ def set_job_info_without_job_id(name: str,
             execution=execution,
         )
 
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             result = session.execute(insert_stmt)
             ret = result.lastrowid
             session.commit()
@@ -1091,7 +1089,7 @@ def get_num_tasks(job_id: int) -> int:
 
 
 def get_latest_task_id_status(
-        job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
+        job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job.
 
     The latest means the task that is currently being executed or to be started
@@ -2151,7 +2149,7 @@ def get_workspace(job_id: int) -> str:
 
 
 async def get_latest_task_id_status_async(
-        job_id: int) -> Union[Tuple[int, ManagedJobStatus], Tuple[None, None]]:
+        job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job."""
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -2179,7 +2177,7 @@ async def set_starting_async(job_id: int,
                              run_timestamp: str,
                              submit_time: float,
                              resources_str: str,
-                             specs: Dict[str, Union[str, int]],
+                             specs: Dict[str, Any],
                              callback_func: AsyncCallbackType,
                              full_resources_json: Optional[Dict[str,
                                                                 Any]] = None):
@@ -2618,7 +2616,7 @@ def set_job_info(job_id: int,
                  execution: Optional[str] = None):
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):

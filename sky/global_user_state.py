@@ -339,7 +339,7 @@ def _sqlite_supports_returning() -> bool:
         return False
 
     engine = _db_manager.get_engine()
-    if (engine.dialect.name != db_utils.SQLAlchemyDialect.SQLITE.value):
+    if engine.dialect.name != db_utils.SQLAlchemyDialect.SQLITE.value:
         return False
     with orm.Session(engine) as session:
         result = session.execute(sqlalchemy.text('SELECT sqlite_version()'))
@@ -383,7 +383,7 @@ def add_or_update_user(
             if existing_user is not None:
                 return (False, user) if return_user else False
 
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             # For SQLite, use INSERT OR IGNORE followed by UPDATE to detect new
             # vs existing
             insert_func = sqlite.insert
@@ -747,7 +747,7 @@ def add_or_update_cluster(cluster_name: str,
                 'provision_log_path': provision_log_path,
             })
 
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -905,7 +905,7 @@ def add_cluster_event(cluster_name: str,
     if transitioned_at is None:
         transitioned_at = int(time.time())
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -1354,7 +1354,7 @@ def get_glob_cluster_names(
     engine = _db_manager.get_engine()
     assert cluster_name is not None, 'cluster_name cannot be None'
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             query = session.query(cluster_table.c.name).filter(
                 cluster_table.c.name.op('GLOB')(cluster_name))
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
@@ -2151,7 +2151,7 @@ def set_enabled_clouds(enabled_clouds: List[str],
                        workspace: str) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2188,7 +2188,7 @@ def get_allowed_clouds(workspace: str) -> List[str]:
 def set_allowed_clouds(allowed_clouds: List[str], workspace: str) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2225,7 +2225,7 @@ def add_or_update_storage(storage_name: str,
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2315,7 +2315,7 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
     engine = _db_manager.get_engine()
     assert storage_name is not None, 'storage_name cannot be None'
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             rows = session.query(storage_table).filter(
                 storage_table.c.name.op('GLOB')(storage_name)).all()
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
@@ -2442,7 +2442,7 @@ def add_volume(
         last_attached_at = None
 
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2542,7 +2542,7 @@ def get_ssh_keys(user_hash: str) -> Tuple[str, str, bool]:
 def set_ssh_keys(user_hash: str, ssh_public_key: str, ssh_private_key: str):
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2575,7 +2575,7 @@ def add_service_account_token(token_id: str,
     created_at = int(time.time())
 
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2795,7 +2795,7 @@ def set_cluster_yaml(cluster_name: str, yaml_str: str) -> None:
     """Set the cluster yaml in the database."""
     engine = _db_manager.get_engine()
     with orm.Session(_db_manager.get_engine()) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2857,7 +2857,7 @@ def set_system_config(config_key: str, config_value: str) -> None:
     current_time = int(time.time())
 
     with orm.Session(engine) as session:
-        if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+        if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
             insert_func = sqlite.insert
         elif (engine.dialect.name == db_utils.SQLAlchemyDialect.POSTGRESQL.value
              ):
@@ -2884,7 +2884,7 @@ def set_system_config(config_key: str, config_value: str) -> None:
 def get_max_db_connections() -> Optional[int]:
     """Get the maximum number of connections for the engine."""
     engine = _db_manager.get_engine()
-    if (engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value):
+    if engine.dialect.name == db_utils.SQLAlchemyDialect.SQLITE.value:
         return None
     with sqlalchemy.orm.Session(engine) as session:
         max_connections = session.execute(
