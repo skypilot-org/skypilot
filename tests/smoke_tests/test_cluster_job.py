@@ -3211,7 +3211,8 @@ def test_kubernetes_rbac_concurrent_launch():
             f'sky status {name}-1 && sky status {name}-2',
         ],
         (f'sky down -y {name}-1 {name}-2; '
-         f'rm -f /tmp/{name}-1.log /tmp/{name}-2.log'),
+         f'rm -f /tmp/{name}-1.log /tmp/{name}-2.log; '
+         f'{cleanup_rbac_cmd}'),
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
