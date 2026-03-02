@@ -831,3 +831,209 @@ def test_raise_pod_scheduling_errors_pvc_unbound(monkeypatch):
     # Verify that PVC binding issue is mentioned in the error
     assert 'PVC binding issue' in error_str or 'unbound' in error_str
     assert 'test-pvc' in error_str or 'PersistentVolumeClaims' in error_str
+
+
+# ---------- RBAC 409 Conflict Handling Tests ----------
+
+
+def _make_api_exception(status, reason='', body=''):
+    """Create a mock Kubernetes ApiException with the given status code."""
+    exc = mock.MagicMock()
+    exc.status = status
+    exc.reason = reason
+    exc.body = body
+    return exc
+
+
+def _make_provider_config_for_rbac():
+    """Return a minimal provider_config with all RBAC fields populated."""
+    return {
+        'autoscaler_service_account': {
+            'metadata': {
+                'name': 'skypilot-service-account',
+                'namespace': 'default',
+            },
+        },
+        'autoscaler_role': {
+            'metadata': {
+                'name': 'skypilot-service-account-role',
+                'namespace': 'default',
+            },
+            'rules': [{
+                'apiGroups': [''],
+                'resources': ['pods'],
+                'verbs': ['get', 'list'],
+            }],
+        },
+        'autoscaler_role_binding': {
+            'metadata': {
+                'name': 'skypilot-service-account-role-binding',
+                'namespace': 'default',
+            },
+            'roleRef': {
+                'apiGroup': 'rbac.authorization.k8s.io',
+                'kind': 'Role',
+                'name': 'skypilot-service-account-role',
+            },
+            'subjects': [{
+                'kind': 'ServiceAccount',
+                'name': 'skypilot-service-account',
+                'namespace': 'default',
+            }],
+        },
+        'autoscaler_cluster_role': {
+            'metadata': {
+                'name': 'skypilot-service-account-cluster-role',
+                'namespace': 'default',
+            },
+            'rules': [{
+                'apiGroups': [''],
+                'resources': ['nodes'],
+                'verbs': ['get', 'list'],
+            }],
+        },
+        'autoscaler_cluster_role_binding': {
+            'metadata': {
+                'name': 'skypilot-service-account-cluster-role-binding',
+                'namespace': 'default',
+            },
+            'roleRef': {
+                'apiGroup': 'rbac.authorization.k8s.io',
+                'kind': 'ClusterRole',
+                'name': 'skypilot-service-account-cluster-role',
+            },
+            'subjects': [{
+                'kind': 'ServiceAccount',
+                'name': 'skypilot-service-account',
+                'namespace': 'default',
+            }],
+        },
+    }
+
+
+class TestRbac409ConflictHandling:
+    """Tests that RBAC resource creation handles 409 Conflict gracefully.
+
+    When two concurrent cluster launches both find RBAC resources missing
+    and try to create them, the second one gets a 409 Conflict. The fix
+    catches this and treats it as success (idempotent creation).
+    """
+
+    def test_service_account_409_handled(self, monkeypatch):
+        """Test 409 on create_namespaced_service_account is treated as
+        success."""
+        api_exc = _make_api_exception(409, 'Conflict')
+
+        core_api_mock = mock.MagicMock()
+        # list returns empty -> "not found"
+        core_api_mock.list_namespaced_service_account.return_value = (
+            mock.MagicMock(items=[]))
+        # create raises 409
+        core_api_mock.create_namespaced_service_account.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *args, **kwargs: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        provider_config = _make_provider_config_for_rbac()
+        # Should not raise
+        config_lib._configure_autoscaler_service_account(
+            'default', None, provider_config)
+
+    def test_service_account_other_error_raised(self, monkeypatch):
+        """Test that non-409 errors are still raised."""
+
+        class FakeApiException(Exception):
+
+            def __init__(self, status, reason=''):
+                self.status = status
+                self.reason = reason
+
+        api_exc = FakeApiException(500, 'Internal Server Error')
+
+        core_api_mock = mock.MagicMock()
+        core_api_mock.list_namespaced_service_account.return_value = (
+            mock.MagicMock(items=[]))
+        core_api_mock.create_namespaced_service_account.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                            lambda *args, **kwargs: core_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: FakeApiException)
+
+        provider_config = _make_provider_config_for_rbac()
+        with pytest.raises(FakeApiException):
+            config_lib._configure_autoscaler_service_account(
+                'default', None, provider_config)
+
+    def test_role_409_handled(self, monkeypatch):
+        """Test 409 on create_namespaced_role is treated as success."""
+        api_exc = _make_api_exception(409, 'Conflict')
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_namespaced_role.return_value = mock.MagicMock(
+            items=[])
+        auth_api_mock.create_namespaced_role.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        provider_config = _make_provider_config_for_rbac()
+        config_lib._configure_autoscaler_role('default', None, provider_config,
+                                              'autoscaler_role')
+
+    def test_role_binding_409_handled(self, monkeypatch):
+        """Test 409 on create_namespaced_role_binding is treated as success."""
+        api_exc = _make_api_exception(409, 'Conflict')
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_namespaced_role_binding.return_value = (
+            mock.MagicMock(items=[]))
+        auth_api_mock.create_namespaced_role_binding.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        provider_config = _make_provider_config_for_rbac()
+        config_lib._configure_autoscaler_role_binding(
+            'default', None, provider_config, 'autoscaler_role_binding')
+
+    def test_cluster_role_409_handled(self, monkeypatch):
+        """Test 409 on create_cluster_role is treated as success."""
+        api_exc = _make_api_exception(409, 'Conflict')
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_cluster_role.return_value = mock.MagicMock(items=[])
+        auth_api_mock.create_cluster_role.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        provider_config = _make_provider_config_for_rbac()
+        config_lib._configure_autoscaler_cluster_role('default', None,
+                                                      provider_config)
+
+    def test_cluster_role_binding_409_handled(self, monkeypatch):
+        """Test 409 on create_cluster_role_binding is treated as success."""
+        api_exc = _make_api_exception(409, 'Conflict')
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_cluster_role_binding.return_value = mock.MagicMock(
+            items=[])
+        auth_api_mock.create_cluster_role_binding.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        provider_config = _make_provider_config_for_rbac()
+        config_lib._configure_autoscaler_cluster_role_binding(
+            'default', None, provider_config)
