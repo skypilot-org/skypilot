@@ -728,11 +728,13 @@ class LocalUpBody(RequestBody):
     gpus: bool = True
     name: Optional[str] = None
     port_start: Optional[int] = None
+    path: Optional[str] = None
 
 
 class LocalDownBody(RequestBody):
     """The request body for the local down endpoint."""
     name: Optional[str] = None
+    path: Optional[str] = None
 
 
 class SSHUpBody(RequestBody):

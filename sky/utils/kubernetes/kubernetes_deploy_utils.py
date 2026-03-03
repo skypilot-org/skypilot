@@ -1,4 +1,5 @@
 """Utility functions for deploying local Kubernetes kind clusters."""
+from contextlib import suppress
 import os
 import random
 import shlex
@@ -27,6 +28,66 @@ DEFAULT_LOCAL_CLUSTER_NAME = 'skypilot'
 LOCAL_CLUSTER_PORT_RANGE = 100
 LOCAL_CLUSTER_INTERNAL_PORT_START = 30000
 LOCAL_CLUSTER_INTERNAL_PORT_END = 30099
+
+
+def _merge_given_path_with_shell_path(given_path: Optional[str] = None) -> dict:
+    """Get env dict with PATH merged from a given PATH and login shell.
+
+    Builds a process environment whose PATH is the union of three
+    sources (highest priority first):
+    1. ``given_path`` - caller-supplied PATH value (e.g. from a custom
+       shell wrapper that sets its own PATH programmatically).
+    2. The current process ``os.environ['PATH']``.
+    3. Additional entries discovered from the user's login shell
+       profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that tools like
+       ``kind``, ``kubectl``, ``docker`` and ``helm`` installed in
+       non-standard locations can be found.
+
+    Args:
+        given_path: Optional PATH string supplied by the caller.
+            When provided its entries are prepended so they take the
+            highest priority.
+
+    Returns:
+        A copy of ``os.environ`` with the merged PATH.
+    """
+    env = os.environ.copy()
+    current_path = env.get('PATH', '')
+
+    # Start with the given_path entries (highest priority), then
+    # append entries from the current process PATH that are not
+    # already present.
+    if given_path:
+        given_parts = given_path.split(os.pathsep)
+        given_set = set(given_parts)
+        extra_current = [
+            p for p in current_path.split(os.pathsep)
+            if p and p not in given_set
+        ]
+        merged = given_parts + extra_current
+    else:
+        merged = current_path.split(os.pathsep)
+
+    # Now append any login-shell-only entries so that profile-
+    # configured paths are also available.
+    with suppress(Exception):
+        # If anything goes wrong (e.g. shell not found, timeout),
+        # fall back to what we already have.
+        user_shell = env.get('SHELL', '/bin/bash')
+        result = subprocess.run([user_shell, '-l', '-c', 'echo "$PATH"'],
+                                capture_output=True,
+                                text=True,
+                                timeout=10,
+                                check=True)
+        login_path = result.stdout.strip()
+        merged_set = set(merged)
+        extra_login = [
+            p for p in login_path.split(os.pathsep) if p and p not in merged_set
+        ]
+        merged.extend(extra_login)
+
+    env['PATH'] = os.pathsep.join(merged)
+    return env
 
 
 def generate_kind_config(port_start: int,
@@ -112,7 +173,7 @@ def _get_port_range(name: str, port_start: Optional[int]) -> Tuple[int, int]:
 
 
 def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
-                         gpus: bool):
+                         gpus: bool, path: Optional[str]):
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
     port_start, port_end = _get_port_range(name, port_start)
     context_name = f'kind-{name}'
@@ -153,6 +214,11 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
             run_command += ' --gpus'
         run_command = shlex.split(run_command)
 
+        # Build an env that includes PATH entries from the caller,
+        # current process, and the user's login shell profile so that
+        # tools like kind, kubectl, docker and helm can be found.
+        env = _merge_given_path_with_shell_path(path)
+
         # Setup logging paths
         run_timestamp = sky_logging.get_run_timestamp()
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
@@ -170,7 +236,8 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
                 stream_logs=False,
                 line_processor=log_utils.SkyLocalUpLineProcessor(
                     log_path=log_path, is_local=True),
-                cwd=cwd)
+                cwd=cwd,
+                env=env)
 
     # Kind always writes to stderr even if it succeeds.
     # If the failure happens after the cluster is created, we need
@@ -262,7 +329,8 @@ def deploy_local_cluster(name: Optional[str], port_start: Optional[int],
                     f'{gpu_hint}')))
 
 
-def teardown_local_cluster(name: Optional[str] = None):
+def teardown_local_cluster(name: Optional[str] = None,
+                           path: Optional[str] = None):
     name = name or DEFAULT_LOCAL_CLUSTER_NAME
     cluster_removed = False
 
@@ -272,6 +340,11 @@ def teardown_local_cluster(name: Optional[str] = None):
     cwd = os.path.dirname(os.path.abspath(down_script_path))
     run_command = f'{down_script_path} {name}'
     run_command = shlex.split(run_command)
+
+    # Build an env that includes PATH entries from the caller,
+    # current process, and the user's login shell profile so that
+    # tools like kind, kubectl, docker and helm can be found.
+    env = _merge_given_path_with_shell_path(path)
 
     # Setup logging paths
     run_timestamp = sky_logging.get_run_timestamp()
@@ -287,7 +360,8 @@ def teardown_local_cluster(name: Optional[str] = None):
                                                           log_path=log_path,
                                                           require_outputs=True,
                                                           stream_logs=False,
-                                                          cwd=cwd)
+                                                          cwd=cwd,
+                                                          env=env)
         stderr = stderr.replace('No kind clusters found.\n', '')
 
         if returncode == 0:
