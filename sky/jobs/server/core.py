@@ -9,6 +9,7 @@ from urllib import parse as urlparse
 import uuid
 
 import colorama
+from pydantic import SecretStr as _SecretStr
 
 from sky import backends
 from sky import core
@@ -36,6 +37,7 @@ from sky.schemas.api import responses
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve.server import impl
+from sky.server import common as server_common
 from sky.server.requests import request_names
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
@@ -745,54 +747,52 @@ def launch(
             task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
         # Inject API server credentials for tasks with api_access enabled.
-        for task_ in dag.tasks:
-            if task_.api_access:
-                sa_enabled = os.environ.get(
-                    skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
-                    'false').lower()
-                if sa_enabled != 'true':
-                    with ux_utils.print_exception_no_traceback():
-                        env_var = (
-                            skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS)
-                        raise ValueError('api_access: true requires service '
-                                         'accounts to be enabled on the API '
-                                         f'server. Set {env_var}=true '
-                                         'environment variable on the server.')
+        # Create a single token for the entire DAG and reuse it across all
+        # tasks that need API access, rather than creating one per task.
+        any_api_access = any(task_.api_access for task_ in dag.tasks)
+        if any_api_access:
+            sa_enabled = os.environ.get(
+                skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                'false').lower()
+            if sa_enabled != 'true':
+                with ux_utils.print_exception_no_traceback():
+                    env_var = (skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS)
+                    raise ValueError('api_access: true requires service '
+                                     'accounts to be enabled on the API '
+                                     f'server. Set {env_var}=true '
+                                     'environment variable on the server.')
 
-                # pylint: disable=import-outside-toplevel
-                from pydantic import SecretStr as _SecretStr
+            endpoint = server_common.get_server_url()
+            if server_common.is_api_server_local(endpoint):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('api_access: true requires a remote API '
+                                     'server. A local API server '
+                                     f'({endpoint}) is not reachable from '
+                                     'managed jobs running on remote clusters.')
+            user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
+            if user_id is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Cannot determine user identity for '
+                                       'api_access credential injection.')
+            token, token_id = _create_job_api_token(
+                creator_user_id=user_id,
+                job_name=dag.name,
+                dag_uuid=dag_uuid,
+            )
 
-                from sky.server import common as server_common
+            for task_ in dag.tasks:
+                if task_.api_access:
+                    task_.update_envs({
+                        skylet_constants.SKY_API_SERVER_URL_ENV_VAR: endpoint,
+                    })
+                    task_._secrets[  # pylint: disable=protected-access
+                        skylet_constants.
+                        SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)
 
-                api_endpoint = server_common.get_server_url()
-                if server_common.is_api_server_local(api_endpoint):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'api_access: true requires a remote API '
-                            'server. A local API server '
-                            f'({api_endpoint}) is not reachable from '
-                            'managed jobs running on remote clusters.')
-                user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
-                if user_id is None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise RuntimeError('Cannot determine user identity for '
-                                           'api_access credential injection.')
-                token, token_id = _create_job_api_token(
-                    creator_user_id=user_id,
-                    job_name=dag.name,
-                    dag_uuid=dag_uuid,
-                )
-                task_.update_envs({
-                    skylet_constants.SKY_API_SERVER_URL_ENV_VAR: api_endpoint,
-                })
-                task_._secrets[  # pylint: disable=protected-access
-                    skylet_constants.
-                    SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)
-
-                # Store the token ID so it can be cleaned up when the
-                # job completes.
-                for job_id in job_ids:
-                    managed_job_state.set_api_access_token_id(job_id, token_id)
+            # Store the token ID so it can be cleaned up when the
+            # job completes.
+            for job_id in job_ids:
+                managed_job_state.set_api_access_token_id(job_id, token_id)
 
         dag_utils.dump_dag_to_yaml(dag, f.name)
 
