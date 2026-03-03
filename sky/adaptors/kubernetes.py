@@ -386,11 +386,6 @@ def _clear_kubernetes_client_caches() -> None:
     annotations.clear_request_level_cache()
 
 
-def clear_kubernetes_client_caches() -> None:
-    """Clear API client caches (provisioner and interval refresh)."""
-    _clear_kubernetes_client_caches()
-
-
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
 @_retryable_kubernetes_api
