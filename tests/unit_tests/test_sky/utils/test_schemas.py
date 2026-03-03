@@ -670,9 +670,6 @@ class TestAzureSchema(unittest.TestCase):
             'storage_account': 'mystorage',
             'resource_group_vm': 'my-rg',
             'vpc_name': 'my-vnet',
-            'labels': {
-                'team': 'ml'
-            },
             'use_internal_ips': True,
             'ssh_proxy_command': 'ssh -W %h:%p bastion',
         }
