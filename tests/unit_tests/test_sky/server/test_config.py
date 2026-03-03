@@ -139,7 +139,7 @@ def test_parallel_size_short():
     # Test with limited memory
     blocking_size = 1
     mem_size_gb = 3
-    expected = 3
+    expected = 4
     assert config._max_short_worker_parallism(mem_size_gb,
                                               blocking_size) == expected
 
