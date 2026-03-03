@@ -320,6 +320,32 @@ When the trainer task finishes, the data-server (auxiliary) task will receive a
 termination signal after the 30-second delay, allowing it to flush pending data
 or perform cleanup.
 
+Using the Python SDK
+~~~~~~~~~~~~~~~~~~~~
+
+Job Groups can also be created and launched entirely in Python using the SkyPilot SDK,
+instead of YAML files. See the `Job Group SDK examples <https://github.com/skypilot-org/skypilot/tree/master/examples/job-group-sdk>`_ for more.
+
+Here is a minimal example:
+
+.. code-block:: python
+
+   import sky
+
+   server = sky.Task(name='server', run='python3 -m http.server 8080')
+   server.set_resources(sky.Resources(cpus=2, infra='kubernetes'))
+
+   client = sky.Task(name='client', run='curl http://server-0.${SKYPILOT_JOBGROUP_NAME}:8080/')
+   client.set_resources(sky.Resources(cpus=2, infra='kubernetes'))
+
+   with sky.Dag() as dag:
+       dag.add(server)
+       dag.add(client)
+   dag.name = 'my-group'
+   dag.set_execution(sky.DagExecution.PARALLEL)
+
+   sky.stream_and_get(sky.jobs.launch(dag))
+
 
 Current limitations
 -------------------

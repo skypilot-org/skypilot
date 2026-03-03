@@ -121,9 +121,6 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
-_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
-
 Base = declarative.declarative_base()
 
 config_yaml_table = sqlalchemy.Table(
@@ -511,7 +508,7 @@ def safe_reload_config() -> None:
         reload_config()
 
 
-def reload_config(init_db: bool = False) -> None:
+def reload_config() -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
@@ -523,7 +520,7 @@ def reload_config(init_db: bool = False) -> None:
         return
 
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _reload_config_as_server(init_db=init_db)
+        _reload_config_as_server()
     else:
         _reload_config_as_client()
 
@@ -601,36 +598,13 @@ def _create_table(engine: sqlalchemy.engine.Engine):
         migration_utils.SKYPILOT_CONFIG_VERSION)
 
 
-def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
-    """Initialize and return the config database engine.
-
-    This function should only be called by the API Server during initialization.
-    Client-side code should never call this function.
-    """
-    assert os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None, (
-        'initialize_and_get_db() can only be called by the API Server')
-
-    global _SQLALCHEMY_ENGINE
-
-    if _SQLALCHEMY_ENGINE is not None:
-        return _SQLALCHEMY_ENGINE
-
-    with _SQLALCHEMY_ENGINE_LOCK:
-        if _SQLALCHEMY_ENGINE is not None:
-            return _SQLALCHEMY_ENGINE
-
-        # We only store config in the DB when using Postgres,
-        # so no need to pass in db_name here.
-        engine = db_utils.get_engine(None)
-
-        # Run migrations if needed
-        _create_table(engine)
-
-        _SQLALCHEMY_ENGINE = engine
-        return _SQLALCHEMY_ENGINE
+# We only store config in the DB when using Postgres,
+# so no need to pass in db_name here.
+_db_manager = db_utils.DatabaseManager(db_name='config',
+                                       create_table_fn=_create_table)
 
 
-def _reload_config_as_server(init_db: bool = False) -> None:
+def _reload_config_as_server() -> None:
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
     _set_loaded_config_path(None)
@@ -647,12 +621,8 @@ def _reload_config_as_server(init_db: bool = False) -> None:
                 'If db config is specified, no other config is allowed')
         logger.debug('retrieving config from database')
 
-        if init_db:
-            _initialize_and_get_db()
-
         def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
-            assert _SQLALCHEMY_ENGINE is not None
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            with orm.Session(_db_manager.get_engine()) as session:
                 row = session.query(config_yaml_table).filter_by(
                     key=key).first()
             if row:
@@ -719,7 +689,7 @@ def loaded_config_path_serialized() -> Optional[str]:
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
-reload_config(init_db=True)
+reload_config()
 
 
 def loaded() -> bool:
@@ -966,15 +936,13 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if existing_db_url:
 
             def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-                # reload_config(init_db=True) is called when this module is
-                # imported, so the database engine must already be initialized.
-                assert _SQLALCHEMY_ENGINE is not None
+                engine = _db_manager.get_engine()
                 config_str = yaml_utils.dump_yaml_str(dict(config))
-                with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                    if (_SQLALCHEMY_ENGINE.dialect.name ==
+                with orm.Session(engine) as session:
+                    if (engine.dialect.name ==
                             db_utils.SQLAlchemyDialect.SQLITE.value):
                         insert_func = sqlite.insert
-                    elif (_SQLALCHEMY_ENGINE.dialect.name ==
+                    elif (engine.dialect.name ==
                           db_utils.SQLAlchemyDialect.POSTGRESQL.value):
                         insert_func = postgresql.insert
                     else:

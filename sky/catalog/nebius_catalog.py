@@ -7,6 +7,7 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.catalog import common
+from sky.clouds import Nebius
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -57,8 +58,14 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
-    del disk_tier, local_disk  # unused
-    return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
+    del local_disk  # unused
+
+    def _filter_disk_type(instance_type: str) -> bool:
+        valid, _ = Nebius.check_disk_tier(instance_type, disk_tier)
+        return valid
+
+    df = _df.loc[_df['InstanceType'].apply(_filter_disk_type)]
+    return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
                                                       zone)
 
 

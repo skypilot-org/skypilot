@@ -659,9 +659,9 @@ export function TopBar() {
                   className="text-sm text-muted-foreground"
                 >
                   <Link
-                    href="/config"
+                    href="/settings"
                     className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
-                      isActivePath('/config')
+                      isActivePath('/settings')
                         ? 'text-blue-600 hover:bg-gray-100'
                         : 'text-gray-600 hover:bg-gray-100'
                     }`}
@@ -924,9 +924,9 @@ export function TopBar() {
                 </a>
 
                 <Link
-                  href="/config"
+                  href="/settings"
                   className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
-                    isActivePath('/config')
+                    isActivePath('/settings')
                       ? 'bg-blue-50 text-blue-600'
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
