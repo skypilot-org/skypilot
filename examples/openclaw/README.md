@@ -16,7 +16,7 @@ This gives you an isolated sandbox environment separate from your local machine,
 1. Launch the gateway:
 
 ```bash
-sky launch -c openclaw openclaw.yaml --env ANTHROPIC_API_KEY
+sky launch -c openclaw openclaw.yaml --secret ANTHROPIC_API_KEY
 ```
 
 2. Open an SSH tunnel and access WebChat:

@@ -205,6 +205,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     region_configs:
       :ref:`eu-north1 <config-yaml-nebius>`:
         project_id: project-e00xxxxxxxxxxx
+        subnet_id: vpcsubnet-e00xxxxxxxxxxx
         fabric: fabric-3
         filesystems:
         - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
@@ -1885,6 +1886,10 @@ Advanced Nebius configuration (optional).
     Identifier for the Nebius project (optional)
     Default: Uses first available project if not specified
 
+``subnet_id``
+    Identifier for the Nebius subnet (optional)
+    Default: Uses first available subnet if not specified
+
 ``fabric``
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
@@ -1920,6 +1925,9 @@ Example:
                 # Project identifier for this region
                 # Optional: Uses first available project if not specified
                 project_id: project-e00......
+                # Subnet identifier for this region
+                # Optional: Uses first available subnet if not specified
+                subnet_id: vpcsubnet-e00......
                 # GPU cluster fabric identifier
                 # Optional: GPU cluster disabled if not specified
                 fabric: fabric-3
