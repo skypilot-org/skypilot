@@ -13,7 +13,6 @@ import functools
 import logging
 import os
 import platform
-import ssl
 import threading
 import time
 import typing
@@ -97,7 +96,7 @@ def _api_logging_decorator(logger_src: str, level: int):
 def _get_config_file() -> str:
     # Kubernetes load the kubeconfig from the KUBECONFIG env var on
     # package initialization. So we have to reload the KUBECONFIG env var
-    # every time in case the KUBECONFIG env var is changed.
+    # everytime in case the KUBECONFIG env var is changed.
     return os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 
@@ -315,20 +314,17 @@ def _make_retryable(client: Any, getter: Callable,
 
 def _retryable_kubernetes_api(getter: Callable) -> Callable:
     """Wrap getter return in RetryableClientWrapper for interval-based refresh.
-    Getter is the raw function (returns ClientWrapper). Unpacks (args, kwargs)
-    when the request-scoped cache passes them as two positional args.
+
+    The getter is the raw function that returns a ClientWrapper. On each call,
+    we delegate to the getter and wrap the result so the client can be
+    refreshed based on the configured kubeconfig refresh interval.
     """
 
     @functools.wraps(getter)
     def wrapper(*args: Any, **kwargs: Any) -> RetryableClientWrapper:
-        if (len(args) == 2 and isinstance(args[0], tuple) and
-                isinstance(args[1], dict) and not kwargs):
-            actual_args, actual_kwargs = args[0], args[1]
-        else:
-            actual_args, actual_kwargs = args, kwargs
-        client = getter(*actual_args, **actual_kwargs)
+        client = getter(*args, **kwargs)
         _mark_client_refreshed()
-        return _make_retryable(client, getter, actual_args, actual_kwargs)
+        return _make_retryable(client, getter, args, kwargs)
 
     return wrapper
 
