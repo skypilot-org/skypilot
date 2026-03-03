@@ -922,19 +922,38 @@ class TestRbac409ConflictHandling:
 
     When two concurrent cluster launches both find RBAC resources missing
     and try to create them, the second one gets a 409 Conflict. The fix
-    catches this and treats it as success (idempotent creation).
+    catches this, re-reads the resource, and falls through to compare/patch
+    (upsert semantics).
     """
 
+    @staticmethod
+    def _make_existing_role(rules):
+        """Create a mock existing role with the given rules."""
+        existing = mock.MagicMock()
+        existing.rules = rules
+        return existing
+
+    @staticmethod
+    def _make_existing_binding(role_ref, subjects):
+        """Create a mock existing binding with the given role_ref/subjects."""
+        existing = mock.MagicMock()
+        existing.role_ref = role_ref
+        existing.subjects = subjects
+        return existing
+
     def test_service_account_409_handled(self, monkeypatch):
-        """Test 409 on create_namespaced_service_account is treated as
-        success."""
+        """Test 409 on create_namespaced_service_account re-reads and succeeds.
+        """
         api_exc = _make_api_exception(409, 'Conflict')
+        existing_sa = mock.MagicMock()
 
         core_api_mock = mock.MagicMock()
-        # list returns empty -> "not found"
-        core_api_mock.list_namespaced_service_account.return_value = (
-            mock.MagicMock(items=[]))
-        # create raises 409
+        # First list returns empty -> "not found", second list (after 409)
+        # returns the concurrently-created resource.
+        core_api_mock.list_namespaced_service_account.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_sa]),
+        ]
         core_api_mock.create_namespaced_service_account.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
@@ -967,12 +986,22 @@ class TestRbac409ConflictHandling:
                 'default', None, provider_config)
 
     def test_role_409_handled(self, monkeypatch):
-        """Test 409 on create_namespaced_role is treated as success."""
+        """Test 409 on create_namespaced_role re-reads and succeeds."""
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
         api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        # Build the expected k8s role object so we can match its rules.
+        new_role = kubernetes_utils.dict_to_k8s_object(
+            provider_config['autoscaler_role'], 'V1Role')
+        existing_role = self._make_existing_role(new_role.rules)
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_namespaced_role.return_value = mock.MagicMock(
-            items=[])
+        auth_api_mock.list_namespaced_role.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_role]),
+        ]
         auth_api_mock.create_namespaced_role.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -980,17 +1009,54 @@ class TestRbac409ConflictHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *args, **kwargs: type(api_exc))
 
-        provider_config = _make_provider_config_for_rbac()
         config_lib._configure_autoscaler_role('default', None, provider_config,
                                               'autoscaler_role')
+        # Rules match, so patch should NOT be called.
+        auth_api_mock.patch_namespaced_role.assert_not_called()
 
-    def test_role_binding_409_handled(self, monkeypatch):
-        """Test 409 on create_namespaced_role_binding is treated as success."""
+    def test_role_409_then_patch(self, monkeypatch):
+        """Test 409 on create_namespaced_role re-reads and patches when rules
+        differ."""
         api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        # Existing role has different rules than what we want.
+        existing_role = self._make_existing_role(rules=['stale-rules'])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_namespaced_role_binding.return_value = (
-            mock.MagicMock(items=[]))
+        auth_api_mock.list_namespaced_role.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_role]),
+        ]
+        auth_api_mock.create_namespaced_role.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        config_lib._configure_autoscaler_role('default', None, provider_config,
+                                              'autoscaler_role')
+        # Rules differ, so patch SHOULD be called.
+        auth_api_mock.patch_namespaced_role.assert_called_once()
+
+    def test_role_binding_409_handled(self, monkeypatch):
+        """Test 409 on create_namespaced_role_binding re-reads and succeeds."""
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        new_rb = kubernetes_utils.dict_to_k8s_object(
+            provider_config['autoscaler_role_binding'], 'V1RoleBinding')
+        existing_rb = self._make_existing_binding(new_rb.role_ref,
+                                                  new_rb.subjects)
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_namespaced_role_binding.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_rb]),
+        ]
         auth_api_mock.create_namespaced_role_binding.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -998,16 +1064,52 @@ class TestRbac409ConflictHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *args, **kwargs: type(api_exc))
 
-        provider_config = _make_provider_config_for_rbac()
         config_lib._configure_autoscaler_role_binding(
             'default', None, provider_config, 'autoscaler_role_binding')
+        auth_api_mock.patch_namespaced_role_binding.assert_not_called()
 
-    def test_cluster_role_409_handled(self, monkeypatch):
-        """Test 409 on create_cluster_role is treated as success."""
+    def test_role_binding_409_then_patch(self, monkeypatch):
+        """Test 409 on create_namespaced_role_binding re-reads and patches when
+        binding differs."""
         api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        # Existing binding has different subjects.
+        existing_rb = self._make_existing_binding(role_ref='stale-role-ref',
+                                                  subjects=['stale-subject'])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_cluster_role.return_value = mock.MagicMock(items=[])
+        auth_api_mock.list_namespaced_role_binding.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_rb]),
+        ]
+        auth_api_mock.create_namespaced_role_binding.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        config_lib._configure_autoscaler_role_binding(
+            'default', None, provider_config, 'autoscaler_role_binding')
+        auth_api_mock.patch_namespaced_role_binding.assert_called_once()
+
+    def test_cluster_role_409_handled(self, monkeypatch):
+        """Test 409 on create_cluster_role re-reads and succeeds."""
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        new_cr = kubernetes_utils.dict_to_k8s_object(
+            provider_config['autoscaler_cluster_role'], 'V1ClusterRole')
+        existing_cr = self._make_existing_role(new_cr.rules)
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_cluster_role.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_cr]),
+        ]
         auth_api_mock.create_cluster_role.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1015,17 +1117,52 @@ class TestRbac409ConflictHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *args, **kwargs: type(api_exc))
 
-        provider_config = _make_provider_config_for_rbac()
         config_lib._configure_autoscaler_cluster_role('default', None,
                                                       provider_config)
+        auth_api_mock.patch_cluster_role.assert_not_called()
 
-    def test_cluster_role_binding_409_handled(self, monkeypatch):
-        """Test 409 on create_cluster_role_binding is treated as success."""
+    def test_cluster_role_409_then_patch(self, monkeypatch):
+        """Test 409 on create_cluster_role re-reads and patches when rules
+        differ."""
         api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        existing_cr = self._make_existing_role(rules=['stale-rules'])
 
         auth_api_mock = mock.MagicMock()
-        auth_api_mock.list_cluster_role_binding.return_value = mock.MagicMock(
-            items=[])
+        auth_api_mock.list_cluster_role.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_cr]),
+        ]
+        auth_api_mock.create_cluster_role.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        config_lib._configure_autoscaler_cluster_role('default', None,
+                                                      provider_config)
+        auth_api_mock.patch_cluster_role.assert_called_once()
+
+    def test_cluster_role_binding_409_handled(self, monkeypatch):
+        """Test 409 on create_cluster_role_binding re-reads and succeeds."""
+        from sky.provision.kubernetes import utils as kubernetes_utils
+
+        api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        new_binding = kubernetes_utils.dict_to_k8s_object(
+            provider_config['autoscaler_cluster_role_binding'],
+            'V1ClusterRoleBinding')
+        existing_binding = self._make_existing_binding(new_binding.role_ref,
+                                                       new_binding.subjects)
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_cluster_role_binding.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_binding]),
+        ]
         auth_api_mock.create_cluster_role_binding.side_effect = api_exc
 
         monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
@@ -1033,6 +1170,31 @@ class TestRbac409ConflictHandling:
         monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
                             lambda *args, **kwargs: type(api_exc))
 
-        provider_config = _make_provider_config_for_rbac()
         config_lib._configure_autoscaler_cluster_role_binding(
             'default', None, provider_config)
+        auth_api_mock.patch_cluster_role_binding.assert_not_called()
+
+    def test_cluster_role_binding_409_then_patch(self, monkeypatch):
+        """Test 409 on create_cluster_role_binding re-reads and patches when
+        binding differs."""
+        api_exc = _make_api_exception(409, 'Conflict')
+        provider_config = _make_provider_config_for_rbac()
+
+        existing_binding = self._make_existing_binding(
+            role_ref='stale-role-ref', subjects=['stale-subject'])
+
+        auth_api_mock = mock.MagicMock()
+        auth_api_mock.list_cluster_role_binding.side_effect = [
+            mock.MagicMock(items=[]),
+            mock.MagicMock(items=[existing_binding]),
+        ]
+        auth_api_mock.create_cluster_role_binding.side_effect = api_exc
+
+        monkeypatch.setattr('sky.adaptors.kubernetes.auth_api',
+                            lambda *args, **kwargs: auth_api_mock)
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_exception',
+                            lambda *args, **kwargs: type(api_exc))
+
+        config_lib._configure_autoscaler_cluster_role_binding(
+            'default', None, provider_config)
+        auth_api_mock.patch_cluster_role_binding.assert_called_once()
