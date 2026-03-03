@@ -166,13 +166,6 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
-    # Batch progress columns (for sky.batch dashboard display)
-    sqlalchemy.Column('batch_total_batches',
-                      sqlalchemy.Integer,
-                      server_default=None),
-    sqlalchemy.Column('batch_completed_batches',
-                      sqlalchemy.Integer,
-                      server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -201,6 +194,38 @@ job_events_table = sqlalchemy.Table(
                       sqlalchemy.DateTime(timezone=True),
                       index=True),
 )
+
+batch_state_table = sqlalchemy.Table(
+    'batch_state',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('batch_idx', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('start_idx', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('end_idx', sqlalchemy.Integer, nullable=False),
+    sqlalchemy.Column('status',
+                      sqlalchemy.Text,
+                      nullable=False,
+                      server_default='PENDING'),
+    sqlalchemy.Column('worker_cluster', sqlalchemy.Text),
+    sqlalchemy.Column('retry_count',
+                      sqlalchemy.Integer,
+                      nullable=False,
+                      server_default='0'),
+    sqlalchemy.Column('updated_at', sqlalchemy.Float),
+    sqlalchemy.PrimaryKeyConstraint('job_id', 'batch_idx'),
+)
+
+# Subquery that aggregates batch_state into per-job progress counts.
+# Used by jobs-queue queries to supply batch_total_batches and
+# batch_completed_batches without denormalized columns on job_info.
+_batch_progress_subquery = sqlalchemy.select(
+    batch_state_table.c.job_id,
+    sqlalchemy.func.count().label(  # pylint: disable=not-callable
+        'batch_total_batches'),
+    sqlalchemy.func.count(  # pylint: disable=not-callable
+        sqlalchemy.case((batch_state_table.c.status
+                         == 'COMPLETED', 1),)).label('batch_completed_batches'),
+).group_by(batch_state_table.c.job_id).subquery('batch_progress')
 
 
 def create_table(engine: sqlalchemy.engine.Engine):
@@ -1325,10 +1350,17 @@ def get_managed_job_tasks(job_id: int) -> List[Dict[str, Any]]:
     # Note: we will get the user_hash here, but don't try to call
     # global_user_state.get_user() on it. This runs on the controller, which may
     # not have the user info. Prefer to do it on the API server side.
-    query = sqlalchemy.select(spot_table, job_info_table).select_from(
+    query = sqlalchemy.select(
+        spot_table,
+        job_info_table,
+        _batch_progress_subquery.c.batch_total_batches,
+        _batch_progress_subquery.c.batch_completed_batches,
+    ).select_from(
         spot_table.outerjoin(
             job_info_table,
-            spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id).outerjoin(
+                _batch_progress_subquery,
+                spot_table.c.spot_job_id == _batch_progress_subquery.c.job_id))
     query = query.where(spot_table.c.spot_job_id == job_id)
     query = query.order_by(spot_table.c.task_id.asc())
     rows = None
@@ -1374,6 +1406,10 @@ def _map_response_field_to_db_column(field: str):
         'job_id': spot_table.c.spot_job_id,  # public job id -> spot.spot_job_id
         '_job_info_job_id': job_info_table.c.spot_job_id,
         'job_name': job_info_table.c.name,  # public job name -> job_info.name
+        # Batch progress from batch_state aggregation subquery
+        'batch_total_batches': _batch_progress_subquery.c.batch_total_batches,
+        'batch_completed_batches':
+            _batch_progress_subquery.c.batch_completed_batches,
     }
     if field in alias_mapping:
         return alias_mapping[field]
@@ -1454,11 +1490,18 @@ def build_managed_jobs_with_filters_no_status_query(
         query = sqlalchemy.select(spot_table.c.status,
                                   sqlalchemy.func.count().label('count'))  # pylint: disable=not-callable
     else:
-        query = sqlalchemy.select(spot_table, job_info_table)
+        query = sqlalchemy.select(
+            spot_table,
+            job_info_table,
+            _batch_progress_subquery.c.batch_total_batches,
+            _batch_progress_subquery.c.batch_completed_batches,
+        )
     query = query.select_from(
         spot_table.outerjoin(
             job_info_table,
-            spot_table.c.spot_job_id == job_info_table.c.spot_job_id))
+            spot_table.c.spot_job_id == job_info_table.c.spot_job_id).outerjoin(
+                _batch_progress_subquery,
+                spot_table.c.spot_job_id == _batch_progress_subquery.c.job_id))
     if skip_finished:
         # Filter out finished jobs at the DB level. If a multi-task job is
         # partially finished, include all its tasks. We do this by first
@@ -1907,15 +1950,91 @@ def set_job_infra(job_id: int,
 
 
 @_init_db
-def set_batch_progress(job_id: int, total: int, completed: int) -> None:
-    """Update batch progress for dashboard display."""
+def save_batch_states(job_id: int, batches: List[List[int]]) -> None:
+    """Bulk insert all batch records (atomic).
+
+    Args:
+        job_id: Managed job ID.
+        batches: List of [start_idx, end_idx] pairs, indexed by batch_idx.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    now = time.time()
+    rows = [{
+        'job_id': job_id,
+        'batch_idx': idx,
+        'start_idx': b[0],
+        'end_idx': b[1],
+        'status': 'PENDING',
+        'retry_count': 0,
+        'updated_at': now,
+    } for idx, b in enumerate(batches)]
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(batch_state_table.insert(), rows)
+        session.commit()
+
+
+@_init_db
+def get_batch_states(job_id: int) -> List[Dict[str, Any]]:
+    """Read all batch records ordered by batch_idx.
+
+    Returns:
+        List of dicts with keys: batch_idx, start_idx, end_idx, status,
+        worker_cluster, retry_count, updated_at.
+    """
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
-        session.query(job_info_table).filter(
-            job_info_table.c.spot_job_id == job_id).update({
-                job_info_table.c.batch_total_batches: total,
-                job_info_table.c.batch_completed_batches: completed,
-            })
+        result = session.execute(
+            sqlalchemy.select(batch_state_table).where(
+                batch_state_table.c.job_id == job_id).order_by(
+                    batch_state_table.c.batch_idx))
+        rows = result.mappings().all()
+        return [dict(r) for r in rows]
+
+
+@_init_db
+def set_batch_status(job_id: int,
+                     batch_idx: int,
+                     status: str,
+                     worker_cluster: Optional[str] = None,
+                     retry_count: Optional[int] = None) -> None:
+    """Update a single batch record's status.
+
+    Args:
+        job_id: Managed job ID.
+        batch_idx: 0-based batch index.
+        status: New status (PENDING, DISPATCHED, COMPLETED, FAILED).
+        worker_cluster: Cluster processing this batch (optional).
+        retry_count: Current retry count (optional).
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    values: Dict[str, Any] = {
+        'status': status,
+        'updated_at': time.time(),
+    }
+    if worker_cluster is not None:
+        values['worker_cluster'] = worker_cluster
+    if retry_count is not None:
+        values['retry_count'] = retry_count
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.update(batch_state_table).where(
+                sqlalchemy.and_(
+                    batch_state_table.c.job_id == job_id,
+                    batch_state_table.c.batch_idx == batch_idx)).values(values))
+        session.commit()
+
+
+@_init_db
+def reset_dispatched_batches(job_id: int) -> None:
+    """Reset all DISPATCHED batches to PENDING for crash recovery."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        session.execute(
+            sqlalchemy.update(batch_state_table).where(
+                sqlalchemy.and_(
+                    batch_state_table.c.job_id == job_id,
+                    batch_state_table.c.status == 'DISPATCHED')).values(
+                        status='PENDING', updated_at=time.time()))
         session.commit()
 
 

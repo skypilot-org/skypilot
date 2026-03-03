@@ -400,8 +400,10 @@ class JobController:
             job_id=self._job_id, task_id=task_id, task=task)
 
         if task.metadata.get('batch_coordinator'):
-            return await self._run_batch_coordinator_task(
-                task_id, task, callback_func)
+            return await self._run_batch_coordinator_task(task_id,
+                                                          task,
+                                                          callback_func,
+                                                          is_resume=is_resume)
 
         if task.run is None:
             logger.info(f'Skip running task {task_id} ({task.name}) due to its '
@@ -570,16 +572,34 @@ class JobController:
         task_id: int,
         task: 'sky.Task',
         callback_func: typing.Callable,
+        is_resume: bool = False,
     ) -> bool:
         """Run the BatchCoordinator inline on the controller.
 
         The coordinator is lightweight orchestration (count items, split
         batches, dispatch via ``sdk.exec()``).  Running it here avoids
         provisioning a separate CPU cluster.
+
+        When ``is_resume=True``, the coordinator reloads persisted batch
+        state from the DB and resumes dispatch from where it left off.
         """
         # Import lazily to avoid circular imports and keep startup fast.
         from sky.batch.coordinator import (
             BatchCoordinator)  # pylint: disable=import-outside-toplevel
+
+        if is_resume:
+            # Check if the previous run already reached a terminal status.
+            _, prev_status = (await
+                              managed_job_state.get_latest_task_id_status_async(
+                                  self._job_id))
+            if (prev_status is not None and prev_status.is_terminal()):
+                logger.info(f'Batch task {task_id} already in terminal status '
+                            f'{prev_status.value}, skipping.')
+                return prev_status == (
+                    managed_job_state.ManagedJobStatus.SUCCEEDED)
+            if prev_status == managed_job_state.ManagedJobStatus.CANCELLING:
+                raise asyncio.CancelledError(
+                    'Batch coordinator resuming into CANCELLING state')
 
         metadata = task.metadata
 
@@ -591,26 +611,29 @@ class JobController:
             serialized_fn=metadata['batch_serialized_fn'],
             activate_env=metadata.get('batch_activate_env', ''),
             job_id=self._job_id,
+            is_resume=is_resume,
         )
 
-        submitted_at = backend_utils.get_timestamp_from_run_timestamp(
-            self._backend.run_timestamp) if task_id == 0 else time.time()
+        if not is_resume:
+            submitted_at = backend_utils.get_timestamp_from_run_timestamp(
+                self._backend.run_timestamp) if task_id == 0 else time.time()
 
-        await managed_job_state.set_starting_async(
-            self._job_id,
-            task_id,
-            self._backend.run_timestamp,
-            submitted_at,
-            resources_str='BatchCoordinator',
-            specs={
-                'max_restarts_on_errors': 0,
-                'recover_on_exit_codes': []
-            },
-            callback_func=callback_func)
-        await managed_job_state.set_started_async(job_id=self._job_id,
-                                                  task_id=task_id,
-                                                  start_time=time.time(),
-                                                  callback_func=callback_func)
+            await managed_job_state.set_starting_async(
+                self._job_id,
+                task_id,
+                self._backend.run_timestamp,
+                submitted_at,
+                resources_str='BatchCoordinator',
+                specs={
+                    'max_restarts_on_errors': 0,
+                    'recover_on_exit_codes': []
+                },
+                callback_func=callback_func)
+            await managed_job_state.set_started_async(
+                job_id=self._job_id,
+                task_id=task_id,
+                start_time=time.time(),
+                callback_func=callback_func)
 
         try:
             await asyncio.to_thread(coordinator.run)

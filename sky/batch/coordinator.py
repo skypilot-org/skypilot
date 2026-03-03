@@ -53,13 +53,15 @@ class BatchCoordinator:
                  pool_name: str,
                  serialized_fn: str,
                  activate_env: str = '',
-                 job_id: Optional[int] = None):
+                 job_id: Optional[int] = None,
+                 is_resume: bool = False):
         self.dataset_path = dataset_path
         self.output_path = output_path
         self.batch_size = batch_size
         self.pool_name = pool_name
         self.serialized_fn = serialized_fn
         self.activate_env = activate_env
+        self._is_resume = is_resume
 
         # Use explicit job_id if provided (inline on controller),
         # otherwise fall back to env var (backward compat).
@@ -81,6 +83,10 @@ class BatchCoordinator:
         self.completed_count: int = 0
         self._completed_lock = threading.Lock()
 
+        # Retry tracking: batch_idx -> retry count.  Persisted across
+        # resume so that a batch cannot be retried indefinitely.
+        self._retry_counts: Dict[int, int] = {}
+
         # Worker tracking: cluster_name → worker_job_id
         self._active_workers: Dict[str, int] = {}
 
@@ -98,11 +104,26 @@ class BatchCoordinator:
         """Main entry point.  Returns on success, raises on failure."""
         try:
             logger.info(f'managed_job_id={self._managed_job_id}')
-            self._count_and_split()
-            if not self.batches:
-                logger.info('No items in dataset — nothing to do.')
+            self._output_format = utils.get_output_format(self.output_path)
+
+            if self._is_resume:
+                self._resume_from_db()
+            else:
+                self._count_and_split()
+                if not self.batches:
+                    logger.info('No items in dataset — nothing to do.')
+                    return
+                self._save_batches_to_db()
+
+            if self.completed_count == len(self.batches):
+                # Crash happened after all batches done but before merge.
+                logger.info('All batches already completed, skipping '
+                            'to merge.')
+                self._merge_results()
                 return
+
             self._discover_workers()
+            self._shutdown_stale_workers()
             self._update_resources_str()
             self._dispatch_all()
             self._merge_results()
@@ -141,8 +162,6 @@ class BatchCoordinator:
     def _count_and_split(self) -> None:
         """Count dataset items and create batch index ranges."""
         dataset_format = self._get_dataset_format()
-        output_format = utils.get_output_format(self.output_path)
-        self._output_format = output_format
 
         logger.info(f'Counting items in {self.dataset_path}')
         total_items = dataset_format.count_items(self.dataset_path)
@@ -169,6 +188,61 @@ class BatchCoordinator:
         else:
             raise ValueError(f'Unsupported dataset format: '
                              f'{self.dataset_path}. Supported: .jsonl')
+
+    # ------------------------------------------------------------------
+    # DB persistence for HA recovery
+    # ------------------------------------------------------------------
+
+    def _save_batches_to_db(self) -> None:
+        """Write all batch records to DB with PENDING status."""
+        managed_job_state.save_batch_states(self._managed_job_id, self.batches)
+        logger.info(f'Saved {len(self.batches)} batch records to DB')
+
+    def _resume_from_db(self) -> None:
+        """Restore coordinator state from DB after a controller crash.
+
+        Resets any DISPATCHED (in-flight) batches back to PENDING, then
+        rebuilds in-memory state from the persisted records.
+        """
+        managed_job_state.reset_dispatched_batches(self._managed_job_id)
+        records = managed_job_state.get_batch_states(self._managed_job_id)
+        if not records:
+            raise RuntimeError(
+                f'No batch records found for job {self._managed_job_id} '
+                'during resume. The job may need to be re-submitted.')
+
+        self.batches = []
+        self.pending_batches = collections.deque()
+        self.completed_count = 0
+        self._retry_counts = {}
+
+        for rec in records:
+            batch_idx = rec['batch_idx']
+            self.batches.append([rec['start_idx'], rec['end_idx']])
+            status = rec['status']
+            if status == 'PENDING':
+                self.pending_batches.append(batch_idx)
+            elif status == 'COMPLETED':
+                self.completed_count += 1
+            # FAILED batches stay failed — not re-queued.
+            self._retry_counts[batch_idx] = rec['retry_count']
+
+        logger.info(f'Resumed from DB: {len(self.batches)} batches, '
+                    f'{self.completed_count} completed, '
+                    f'{len(self.pending_batches)} pending')
+
+    def _shutdown_stale_workers(self) -> None:
+        """Shut down any stale worker services on discovered workers.
+
+        After a crash, old worker processes may still hold port 8290.
+        Send /shutdown to each worker before launching fresh services.
+        """
+        for cluster_name in self._workers:
+            try:
+                self._shutdown_worker(cluster_name)
+            except Exception:  # pylint: disable=broad-except
+                logger.debug(f'No stale worker to shut down on '
+                             f'{cluster_name}')
 
     # ------------------------------------------------------------------
     # Worker discovery
@@ -426,19 +500,6 @@ class BatchCoordinator:
                                f'{worker_job_id}: {e}')
 
     # ------------------------------------------------------------------
-    # Progress reporting
-    # ------------------------------------------------------------------
-
-    def _write_progress(self) -> None:
-        """Write batch progress directly to the DB."""
-        try:
-            managed_job_state.set_batch_progress(self._managed_job_id,
-                                                 len(self.batches),
-                                                 self.completed_count)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to write progress: {e}')
-
-    # ------------------------------------------------------------------
     # Per-worker dispatch loop (runs in its own thread)
     # ------------------------------------------------------------------
 
@@ -450,7 +511,6 @@ class BatchCoordinator:
         3. Shutdown worker service when done.
         """
         job_id = str(self._managed_job_id)
-        retry_counts: Dict[int, int] = {}
 
         worker_job_id = self._launch_worker_service(cluster_name)
         self._active_workers[cluster_name] = worker_job_id
@@ -462,7 +522,14 @@ class BatchCoordinator:
                 except IndexError:
                     return
 
-                retries = retry_counts.get(batch_idx, 0)
+                retries = self._retry_counts.get(batch_idx, 0)
+
+                # Mark batch as dispatched in DB.
+                managed_job_state.set_batch_status(self._managed_job_id,
+                                                   batch_idx,
+                                                   'DISPATCHED',
+                                                   worker_cluster=cluster_name)
+
                 try:
                     notify_code = self._generate_notify_code(batch_idx)
                     task = sky.Task(name=f'batch-notify-{job_id}-{batch_idx}',
@@ -490,9 +557,11 @@ class BatchCoordinator:
                                         f'on {cluster_name}')
                             break
 
+                    # Mark batch as completed in DB.
+                    managed_job_state.set_batch_status(self._managed_job_id,
+                                                       batch_idx, 'COMPLETED')
                     with self._completed_lock:
                         self.completed_count += 1
-                    self._write_progress()
                     logger.info(f'Batch {batch_idx} completed '
                                 f'({self.completed_count}/'
                                 f'{len(self.batches)})')
@@ -500,16 +569,26 @@ class BatchCoordinator:
                     logger.error(f'Batch {batch_idx} failed on '
                                  f'{cluster_name}: {e}')
                     if retries < constants.MAX_RETRIES:
-                        retry_counts[batch_idx] = retries + 1
+                        self._retry_counts[batch_idx] = retries + 1
+                        managed_job_state.set_batch_status(
+                            self._managed_job_id,
+                            batch_idx,
+                            'PENDING',
+                            retry_count=self._retry_counts[batch_idx])
                         self.pending_batches.append(batch_idx)
                         backoff = (constants.RETRY_BACKOFF_BASE**
-                                   retry_counts[batch_idx])
+                                   self._retry_counts[batch_idx])
                         logger.info(
                             f'Re-queued batch {batch_idx} '
-                            f'(retry {retry_counts[batch_idx]}/'
+                            f'(retry {self._retry_counts[batch_idx]}/'
                             f'{constants.MAX_RETRIES}), backoff {backoff}s')
                         time.sleep(backoff)
                     else:
+                        managed_job_state.set_batch_status(self._managed_job_id,
+                                                           batch_idx,
+                                                           'FAILED',
+                                                           retry_count=retries +
+                                                           1)
                         raise RuntimeError(
                             f'Batch {batch_idx} failed after '
                             f'{constants.MAX_RETRIES} retries: {e}') from e
@@ -523,9 +602,6 @@ class BatchCoordinator:
 
     def _dispatch_all(self) -> None:
         """Launch one dispatch thread per worker and wait."""
-        # Write initial progress
-        self._write_progress()
-
         dispatch_threads: List[threading.Thread] = []
         errors: List[Exception] = []
 
