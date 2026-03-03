@@ -257,11 +257,15 @@ def _get_kubeconfig_refresh_interval_seconds() -> float:
     raw = os.environ.get(KUBECONFIG_REFRESH_INTERVAL_ENV_VAR, '').strip()
     if not raw:
         return 0.0
-    try:
-        val = float(raw)
-        return max(0.0, val)
-    except ValueError:
-        return 0.0
+        try:
+            val = float(raw)
+            return max(0.0, val)
+        except ValueError:
+            logger.warning(
+                f'Invalid value for {KUBECONFIG_REFRESH_INTERVAL_ENV_VAR}: '
+                f'"{raw}". Expected a numeric value. Disabling client '
+                'refresh interval.')
+            return 0.0
 
 
 def _should_refresh_client_by_interval() -> bool:
