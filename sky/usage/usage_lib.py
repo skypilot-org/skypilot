@@ -8,7 +8,7 @@ import os
 import time
 import traceback
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 from typing_extensions import ParamSpec
 
@@ -47,7 +47,7 @@ class MessageType(enum.Enum):
     """Types for messages to be sent to Loki."""
     USAGE = 'usage'
     HEARTBEAT = 'heartbeat'
-    # TODO(zhwu): Add more types, e.g., cluster_lifecycle.
+    SERVER_HEARTBEAT = 'server_heartbeat'
 
 
 class MessageToReport:
@@ -312,13 +312,79 @@ class HeartbeatMessageToReport(MessageToReport):
         return properties
 
 
+def _get_server_id() -> str:
+    """Get server identifier for server-side heartbeat messages.
+
+    Uses the same pattern as gpu_healer/observability.py for identifying
+    the API server deployment.
+    """
+    import socket  # pylint: disable=import-outside-toplevel
+    return (os.getenv('HELM_RELEASE_NAME') or
+            os.getenv('SKYPILOT_RELEASE_NAME') or socket.gethostname())
+
+
+class ServerHeartbeatMessage(MessageToReport):
+    """Server-side heartbeat that plugins can enrich with data.
+
+    Plugins call register_provider() during install() to contribute
+    metrics. Data is collected lazily in get_properties() at send time.
+
+    Top-level schema (all fields serialized by get_properties()):
+        schema_version: int — message schema version
+        start_time: int — timestamp (ns) when message was created
+        send_time: int — timestamp (ns) when message was sent
+        interval_seconds: int — heartbeat interval
+        server_id: str — Helm release name or hostname
+        user: str — stable per-installation user hash
+        sky_version: str — SkyPilot version
+        ingress_host: Optional[str] — ingress DNS hostname if deployed
+            with ingress (from SKYPILOT_INGRESS_HOST env var)
+        plugins: Dict[str, Any] — per-plugin data from registered providers
+    """
+
+    _data_providers: ClassVar[Dict[str, Callable[[], Dict[str, Any]]]] = {}
+
+    def __init__(self, interval_seconds: int = 600):
+        super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        self.interval_seconds = interval_seconds
+        self.server_id: str = _get_server_id()
+        self.user: str = common_utils.get_user_hash()
+        self.sky_version: str = sky.__version__
+        self.ingress_host: Optional[str] = os.getenv('SKYPILOT_INGRESS_HOST')
+
+    @classmethod
+    def register_provider(cls, name: str,
+                          provider: Callable[[], Dict[str, Any]]) -> None:
+        """Register a plugin data provider. Called during plugin install()."""
+        cls._data_providers[name] = provider
+
+    @classmethod
+    def has_providers(cls) -> bool:
+        return len(cls._data_providers) > 0
+
+    def get_properties(self) -> Dict[str, Any]:
+        properties = super().get_properties()
+        plugins_data = {}
+        for name, provider in self._data_providers.items():
+            try:
+                plugins_data[name] = provider()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Server heartbeat provider {name} failed: {e}')
+        properties['plugins'] = plugins_data
+        return properties
+
+
 class MessageCollection:
     """A collection of messages."""
 
     def __init__(self):
+        self._factories: Dict[MessageType, type] = {
+            MessageType.USAGE: UsageMessageToReport,
+            MessageType.HEARTBEAT: HeartbeatMessageToReport,
+            MessageType.SERVER_HEARTBEAT: ServerHeartbeatMessage,
+        }
         self._messages: Dict[MessageType, MessageToReport] = {
-            MessageType.USAGE: UsageMessageToReport(),
-            MessageType.HEARTBEAT: HeartbeatMessageToReport()
+            mt: factory() for mt, factory in self._factories.items()
         }
 
     @property
@@ -333,13 +399,18 @@ class MessageCollection:
         assert isinstance(msg, HeartbeatMessageToReport)
         return msg
 
+    @property
+    def server_heartbeat(self) -> ServerHeartbeatMessage:
+        msg = self._messages[MessageType.SERVER_HEARTBEAT]
+        assert isinstance(msg, ServerHeartbeatMessage)
+        return msg
+
     def reset(self, message_type: MessageType):
-        if message_type == MessageType.USAGE:
-            self._messages[message_type] = UsageMessageToReport()
-        elif message_type == MessageType.HEARTBEAT:
-            self._messages[message_type] = HeartbeatMessageToReport()
-        else:
+        """Reset a message to a fresh instance using its factory."""
+        factory = self._factories.get(message_type)
+        if factory is None:
             raise ValueError(f'Unknown message type: {message_type}')
+        self._messages[message_type] = factory()
 
     def __getitem__(self, key):
         return self._messages[key]
@@ -457,7 +528,8 @@ def prepare_json_from_yaml_config(
 def _send_local_messages():
     """Send all messages not been uploaded to Loki."""
     for msg_type, message in messages.items():
-        if not message.message_sent and msg_type != MessageType.HEARTBEAT:
+        if not message.message_sent and msg_type not in (
+                MessageType.HEARTBEAT, MessageType.SERVER_HEARTBEAT):
             # Avoid the fallback entrypoint to send the message again
             # in normal case.
             try:
@@ -483,6 +555,11 @@ def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
 def send_heartbeat(interval_seconds: int = 600):
     messages.heartbeat.interval_seconds = interval_seconds
     _send_to_loki(MessageType.HEARTBEAT)
+
+
+def send_server_heartbeat():
+    """Send server-side heartbeat with plugin metrics to Loki."""
+    _send_to_loki(MessageType.SERVER_HEARTBEAT)
 
 
 def maybe_show_privacy_policy():
