@@ -965,8 +965,10 @@ export function Users() {
             setSearchQuery={setServiceAccountSearchQuery}
           />
         )
-      ) : null}
-      <PluginSlot name="users.tab-content" context={{ activeTab: activeMainTab }} />
+      ) : (
+        <PluginSlot name="users.tab-content" context={{ activeTab: activeMainTab }} />
+      )}
+
 
       {/* Create User Dialog */}
       <Dialog
