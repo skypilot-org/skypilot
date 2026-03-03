@@ -496,6 +496,9 @@ export function useClusterDetails({ cluster, job = null }) {
  * @param {number} options.refreshInterval - Auto-refresh interval in ms
  * @returns {Object} Cluster data with pagination state and actions
  */
+export const DELETED_CLUSTERS_STORAGE_KEY =
+  'skypilot-dashboard-deleted-clusters';
+
 export function useClusterData(options = {}) {
   const {
     showHistory = false,
@@ -503,6 +506,7 @@ export function useClusterData(options = {}) {
     refreshInterval = null,
     sortConfig = { key: null, direction: 'ascending' },
     filters = [],
+    deletedFromHistory = new Set(),
   } = options;
 
   // Convert sortConfig to API format
@@ -616,7 +620,10 @@ export function useClusterData(options = {}) {
 
       allClusters = [...markedActive];
       markedHistory.forEach((hist) => {
-        if (!activeClusters.some((a) => a.cluster_hash === hist.cluster_hash)) {
+        if (
+          !activeClusters.some((a) => a.cluster_hash === hist.cluster_hash) &&
+          !deletedFromHistory.has(hist.cluster_hash)
+        ) {
           allClusters.push(hist);
         }
       });
@@ -639,7 +646,7 @@ export function useClusterData(options = {}) {
     setHasNext(page < clientTotalPages);
     setHasPrev(page > 1);
     setIsServerPagination(false);
-  }, [showHistory, historyDays, page, limit]);
+  }, [showHistory, historyDays, page, limit, deletedFromHistory]);
 
   /**
    * Main fetch function - chooses server or client path
