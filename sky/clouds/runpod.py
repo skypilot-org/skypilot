@@ -228,7 +228,7 @@ class RunPod(clouds.Cloud):
             'availability_zone': ','.join(zone_names),
             'image_id': image_id,
             'use_spot': use_spot,
-            'bid_per_gpu': str(hourly_cost),
+            'bid_per_gpu': str(hourly_cost / list(acc_dict.values())[0]),
             'docker_username_for_runpod': docker_username_for_runpod,
         }
 
