@@ -43,9 +43,10 @@ def _load_task_and_apply_policy(
     config_path: str,
     monkeypatch,
     idle_minutes_to_autostop: Optional[int] = None,
+    at_client_side: bool = True,
 ) -> Tuple[sky.Dag, config_utils.Config]:
     """Apply admin policy using real SkyPilot patterns.
-    
+
     This function is copied from tests/unit_tests/test_admin_policy.py
     to avoid import path complexity while reusing the same proven pattern.
     """
@@ -60,7 +61,8 @@ def _load_task_and_apply_policy(
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             down=False,
             dryrun=False,
-        ))
+        ),
+        at_client_side=at_client_side)
 
 
 # Global registry to track active servers for cleanup
@@ -417,8 +419,10 @@ def test_restful_policy_with_user(monkeypatch):
                 config_path = f.name
 
             try:
-                dag, config = _load_task_and_apply_policy(
-                    task, config_path, monkeypatch)
+                dag, config = _load_task_and_apply_policy(task,
+                                                          config_path,
+                                                          monkeypatch,
+                                                          at_client_side=False)
 
                 # Verify the policy was called with proper request structure
                 assert len(ImageIdInspectorPolicy.received_requests) == 1
