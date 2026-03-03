@@ -76,3 +76,6 @@ RAY_NODE_CONTAINER_NAME = 'ray-node'
 
 # Pod phases that are not holding PVCs
 PVC_NOT_HOLD_POD_PHASES = ['Succeeded', 'Failed']
+
+# Label selector for finding the ingress controller service
+INGRESS_SERVICE_LABEL_SELECTOR = 'app.kubernetes.io/name=ingress-nginx,app.kubernetes.io/component=controller'  # pylint: disable=line-too-long
