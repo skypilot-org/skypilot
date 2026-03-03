@@ -317,8 +317,7 @@ INTERNAL_REQUEST_DAEMONS = [
         id='server-heartbeat-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
         event_fn=server_heartbeat_event,
-        should_skip=should_skip_server_heartbeat,
-        default_log_level='DEBUG'),
+        should_skip=should_skip_server_heartbeat),
 ]
 
 
