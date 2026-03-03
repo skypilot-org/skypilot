@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
 
 # Default images for Verda Cloud
 # These images are provided by Verda and include CUDA drivers
-_DEFAULT_IMAGE = 'ubuntu-24.04-cuda-12.8-open-docker'
+VERDA_DEFAULT_IMAGE = 'ubuntu-24.04-cuda-12.8-open-docker'
 
 
 @registry.CLOUD_REGISTRY.register
@@ -28,23 +28,38 @@ class Verda(clouds.Cloud):
 
     _REPR = 'Verda'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
+        clouds.CloudImplementationFeatures.STOP:
+            (f'Stopping not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
-             'are non-trivial on Verda.'),
+             f'are non-trivial on {_REPR}.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            (f'Migrating disk is not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            (f'Docker images are not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
-            ('Customizing disk tier is not supported yet on Verda.'),
+            (f'Customizing disk tier is not supported yet on {_REPR}.'),
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
-            ('Custom network tier is not supported yet on Verda.'),
+            (f'Custom network tier is not supported yet on {_REPR}.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            (f'Opening ports is not supported on {_REPR}.'),
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
-            ('Mounting object stores is not supported on Verda. To read data '
-             'from object stores on Verda, use `mode: COPY` to copy the data '
-             'to local disk.'),
+            (f'Mounting object stores is not supported on {_REPR}. To read '
+             f'data from object stores on {_REPR}, use `mode: COPY` to copy '
+             'the data to local disk.'),
+        clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
+            (f'Host controllers are not supported yet on {_REPR}.'),
         clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
-            ('High availability controllers are not supported on Verda.'),
-        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK: (
-            'Customized multiple network interfaces are not supported on Verda.'
-        ),
+            (f'High availability controllers are not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            (f'Auto-stop is not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.AUTODOWN:
+            (f'Auto-down is not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
+            ('Customized multiple network interfaces are not supported '
+             f'on {_REPR}.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _MAX_VOLUME_NAME_LEN_LIMIT = 30
@@ -210,7 +225,7 @@ class Verda(clouds.Cloud):
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
 
-        image_id: str = _DEFAULT_IMAGE
+        image_id: str = VERDA_DEFAULT_IMAGE
 
         # Image selection logic
         if resources.image_id is None:
@@ -233,7 +248,7 @@ class Verda(clouds.Cloud):
                     image_id = resources.image_id[resources.region]
                 else:
                     # Fallback to default if region not in dict
-                    image_id = _DEFAULT_IMAGE
+                    image_id = VERDA_DEFAULT_IMAGE
             else:
                 # Direct string image_id
                 image_id = resources.image_id
