@@ -52,8 +52,10 @@ DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
 # context when running with in-cluster auth. If not set, the context name is
 # set to DEFAULT_IN_CLUSTER_REGION.
 IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
-# If set (positive seconds), client is refreshed proactively after this interval.
-KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = 'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS'
+# If set (positive seconds), client is refreshed proactively after this
+# interval.
+KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = (
+    'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -272,12 +274,12 @@ def _should_refresh_client_by_interval() -> bool:
 
 
 def _mark_client_refreshed() -> None:
-    """Record that the client was just refreshed (for interval-based refresh)."""
+    """Record that the client was just refreshed (interval-based refresh)."""
     _thread_local.last_kubeconfig_refresh_time = time.time()
 
 
 class RetryableClientWrapper:
-    """Refreshes the client from kubeconfig when the env-set interval has elapsed."""
+    """Refresh client from kubeconfig when the env-set interval has elapsed."""
 
     def __init__(self, client: Any, getter: Callable, getter_args: tuple,
                  getter_kwargs: dict):
@@ -306,7 +308,7 @@ class RetryableClientWrapper:
 
 def _make_retryable(client: Any, getter: Callable, getter_args: tuple,
                     getter_kwargs: dict) -> RetryableClientWrapper:
-    """Wrap client so it can be refreshed by interval; getter returns ClientWrapper."""
+    """Wrap client for interval refresh; getter returns ClientWrapper."""
     return RetryableClientWrapper(client, getter, getter_args, getter_kwargs)
 
 
@@ -382,7 +384,7 @@ def _clear_kubernetes_client_caches() -> None:
 
 
 def clear_kubernetes_client_caches() -> None:
-    """Clear API client caches (used by provisioner and for interval refresh)."""
+    """Clear API client caches (provisioner and interval refresh)."""
     _clear_kubernetes_client_caches()
 
 
