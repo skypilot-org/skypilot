@@ -135,6 +135,9 @@ def _wait_for_job_ready(
     ready_signal: str,
     slurm_log: str,
     timeout: Optional[float] = None,
+    container_image_pulled_dir: Optional[str] = None,
+    num_nodes: int = 1,
+    cluster_name: Optional[str] = None,
 ) -> None:
     """Wait for Slurm job initialization to complete.
 
@@ -142,9 +145,13 @@ def _wait_for_job_ready(
     1. The job exits/fails (state not in PENDING/RUNNING/CONFIGURING)
     2. The ready signal file never appears
     3. The timeout is exceeded (if specified)
+
+    If container_image_pulled_dir is provided, the spinner is updated with
+    the current container phase (pulling image vs initializing container).
     """
     poll_interval_seconds = 1
     start_time = time.time()
+    last_container_status = None
 
     while True:
         if timeout is not None:
@@ -167,6 +174,28 @@ def _wait_for_job_ready(
             raise RuntimeError(f'Slurm job {job_id} exited ({job_state}) '
                                'before initialization completed. See sbatch '
                                f'logs for details: {slurm_log}')
+
+        # Update spinner with container image pull / init status.
+        if (container_image_pulled_dir is not None and
+                cluster_name is not None):
+            rc_img, stdout_img, _ = login_node_runner.run(
+                f'ls -1 {container_image_pulled_dir} 2>/dev/null | wc -l',
+                require_outputs=True,
+                stream_logs=False)
+            num_pulled = 0
+            if rc_img == 0:
+                try:
+                    num_pulled = int(stdout_img.strip())
+                except ValueError:
+                    pass
+            if num_pulled >= num_nodes:
+                msg = 'Launching - Initializing container'
+            else:
+                msg = 'Launching - Pulling container image'
+            if msg != last_container_status:
+                rich_utils.force_update_status(
+                    ux_utils.spinner_message(msg, cluster_name=cluster_name))
+                last_container_status = msg
 
         time.sleep(poll_interval_seconds)
 
@@ -363,6 +392,7 @@ def _create_virtual_instance(
 
     # Build container initialization block if container image specified
     container_block = ''
+    container_image_pulled_dir = None
     if container_image is not None:
         # Note: /dev/shm is NOT mounted here because enroot handles it:
         # - If ENROOT_RESTRICT_DEV is set: /dev is restricted but /dev/shm is
@@ -381,8 +411,19 @@ def _create_virtual_instance(
         # This allows scripts with 'sudo' commands to work without modification.
         # For containers, ~ is /root which is isolated inside the container,
         # so modifying bashrc doesn't affect non-containerized sessions.
-        container_init_script = """\
+        container_marker_file = (f'{sky_cluster_home_dir}/'
+                                 f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
+        container_init_done_dir = (
+            f'{sky_cluster_home_dir}/.sky_container_init_done')
+        container_image_pulled_dir = (
+            f'{sky_cluster_home_dir}/.sky_container_image_pulled')
+        # The image pull marker is touched as the very first action inside
+        # the container. By the time bash starts executing inside the
+        # container, Pyxis has already pulled the image, so this signals
+        # "image pulled on this node" to the login-node polling loop.
+        container_init_script = f"""\
 set -e
+touch {container_image_pulled_dir}/$SLURM_PROCID
 echo "[container-init] Starting..."
 INIT_START=$SECONDS
 apt-get update
@@ -390,10 +431,6 @@ apt-get install -y ca-certificates rsync curl git wget fuse
 echo 'alias sudo=""' >> ~/.bashrc
 echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 """
-        container_marker_file = (f'{sky_cluster_home_dir}/'
-                                 f'{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-        container_init_done_dir = (
-            f'{sky_cluster_home_dir}/.sky_container_init_done')
         # Run container init, touch per-node "done" marker, then sleep infinity
         # to keep container running. Use --overlap so subsequent sruns can share
         # the allocation. Background with & so sbatch continues.
@@ -406,6 +443,8 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
             f'echo "[container] Initializing {container_name} on all nodes"\n'
             f'rm -rf {container_init_done_dir}\n'
             f'mkdir -p {container_init_done_dir}\n'
+            f'rm -rf {container_image_pulled_dir}\n'
+            f'mkdir -p {container_image_pulled_dir}\n'
             f'srun --overlap {"--label " if num_nodes > 1 else ""}--unbuffered '
             f'--nodes={num_nodes} --ntasks-per-node=1 '
             f'--container-image={shlex.quote(container_image)} '
@@ -522,9 +561,6 @@ touch {sky_cluster_home_dir}/.hushlogin
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
 
-    # Track start time to calculate remaining timeout after node allocation
-    provision_start_time = time.time()
-
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
     nodes, _ = client.get_job_nodes(job_id)
@@ -532,11 +568,11 @@ touch {sky_cluster_home_dir}/.hushlogin
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
 
-    # Calculate remaining timeout for job initialization
-    remaining_timeout = None
-    if provision_timeout is not None:
-        elapsed = time.time() - provision_start_time
-        remaining_timeout = max(0, provision_timeout - elapsed)
+    # No timeout for job initialization: once nodes are allocated, the
+    # provision has effectively succeeded. Container image pulls and
+    # package installation can take a long time for large images, and
+    # should not be subject to the provision timeout (which is meant for
+    # the Slurm scheduler queue, not for container setup).
 
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
@@ -561,7 +597,9 @@ touch {sky_cluster_home_dir}/.hushlogin
             job_id,
             ready_signal,
             slurm_log,
-            remaining_timeout,
+            container_image_pulled_dir=container_image_pulled_dir,
+            num_nodes=num_nodes,
+            cluster_name=cluster_name,
         )
     except (TimeoutError, RuntimeError, exceptions.CommandError) as e:
         _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
