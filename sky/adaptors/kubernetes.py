@@ -334,10 +334,16 @@ class RetryableClientWrapper:
         return with_retry
 
 
-def _make_retryable(client: Any, getter: Callable, *args: Any,
-                    **kwargs: Any) -> RetryableClientWrapper:
-    """Wrap a Kubernetes client so one retry is done on SSL/cert errors."""
-    return RetryableClientWrapper(client, getter, args, kwargs)
+def _make_retryable(client: Any, getter: Callable,
+                    getter_args: tuple,
+                    getter_kwargs: dict) -> RetryableClientWrapper:
+    """Wrap a Kubernetes client so one retry is done on SSL/cert errors.
+
+    getter must be the raw getter that returns ClientWrapper (not a
+    RetryableClientWrapper), so retries get an unwrapped client and avoid
+    nested retry loops.
+    """
+    return RetryableClientWrapper(client, getter, getter_args, getter_kwargs)
 
 
 def _retryable_kubernetes_api(getter: Callable) -> Callable:
@@ -345,8 +351,8 @@ def _retryable_kubernetes_api(getter: Callable) -> Callable:
     RetryableClientWrapper so SSL/cert errors trigger a retry via the getter.
 
     The decorated function must return a ClientWrapper. The getter passed to
-    _make_retryable is the decorator's wrapper, so after cache clear the
-    next call re-invokes the cached getter and gets a fresh client.
+    _make_retryable is the raw getter (this function), so on retry we get an
+    unwrapped ClientWrapper and avoid nested RetryableClientWrapper/retry loops.
 
     When used under lru_cache(scope='request'), the cache may invoke the
     wrapper with (args_tuple, kwargs_dict) as two positional args; we unpack
@@ -361,7 +367,7 @@ def _retryable_kubernetes_api(getter: Callable) -> Callable:
         else:
             actual_args, actual_kwargs = args, kwargs
         client = getter(*actual_args, **actual_kwargs)
-        return _make_retryable(client, wrapper, args, kwargs)
+        return _make_retryable(client, getter, actual_args, actual_kwargs)
 
     return wrapper
 
