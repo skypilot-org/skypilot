@@ -532,6 +532,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
+            cluster_name: Optional[str] = None
             if pool is None:
                 task_name = task['job_name']
                 cluster_name = generate_managed_job_cluster_name(
@@ -539,6 +540,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             else:
                 cluster_name, _ = (
                     managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is None:
+                continue
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
@@ -1189,19 +1192,21 @@ def stream_logs_by_id(
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
+        latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
 
         # If a task filter was specified, use the filtered task_id instead of
         # the latest task_id. This allows viewing logs for a specific task in
         # a JobGroup with parallel execution.
         if filtered_task_id is not None:
-            task_id = filtered_task_id
+            latest_task_id = filtered_task_id
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
-        assert managed_job_status is not None, (job_id, task_id,
+        assert managed_job_status is not None, (job_id, latest_task_id,
                                                 managed_job_status)
+        assert latest_task_id is not None, (job_id, latest_task_id)
+        task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
             handle = None
@@ -1238,13 +1243,15 @@ def stream_logs_by_id(
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
+                latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
                 if filtered_task_id is not None:
-                    task_id = filtered_task_id
-                assert managed_job_status is not None, (job_id, task_id,
+                    latest_task_id = filtered_task_id
+                assert managed_job_status is not None, (job_id, latest_task_id,
                                                         managed_job_status)
+                assert latest_task_id is not None, (job_id, latest_task_id)
+                task_id = latest_task_id
                 continue
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
@@ -1331,13 +1338,16 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
-                        task_id, managed_job_status = (
+                        latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
-                        if original_task_id != task_id:
+                        if original_task_id != latest_task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    assert managed_job_status is not None, (job_id, task_id,
+                    assert managed_job_status is not None, (job_id,
+                                                            latest_task_id,
                                                             managed_job_status)
+                    assert latest_task_id is not None, (job_id, latest_task_id)
+                    task_id = latest_task_id
                     continue
 
                 # The job can be cancelled by the user or the controller (when
