@@ -340,8 +340,6 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                         raise exceptions.KubeAPIUnreachableError(
                             f'Kubernetes API error: {str(e)}') from e
                     if attempt < max_retries - 1:
-                        if kubernetes.is_ssl_related_error(e):
-                            kubernetes.clear_kubernetes_client_caches()
                         sleep_time = backoff.current_backoff()
                         error_type = 'CloudFlare 403' if is_cloudflare_403 else 'error'
                         logger.debug(

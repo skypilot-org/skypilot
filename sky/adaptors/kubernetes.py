@@ -5,15 +5,16 @@ Thread safety notes:
 The API functions (core_api, batch_api, etc.) return cached clients that are
 created with context-specific ApiClient instances.
 
-The adaptor retries API calls on SSL/certificate errors (with a short delay)
-after clearing client caches so that a new client is built from the updated
-kubeconfig.
+Set SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS (seconds) to refresh the
+client proactively at a fixed interval so it is rebuilt from the updated
+kubeconfig (e.g. for short-lived certs).
 """
 import functools
 import logging
 import os
 import platform
 import ssl
+import threading
 import time
 import typing
 from typing import Any, Callable, Optional, Set
@@ -98,37 +99,6 @@ def _get_config_file() -> str:
     # package initialization. So we have to reload the KUBECONFIG env var
     # every time in case the KUBECONFIG env var is changed.
     return os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
-
-
-def _is_ssl_related_error(exc: BaseException) -> bool:
-    """True if the exception is an SSL/certificate error (e.g. after cert
-    rotation).
-    """
-    if exc is None:
-        return False
-    if isinstance(exc, ssl.SSLError):
-        return True
-    if hasattr(urllib3.exceptions, 'SSLError') and isinstance(
-            exc, urllib3.exceptions.SSLError):
-        return True
-    if hasattr(urllib3.exceptions, 'MaxRetryError') and isinstance(
-            exc, urllib3.exceptions.MaxRetryError):
-        reason = getattr(exc, 'reason', None)
-        if reason is not None and _is_ssl_related_error(reason):
-            return True
-    cause = getattr(exc, '__cause__', None)
-    if cause is not None and _is_ssl_related_error(cause):
-        return True
-    # Fallback: detect by message (e.g. heavily wrapped or custom exception)
-    msg = str(exc).lower()
-    if 'certificate expired' in msg or 'sslv3_alert_certificate_expired' in msg:
-        return True
-    return False
-
-
-def is_ssl_related_error(exc: BaseException) -> bool:
-    """Public helper to detect SSL/cert errors (e.g. for outer retry logic)."""
-    return _is_ssl_related_error(exc)
 
 
 def _get_api_client(context: Optional[str] = None) -> Any:
@@ -276,19 +246,40 @@ class ClientWrapper:
                 logger.debug(f'Error closing Kubernetes client: {e}')
 
 
-# Max retries for SSL/cert errors (e.g. after cert rotation). Delay between
-# retries allows kubeconfig to be refreshed.
-_SSL_RETRY_ATTEMPTS = 3
-_SSL_RETRY_DELAY_SECONDS = 2
+# If set (positive seconds), client is refreshed proactively after this interval.
+KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = 'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS'
+
+_thread_local = threading.local()
+
+
+def _get_kubeconfig_refresh_interval_seconds() -> float:
+    """Parse refresh interval from env; 0 means disabled."""
+    raw = os.environ.get(KUBECONFIG_REFRESH_INTERVAL_ENV_VAR, '').strip()
+    if not raw:
+        return 0.0
+    try:
+        val = float(raw)
+        return max(0.0, val)
+    except ValueError:
+        return 0.0
+
+
+def _should_refresh_client_by_interval() -> bool:
+    """True if the fixed refresh interval has elapsed since last refresh."""
+    interval = _get_kubeconfig_refresh_interval_seconds()
+    if interval <= 0:
+        return False
+    last = getattr(_thread_local, 'last_kubeconfig_refresh_time', 0.0)
+    return (time.time() - last) >= interval
+
+
+def _mark_client_refreshed() -> None:
+    """Record that the client was just refreshed (for interval-based refresh)."""
+    _thread_local.last_kubeconfig_refresh_time = time.time()
 
 
 class RetryableClientWrapper:
-    """Wraps a Kubernetes API client to retry on SSL/cert errors.
-
-    When a method call raises an SSL-related error (e.g. after certificate
-    rotation), clears client caches and retries with a short delay
-    so a new client is built from the updated kubeconfig.
-    """
+    """Refreshes the client from kubeconfig when the env-set interval has elapsed."""
 
     def __init__(self, client: Any, getter: Callable, getter_args: tuple,
                  getter_kwargs: dict):
@@ -302,61 +293,30 @@ class RetryableClientWrapper:
         if not callable(attr):
             return attr
 
-        def with_retry(*args, **kwargs):
-            last_exc = None
-            for attempt in range(_SSL_RETRY_ATTEMPTS):
-                try:
-                    if attempt == 0:
-                        client = self._client
-                    else:
-                        time.sleep(_SSL_RETRY_DELAY_SECONDS)
-                        _clear_kubernetes_client_caches()
-                        client = self._getter(*self._getter_args,
-                                              **self._getter_kwargs)
-                    method = getattr(client, name)
-                    return method(*args, **kwargs)
-                except Exception as e:  # pylint: disable=broad-except
-                    last_exc = e
-                    if not _is_ssl_related_error(e):
-                        raise
-                    logger.debug(
-                        'Kubernetes SSL/cert error (attempt %s/%s), clearing '
-                        'caches and retrying: %s',
-                        attempt + 1,
-                        _SSL_RETRY_ATTEMPTS,
-                        e,
-                    )
-            if last_exc is not None:
-                raise last_exc
-            raise RuntimeError(
-                'Unexpected: SSL retry loop exited without exception')
+        def with_refresh(*args, **kwargs):
+            if _should_refresh_client_by_interval():
+                _clear_kubernetes_client_caches()
+                client = self._getter(*self._getter_args, **self._getter_kwargs)
+                _mark_client_refreshed()
+            else:
+                client = self._client
+            method = getattr(client, name)
+            return method(*args, **kwargs)
 
-        return with_retry
+        return with_refresh
 
 
 def _make_retryable(client: Any, getter: Callable,
                     getter_args: tuple,
                     getter_kwargs: dict) -> RetryableClientWrapper:
-    """Wrap a Kubernetes client so one retry is done on SSL/cert errors.
-
-    getter must be the raw getter that returns ClientWrapper (not a
-    RetryableClientWrapper), so retries get an unwrapped client and avoid
-    nested retry loops.
-    """
+    """Wrap client so it can be refreshed by interval; getter returns ClientWrapper."""
     return RetryableClientWrapper(client, getter, getter_args, getter_kwargs)
 
 
 def _retryable_kubernetes_api(getter: Callable) -> Callable:
-    """Decorator that wraps a getter's return value (ClientWrapper) in
-    RetryableClientWrapper so SSL/cert errors trigger a retry via the getter.
-
-    The decorated function must return a ClientWrapper. The getter passed to
-    _make_retryable is the raw getter (this function), so on retry we get an
-    unwrapped ClientWrapper and avoid nested RetryableClientWrapper/retry loops.
-
-    When used under lru_cache(scope='request'), the cache may invoke the
-    wrapper with (args_tuple, kwargs_dict) as two positional args; we unpack
-    those so the getter is called with the real arguments.
+    """Wrap getter return in RetryableClientWrapper for interval-based refresh.
+    Getter is the raw function (returns ClientWrapper). Unpacks (args, kwargs)
+    when the request-scoped cache passes them as two positional args.
     """
 
     @functools.wraps(getter)
@@ -367,6 +327,7 @@ def _retryable_kubernetes_api(getter: Callable) -> Callable:
         else:
             actual_args, actual_kwargs = args, kwargs
         client = getter(*actual_args, **actual_kwargs)
+        _mark_client_refreshed()
         return _make_retryable(client, getter, actual_args, actual_kwargs)
 
     return wrapper
@@ -425,21 +386,12 @@ def node_api(context: Optional[str] = None):
 
 
 def _clear_kubernetes_client_caches() -> None:
-    """Clear Kubernetes API client caches so the next call rebuilds from
-    kubeconfig.
-
-    Used after SSL/cert errors (e.g. after cert rotation) so clients are
-    recreated with updated certificates. All API getters (including node_api)
-    use request-scoped cache, so clearing the request-level cache is
-    sufficient.
-    """
+    """Clear API client caches so the next call rebuilds from kubeconfig."""
     annotations.clear_request_level_cache()
 
 
 def clear_kubernetes_client_caches() -> None:
-    """Clear Kubernetes API client caches (e.g. before outer retries on
-    SSL errors).
-    """
+    """Clear API client caches (used by provisioner and for interval refresh)."""
     _clear_kubernetes_client_caches()
 
 
