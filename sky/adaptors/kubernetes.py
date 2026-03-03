@@ -332,7 +332,9 @@ class RetryableClientWrapper:
                         _SSL_RETRY_ATTEMPTS,
                         e,
                     )
-            raise last_exc
+            if last_exc is not None:
+                raise last_exc
+            raise RuntimeError('Unexpected: SSL retry loop exited without exception')
 
         return with_retry
 
@@ -366,8 +368,7 @@ def core_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def storage_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.StorageV1Api(
-            api_client=_get_api_client(context)))
+        kubernetes.client.StorageV1Api(api_client=_get_api_client(context)))
     return _make_retryable(client, storage_api, context)
 
 
@@ -384,8 +385,7 @@ def auth_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def networking_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.NetworkingV1Api(
-            api_client=_get_api_client(context)))
+        kubernetes.client.NetworkingV1Api(api_client=_get_api_client(context)))
     return _make_retryable(client, networking_api, context)
 
 
@@ -393,8 +393,7 @@ def networking_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def custom_objects_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.CustomObjectsApi(
-            api_client=_get_api_client(context)))
+        kubernetes.client.CustomObjectsApi(api_client=_get_api_client(context)))
     return _make_retryable(client, custom_objects_api, context)
 
 
@@ -448,8 +447,7 @@ def api_client(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def custom_resources_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.CustomObjectsApi(
-            api_client=_get_api_client(context)))
+        kubernetes.client.CustomObjectsApi(api_client=_get_api_client(context)))
     return _make_retryable(client, custom_resources_api, context)
 
 
