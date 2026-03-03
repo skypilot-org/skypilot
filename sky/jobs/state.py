@@ -1870,6 +1870,20 @@ def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
         session.commit()
 
 
+@_init_db_async
+async def set_current_cluster_name_async(job_id: int,
+                                         current_cluster_name: str) -> None:
+    """Set the current cluster name for a job."""
+    assert _SQLALCHEMY_ENGINE_ASYNC is not None
+    async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
+        await session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values(
+                    {job_info_table.c.current_cluster_name:
+                     current_cluster_name}))
+        await session.commit()
+
+
 @_init_db
 def set_job_infra(job_id: int,
                   cloud: Optional[str] = None,
