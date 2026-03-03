@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "skypilot",
+      "name": "skypilot-skills",
       "source": "./skills/skypilot",
       "description": "SkyPilot agent skill for launching cloud VMs, Kubernetes pods, and Slurm jobs across 25+ clouds",
       "version": "1.0.0",

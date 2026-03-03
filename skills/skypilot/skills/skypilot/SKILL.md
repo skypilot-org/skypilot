@@ -1,6 +1,6 @@
 ---
 name: skypilot
-description: Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, running interactive development, training, serving models, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters, or optimizing cost and availability.
+description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
 ---
 
 # SkyPilot Skill
@@ -26,7 +26,7 @@ SkyPilot has three core abstractions. Use the right one for each stage of your w
 
 **1. SkyPilot Clusters** (`sky launch` / `sky exec`) — Interactive development and debugging
 - Use during initial development, debugging, and experimentation
-- Launch a cluster, SSH in or connect VSCode/Cursor, iterate quickly
+- Launch a cluster, SSH in or connect VSCode/Cursor (`code --remote ssh-remote+CLUSTER`), iterate quickly
 - Cluster stays up until you stop/down it or autostop triggers
 - Best for: prototyping, debugging, short experiments
 
@@ -65,15 +65,34 @@ This shows which clouds are configured. If the user's target cloud is not enable
 
 ## Essential Commands
 
+**Clusters** — interactive development and debugging:
+
 | Command | Description |
 |---------|-------------|
 | `sky launch -c NAME task.yaml` | Launch a cluster or run a task |
 | `sky exec NAME task.yaml` | Run task on existing cluster (skips provisioning) |
-| `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle) |
-| `sky serve up serve.yaml -n NAME` | Start a model serving service |
 | `sky status` | Show all clusters |
 | `sky logs NAME` | Stream job logs from a cluster |
-| `sky down NAME` | Tear down a cluster |
+| `sky stop NAME` / `sky start NAME` | Stop/restart to save costs (preserves disk) |
+| `sky down NAME` | Tear down a cluster completely |
+
+**Managed Jobs** — long-running unattended workloads:
+
+| Command | Description |
+|---------|-------------|
+| `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle + recovery) |
+| `sky jobs queue` | Show all managed jobs and their status |
+| `sky jobs logs JOB_ID` | Stream logs from a managed job |
+| `sky jobs cancel JOB_ID` | Cancel a managed job |
+
+**SkyServe** — model serving with autoscaling:
+
+| Command | Description |
+|---------|-------------|
+| `sky serve up serve.yaml -n NAME` | Start a model serving service |
+| `sky serve status NAME` | Show service status and endpoint URL |
+| `sky serve update NAME new.yaml` | Update a running service (rolling) |
+| `sky serve down NAME` | Tear down a service |
 
 For complete CLI reference, see [CLI Reference](references/cli-reference.md).
 
@@ -88,6 +107,10 @@ sky launch -c mycluster task.yaml
 
 # SSH into cluster
 ssh mycluster
+
+# Connect VSCode or Cursor to the cluster for interactive development
+code --remote ssh-remote+mycluster /home/user/sky_workdir
+# or: cursor --remote ssh-remote+mycluster /home/user/sky_workdir
 
 # Tear down
 sky down mycluster
