@@ -15,11 +15,13 @@ import tempfile
 import termios
 import threading
 import time
+import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Tuple, Type,
                     Union)
 import uuid
 
 import colorama
+from typing_extensions import Literal
 
 from sky import exceptions
 from sky import sky_logging
@@ -552,6 +554,40 @@ class CommandRunner:
                                            stderr=stdout + stderr,
                                            stream_logs=stream_logs)
 
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[False] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[True],
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
     @timeline.event
     def run(
             self,
@@ -596,6 +632,20 @@ class CommandRunner:
         """
         raise NotImplementedError
 
+    @typing.overload
+    def run_driver(self,
+                   cmd: Union[str, List[str]],
+                   *,
+                   require_outputs: Literal[False] = ...,
+                   **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_driver(self, cmd: Union[str, List[str]], *,
+                   require_outputs: Literal[True],
+                   **kwargs) -> Tuple[int, str, str]:
+        ...
+
     def run_driver(
         self,
         cmd: Union[str, List[str]],
@@ -618,6 +668,20 @@ class CommandRunner:
             A tuple of (returncode, stdout, stderr).
         """
         return self.run(cmd, **kwargs)
+
+    @typing.overload
+    def run_setup(self,
+                  cmd: Union[str, List[str]],
+                  *,
+                  require_outputs: Literal[False] = ...,
+                  **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_setup(self, cmd: Union[str, List[str]], *,
+                  require_outputs: Literal[True],
+                  **kwargs) -> Tuple[int, str, str]:
+        ...
 
     def run_setup(
         self,
@@ -1200,6 +1264,42 @@ class SSHCommandRunner(CommandRunner):
                                      process_stream=False,
                                      shell=True)
 
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[False] = ...,
+            port_forward: Optional[List[Tuple[int, int]]] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[True],
+            port_forward: Optional[List[Tuple[int, int]]] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
     @timeline.event
     @context_utils.cancellation_guard
     def run(
@@ -1496,6 +1596,42 @@ class KubernetesCommandRunner(CommandRunner):
         ]
         return kubectl_cmd
 
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: Literal[False] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = ...,
+            require_outputs: Literal[True],
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
     @timeline.event
     @context_utils.cancellation_guard
     def run(
@@ -1692,6 +1828,42 @@ class LocalProcessCommandRunner(CommandRunner):
 
     def __init__(self):
         super().__init__('local')
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[False] = ...,
+            port_forward: Optional[List[Tuple[int, int]]] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[True],
+            port_forward: Optional[List[Tuple[int, int]]] = ...,
+            log_path: str = ...,
+            process_stream: bool = ...,
+            stream_logs: bool = ...,
+            ssh_mode: SshMode = ...,
+            separate_stderr: bool = ...,
+            connect_timeout: Optional[int] = ...,
+            source_bashrc: bool = ...,
+            skip_num_lines: int = ...,
+            run_in_background: bool = ...,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
 
     @timeline.event
     @context_utils.cancellation_guard
@@ -1971,6 +2143,19 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
                              stream_logs=stream_logs,
                              max_retry=max_retry)
 
+    @typing.overload
+    def run(self,
+            cmd: Union[str, List[str]],
+            *,
+            require_outputs: Literal[False] = ...,
+            **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run(self, cmd: Union[str, List[str]], *, require_outputs: Literal[True],
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
     @timeline.event
     @context_utils.cancellation_guard
     def run(
@@ -1981,6 +2166,20 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         in_container = self.container_args is not None
         return self._run_via_srun(cmd, in_container=in_container, **kwargs)
 
+    @typing.overload
+    def run_driver(self,
+                   cmd: Union[str, List[str]],
+                   *,
+                   require_outputs: Literal[False] = ...,
+                   **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_driver(self, cmd: Union[str, List[str]], *,
+                   require_outputs: Literal[True],
+                   **kwargs) -> Tuple[int, str, str]:
+        ...
+
     def run_driver(
         self,
         cmd: Union[str, List[str]],
@@ -1988,6 +2187,20 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
     ) -> Union[int, Tuple[int, str, str]]:
         # Host only: driver uses srun internally to launch work in containers.
         return self._run_via_srun(cmd, in_container=False, **kwargs)
+
+    @typing.overload
+    def run_setup(self,
+                  cmd: Union[str, List[str]],
+                  *,
+                  require_outputs: Literal[False] = ...,
+                  **kwargs) -> int:
+        ...
+
+    @typing.overload
+    def run_setup(self, cmd: Union[str, List[str]], *,
+                  require_outputs: Literal[True],
+                  **kwargs) -> Tuple[int, str, str]:
+        ...
 
     def run_setup(
         self,
@@ -1997,7 +2210,7 @@ exec {ssh_command} srun --unbuffered --quiet --overlap {extra_srun_args}\\
         # Both host and container: ensure environment is consistent.
         result = self._run_via_srun(cmd, in_container=False, **kwargs)
         if self.container_args:
-            returncode = result if isinstance(result, int) else result[0]
+            returncode = result if isinstance(result, int) else result[0]  # pylint: disable=unsubscriptable-object
             if returncode != 0:
                 return result
             result = self._run_via_srun(cmd, in_container=True, **kwargs)

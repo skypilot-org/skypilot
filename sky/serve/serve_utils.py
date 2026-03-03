@@ -296,7 +296,9 @@ def ha_recovery_for_consolidation_mode(pool: bool):
                 f.write(f'{capnoun} {service_name}\'s recovery script does '
                         'not exist. Skipping recovery.\n')
                 continue
-            rc, out, err = runner.run(script, require_outputs=True)
+            rc, out, err = runner.run(  # pylint: disable=unpacking-non-sequence
+                script,
+                require_outputs=True)
             if rc:
                 f.write(f'Recovery script returned {rc}. '
                         f'Output: {out}\nError: {err}\n')

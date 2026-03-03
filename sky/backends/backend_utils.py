@@ -17,7 +17,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Iterator, List, Optional, Sequence,
-                    Set, Tuple, TypeVar, Union)
+                    Set, Tuple, TYPE_CHECKING, TypeVar, Union)
 import uuid
 
 import aiohttp
@@ -1411,7 +1411,7 @@ def get_docker_user(ip: str, cluster_config_file: str) -> str:
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     runner = command_runner.SSHCommandRunner(node=(ip, 22), **ssh_credentials)
     container_name = constants.DEFAULT_DOCKER_CONTAINER_NAME
-    whoami_returncode, whoami_stdout, whoami_stderr = runner.run(
+    whoami_returncode, whoami_stdout, whoami_stderr = runner.run(  # pylint: disable=unpacking-non-sequence
         f'sudo docker exec {container_name} whoami',
         stream_logs=False,
         require_outputs=True)
@@ -1464,7 +1464,7 @@ def wait_until_ray_cluster_ready(
             ux_utils.spinner_message('Waiting for workers',
                                      log_path=log_path)) as worker_status:
         while True:
-            rc, output, stderr = runner.run(
+            rc, output, stderr = runner.run(  # pylint: disable=unpacking-non-sequence
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 log_path=log_path,
                 stream_logs=False,
@@ -3189,7 +3189,7 @@ def is_controller_accessible(
         # status of the controller.
         controller_status, handle = refresh_cluster_status_handle(
             cluster_name,
-            force_refresh_statuses=[status_lib.ClusterStatus.INIT],
+            force_refresh_statuses={status_lib.ClusterStatus.INIT},
             cluster_status_lock_timeout=0)
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
@@ -3229,6 +3229,9 @@ def is_controller_accessible(
                                                    handle.docker_user,
                                                    handle.ssh_user)
 
+        if TYPE_CHECKING:
+            assert handle.head_ip is not None
+            assert handle.head_ssh_port is not None
         runner = command_runner.SSHCommandRunner(node=(handle.head_ip,
                                                        handle.head_ssh_port),
                                                  **ssh_credentials)
@@ -3249,6 +3252,9 @@ def is_controller_accessible(
                                                handle=handle)
     assert handle is not None and handle.head_ip is not None, (
         handle, controller_status)
+    # TODO(jason810496): We should correct the return type to 'ResourceHandle' instead of 'CloudVmRayResourceHandle'.
+    if TYPE_CHECKING:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     return handle
 
 

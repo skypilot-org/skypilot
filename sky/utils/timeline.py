@@ -9,9 +9,12 @@ import os
 import threading
 import time
 import traceback
-from typing import Callable, Optional, Union
+import typing
+from typing import Any, Callable, Optional, Union
 
 from sky.utils import common_utils
+
+F = typing.TypeVar('F', bound=Callable)
 
 _events = []
 
@@ -82,7 +85,18 @@ class Event:
         self.end()
 
 
-def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
+@typing.overload
+def event(name_or_fn: str, message: Optional[str] = None) -> Callable[[F], F]:
+    ...
+
+
+@typing.overload
+def event(name_or_fn: F, message: Optional[str] = None) -> F:
+    ...
+
+
+def event(name_or_fn: Union[str, Callable],
+          message: Optional[str] = None) -> Any:
     return common_utils.make_decorator(Event, name_or_fn, message=message)
 
 

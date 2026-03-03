@@ -530,7 +530,9 @@ def _execute_dag(
                 job_id = backend.execute(handle, task, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
-                backend.post_execute(handle, down)
+                backend.post_execute(
+                    typing.cast(backends.CloudVmRayResourceHandle, handle),
+                    down)
 
         if Stage.DOWN in stages and not dryrun:
             if down and idle_minutes_to_autostop is None:
@@ -710,12 +712,12 @@ def launch(
             cluster_status, maybe_handle = (
                 backend_utils.refresh_cluster_status_handle(
                     cluster_name,
-                    force_refresh_statuses=[
+                    force_refresh_statuses={
                         # If the cluster is INIT, we want to try to grab the
                         # status lock, which should block until provisioning is
                         # finished.
                         status_lib.ClusterStatus.INIT,
-                    ],
+                    },
                     # Wait indefinitely to obtain the lock, so that we don't
                     # have multiple processes launching the same cluster at
                     # once.

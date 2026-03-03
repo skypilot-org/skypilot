@@ -36,14 +36,14 @@ def get_internal_ip(node_info: Dict[str, Any]) -> None:
                         require_outputs=True,
                         stream_logs=False)
 
-    if result[0] != 0:
+    if result[0] != 0:  # pylint: disable=unsubscriptable-object
         # Some DCs do not have internal IPs and can fail when getting
         # the IP. We set the `internal_ip` to the same as
         # external IP. It should be fine as the `ray cluster`
         # will also get and use that external IP in that case.
         logger.debug('Failed get obtain private IP from node')
     else:
-        node_info['internal_ip'] = result[1].strip()
+        node_info['internal_ip'] = result[1].strip()  # pylint: disable=unsubscriptable-object
 
 
 def _filter_instances(

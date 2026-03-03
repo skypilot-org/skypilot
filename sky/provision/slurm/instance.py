@@ -501,9 +501,10 @@ touch {sky_cluster_home_dir}/.hushlogin
     # pylint: enable=line-too-long
 
     cmd = f'mkdir -p {PROVISION_SCRIPTS_DIRECTORY}'
-    rc, stdout, stderr = login_node_runner.run(cmd,
-                                               require_outputs=True,
-                                               stream_logs=False)
+    rc, stdout, stderr = login_node_runner.run(  # pylint: disable=unpacking-non-sequence
+        cmd,
+        require_outputs=True,
+        stream_logs=False)
     subprocess_utils.handle_returncode(
         rc,
         cmd,
@@ -564,9 +565,10 @@ touch {sky_cluster_home_dir}/.hushlogin
             remaining_timeout,
         )
     except (TimeoutError, RuntimeError, exceptions.CommandError) as e:
-        _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
-                                             require_outputs=True,
-                                             stream_logs=False)
+        _, stdout, _ = login_node_runner.run(  # pylint: disable=unpacking-non-sequence
+            f'cat {slurm_log} 2>/dev/null',
+            require_outputs=True,
+            stream_logs=False)
         if stdout:
             logger.error(f'=== Slurm job logs ({slurm_log}) ===\n'
                          f'{stdout}'
@@ -939,9 +941,10 @@ def get_command_runners(
                                                  cluster_name_on_cloud)
     container_marker = (
         f'{sky_cluster_home_dir}/{slurm_utils.SLURM_CONTAINER_MARKER_FILE}')
-    rc, stdout, stderr = login_node_runner.run(f'test -f {container_marker}',
-                                               require_outputs=True,
-                                               stream_logs=False)
+    rc, stdout, stderr = login_node_runner.run(  # pylint: disable=unpacking-non-sequence
+        f'test -f {container_marker}',
+        require_outputs=True,
+        stream_logs=False)
     if rc not in (0, 1):
         subprocess_utils.handle_returncode(
             rc,

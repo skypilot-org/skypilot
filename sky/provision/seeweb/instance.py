@@ -99,10 +99,11 @@ class SeewebNodeProvider:
             ssh_user=self._get_ssh_user(),
             ssh_private_key=self._get_private_key_path(),
         )
-        rc, stdout, stderr = runner.run(cmd,
-                                        stream_logs=stream_logs,
-                                        require_outputs=True,
-                                        connect_timeout=timeout)
+        rc, stdout, stderr = runner.run(  # pylint: disable=unpacking-non-sequence
+            cmd,
+            stream_logs=stream_logs,
+            require_outputs=True,
+            connect_timeout=timeout)
         # Convert to simple namespace for compatibility
         proc = subprocess.CompletedProcess(args=cmd,
                                            returncode=rc,

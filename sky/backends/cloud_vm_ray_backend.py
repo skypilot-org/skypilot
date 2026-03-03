@@ -19,10 +19,11 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, Dict, Iterable, Iterator, List, Optional,
-                    Set, Tuple, Union)
+                    Set, Tuple, TYPE_CHECKING, Union)
 
 import colorama
 import psutil
+from typing_extensions import Literal
 
 from sky import backends
 from sky import catalog
@@ -1054,20 +1055,23 @@ class RetryingVmProvisioner(object):
             for failover_overrides in to_provision.cloud.yield_cloud_specific_failover_overrides(
                     region=to_provision.region):
                 try:
-                    config_dict = backend_utils.write_cluster_config(
-                        to_provision,
-                        num_nodes,
-                        _get_cluster_config_template(to_provision.cloud),
-                        cluster_name,
-                        self._local_wheel_path,
-                        self._wheel_hash,
-                        region=region,
-                        zones=zones,
-                        dryrun=dryrun,
-                        keep_launch_fields_in_existing_config=cluster_exists,
-                        volume_mounts=volume_mounts,
-                        cloud_specific_failover_overrides=failover_overrides,
-                    )
+                    # cast from Dict[str, str] to Dict[str, Any] to silence mypy
+                    config_dict = typing.cast(
+                        Dict[str, Any],
+                        backend_utils.write_cluster_config(
+                            to_provision,
+                            num_nodes,
+                            _get_cluster_config_template(to_provision.cloud),
+                            cluster_name,
+                            self._local_wheel_path,
+                            self._wheel_hash,
+                            region=region,
+                            zones=zones,
+                            dryrun=dryrun,
+                            keep_launch_fields_in_existing_config=cluster_exists,
+                            volume_mounts=volume_mounts,
+                            cloud_specific_failover_overrides=failover_overrides,
+                        ))
                 except exceptions.ResourcesUnavailableError as e:
                     # Failed due to catalog issue, e.g. image not found, or
                     # GPUs are requested in a Kubernetes cluster but the cluster
@@ -1621,7 +1625,7 @@ class RetryingVmProvisioner(object):
             return
         backend = CloudVmRayBackend()
 
-        returncode, output, _ = backend.run_on_head(
+        returncode, output, _ = backend.run_on_head(  # pylint: disable=unpacking-non-sequence
             handle,
             instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
             require_outputs=True)
@@ -1630,7 +1634,7 @@ class RetryingVmProvisioner(object):
             # ray cluster is just started but the ray status is not ready yet.
             logger.info('Waiting for ray cluster to be ready remotely.')
             time.sleep(1)
-            returncode, output, _ = backend.run_on_head(
+            returncode, output, _ = backend.run_on_head(  # pylint: disable=unpacking-non-sequence
                 handle,
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 require_outputs=True)
@@ -2067,6 +2071,9 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 logger.debug(f'Using provided external IPs: {external_ips}')
                 cluster_feasible_ips = typing.cast(List[str], external_ips)
             else:
+                if TYPE_CHECKING:
+                    assert self.cluster_yaml is not None
+
                 cluster_feasible_ips = backend_utils.get_node_ips(
                     self.cluster_yaml,
                     self.launched_nodes,
@@ -2099,6 +2106,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                 logger.debug(f'Using provided internal IPs: {internal_ips}')
                 cluster_internal_ips = typing.cast(List[str], internal_ips)
             else:
+                if TYPE_CHECKING:
+                    assert self.cluster_yaml is not None
                 cluster_internal_ips = backend_utils.get_node_ips(
                     self.cluster_yaml,
                     self.launched_nodes,
@@ -3300,6 +3309,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 handle.launched_resources = handle.launched_resources.copy(
                     region=provision_record.region, zone=provision_record.zone)
 
+                if TYPE_CHECKING:
+                    assert config_hash is not None, 'config_hash should be str'
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, config_hash)
@@ -3365,6 +3376,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # and restarted if necessary.
             self.check_skylet_running(handle)
 
+            if TYPE_CHECKING:
+                assert config_hash is not None, 'config_hash should be str'
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, config_hash)
@@ -3413,8 +3426,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
                 if use_legacy:
                     cmd = job_lib.JobLibCodeGen.update_status()
-                    returncode, _, stderr = self.run_on_head(
-                        handle, cmd, require_outputs=True)
+                    returncode, _, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
+                        handle,
+                        cmd,
+                        require_outputs=True)
                     subprocess_utils.handle_returncode(
                         returncode, cmd, 'Failed to update job status.', stderr)
         if prev_cluster_status == status_lib.ClusterStatus.STOPPED:
@@ -3437,8 +3452,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
             if use_legacy:
                 cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-                returncode, stdout, stderr = self.run_on_head(
-                    handle, cmd, require_outputs=True)
+                returncode, stdout, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
+                    handle,
+                    cmd,
+                    require_outputs=True)
                 subprocess_utils.handle_returncode(
                     returncode, cmd,
                     'Failed to set previously in-progress jobs to FAILED',
@@ -3939,7 +3956,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # For Slurm, run in background so that SSH returns immediately.
             # This is needed because we add the wait_for_job code above which
             # makes the command block until the job completes.
-            returncode, stdout, stderr = self.run_on_head(
+            returncode, stdout, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
                 handle,
                 job_submit_cmd,
                 stream_logs=False,
@@ -3961,7 +3978,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 _dump_code_to_file(codegen)
                 job_submit_cmd = f'{mkdir_code} && {code}'
                 # See comment above for why run_in_background=is_slurm.
-                returncode, stdout, stderr = self.run_on_head(
+                returncode, stdout, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
                     handle,
                     job_submit_cmd,
                     stream_logs=False,
@@ -4011,7 +4028,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 run_timestamp=self.run_timestamp,
                 resources_str=resources_str,
                 metadata=metadata)
-            returncode, result_str, stderr = self.run_on_head(
+            returncode, result_str, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
                 handle,
                 code,
                 stream_logs=False,
@@ -4107,7 +4124,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 is_primary_in_job_groups=is_primary_in_job_groups,
                 num_jobs=num_jobs,
                 execution=execution)
-            returncode, result_str, stderr = self.run_on_head(
+            returncode, result_str, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
                 handle,
                 code,
                 stream_logs=False,
@@ -4325,11 +4342,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 pass
 
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
-        returncode, stdout, stderr = self.run_on_head(handle,
-                                                      code,
-                                                      stream_logs=stream_logs,
-                                                      require_outputs=True,
-                                                      separate_stderr=True)
+        returncode, stdout, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
+            handle,
+            code,
+            stream_logs=stream_logs,
+            require_outputs=True,
+            separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
         statuses = job_lib.load_statuses_payload(stdout)
@@ -4361,6 +4379,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if use_legacy:
             code = job_lib.JobLibCodeGen.cancel_jobs(jobs, cancel_all,
                                                      user_hash)
+            # pylint: disable=unpacking-non-sequence
             returncode, stdout, _ = self.run_on_head(handle,
                                                      code,
                                                      stream_logs=False,
@@ -4415,6 +4434,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         if use_legacy:
             code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(job_ids)
+            # pylint: disable=unpacking-non-sequence
             returncode, stdout, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
@@ -4564,6 +4584,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
+            if TYPE_CHECKING:
+                assert isinstance(e.code, int)
             final = e.code
         return final
 
@@ -4612,6 +4634,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
+            if TYPE_CHECKING:
+                assert isinstance(e.code, int)
             returncode = e.code
         return returncode
 
@@ -4645,6 +4669,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
+            if TYPE_CHECKING:
+                assert isinstance(e.code, int)
             returncode = e.code
         return returncode
 
@@ -4692,7 +4718,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if use_legacy:
                 code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
                     job_name=job_name)
-                returncode, job_ids_payload, stderr = self.run_on_head(
+                returncode, job_ids_payload, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
                     handle,
                     code,
                     stream_logs=False,
@@ -4750,7 +4776,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             if use_legacy:
                 code = job_lib.JobLibCodeGen.get_log_dirs_for_jobs(
                     [str(job_id)])
-                returncode, run_timestamps_payload, stderr = self.run_on_head(
+                returncode, run_timestamps_payload, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
                     handle,
                     code,
                     stream_logs=False,
@@ -5384,8 +5410,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 code = autostop_lib.AutostopCodeGen.set_autostop(
                     idle_minutes_to_autostop, self.NAME, wait_for, down, hook,
                     hook_timeout)
-                returncode, _, stderr = self.run_on_head(
-                    handle, code, require_outputs=True, stream_logs=stream_logs)
+                returncode, _, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
+                    handle,
+                    code,
+                    require_outputs=True,
+                    stream_logs=stream_logs)
                 subprocess_utils.handle_returncode(returncode,
                                                    code,
                                                    'Failed to set autostop',
@@ -5432,8 +5461,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 return False
         else:
             code = autostop_lib.AutostopCodeGen.is_autostopping()
-            returncode, stdout, stderr = self.run_on_head(
-                handle, code, require_outputs=True, stream_logs=stream_logs)
+            returncode, stdout, stderr = self.run_on_head(  # pylint: disable=unpacking-non-sequence
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=stream_logs)
             if returncode == 0:
                 is_autostopping = message_utils.decode_payload(stdout)
             else:
@@ -5446,6 +5478,63 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = ...,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        ssh_mode: command_runner.SshMode = ...,
+        under_remote_workdir: bool = ...,
+        require_outputs: Literal[False] = ...,
+        separate_stderr: bool = ...,
+        process_stream: bool = ...,
+        source_bashrc: bool = ...,
+        **kwargs,
+    ) -> int:
+        ...
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = ...,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        ssh_mode: command_runner.SshMode = ...,
+        under_remote_workdir: bool = ...,
+        require_outputs: Literal[True],
+        separate_stderr: bool = ...,
+        process_stream: bool = ...,
+        source_bashrc: bool = ...,
+        **kwargs,
+    ) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = ...,
+        log_path: str = ...,
+        stream_logs: bool = ...,
+        ssh_mode: command_runner.SshMode = ...,
+        under_remote_workdir: bool = ...,
+        require_outputs: bool,
+        separate_stderr: bool = ...,
+        process_stream: bool = ...,
+        source_bashrc: bool = ...,
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        ...
+
     @timeline.event
     @context_utils.cancellation_guard
     def run_on_head(

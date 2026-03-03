@@ -621,8 +621,22 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def make_decorator(cls, name_or_fn: Union[str, Callable],
-                   **ctx_kwargs) -> Callable:
+F = typing.TypeVar('F', bound=Callable)
+
+
+@typing.overload
+def make_decorator(cls: Any, name_or_fn: str,
+                   **ctx_kwargs: Any) -> Callable[[F], F]:
+    ...
+
+
+@typing.overload
+def make_decorator(cls: Any, name_or_fn: F, **ctx_kwargs: Any) -> F:
+    ...
+
+
+def make_decorator(cls: Any, name_or_fn: Union[str, Callable],
+                   **ctx_kwargs: Any) -> Any:
     """Make the cls a decorator.
 
     class cls:

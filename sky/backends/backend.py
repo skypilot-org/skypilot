@@ -21,7 +21,27 @@ _ResourceHandleType = typing.TypeVar('_ResourceHandleType',
 
 # Backend-specific handle to the launched resources (e.g., a cluster).
 # Examples: 'cluster.yaml'; 'ray://...', 'k8s://...'.
-class ResourceHandle:
+class ResourceHandle:  # pylint: disable=missing-class-docstring
+
+    launched_nodes: int
+    launched_resources: 'resources.Resources'
+    docker_user: Optional[str]
+
+    @property
+    def cluster_yaml(self) -> Optional[str]:
+        raise NotImplementedError
+
+    @property
+    def head_ip(self) -> Optional[str]:
+        raise NotImplementedError
+
+    @property
+    def head_ssh_port(self) -> Optional[int]:
+        raise NotImplementedError
+
+    @property
+    def ssh_user(self) -> Optional[str]:
+        raise NotImplementedError
 
     def get_cluster_name(self) -> str:
         raise NotImplementedError

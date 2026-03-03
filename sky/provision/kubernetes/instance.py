@@ -899,9 +899,10 @@ def pre_init(namespace: str, context: Optional[str], new_nodes: List) -> None:
             container=k8s_constants.RAY_NODE_CONTAINER_NAME)
 
         # Run the combined pre-init command
-        rc, stdout, _ = runner.run(pre_init_cmd,
-                                   require_outputs=True,
-                                   stream_logs=False)
+        rc, stdout, _ = runner.run(  # pylint: disable=unpacking-non-sequence
+            pre_init_cmd,
+            require_outputs=True,
+            stream_logs=False)
         if rc == exceptions.INSUFFICIENT_PRIVILEGES_CODE:
             raise config_lib.KubernetesError(
                 'Insufficient system privileges detected. '
@@ -1709,10 +1710,11 @@ def get_cluster_info(
     runner = command_runner.KubernetesCommandRunner(
         ((namespace, context), head_pod_name),
         container=k8s_constants.RAY_NODE_CONTAINER_NAME)
-    rc, stdout, stderr = runner.run(get_k8s_ssh_user_cmd,
-                                    require_outputs=True,
-                                    separate_stderr=True,
-                                    stream_logs=False)
+    rc, stdout, stderr = runner.run(  # pylint: disable=unpacking-non-sequence
+        get_k8s_ssh_user_cmd,
+        require_outputs=True,
+        separate_stderr=True,
+        stream_logs=False)
     _raise_command_running_error('get ssh user', get_k8s_ssh_user_cmd,
                                  head_pod_name, rc, stdout + stderr)
 
