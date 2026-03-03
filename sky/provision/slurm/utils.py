@@ -5,7 +5,7 @@ import os
 import re
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
@@ -35,6 +35,8 @@ _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 _SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
 # Pyxis plugin availability is unlikely to change frequently.
 _SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
+# FUSE availability is unlikely to change frequently.
+_SLURM_FUSE_CHECK_CACHE_TTL = 24 * 60 * 60
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -152,17 +154,26 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
     return proctrack_type
 
 
-def check_pyxis_enabled(cluster: str) -> bool:
-    """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
+def _check_cluster_feature(
+    cluster: str,
+    feature_name: str,
+    check_fn: Callable[[slurm.SlurmClient], bool],
+    cache_ttl: int,
+) -> bool:
+    """Check if a feature is available on a Slurm cluster, with caching.
 
-    Pyxis is required for Docker container support on Slurm. This function
-    caches the result per cluster since the plugin availability is unlikely
-    to change frequently.
+    Args:
+        cluster: Name of the Slurm cluster.
+        feature_name: Short name for the feature (used in cache key and logs).
+        check_fn: A callable that takes a SlurmClient and returns True if
+            the feature is available.
+        cache_ttl: Time-to-live for the cache entry in seconds.
     """
-    cache_key = f'slurm:pyxis_enabled:{cluster}'
+    cache_key = f'slurm:{feature_name}_enabled:{cluster}'
     cached = kv_cache.get_cache_entry(cache_key)
     if cached is not None:
-        logger.debug(f'Slurm pyxis check found in cache ({cache_key})')
+        logger.debug(f'Slurm {feature_name} check found in cache '
+                     f'({cache_key})')
         return cached == 'true'
 
     ssh_config = get_slurm_ssh_config()
@@ -176,17 +187,41 @@ def check_pyxis_enabled(cluster: str) -> bool:
         ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
         identities_only=get_identities_only(ssh_config_dict),
     )
-    enabled = client.check_pyxis_enabled()
+    enabled = check_fn(client)
 
     try:
-        kv_cache.add_or_update_cache_entry(
-            cache_key, 'true' if enabled else 'false',
-            time.time() + _SLURM_PYXIS_CHECK_CACHE_TTL)
+        kv_cache.add_or_update_cache_entry(cache_key,
+                                           'true' if enabled else 'false',
+                                           time.time() + cache_ttl)
     except Exception as e:  # pylint: disable=broad-except
-        logger.debug(f'Failed to cache slurm pyxis check for {cluster}: '
-                     f'{common_utils.format_exception(e)}')
+        logger.debug(f'Failed to cache slurm {feature_name} check for '
+                     f'{cluster}: {common_utils.format_exception(e)}')
 
     return enabled
+
+
+def check_pyxis_enabled(cluster: str) -> bool:
+    """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
+
+    Pyxis is required for Docker container support on Slurm. This function
+    caches the result per cluster since the plugin availability is unlikely
+    to change frequently.
+    """
+    return _check_cluster_feature(cluster, 'pyxis',
+                                  lambda c: c.check_pyxis_enabled(),
+                                  _SLURM_PYXIS_CHECK_CACHE_TTL)
+
+
+def check_fuse_enabled(cluster: str) -> bool:
+    """Check if FUSE is available on a Slurm cluster.
+
+    FUSE is required for storage mounting (MOUNT/MOUNT_CACHED modes) via
+    tools like goofys and rclone. This function caches the result per
+    cluster since FUSE availability is unlikely to change frequently.
+    """
+    return _check_cluster_feature(cluster, 'fuse',
+                                  lambda c: c.check_fuse_enabled(),
+                                  _SLURM_FUSE_CHECK_CACHE_TTL)
 
 
 class SlurmInstanceType:
