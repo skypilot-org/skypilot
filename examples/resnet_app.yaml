@@ -3,7 +3,8 @@ name: resnet-app
 resources:
   infra: aws
   accelerators:
-    V100: 1
+    T4: 1
+  memory: 32+
 
 inputs: {
   gs://cloud-tpu-test-dataset/fake_imagenet: 70,
@@ -53,7 +54,7 @@ run: |
 
   export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
   python -u models/official/resnet/resnet_main.py --use_tpu=False \
-      --mode=train --train_batch_size=256 --train_steps=250 \
+      --mode=train --train_batch_size=64 --train_steps=250 \
       --iterations_per_loop=125 \
       --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
       --model_dir=resnet-model-dir \

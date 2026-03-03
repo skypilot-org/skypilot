@@ -1697,6 +1697,9 @@ def get_config_schema():
                             'project_id': {
                                 'type': 'string',
                             },
+                            'subnet_id': {
+                                'type': 'string',
+                            },
                             'fabric': {
                                 'type': 'string',
                             },

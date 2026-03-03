@@ -253,6 +253,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
+    'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
     'yotta': [],  # No dependencies needed for Yotta
