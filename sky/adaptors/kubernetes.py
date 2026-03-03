@@ -52,6 +52,8 @@ DEFAULT_IN_CLUSTER_REGION = 'in-cluster'
 # context when running with in-cluster auth. If not set, the context name is
 # set to DEFAULT_IN_CLUSTER_REGION.
 IN_CLUSTER_CONTEXT_NAME_ENV_VAR = 'SKYPILOT_IN_CLUSTER_CONTEXT_NAME'
+# If set (positive seconds), client is refreshed proactively after this interval.
+KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = 'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -245,9 +247,6 @@ class ClientWrapper:
                 logger.debug(f'Error closing Kubernetes client: {e}')
 
 
-# If set (positive seconds), client is refreshed proactively after this interval.
-KUBECONFIG_REFRESH_INTERVAL_ENV_VAR = 'SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS'
-
 _thread_local = threading.local()
 
 
@@ -305,8 +304,7 @@ class RetryableClientWrapper:
         return with_refresh
 
 
-def _make_retryable(client: Any, getter: Callable,
-                    getter_args: tuple,
+def _make_retryable(client: Any, getter: Callable, getter_args: tuple,
                     getter_kwargs: dict) -> RetryableClientWrapper:
     """Wrap client so it can be refreshed by interval; getter returns ClientWrapper."""
     return RetryableClientWrapper(client, getter, getter_args, getter_kwargs)
@@ -342,8 +340,7 @@ def core_api(context: Optional[str] = None):
 @_retryable_kubernetes_api
 def storage_api(context: Optional[str] = None):
     return ClientWrapper(
-        kubernetes.client.StorageV1Api(
-            api_client=_get_api_client(context)))
+        kubernetes.client.StorageV1Api(api_client=_get_api_client(context)))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
@@ -360,8 +357,7 @@ def auth_api(context: Optional[str] = None):
 @_retryable_kubernetes_api
 def networking_api(context: Optional[str] = None):
     return ClientWrapper(
-        kubernetes.client.NetworkingV1Api(
-            api_client=_get_api_client(context)))
+        kubernetes.client.NetworkingV1Api(api_client=_get_api_client(context)))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
@@ -369,8 +365,7 @@ def networking_api(context: Optional[str] = None):
 @_retryable_kubernetes_api
 def custom_objects_api(context: Optional[str] = None):
     return ClientWrapper(
-        kubernetes.client.CustomObjectsApi(
-            api_client=_get_api_client(context)))
+        kubernetes.client.CustomObjectsApi(api_client=_get_api_client(context)))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
@@ -419,8 +414,7 @@ def api_client(context: Optional[str] = None):
 @_retryable_kubernetes_api
 def custom_resources_api(context: Optional[str] = None):
     return ClientWrapper(
-        kubernetes.client.CustomObjectsApi(
-            api_client=_get_api_client(context)))
+        kubernetes.client.CustomObjectsApi(api_client=_get_api_client(context)))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)

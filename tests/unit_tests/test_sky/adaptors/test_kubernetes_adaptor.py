@@ -91,7 +91,8 @@ def test_watch_cleanup(monkeypatch):
     w = kubernetes.watch()
     # Keep a handle to the underlying watch (skip RetryableClientWrapper and
     # ClientWrapper) so we can assert its _api_client.close() was called.
-    underlying = w._client._client if hasattr(w._client, '_client') else w._client
+    underlying = w._client._client if hasattr(w._client,
+                                              '_client') else w._client
     del w
     annotations.clear_request_level_cache()
     gc.collect()
@@ -204,5 +205,3 @@ def test_concurrent_context_isolation(monkeypatch, api_func):
                     f'got {actual_host}. Race condition detected.')
     finally:
         os.unlink(config_file)
-
-
