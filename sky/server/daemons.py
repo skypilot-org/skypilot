@@ -320,6 +320,10 @@ INTERNAL_REQUEST_DAEMONS = [
         should_skip=should_skip_server_heartbeat),
 ]
 
+HIDDEN_REQUEST_NAMES = [
+    request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
+]
+
 
 def is_daemon_request_id(request_id: str) -> bool:
     """Returns whether a specific request_id is an internal daemon."""
