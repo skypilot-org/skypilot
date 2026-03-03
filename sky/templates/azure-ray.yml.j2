@@ -59,7 +59,7 @@ available_node_types:
         tags:
           skypilot-user: {{ user }}
           {%- for label_key, label_value in labels.items() %}
-          {{ label_key }}: {{ label_value }}
+          {{ label_key }}: {{ label_value|tojson }}
           {%- endfor %}
         azure_arm_parameters:
             adminUsername: skypilot:ssh_user
