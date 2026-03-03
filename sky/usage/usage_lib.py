@@ -313,17 +313,6 @@ class HeartbeatMessageToReport(MessageToReport):
         return properties
 
 
-def _get_server_id() -> str:
-    """Get server identifier for server-side heartbeat messages.
-
-    Uses the same pattern as gpu_healer/observability.py for identifying
-    the API server deployment.
-    """
-    import socket  # pylint: disable=import-outside-toplevel
-    return (os.getenv('HELM_RELEASE_NAME') or
-            os.getenv('SKYPILOT_RELEASE_NAME') or socket.gethostname())
-
-
 class ServerHeartbeatMessage(MessageToReport):
     """Server-side heartbeat that plugins can enrich with data.
 
@@ -335,8 +324,9 @@ class ServerHeartbeatMessage(MessageToReport):
         start_time: int — timestamp (ns) when message was created
         send_time: int — timestamp (ns) when message was sent
         interval_seconds: int — heartbeat interval
-        server_id: str — Helm release name or hostname
-        user: str — stable per-installation user hash
+        hostname: str — machine hostname
+        release_name: Optional[str] — Helm release name (null if local)
+        server_hash: str — stable per-installation hash
         sky_version: str — SkyPilot version
         ingress_host: Optional[str] — ingress DNS hostname if deployed
             with ingress (from SKYPILOT_INGRESS_HOST env var)
@@ -347,9 +337,12 @@ class ServerHeartbeatMessage(MessageToReport):
 
     def __init__(self, interval_seconds: int = 600):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        import socket  # pylint: disable=import-outside-toplevel
         self.interval_seconds = interval_seconds
-        self.server_id: str = _get_server_id()
-        self.user: str = common_utils.get_user_hash()
+        self.hostname: str = socket.gethostname()
+        self.release_name: Optional[str] = (os.getenv('SKYPILOT_RELEASE_NAME')
+                                            or os.getenv('HELM_RELEASE_NAME'))
+        self.server_hash: str = common_utils.get_user_hash()
         self.sky_version: str = sky.__version__
         self.ingress_host: Optional[str] = os.getenv('SKYPILOT_INGRESS_HOST')
 
