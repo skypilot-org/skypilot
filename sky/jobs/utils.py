@@ -1088,6 +1088,16 @@ def stream_logs_by_id(
                     f'{job_msg}',
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
+        # Batch coordinator jobs run inline on the controller — no
+        # separate cluster is provisioned. Stream controller logs instead
+        # of trying to find a worker cluster handle.
+        if managed_job_state.is_batch_job(job_id):
+            return stream_logs(job_id,
+                               job_name=None,
+                               controller=True,
+                               follow=follow,
+                               tail=tail)
+
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))

@@ -1974,6 +1974,18 @@ def save_batch_states(job_id: int, batches: List[List[int]]) -> None:
 
 
 @_init_db
+def is_batch_job(job_id: int) -> bool:
+    """Check if a job is a batch coordinator job (has batch_state records)."""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.select(sqlalchemy.func.count()  # pylint: disable=not-callable
+                             ).select_from(batch_state_table).where(
+                                 batch_state_table.c.job_id == job_id))
+        return result.scalar_one() > 0
+
+
+@_init_db
 def get_batch_states(job_id: int) -> List[Dict[str, Any]]:
     """Read all batch records ordered by batch_idx.
 
