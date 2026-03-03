@@ -15,6 +15,10 @@ service ServeService {
     rpc WaitServiceRegistration(WaitServiceRegistrationRequest) returns (WaitServiceRegistrationResponse);
     // Update service.
     rpc UpdateService(UpdateServiceRequest) returns (UpdateServiceResponse);
+    // Stream replica logs.
+    rpc StreamReplicaLogs(StreamReplicaLogsRequest) returns (stream StreamReplicaLogsResponse);
+    // Stream serve process logs.
+    rpc StreamServeProcessLogs(StreamServeProcessLogsRequest) returns (stream StreamServeProcessLogsResponse);
 }
 
 message ServiceNames {
@@ -83,4 +87,29 @@ message UpdateServiceResponse {
     // TODO (kyuds): the return value of UpdateService is not
     // used in the current codepath. We should add it in this
     // protobuf message after it starts getting used.
+}
+
+message StreamReplicaLogsRequest {
+    string service_name = 1;
+    int64 replica_id = 2;
+    bool follow = 3;
+    optional int64 tail = 4;
+    bool pool = 5;
+}
+
+message StreamReplicaLogsResponse {
+    string log_line = 1;
+}
+
+message StreamServeProcessLogsRequest {
+    string service_name = 1;
+    bool stream_controller = 2;
+    bool follow = 3;
+    optional int64 tail = 4;
+    bool pool = 5;
+}
+
+// keeping identical contents of protobuf message for future-proofing purposes.
+message StreamServeProcessLogsResponse {
+    string log_line = 1;
 }
