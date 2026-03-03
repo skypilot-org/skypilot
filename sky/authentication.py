@@ -40,12 +40,12 @@ from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
 from sky.adaptors import verda
+from sky.adaptors.verda import VerdaClient
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.mithril import utils as mithril_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
-from sky.provision.verda.utils import VerdaClient
 from sky.utils import auth_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils

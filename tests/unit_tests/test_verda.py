@@ -8,10 +8,10 @@ from unittest.mock import patch
 import pytest
 
 from sky import clouds
+from sky.adaptors.verda import Instance
+from sky.adaptors.verda import InstanceStatus
+from sky.adaptors.verda import VerdaClient
 from sky.clouds import verda
-from sky.provision.verda.utils import Instance
-from sky.provision.verda.utils import InstanceStatus
-from sky.provision.verda.utils import VerdaClient
 
 
 def test_verda_cloud_basics():
@@ -55,12 +55,12 @@ def test_verda_check_credentials_missing(mock_get_config, monkeypatch,
 
 
 class TestVerdaClientInstanceCreation:
-    """Test cases for VerdaClient instance creation through utils.py."""
+    """Test cases for VerdaClient instance creation through Verda adaptor."""
 
-    @patch('sky.provision.verda.utils.get_verda_configuration')
-    @patch('sky.provision.verda.utils.requests.post')
-    @patch('sky.provision.verda.utils.requests.get')
-    @patch('sky.provision.verda.utils.time.time')
+    @patch('sky.adaptors.verda.get_verda_configuration')
+    @patch('sky.adaptors.verda.requests.post')
+    @patch('sky.adaptors.verda.requests.get')
+    @patch('sky.adaptors.verda.time.time')
     def test_instance_create_success(self, mock_time, mock_get, mock_post,
                                      mock_get_config):
         """Test successful instance creation."""
@@ -153,10 +153,10 @@ class TestVerdaClientInstanceCreation:
         assert 'https://api.verda.com/v1/instances/instance-123' in get_call[0][
             0]
 
-    @patch('sky.provision.verda.utils.get_verda_configuration')
-    @patch('sky.provision.verda.utils.requests.post')
-    @patch('sky.provision.verda.utils.requests.get')
-    @patch('sky.provision.verda.utils.time.time')
+    @patch('sky.adaptors.verda.get_verda_configuration')
+    @patch('sky.adaptors.verda.requests.post')
+    @patch('sky.adaptors.verda.requests.get')
+    @patch('sky.adaptors.verda.time.time')
     def test_instance_create_with_spot(self, mock_time, mock_get, mock_post,
                                        mock_get_config):
         """Test instance creation with spot/preemptible instance."""
@@ -165,9 +165,9 @@ class TestVerdaClientInstanceCreation:
 
         # Mock configuration
         mock_config = MagicMock()
-        mock_config.client_id = "test-client-id"
-        mock_config.client_secret = "test-client-secret"
-        mock_config.base_url = "https://api.verda.com/v1"
+        mock_config.client_id = 'test-client-id'
+        mock_config.client_secret = 'test-client-secret'
+        mock_config.base_url = 'https://api.verda.com/v1'
         mock_get_config.return_value = (True, None, mock_config)
 
         # Mock authentication response (called during HTTPClient.__init__)
@@ -234,9 +234,9 @@ class TestVerdaClientInstanceCreation:
         assert create_call[1]['json']['is_spot'] is True
         assert create_call[1]['json']['contract'] == 'SPOT'
 
-    @patch('sky.provision.verda.utils.get_verda_configuration')
-    @patch('sky.provision.verda.utils.requests.post')
-    @patch('sky.provision.verda.utils.time.time')
+    @patch('sky.adaptors.verda.get_verda_configuration')
+    @patch('sky.adaptors.verda.requests.post')
+    @patch('sky.adaptors.verda.time.time')
     def test_instance_create_api_error(self, mock_time, mock_post,
                                        mock_get_config):
         """Test instance creation with API error."""
@@ -289,14 +289,14 @@ class TestVerdaClientInstanceCreation:
         }
 
         # Verify APIException is raised
-        from sky.provision.verda.utils import APIException
+        from sky.adaptors.verda import APIException
         with pytest.raises(APIException) as exc_info:
             client.instance_create(payload)
 
         assert exc_info.value.code == 'INVALID_INPUT'
         assert 'Invalid instance type' in exc_info.value.message
 
-    @patch('sky.provision.verda.utils.get_verda_configuration')
+    @patch('sky.adaptors.verda.get_verda_configuration')
     def test_instance_create_configuration_error(self, mock_get_config):
         """Test instance creation with configuration error."""
         # Mock configuration error

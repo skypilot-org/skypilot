@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors.verda import Instance
+from sky.adaptors.verda import InstanceStatus
+from sky.adaptors.verda import VerdaClient
+from sky.clouds.verda import VERDA_DEFAULT_IMAGE
 from sky.provision import common
-from sky.provision.verda.utils import Instance
-from sky.provision.verda.utils import InstanceStatus
-from sky.provision.verda.utils import VerdaClient
 from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -40,7 +41,7 @@ def _filter_instances(
         instance_id = instance.instance_id
         instance_name = instance.hostname
         # Filter by cluster name
-        if cluster_name_on_cloud and cluster_name_on_cloud not in instance_name:
+        if cluster_name_on_cloud not in instance_name:
             continue
         # Filter by status if status_filters is provided
         if status_filters is not None and instance.status not in status_filters:
@@ -138,8 +139,7 @@ def run_instances(
             is_spot = config.node_config.get('Preemptible', None)
 
             # Get image from node_config (populated from template)
-            image = config.node_config.get(
-                'ImageId', 'ubuntu-24.04-cuda-12.8-open-docker')
+            image = config.node_config.get('ImageId', VERDA_DEFAULT_IMAGE)
 
             ssh_public_key = config.node_config['PublicKey']
             if ssh_public_key is None:
@@ -240,6 +240,7 @@ def wait_instances(
     cluster_name_on_cloud: str,
     state: Optional[status_lib.ClusterStatus],
 ) -> None:
+    # Waiting for instances to be ready is already handled in run_instances.
     del region, cluster_name_on_cloud, state
 
 
