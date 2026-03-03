@@ -262,6 +262,14 @@ def server_heartbeat_event():
     # pylint: disable=import-outside-toplevel
     from sky.usage import usage_lib
 
+    if not usage_lib.ServerHeartbeatMessage.has_providers():
+        # No plugins registered providers — nothing to send.
+        # Check inside event_fn (not should_skip) because providers are
+        # registered in executor processes via plugin install(), not in
+        # the main process where should_skip runs.
+        time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
+        return
+
     # _send_to_loki checks DISABLE_LOGGING, but run_event() sets it to '1'
     # to prevent usage messages from daemons. We temporarily unset it here
     # because the server heartbeat's purpose IS to send to Loki.
@@ -274,13 +282,6 @@ def server_heartbeat_event():
         if original_val is not None:
             os.environ[disable_key] = original_val
     time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
-
-
-def should_skip_server_heartbeat():
-    """Check if the server heartbeat should be skipped."""
-    # pylint: disable=import-outside-toplevel
-    from sky.usage import usage_lib
-    return not usage_lib.ServerHeartbeatMessage.has_providers()
 
 
 # Register the events to run in the background.
@@ -316,8 +317,7 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(
         id='server-heartbeat-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
-        event_fn=server_heartbeat_event,
-        should_skip=should_skip_server_heartbeat),
+        event_fn=server_heartbeat_event),
 ]
 
 HIDDEN_REQUEST_NAMES = [
