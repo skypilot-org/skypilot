@@ -1,6 +1,18 @@
 """Constants used by the Nebius provisioner."""
+import math
 
 VERSION = 'v1'
+
+# Nebius requires disk sizes to be a multiple of 93 GiB
+# (99857989632 bytes = 93 * 1024^3).
+NEBIUS_DISK_SIZE_STEP_GIB = 93
+
+
+def round_up_disk_size(disk_size_gib: int) -> int:
+    """Round up disk size to the nearest multiple of 93 GiB."""
+    return (math.ceil(disk_size_gib / NEBIUS_DISK_SIZE_STEP_GIB) *
+            NEBIUS_DISK_SIZE_STEP_GIB)
+
 
 # InfiniBand-capable instance platforms
 INFINIBAND_INSTANCE_PLATFORMS = [

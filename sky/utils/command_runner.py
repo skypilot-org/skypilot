@@ -9,6 +9,7 @@ import re
 import shlex
 import signal
 import socket
+import subprocess
 import sys
 import tempfile
 import termios
@@ -1608,6 +1609,17 @@ class KubernetesCommandRunner(CommandRunner):
             else:
                 command += [f'> {log_path}']
             executable = '/bin/bash'
+
+        if ssh_mode == SshMode.INTERACTIVE:
+            # Use PIPE instead of DEVNULL for stdin so the remote process
+            # gets a live stdin pipe. This enables orphan detection on the
+            # controller: when the kubectl exec connection drops (e.g.,
+            # client disconnects), the kubelet closes the stdin pipe,
+            # causing EOF. The remote process can detect this and exit,
+            # preventing leaked processes. With DEVNULL, stdin is
+            # immediately at EOF, making it impossible to detect
+            # disconnection.
+            kwargs.setdefault('stdin', subprocess.PIPE)
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
                                     require_outputs=require_outputs,

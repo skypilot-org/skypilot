@@ -291,6 +291,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # single jobs
         execution_mode = (dag.execution.value
                           if dag.execution else DEFAULT_EXECUTION.value)
+        assert dag.name is not None, 'dag must have a name'
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -311,6 +312,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
             if dag.is_job_group():
                 is_primary_in_job_group = (dag.primary_tasks is None or
                                            task.name in dag.primary_tasks)
+            assert task.name is not None, 'task must have a name'
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
@@ -412,7 +414,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
 
     workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
     entrypoint = common_utils.get_current_command()
-    pool_hash = serve_state.get_service_hash(pool)
+    pool_hash = serve_state.get_service_hash(pool) if pool else None
     user_hash = common_utils.get_user_hash()
 
     # Prepare task data

@@ -1,6 +1,6 @@
 resources:
   infra: aws
-  instance_type: g4dn.xlarge
+  accelerators: T4:1
   image_id:
     us-west-2: skypilot:gpu-ubuntu-1804
     us-east-2: skypilot:gpu-ubuntu-2004
