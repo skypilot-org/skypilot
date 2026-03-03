@@ -695,14 +695,17 @@ export function Users() {
   };
 
   // Show loading while fetching health check
-  const handleTabChange = useCallback((tab) => {
-    setActiveMainTab(tab);
-    if (tab === 'users') {
-      router.push('/users', undefined, { shallow: true });
-    } else {
-      router.push(`/users?tab=${tab}`, undefined, { shallow: true });
-    }
-  }, [router]);
+  const handleTabChange = useCallback(
+    (tab) => {
+      setActiveMainTab(tab);
+      if (tab === 'users') {
+        router.push('/users', undefined, { shallow: true });
+      } else {
+        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
+      }
+    },
+    [router]
+  );
 
   if (healthCheckLoading) {
     return (
@@ -740,7 +743,11 @@ export function Users() {
               Service Accounts
             </button>
           )}
-          <PluginSlot name="users.tabs" context={{ activeTab: activeMainTab, onTabChange: handleTabChange }} wrapperClassName="contents" />
+          <PluginSlot
+            name="users.tabs"
+            context={{ activeTab: activeMainTab, onTabChange: handleTabChange }}
+            wrapperClassName="contents"
+          />
         </div>
 
         <div className="flex items-center">
@@ -847,7 +854,11 @@ export function Users() {
             )}
           </div>
         ) : (
-          <PluginSlot name="users.tab-filter" context={{ activeTab: activeMainTab }} wrapperClassName="contents" />
+          <PluginSlot
+            name="users.tab-filter"
+            context={{ activeTab: activeMainTab }}
+            wrapperClassName="contents"
+          />
         )}
 
         {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
@@ -881,9 +892,7 @@ export function Users() {
         )}
 
         {/* Plugin actions slot for users tab */}
-        {activeMainTab === 'users' && (
-          <PluginSlot name="users.actions" />
-        )}
+        {activeMainTab === 'users' && <PluginSlot name="users.actions" />}
 
         {/* Create Service Account Button for Service Accounts Tab */}
         {activeMainTab === 'service-accounts' && serviceAccountTokenEnabled && (
@@ -966,9 +975,11 @@ export function Users() {
           />
         )
       ) : (
-        <PluginSlot name="users.tab-content" context={{ activeTab: activeMainTab }} />
+        <PluginSlot
+          name="users.tab-content"
+          context={{ activeTab: activeMainTab }}
+        />
       )}
-
 
       {/* Create User Dialog */}
       <Dialog
