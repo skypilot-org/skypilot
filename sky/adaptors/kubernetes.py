@@ -109,7 +109,9 @@ def _get_config_file() -> str:
 
 
 def _is_ssl_related_error(exc: BaseException) -> bool:
-    """True if the exception is an SSL/certificate error (e.g. after cert rotation)."""
+    """True if the exception is an SSL/certificate error (e.g. after cert
+    rotation).
+    """
     if exc is None:
         return False
     if isinstance(exc, ssl.SSLError):
@@ -334,7 +336,8 @@ class RetryableClientWrapper:
                     )
             if last_exc is not None:
                 raise last_exc
-            raise RuntimeError('Unexpected: SSL retry loop exited without exception')
+            raise RuntimeError(
+                'Unexpected: SSL retry loop exited without exception')
 
         return with_retry
 
@@ -406,17 +409,21 @@ def node_api(context: Optional[str] = None):
 
 
 def _clear_kubernetes_client_caches() -> None:
-    """Clear Kubernetes API client caches so the next call rebuilds from kubeconfig.
+    """Clear Kubernetes API client caches so the next call rebuilds from
+    kubeconfig.
 
     Used after SSL/cert errors (e.g. Teleport tbot rotation) so clients are
-    recreated with updated certificates. All API getters (including node_api) use
-    request-scoped cache, so clearing the request-level cache is sufficient.
+    recreated with updated certificates. All API getters (including node_api)
+    use request-scoped cache, so clearing the request-level cache is
+    sufficient.
     """
     annotations.clear_request_level_cache()
 
 
 def clear_kubernetes_client_caches() -> None:
-    """Clear Kubernetes API client caches (e.g. before outer retries on SSL errors)."""
+    """Clear Kubernetes API client caches (e.g. before outer retries on
+    SSL errors).
+    """
     _clear_kubernetes_client_caches()
 
 
