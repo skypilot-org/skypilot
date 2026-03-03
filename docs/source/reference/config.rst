@@ -1325,6 +1325,13 @@ Supported values:
    Requires ``Microsoft.Authorization/roleAssignments/write`` permission (same as
    SERVICE_ACCOUNT).
 
+.. note::
+
+   ``SERVICE_ACCOUNT`` prevents uploading local Azure credentials to Azure instances only.
+   If you are using other clouds, local Azure credentials may still be uploaded to non-Azure
+   instances (e.g., a GCP instance that needs to access Azure resources).
+   ``NO_UPLOAD`` prevents uploading Azure credentials to any instance, regardless of the cloud.
+
 4. **Custom managed identity name or resource ID**:
    Specify the name of an existing User-Assigned Managed Identity to use instead of the
    auto-created one. If a simple name is provided, SkyPilot will look for the identity in

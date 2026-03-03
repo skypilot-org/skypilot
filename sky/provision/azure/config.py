@@ -245,7 +245,7 @@ def _resolve_custom_managed_identity(remote_identity: Optional[str],
     Returns None if remote_identity is not a custom identity (i.e., it is
     None or an enum value like LOCAL_CREDENTIALS / SERVICE_ACCOUNT).
     """
-    if remote_identity is None:
+    if remote_identity is None or not isinstance(remote_identity, str):
         return None
 
     enum_values = {opt.value for opt in schemas.RemoteIdentityOptions}
