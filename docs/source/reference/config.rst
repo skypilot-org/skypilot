@@ -189,8 +189,6 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
     :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
     :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
-    :ref:`labels <config-yaml-azure-labels>`:
-      team: ml-infra
 
   :ref:`oci <config-yaml-oci>`:
     region_configs:
@@ -1370,8 +1368,6 @@ Format 2:
     ssh_proxy_command:
       eastus: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.eastus.proxy
       westus2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
-
-.. _config-yaml-azure-labels:
 
 .. _config-yaml-kubernetes:
 

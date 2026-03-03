@@ -148,7 +148,6 @@ def bootstrap_instances(
     if custom_vnet is not None:
         _remove_network_resources_from_template(template)
 
-
     logger.info(f'Using cluster name: {cluster_name_on_cloud}')
 
     cluster_id, nsg_name = get_cluster_id_and_nsg_name(
@@ -269,10 +268,12 @@ def _resolve_custom_vnet(vpc_name: Optional[str], subscription_id: str,
     except azure.exceptions().ResourceNotFoundError as e:
         # Also try listing all VNets and matching by name, in case the
         # VNet is in a different resource group within the subscription.
-        matches = [
-            v for v in network_client.virtual_networks.list_all()
-            if v.name == vpc_name and v.location == location
-        ]
+        matches = []
+        for v in network_client.virtual_networks.list_all():
+            if v.name == vpc_name and v.location == location:
+                matches.append(v)
+                if len(matches) > 1:
+                    break
         if not matches:
             raise exceptions.ResourcesUnavailableError(
                 f'No VNet with name {vpc_name!r} found in resource group '
