@@ -5,12 +5,9 @@ Thread safety notes:
 The API functions (core_api, batch_api, etc.) return cached clients that are
 created with context-specific ApiClient instances.
 
-Teleport tbot certificate rotation: When using Teleport's tbot for short-lived
-kubeconfig certificates, SSL errors can occur after rotation. The adaptor
-retries API calls on SSL-related errors (with a short delay to allow tbot to
-refresh the cert) after clearing client caches so that a new client is built
-from the updated kubeconfig (e.g. from KUBECONFIG=/var/lib/tbot/kubeconfig/
-kubeconfig.yaml).
+The adaptor retries API calls on SSL/certificate errors (with a short delay)
+after clearing client caches so that a new client is built from the updated
+kubeconfig.
 """
 import functools
 import logging
@@ -38,11 +35,6 @@ else:
                                    import_error_message=_IMPORT_ERROR_MESSAGE)
     urllib3 = common.LazyImport('urllib3',
                                 import_error_message=_IMPORT_ERROR_MESSAGE)
-
-# Default path for Teleport tbot kubeconfig (used when KUBECONFIG is not set
-# and API server runs with Teleport). Set KUBECONFIG to this path to enable
-# automatic cert rotation.
-TELEPORT_TBOT_KUBECONFIG_PATH = '/var/lib/tbot/kubeconfig/kubeconfig.yaml'
 
 # Timeout to use for API calls
 API_TIMEOUT = 5
@@ -284,8 +276,8 @@ class ClientWrapper:
                 logger.debug(f'Error closing Kubernetes client: {e}')
 
 
-# Max retries for SSL/cert errors (e.g. Teleport tbot rotation). Delay between
-# retries gives tbot time to write updated kubeconfig.
+# Max retries for SSL/cert errors (e.g. after cert rotation). Delay between
+# retries allows kubeconfig to be refreshed.
 _SSL_RETRY_ATTEMPTS = 3
 _SSL_RETRY_DELAY_SECONDS = 2
 
@@ -293,8 +285,8 @@ _SSL_RETRY_DELAY_SECONDS = 2
 class RetryableClientWrapper:
     """Wraps a Kubernetes API client to retry on SSL/cert errors.
 
-    When a method call raises an SSL-related error (e.g. after Teleport tbot
-    certificate rotation), clears client caches and retries with a short delay
+    When a method call raises an SSL-related error (e.g. after certificate
+    rotation), clears client caches and retries with a short delay
     so a new client is built from the updated kubeconfig.
     """
 
@@ -371,7 +363,8 @@ def core_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def storage_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.StorageV1Api(api_client=_get_api_client(context)))
+        kubernetes.client.StorageV1Api(
+            api_client=_get_api_client(context)))
     return _make_retryable(client, storage_api, context)
 
 
@@ -388,7 +381,8 @@ def auth_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def networking_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.NetworkingV1Api(api_client=_get_api_client(context)))
+        kubernetes.client.NetworkingV1Api(
+            api_client=_get_api_client(context)))
     return _make_retryable(client, networking_api, context)
 
 
@@ -396,7 +390,8 @@ def networking_api(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def custom_objects_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.CustomObjectsApi(api_client=_get_api_client(context)))
+        kubernetes.client.CustomObjectsApi(
+            api_client=_get_api_client(context)))
     return _make_retryable(client, custom_objects_api, context)
 
 
@@ -412,7 +407,7 @@ def _clear_kubernetes_client_caches() -> None:
     """Clear Kubernetes API client caches so the next call rebuilds from
     kubeconfig.
 
-    Used after SSL/cert errors (e.g. Teleport tbot rotation) so clients are
+    Used after SSL/cert errors (e.g. after cert rotation) so clients are
     recreated with updated certificates. All API getters (including node_api)
     use request-scoped cache, so clearing the request-level cache is
     sufficient.
@@ -454,7 +449,8 @@ def api_client(context: Optional[str] = None):
 @annotations.lru_cache(scope='request')
 def custom_resources_api(context: Optional[str] = None):
     client = ClientWrapper(
-        kubernetes.client.CustomObjectsApi(api_client=_get_api_client(context)))
+        kubernetes.client.CustomObjectsApi(
+            api_client=_get_api_client(context)))
     return _make_retryable(client, custom_resources_api, context)
 
 
