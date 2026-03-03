@@ -340,67 +340,82 @@ def _make_retryable(client: Any, getter: Callable, *args: Any,
     return RetryableClientWrapper(client, getter, args, kwargs)
 
 
-def wrap_kubernetes_client(func):
-    """Wraps kubernetes API clients for proper cleanup."""
+def _retryable_kubernetes_api(getter: Callable) -> Callable:
+    """Decorator that wraps a getter's return value (ClientWrapper) in
+    RetryableClientWrapper so SSL/cert errors trigger a retry via the getter.
 
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        obj = func(*args, **kwargs)
-        return ClientWrapper(obj)
+    The decorated function must return a ClientWrapper. The getter passed to
+    _make_retryable is the decorator's wrapper, so after cache clear the
+    next call re-invokes the cached getter and gets a fresh client.
+
+    When used under lru_cache(scope='request'), the cache may invoke the
+    wrapper with (args_tuple, kwargs_dict) as two positional args; we unpack
+    those so the getter is called with the real arguments.
+    """
+
+    @functools.wraps(getter)
+    def wrapper(*args: Any, **kwargs: Any) -> RetryableClientWrapper:
+        if (len(args) == 2 and isinstance(args[0], tuple) and
+                isinstance(args[1], dict) and not kwargs):
+            actual_args, actual_kwargs = args[0], args[1]
+        else:
+            actual_args, actual_kwargs = args, kwargs
+        client = getter(*actual_args, **actual_kwargs)
+        return _make_retryable(client, wrapper, args, kwargs)
 
     return wrapper
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def core_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.CoreV1Api(api_client=_get_api_client(context)))
-    return _make_retryable(client, core_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def storage_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.StorageV1Api(
             api_client=_get_api_client(context)))
-    return _make_retryable(client, storage_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def auth_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.RbacAuthorizationV1Api(
             api_client=_get_api_client(context)))
-    return _make_retryable(client, auth_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def networking_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.NetworkingV1Api(
             api_client=_get_api_client(context)))
-    return _make_retryable(client, networking_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def custom_objects_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.CustomObjectsApi(
             api_client=_get_api_client(context)))
-    return _make_retryable(client, custom_objects_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def node_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.NodeV1Api(api_client=_get_api_client(context)))
-    return _make_retryable(client, node_api, context)
 
 
 def _clear_kubernetes_client_caches() -> None:
@@ -424,42 +439,43 @@ def clear_kubernetes_client_caches() -> None:
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def apps_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.AppsV1Api(api_client=_get_api_client(context)))
-    return _make_retryable(client, apps_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def batch_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.BatchV1Api(api_client=_get_api_client(context)))
-    return _make_retryable(client, batch_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def api_client(context: Optional[str] = None):
-    client = ClientWrapper(_get_api_client(context))
-    return _make_retryable(client, api_client, context)
+    return ClientWrapper(_get_api_client(context))
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def custom_resources_api(context: Optional[str] = None):
-    client = ClientWrapper(
+    return ClientWrapper(
         kubernetes.client.CustomObjectsApi(
             api_client=_get_api_client(context)))
-    return _make_retryable(client, custom_resources_api, context)
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
 @annotations.lru_cache(scope='request')
+@_retryable_kubernetes_api
 def watch(context: Optional[str] = None):
     w = kubernetes.watch.Watch()
     w._api_client = _get_api_client(context)  # pylint: disable=protected-access
-    return _make_retryable(ClientWrapper(w), watch, context)
+    return ClientWrapper(w)
 
 
 def api_exception():

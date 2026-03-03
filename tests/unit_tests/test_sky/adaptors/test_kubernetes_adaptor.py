@@ -89,9 +89,9 @@ def test_watch_cleanup(monkeypatch):
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 
     w = kubernetes.watch()
-    # Keep a handle to the underlying watch instance created by the API
-    # so we can assert its _api_client.close() was called.
-    underlying = w._client
+    # Keep a handle to the underlying watch (skip RetryableClientWrapper and
+    # ClientWrapper) so we can assert its _api_client.close() was called.
+    underlying = w._client._client if hasattr(w._client, '_client') else w._client
     del w
     annotations.clear_request_level_cache()
     gc.collect()
@@ -234,14 +234,13 @@ def test_ssl_retry_on_cert_rotation(monkeypatch):
     def fake_core_v1_api(api_client=None):
         creation_count[0] += 1
         if creation_count[0] == 1:
-            return SimpleNamespace(
-                list_node=MagicMock(side_effect=ssl.SSLError(
-                    'certificate verify failed')))
-        return SimpleNamespace(
-            list_node=MagicMock(
-                return_value=SimpleNamespace(items=[MagicMock()])))
+            return SimpleNamespace(list_node=MagicMock(
+                side_effect=ssl.SSLError('certificate verify failed')))
+        return SimpleNamespace(list_node=MagicMock(return_value=SimpleNamespace(
+            items=[MagicMock()])))
 
-    monkeypatch.setattr(kubernetes, '_get_api_client',
+    monkeypatch.setattr(kubernetes,
+                        '_get_api_client',
                         lambda context=None: MagicMock())
     monkeypatch.setattr(kubernetes.kubernetes.client, 'CoreV1Api',
                         fake_core_v1_api)
