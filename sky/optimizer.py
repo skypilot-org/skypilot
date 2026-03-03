@@ -416,7 +416,7 @@ class Optimizer:
                     f'{node_resources_reprs}.'
                     f'\nTo fix: relax or change the '
                     f'resource requirements.{fuzzy_candidates_str}\n\n'
-                    f'Hint: {bold}sky show-gpus{reset} '
+                    f'Hint: {bold}sky gpus list{reset} '
                     'to list available accelerators.\n'
                     f'{indent_prefix}{bold}sky check{reset} to check the '
                     'enabled clouds.\n'
@@ -1030,7 +1030,7 @@ class Optimizer:
                             f'{colorama.Style.RESET_ALL}')
             if is_multi_instances:
                 logger.info(
-                    f'To list more details, run: sky show-gpus {acc_name}\n')
+                    f'To list more details, run: sky gpus list {acc_name}\n')
 
     @staticmethod
     @timeline.event
@@ -1475,7 +1475,7 @@ class Optimizer:
         if local_best_plan is None:
             error_msg = (f'No launchable resource found for task {task}. '
                          'To fix: relax its resource requirements.\n'
-                         'Hint: \'sky show-gpus --all\' '
+                         'Hint: \'sky gpus list --all\' '
                          'to list available accelerators.\n'
                          '      \'sky check\' to check the enabled clouds.')
             with ux_utils.print_exception_no_traceback():
@@ -1761,6 +1761,12 @@ def _fill_in_launchable_resources(
                                     'or add "+" to the end of the memory size '
                                     'to allow for larger instances.'
                                     f'{colorama.Style.RESET_ALL}')
+                    if resources.local_disk is not None:
+                        logger.info(
+                            f'{colorama.Fore.LIGHTBLACK_EX}'
+                            '- Try using "+" suffix for at-least matching '
+                            '(e.g., "nvme:500+"), or reduce the size '
+                            f'requirement. {colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
                                 f'{repr(cloud)}: {hint}'

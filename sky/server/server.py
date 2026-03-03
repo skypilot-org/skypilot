@@ -34,6 +34,7 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
+import jwt as pyjwt
 import starlette.middleware.base
 import uvloop
 
@@ -55,6 +56,7 @@ from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import utils as slurm_utils
+from sky.recipes import server as recipes_rest
 from sky.schemas.api import responses
 from sky.serve.server import server as serve_rest
 from sky.server import common
@@ -96,6 +98,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
@@ -192,15 +195,81 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
-def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
-    header_name = os.environ.get(constants.ENV_VAR_SERVER_AUTH_USER_HEADER,
-                                 'X-Auth-Request-Email')
-    if header_name not in request.headers:
+def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
+    """Extract identity claim from a JWT token without verification.
+
+    This is for trusted proxy scenarios where the external proxy has already
+    verified the token. We only decode to extract the claim.
+
+    Args:
+        jwt_token: The JWT token string.
+        claim: The claim name to extract (e.g., 'email', 'sub').
+
+    Returns:
+        The claim value if found, None otherwise.
+    """
+    try:
+        # Trusted proxy scenario - skip all verification since the proxy
+        # has already authenticated the request
+        payload = pyjwt.decode(jwt_token,
+                               options={
+                                   'verify_signature': False,
+                                   'verify_exp': False,
+                                   'verify_aud': False,
+                               })
+        return payload.get(claim)
+    except pyjwt.exceptions.DecodeError as e:
+        logger.debug(f'Failed to decode JWT from header: {e}')
         return None
-    user_name = request.headers[header_name]
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Unexpected error decoding JWT: {e}')
+        return None
+
+
+def _extract_user_from_header(
+    request: fastapi.Request,
+    proxy_config: server_config.ExternalProxyConfig,
+) -> Optional[models.User]:
+    """Extract user identity from request header.
+
+    Supports both plaintext headers (e.g., X-Auth-Request-Email) and
+    JWT-encoded headers.
+    """
+    if proxy_config.header_name not in request.headers:
+        return None
+
+    header_value = request.headers[proxy_config.header_name]
+
+    if proxy_config.header_format == 'jwt':
+        user_name = _extract_identity_from_jwt(header_value,
+                                               proxy_config.jwt_identity_claim)
+    else:
+        user_name = header_value
+
+    if not user_name:
+        return None
+
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    return models.User(id=user_hash, name=user_name)
+    if proxy_config.enabled:
+        return models.User(id=user_hash,
+                           name=user_name,
+                           user_type=models.UserType.LEGACY.value)
+    else:
+        return models.User(id=user_hash,
+                           name=user_name,
+                           user_type=models.UserType.SSO.value)
+
+
+def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
+    """Legacy function for backward compatibility.
+
+    This function is used by _generate_auth_token() which does not have
+    access to the middleware config. It uses the default configuration
+    which is backward compatible.
+    """
+    proxy_config = server_config.load_external_proxy_config()
+    return _extract_user_from_header(request, proxy_config)
 
 
 def _generate_auth_token(request: fastapi.Request) -> str:
@@ -416,10 +485,28 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
 @middleware_utils.websocket_aware
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
-    """Middleware to handle auth proxy."""
+    """Middleware to handle external auth proxy.
+
+    This middleware extracts user identity from HTTP headers set by an
+    external authentication proxy (e.g., oauth2-proxy)
+    """
+
+    # pylint: disable=redefined-outer-name
+    def __init__(self, app, **kwargs):
+        super().__init__(app, **kwargs)
+        self.config = server_config.load_external_proxy_config()
+        if self.config.enabled:
+            logger.debug('AuthProxyMiddleware enabled with header: '
+                         f'{self.config.header_name}, '
+                         f'format: {self.config.header_format}')
+        else:
+            logger.debug('AuthProxyMiddleware disabled via configuration')
 
     async def dispatch(self, request: fastapi.Request, call_next):
-        auth_user = _get_auth_user_header(request)
+        if not self.config.enabled:
+            return await call_next(request)
+
+        auth_user = _extract_user_from_header(request, self.config)
 
         if request.state.auth_user is not None:
             # Previous middleware is trusted more than this middleware.  For
@@ -677,7 +764,10 @@ app.add_middleware(oauth2_proxy.OAuth2ProxyMiddleware)
 # auth user.
 app.add_middleware(AuthProxyMiddleware)
 enable_basic_auth = os.environ.get(constants.ENV_VAR_ENABLE_BASIC_AUTH, 'false')
-if str(enable_basic_auth).lower() == 'true':
+disable_basic_auth_middleware = os.environ.get(
+    constants.SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE, 'false')
+if (str(enable_basic_auth).lower() == 'true' and
+        str(disable_basic_auth_middleware).lower() != 'true'):
     app.add_middleware(BasicAuthMiddleware)
 # Bearer token middleware should always be present to handle service account
 # authentication
@@ -708,6 +798,7 @@ app.include_router(volumes_rest.router, prefix='/volumes', tags=['volumes'])
 app.include_router(ssh_node_pools_rest.router,
                    prefix='/ssh_node_pools',
                    tags=['ssh_node_pools'])
+app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
@@ -965,6 +1056,21 @@ async def status_kubernetes(request: fastapi.Request) -> None:
     )
 
 
+@app.post('/kubernetes_label_gpus')
+async def kubernetes_label_gpus(
+        request: fastapi.Request,
+        kubernetes_label_gpus_body: payloads.KubernetesLabelGpusBody) -> None:
+    """Labels GPU nodes in a Kubernetes cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.KUBERNETES_LABEL_GPUS,
+        request_body=kubernetes_label_gpus_body,
+        func=gpu_labeler.label_gpus_server,
+        schedule_type=requests_lib.ScheduleType.LONG,  # Can take 10+ min
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.post('/list_accelerators')
 async def list_accelerators(
         request: fastapi.Request,
@@ -1202,6 +1308,16 @@ async def unzip_file(zip_file_path: pathlib.Path,
                     original_path = os.path.normpath(member.filename)
                     new_path = client_file_mounts_dir / original_path.lstrip(
                         '/')
+
+                    # Security check: ensure extracted path stays within target
+                    # directory to prevent Zip Slip attacks (path traversal via
+                    # malicious "../" sequences in archive member names).
+                    resolved_path = new_path.resolve()
+                    if not _is_relative_to(resolved_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(
+                            f'Zip member {member.filename!r} would extract '
+                            'outside target directory. Aborted.')
 
                     if (member.external_attr >> 28) == 0xA:
                         # Symlink. Read the target path and create a symlink.
@@ -1954,6 +2070,8 @@ async def api_status(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
         None, description='Fields to get. If None, get all fields.'),
+    cluster_name: Optional[str] = fastapi.Query(
+        None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -1966,6 +2084,7 @@ async def api_status(
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
+                cluster_names=[cluster_name] if cluster_name else None,
                 limit=limit,
                 fields=fields,
                 sort=True,
@@ -2075,6 +2194,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         ingress_basic_auth_enabled=os.environ.get(
             constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
             'false').lower() == 'true',
+        # Whether external proxy auth is enabled (from server.yaml config)
+        external_proxy_auth_enabled=server_config.load_external_proxy_config().
+        enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
     )
@@ -2333,7 +2455,7 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
     login_node_host = login_node_ssh_config['hostname']
     login_node_port = int(login_node_ssh_config['port'])
     login_node_user = login_node_ssh_config['user']
-    login_node_key = login_node_ssh_config['private_key']
+    login_node_key = login_node_ssh_config.get('private_key', None)
     login_node_proxy_command = login_node_ssh_config.get('proxycommand', None)
     login_node_proxy_jump = login_node_ssh_config.get('proxyjump', None)
 
@@ -2367,9 +2489,17 @@ async def slurm_job_ssh_proxy(websocket: fastapi.WebSocket,
 
     # Run sshd inside the Slurm job "container" via srun, such that it inherits
     # the resource constraints of the Slurm job.
+    is_container_image = handle.launched_resources.extract_docker_image(
+    ) is not None
     ssh_cmd += [
         shlex.quote(
-            slurm_utils.srun_sshd_command(job_id, target_node, login_node_user))
+            slurm_utils.srun_sshd_command(
+                job_id,
+                target_node,
+                login_node_user,
+                handle.cluster_name_on_cloud,
+                is_container_image,
+            ))
     ]
 
     proc = await asyncio.create_subprocess_shell(
@@ -2605,6 +2735,13 @@ async def serve_dashboard(full_path: str):
         if os.path.isfile(plugin_catchall):
             return fastapi.responses.FileResponse(plugin_catchall)
 
+    # Serve recipe detail page for any /recipes/* paths (dynamic route)
+    if full_path.startswith('recipes/') and full_path != 'recipes/':
+        recipe_page = os.path.join(server_constants.DASHBOARD_DIR, 'recipes',
+                                   '[recipe].html')
+        if os.path.isfile(recipe_page):
+            return fastapi.responses.FileResponse(recipe_page)
+
     # Serve index.html for client-side routing
     # e.g. /clusters, /jobs
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
@@ -2654,6 +2791,15 @@ def _init_or_restore_server_user_hash():
 
 
 if __name__ == '__main__':
+    # Raise the websockets library header limits before importing uvicorn.
+    # The env vars are read by websockets.http11 and websockets.legacy.http
+    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
+    os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
+                          server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
+    os.environ.setdefault('WEBSOCKETS_MAX_NUM_HEADERS',
+                          server_constants.WEBSOCKETS_MAX_NUM_HEADERS)
+
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn

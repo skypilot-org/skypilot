@@ -29,6 +29,7 @@ import {
   calculateAggregatedResource,
 } from '@/utils/resourceUtils';
 import { buildContextStatsKey } from '@/utils/infraUtils';
+import { canonicalizeGpuName } from '@/utils/gpuUtils';
 import {
   getWorkspaceInfrastructure,
   getWorkspaceContexts,
@@ -89,6 +90,7 @@ import {
 // Set the refresh interval to align with other pages
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
+const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
@@ -267,10 +269,10 @@ export function InfrastructureSection({
               <div
                 className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                   isTableRefreshing ? 'infra-table-refreshing' : ''
-                }`}
+                } ${safeContexts.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
               >
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
                       <th className="p-3 text-left font-medium text-gray-600 w-1/4">
                         Name
@@ -302,9 +304,7 @@ export function InfrastructureSection({
                       </th>
                     </tr>
                   </thead>
-                  <tbody
-                    className={`bg-white divide-y divide-gray-200 ${safeContexts.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                  >
+                  <tbody className="bg-white divide-y divide-gray-200">
                     {safeContexts.map((context) => {
                       const gpus = groupedPerContextGPUs[context] || [];
                       const nodes = groupedPerNodeGPUs[context] || [];
@@ -340,8 +340,8 @@ export function InfrastructureSection({
                       const gpuTypes = (() => {
                         if (gpus.length === 0) return null;
                         const typeCounts = gpus.reduce((acc, gpu) => {
-                          acc[gpu.gpu_name] =
-                            (acc[gpu.gpu_name] || 0) + (gpu.gpu_total || 0);
+                          const name = canonicalizeGpuName(gpu.gpu_name);
+                          acc[name] = (acc[name] || 0) + (gpu.gpu_total || 0);
                           return acc;
                         }, {});
 
@@ -491,10 +491,10 @@ export function InfrastructureSection({
                 <div
                   className={`overflow-x-auto rounded-md border shadow-sm bg-card ${
                     isTableRefreshing ? 'infra-table-refreshing' : ''
-                  }`}
+                  } ${gpus.length > TABLE_MAX_ROWS_BEFORE_SCROLL ? 'max-h-[300px] overflow-y-auto' : ''}`}
                 >
                   <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
                       <tr>
                         <th className="p-3 text-left font-medium text-gray-600 w-1/4 whitespace-nowrap">
                           GPU
@@ -515,16 +515,18 @@ export function InfrastructureSection({
                         </th>
                       </tr>
                     </thead>
-                    <tbody
-                      className={`bg-white divide-y divide-gray-200 ${gpus.length > 5 ? 'max-h-[250px] overflow-y-auto block' : ''}`}
-                    >
+                    <tbody className="bg-white divide-y divide-gray-200">
                       {gpus.map((gpu) => {
                         // Find the requestable quantities from contexts
                         const requestableQtys = groupedPerContextGPUs
                           ? Object.values(groupedPerContextGPUs)
                               .flat()
                               .filter((g) => {
-                                if (g.gpu_name !== gpu.gpu_name) return false;
+                                if (
+                                  canonicalizeGpuName(g.gpu_name) !==
+                                  gpu.gpu_name
+                                )
+                                  return false;
                                 if (isSlurm) return true; // For Slurm, include all
                                 // For Kubernetes/SSH, filter by context type
                                 const contextKey = g.context || g.cluster;
@@ -541,7 +543,7 @@ export function InfrastructureSection({
                         return (
                           <tr key={gpu.gpu_name}>
                             <td className="p-3 font-medium w-24 whitespace-nowrap">
-                              {gpu.gpu_name}
+                              {canonicalizeGpuName(gpu.gpu_name)}
                             </td>
                             <td className="p-3 text-xs text-gray-600">
                               {requestableQtys || '-'} / node
@@ -724,7 +726,7 @@ export function ContextDetails({
                     >
                       <div className="flex justify-between items-center mb-1.5 flex-wrap">
                         <div className="font-medium text-gray-800 text-sm">
-                          {gpu.gpu_name}
+                          {canonicalizeGpuName(gpu.gpu_name)}
                           <span className="text-xs text-gray-500 ml-2">
                             (Requestable: {gpu.gpu_requestable_qty_per_node} /
                             node)
@@ -885,7 +887,7 @@ export function ContextDetails({
                           </>
                         )}
                         <td className="p-3 whitespace-nowrap text-gray-700">
-                          {node.gpu_name}
+                          {canonicalizeGpuName(node.gpu_name)}
                         </td>
                         <td className="p-3 whitespace-nowrap text-gray-700">
                           {utilizationStr}
@@ -2397,13 +2399,14 @@ export function GPUs() {
   useEffect(() => {
     const gpuSummary = {};
     perContextGPUs.forEach((gpu) => {
-      if (gpu.gpu_name in gpuSummary) {
-        gpuSummary[gpu.gpu_name].gpu_total += gpu.gpu_total || 0;
-        gpuSummary[gpu.gpu_name].gpu_free += gpu.gpu_free || 0;
-        gpuSummary[gpu.gpu_name].gpu_not_ready += gpu.gpu_not_ready || 0;
+      const gpuName = canonicalizeGpuName(gpu.gpu_name);
+      if (gpuName in gpuSummary) {
+        gpuSummary[gpuName].gpu_total += gpu.gpu_total || 0;
+        gpuSummary[gpuName].gpu_free += gpu.gpu_free || 0;
+        gpuSummary[gpuName].gpu_not_ready += gpu.gpu_not_ready || 0;
       } else {
-        gpuSummary[gpu.gpu_name] = {
-          gpu_name: gpu.gpu_name,
+        gpuSummary[gpuName] = {
+          gpu_name: gpuName,
           gpu_total: gpu.gpu_total || 0,
           gpu_free: gpu.gpu_free || 0,
           gpu_not_ready: gpu.gpu_not_ready || 0,
@@ -2629,7 +2632,7 @@ export function GPUs() {
     const sshGpuNames = new Set();
     perContextGPUs.forEach((gpu) => {
       if (gpu.context.startsWith('ssh-')) {
-        sshGpuNames.add(gpu.gpu_name);
+        sshGpuNames.add(canonicalizeGpuName(gpu.gpu_name));
       }
     });
 
@@ -2644,7 +2647,7 @@ export function GPUs() {
     const kubeGpuNames = new Set();
     perContextGPUs.forEach((gpu) => {
       if (!gpu.context.startsWith('ssh-')) {
-        kubeGpuNames.add(gpu.gpu_name);
+        kubeGpuNames.add(canonicalizeGpuName(gpu.gpu_name));
       }
     });
 
@@ -3276,7 +3279,7 @@ function CloudGpuTable({ data, title }) {
             {paginatedData.map((gpu, idx) => (
               <tr key={`${gpu.gpu_name}-${idx}`}>
                 <td className="p-2 whitespace-nowrap text-gray-700">
-                  {gpu.gpu_name}
+                  {canonicalizeGpuName(gpu.gpu_name)}
                 </td>
                 <td className="p-2 whitespace-nowrap text-gray-700">
                   {gpu.gpu_quantities}

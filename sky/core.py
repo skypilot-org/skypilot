@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
@@ -20,6 +21,7 @@ from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.backends import task_codegen
 from sky.clouds import cloud as sky_cloud
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -716,8 +718,84 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
     return message
 
 
+def _graceful_job_cancel(handle: backends.ResourceHandle,
+                         backend: backends.Backend,
+                         cluster_name: str,
+                         timeout: Optional[int] = None,
+                         terminate: bool = True) -> None:
+    """Stop jobs and flush rclone uploads on all nodes in parallel."""
+    op = 'shutdown' if terminate else 'stop'
+    if (not isinstance(handle, backends.CloudVmRayResourceHandle) or
+            not isinstance(backend, backends.CloudVmRayBackend)):
+        logger.warning(f'Graceful {op} only available for '
+                       'CloudVmRayBackend. Skipping...')
+        return
+
+    # Kill all running jobs on the cluster
+    logger.info(f'Graceful {op} enabled. Terminating user jobs on '
+                f'{cluster_name}...')
+    try:
+        backend.cancel_jobs(handle, jobs=None, cancel_all=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to cancel jobs: {e}')
+
+    # Flush rclone uploads on all nodes in parallel
+    logger.info('Flushing MOUNT_CACHED uploads on all nodes of '
+                f'{cluster_name!r}...')
+
+    # Get the flush script
+    flush_script = task_codegen.TaskCodeGen.get_rclone_flush_script()
+
+    # Wrap with timeout if specified
+    if timeout:
+        flush_script = f'timeout {timeout} bash -c {shlex.quote(flush_script)}'
+
+    runners = handle.get_command_runners()
+    node_args = [(i, runner) for i, runner in enumerate(runners)]
+    errors = []
+    logger.debug(f'Waiting for uploads on {len(runners)} node(s)...')
+
+    def run_flush_on_node(args):
+        """Run flush script on a single node."""
+        node_id, runner = args
+        try:
+            returncode, stdout, stderr = runner.run(
+                flush_script,
+                stream_logs=False,
+                require_outputs=True,
+            )
+            return (node_id, returncode, stdout, stderr)
+        except Exception as e:  # pylint: disable=broad-except
+            return (node_id, -1, '', str(e))
+
+    parallel_results = subprocess_utils.run_in_parallel(
+        run_flush_on_node,
+        node_args,
+        num_threads=len(runners),
+    )
+
+    for node_id, returncode, _, stderr in parallel_results:
+        if returncode == 0:
+            logger.debug(f'Node {node_id}: uploads flushed successfully')
+        elif returncode == 124:  # timeout exit code
+            logger.warning(f'Node {node_id}: flush timed out after {timeout}s')
+            errors.append(f'Node {node_id}: timeout')
+        else:
+            logger.warning(
+                f'Node {node_id}: flush failed (rc={returncode}): {stderr}')
+            errors.append(f'Node {node_id}: {stderr}')
+
+    if errors:
+        logger.warning(f'Some nodes had flush errors: {errors}')
+    else:
+        logger.debug(f'All MOUNT_CACHED uploads completed on {cluster_name!r}')
+
+
 @usage_lib.entrypoint
-def down(cluster_name: str, purge: bool = False) -> None:
+def down(cluster_name: str,
+         purge: bool = False,
+         graceful: bool = False,
+         graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tears down a cluster.
 
@@ -733,6 +811,10 @@ def down(cluster_name: str, purge: bool = False) -> None:
             troubleshooting scenarios; with it set, it is the user's
             responsibility to ensure there are no leaked instances and related
             resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
@@ -745,14 +827,24 @@ def down(cluster_name: str, purge: bool = False) -> None:
     if handle is None:
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    if graceful:
+        _graceful_job_cancel(handle,
+                             backend,
+                             cluster_name,
+                             graceful_timeout,
+                             terminate=True)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
     backend.teardown(handle, terminate=True, purge=purge)
 
 
 @usage_lib.entrypoint
-def stop(cluster_name: str, purge: bool = False) -> None:
+def stop(cluster_name: str,
+         purge: bool = False,
+         graceful: bool = False,
+         graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stops a cluster.
 
@@ -771,6 +863,10 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             certain manual troubleshooting scenarios; with it set, it is the
             user's responsibility to ensure there are no leaked instances and
             related resources.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
@@ -811,6 +907,13 @@ def stop(cluster_name: str, purge: bool = False) -> None:
                 f'  {_stop_not_supported_message(handle.launched_resources)}.\n'
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {cluster_name}') from e
+
+    if graceful:
+        _graceful_job_cancel(handle,
+                             backend,
+                             cluster_name,
+                             graceful_timeout,
+                             terminate=False)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)
@@ -1464,7 +1567,7 @@ def realtime_kubernetes_gpu_availability(
             err_msg = (f'Resources{gpu_info_msg} not found '
                        f'in {cloud_identity_capital} clusters. ')
             debug_msg = (f'To show available accelerators on {cloud_identity}, '
-                         f' run: sky show-gpus --cloud {cloud_identity} ')
+                         f' run: sky gpus list --cloud {cloud_identity} ')
         full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                         debug_msg)
         raise ValueError(full_err_msg)
@@ -1472,11 +1575,12 @@ def realtime_kubernetes_gpu_availability(
 
 
 def realtime_slurm_gpu_availability(
-        slurm_cluster_name: Optional[str] = None,
-        name_filter: Optional[str] = None,
-        quantity_filter: Optional[int] = None,
-        env_vars: Optional[Dict[str, str]] = None,
-        **kwargs) -> List[Tuple[str, List[models.RealtimeGpuAvailability]]]:
+    slurm_cluster_name: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None,
+    env_vars: Optional[Dict[str, str]] = None,
+    **kwargs,
+) -> List[Tuple[str, List[models.RealtimeGpuAvailability], Optional[str]]]:
     """Gets Slurm real-time GPU availability grouped by partition.
 
     This function calls the Slurm backend to fetch GPU info.
@@ -1526,7 +1630,8 @@ def realtime_slurm_gpu_availability(
     #       "Slurm is not enabled. Run 'sky check' to enable it.")
 
     def realtime_slurm_gpu_availability_single(
-            slurm_cluster_name: str) -> List[models.RealtimeGpuAvailability]:
+        slurm_cluster_name: str,
+    ) -> Tuple[List[models.RealtimeGpuAvailability], Optional[str]]:
         try:
             # This function now returns aggregated data per GPU type:
             # Tuple[Dict[str, List[InstanceTypeInfo]], Dict[str, int],
@@ -1544,19 +1649,18 @@ def realtime_slurm_gpu_availability(
                     clouds='slurm',
                     case_sensitive=False,
                 ))
-        except exceptions.NotSupportedError as e:
-            logger.error(f'Failed to query Slurm GPU availability: {e}')
-            raise
         except ValueError as e:
-            # Re-raise ValueError if no GPUs are found matching the filters
-            logger.error(f'Error querying Slurm GPU availability: {e}')
-            raise
-        except Exception as e:
-            logger.error(
-                'Error querying Slurm GPU availability: '
+            # No GPUs found matching the filters for this cluster
+            logger.debug(f'No matching GPUs in Slurm cluster '
+                         f'{slurm_cluster_name!r}: '
+                         f'{common_utils.format_exception(e)}')
+            return [], None
+        except Exception as e:  # pylint: disable=broad-except
+            logger.debug(
+                f'Error querying Slurm cluster {slurm_cluster_name!r}: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-            raise ValueError(
-                f'Error querying Slurm GPU availability: {e}') from e
+            return [], (f'Could not query Slurm cluster for info: '
+                        f'{common_utils.format_exception(e)}')
 
         # --- Format the output ---
         realtime_gpu_availability_list: List[
@@ -1569,18 +1673,17 @@ def realtime_slurm_gpu_availability(
                     total_capacity[gpu_type],
                     total_available[gpu_type],
                 ))
-        return realtime_gpu_availability_list
+        return realtime_gpu_availability_list, None
 
     parallel_queried = subprocess_utils.run_in_parallel(
         realtime_slurm_gpu_availability_single, slurm_cluster_names)
-    availability_lists: List[Tuple[str,
-                                   List[models.RealtimeGpuAvailability]]] = []
-    for slurm_cluster_name, queried in zip(slurm_cluster_names,
-                                           parallel_queried):
-        if len(queried) == 0:
-            logger.debug(f'No gpus found in Slurm cluster {slurm_cluster_name}')
+    availability_lists: List[Tuple[str, List[models.RealtimeGpuAvailability],
+                                   Optional[str]]] = []
+    for name, (queried, error) in zip(slurm_cluster_names, parallel_queried):
+        if len(queried) == 0 and error is None:
+            logger.debug(f'No gpus found in Slurm cluster {name}')
             continue
-        availability_lists.append((slurm_cluster_name, queried))
+        availability_lists.append((name, queried, error))
     return availability_lists
 
 

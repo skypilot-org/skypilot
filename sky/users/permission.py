@@ -114,7 +114,10 @@ class PermissionService:
                 logger.debug(f'Basic auth user {username} already exists')
                 return
             global_user_state.add_or_update_user(
-                models.User(id=user_hash, name=username, password=password))
+                models.User(id=user_hash,
+                            name=username,
+                            password=password,
+                            user_type=models.UserType.BASIC.value))
             enforcer = self._ensure_enforcer()
             enforcer.add_grouping_policy(user_hash, rbac.RoleName.ADMIN.value)
             enforcer.save_policy()

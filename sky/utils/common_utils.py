@@ -9,6 +9,7 @@ import gc
 import getpass
 import hashlib
 import inspect
+import json
 import os
 import platform
 import random
@@ -188,6 +189,35 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 'ensure it is fully matched by regex (e.g., '
                 'only contains letters, numbers and dash): '
                 f'{valid_regex}')
+
+
+def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
+    """Errors out on invalid recipe names.
+
+    Recipe names must:
+    - Start with a letter
+    - Contain only letters, numbers, and dashes (no underscores or dots)
+    - End with a letter or number
+    - Be at most constants.RECIPE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the recipe name is invalid.
+    """
+    if recipe_name is None:
+        return
+    if len(recipe_name) > constants.RECIPE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is too long; '
+                f'maximum length is {constants.RECIPE_NAME_MAX_LENGTH} '
+                f'characters, got {len(recipe_name)}')
+    valid_regex = constants.RECIPE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, recipe_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers, and dashes).')
 
 
 def make_cluster_name_on_cloud(display_name: str,
@@ -1161,3 +1191,83 @@ def compute_code_challenge(code_verifier: str) -> str:
     """
     digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
     return base64_url_encode(digest)
+
+
+def merge_node_names_lineage(
+        existing_json: Optional[str],
+        current_names: Optional[List[str]]) -> Optional[str]:
+    """Merge current node names into the existing node name lineage.
+
+    The node_names column stores a JSON list of lists. Each inner list
+    represents one node (head first, then workers) and contains the
+    lineage of names that have been assigned to that node over time
+    (e.g. across recovery events). Each inner list is capped at
+    constants.MAX_NODE_NAME_LINEAGE entries.
+
+    Args:
+        existing_json: JSON string of list-of-lists from the DB, or None.
+        current_names: List of current node names (head first), or None.
+
+    Returns:
+        JSON string of list-of-lists with lineage updated, or None.
+    """
+    if current_names is None:
+        return existing_json
+
+    existing: List[List[str]] = []
+    if existing_json is not None:
+        try:
+            parsed = json.loads(existing_json)
+            if isinstance(parsed, list):
+                existing = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    result: List[List[str]] = []
+    for i, name in enumerate(current_names):
+        if i < len(existing) and isinstance(existing[i], list):
+            lineage = list(existing[i])
+            # Only append if name is valid and different from last entry
+            if name and (not lineage or lineage[-1] != name):
+                lineage.append(name)
+            # Cap at max lineage length
+            if len(lineage) > constants.MAX_NODE_NAME_LINEAGE:
+                lineage = lineage[-constants.MAX_NODE_NAME_LINEAGE:]
+        else:
+            lineage = [name] if name else []
+        result.append(lineage)
+
+    return json.dumps(result) if result else None
+
+
+def get_display_node_names(node_names_json: Optional[str]) -> Optional[str]:
+    """Extract display node names from the lineage JSON.
+
+    Takes the last entry from each inner list (the most recent name for
+    each node) and returns them as a comma-separated string.
+
+    Args:
+        node_names_json: JSON string of list-of-lists, or None.
+
+    Returns:
+        Comma-separated string of current node names, or None.
+    """
+    if node_names_json is None:
+        return None
+
+    try:
+        lineage = json.loads(node_names_json)
+        if not isinstance(lineage, list):
+            # Backward compat: might be old comma-separated format
+            return node_names_json
+        names = []
+        for node_lineage in lineage:
+            if isinstance(node_lineage, list) and node_lineage:
+                names.append(node_lineage[-1])
+            elif isinstance(node_lineage, str):
+                # Backward compat: flat list of strings
+                names.append(node_lineage)
+        return ','.join(names) if names else None
+    except (json.JSONDecodeError, TypeError):
+        # Backward compat: return as-is if not valid JSON
+        return node_names_json

@@ -126,7 +126,7 @@ def add_column_to_table(
 
 def add_all_tables_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
-    engine: sqlalchemy.Engine,
+    engine: Union[sqlalchemy.Engine, sqlalchemy.engine.Connection],
 ):
     """Add tables to the database."""
     for table in metadata.tables.values():
@@ -142,7 +142,7 @@ def add_all_tables_to_db_sqlalchemy(
 
 def add_table_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
-    engine: sqlalchemy.Engine,
+    engine: Union[sqlalchemy.Engine, sqlalchemy.engine.Connection],
     table_name: str,
 ):
     """Add a specific table to the database."""
@@ -416,6 +416,66 @@ class SQLiteConn(threading.local):
         self.conn.close()
 
 
+class DatabaseManager:
+    """Encapsulates lazy engine initialization with double-checked locking.
+
+    Replaces the common pattern of module-level globals (_SQLALCHEMY_ENGINE,
+    _SQLALCHEMY_ENGINE_LOCK) and per-module initialize_and_get_db() functions.
+
+    Usage:
+        _db_manager = DatabaseManager('my_db', create_table_fn)
+    """
+
+    def __init__(
+        self,
+        db_name: str,
+        create_table_fn: Callable[[sqlalchemy.engine.Engine], Any],
+        post_init_fn: Optional[Callable[[sqlalchemy.engine.Engine],
+                                        Any]] = None,
+    ):
+        self._db_name = db_name
+        self._create_table_fn = create_table_fn
+        self._post_init_fn = post_init_fn
+        self._lock = threading.Lock()
+        self._engine: Optional[sqlalchemy.engine.Engine] = None
+        self._engine_async: Optional[sqlalchemy_async.AsyncEngine] = None
+
+    def get_engine(self) -> sqlalchemy.engine.Engine:
+        """Lazy sync engine init with double-checked locking."""
+        if self._engine is not None:
+            return self._engine
+        with self._lock:
+            if self._engine is not None:
+                return self._engine
+            engine = get_engine(self._db_name)
+            self._create_table_fn(engine)
+            # Set _engine before post_init_fn so that post_init_fn
+            # can access self.engine (e.g. _sqlite_supports_returning).
+            self._engine = engine
+            if self._post_init_fn is not None:
+                self._post_init_fn(engine)
+            return self._engine
+
+    async def get_async_engine(self) -> sqlalchemy_async.AsyncEngine:
+        """Lazy async engine init; delegates table creation to get_engine."""
+        if self._engine_async is not None:
+            return self._engine_async
+
+        def init_db():
+            with self._lock:
+                if self._engine_async is not None:
+                    return
+                self._engine_async = get_engine(self._db_name,
+                                                async_engine=True)
+            # Ensure tables are created via the sync path.
+            self.get_engine()
+
+        # Use asyncio.to_thread to avoid blocking the event loop, matching the
+        # original _init_db_async pattern.
+        await asyncio.to_thread(init_db)
+        return self._engine_async
+
+
 _max_connections = 0
 _postgres_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
 _sqlite_engine_cache: Dict[str, sqlalchemy.engine.Engine] = {}
@@ -472,32 +532,31 @@ def get_engine(
                 logger.debug(
                     f'Creating a new postgres {engine_type} engine with '
                     f'maximum {_max_connections} connections')
-                if _max_connections == 0:
-                    kw_args = {'poolclass': sqlalchemy.NullPool}
-                    if async_engine:
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy_async.create_async_engine(
-                                conn_string, **kw_args))
-                    else:
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy.create_engine(conn_string, **kw_args))
+                if async_engine:
+                    # Use NullPool for async engines to avoid event loop binding
+                    # issues. asyncpg connection pools bind to the event loop on
+                    # first use, which causes "Future attached to a different
+                    # loop" errors if the engine is created in a different
+                    # context (e.g., a thread). NullPool creates a fresh
+                    # connection per operation, avoiding this issue.
+                    # Refer to https://docs.sqlalchemy.org/en/21/orm/extensions/asyncio.html#using-multiple-asyncio-event-loops for more details. # pylint: disable=line-too-long
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy_async.create_async_engine(
+                            conn_string, poolclass=sqlalchemy.NullPool))
+                elif _max_connections == 0:
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(conn_string,
+                                                 poolclass=sqlalchemy.NullPool))
                 else:
-                    kw_args = {
-                        'pool_size': _max_connections,
-                        'max_overflow': max(0, 5 - _max_connections),
-                        'pool_pre_ping': True,
-                        'pool_recycle': 1800
-                    }
-                    if async_engine:
-                        kw_args[
-                            'poolclass'] = sqlalchemy.pool.AsyncAdaptedQueuePool
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy_async.create_async_engine(
-                                conn_string, **kw_args))
-                    else:
-                        kw_args['poolclass'] = sqlalchemy.pool.QueuePool
-                        _postgres_engine_cache[conn_string] = (
-                            sqlalchemy.create_engine(conn_string, **kw_args))
+                    # Sync engines can safely use QueuePool for connection reuse
+                    _postgres_engine_cache[conn_string] = (
+                        sqlalchemy.create_engine(
+                            conn_string,
+                            poolclass=sqlalchemy.pool.QueuePool,
+                            pool_size=_max_connections,
+                            max_overflow=max(0, 5 - _max_connections),
+                            pool_pre_ping=True,
+                            pool_recycle=1800))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'

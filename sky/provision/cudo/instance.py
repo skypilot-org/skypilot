@@ -179,6 +179,7 @@ def get_cluster_info(
                 internal_ip=node_info['internal_ip'],
                 external_ip=node_info['external_ip'],
                 tags=node_info['tags'],
+                node_name=node_id,
             )
         ]
         if node_info['name'].endswith('-head'):

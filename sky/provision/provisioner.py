@@ -25,6 +25,7 @@ from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.jobs.server import utils as server_jobs_utils
 from sky.provision import common as provision_common
+from sky.provision import constants as provision_constants
 from sky.provision import instance_setup
 from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
@@ -240,9 +241,19 @@ def teardown_cluster(cloud_name: str, cluster_name: resources_utils.ClusterName,
             specific exceptions will be raised by the cloud APIs.
     """
     if terminate:
-        provision.terminate_instances(cloud_name, cluster_name.name_on_cloud,
-                                      provider_config)
+        try:
+            provision.terminate_instances(cloud_name,
+                                          cluster_name.name_on_cloud,
+                                          provider_config)
+        except RuntimeError as e:
+            if provision_constants.ERROR_NO_NODES_LAUNCHED in str(e):
+                logger.info(
+                    'Ignoring teardown failure as no nodes were launched.')
+                logger.debug(f'Stacktrace: {traceback.format_exc()}')
+            else:
+                raise
         metadata_utils.remove_cluster_metadata(cluster_name.name_on_cloud)
+        # This won't crash because not found volumes is ignored.
         provision_volume.delete_ephemeral_volumes(provider_config)
     else:
         provision.stop_instances(cloud_name, cluster_name.name_on_cloud,

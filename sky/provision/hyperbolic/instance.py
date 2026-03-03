@@ -290,6 +290,7 @@ def get_cluster_info(
                 external_ip=hostname,
                 ssh_port=port,
                 tags={},
+                node_name=instance_id,
             )
         ]
         if head_instance_id is None:

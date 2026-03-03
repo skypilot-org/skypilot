@@ -2913,6 +2913,38 @@ class TestKubernetesDetectNetworkType(unittest.TestCase):
              None))
 
     @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_aws_efa_detection_via_topology_k8s_aws_label(self, mock_get_nodes):
+        """Test detection of AWS EKS clusters via topology.k8s.aws label prefix."""
+        mock_node = self._create_mock_node(
+            {'topology.k8s.aws/zone-id': 'use1-az1'})
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
+             None))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
+    def test_aws_efa_detection_via_topology_ebs_csi_label(self, mock_get_nodes):
+        """Test detection of AWS EKS clusters via topology.ebs.csi.aws.com label prefix."""
+        mock_node = self._create_mock_node(
+            {'topology.ebs.csi.aws.com/zone': 'us-east-1a'})
+        mock_get_nodes.return_value = [mock_node]
+
+        result = kubernetes.Kubernetes._detect_network_type(
+            context='test-context',
+            network_tier=resources_utils.NetworkTier.BEST)
+
+        self.assertEqual(
+            result,
+            (kubernetes_utils.KubernetesHighPerformanceNetworkType.AWS_EFA,
+             None))
+
+    @patch('sky.provision.kubernetes.utils.get_kubernetes_nodes')
     def test_aws_efa_detection_without_acc_params(self, mock_get_nodes):
         """Test AWS EFA detection returns early when GPU params are not specified."""
         mock_node = self._create_mock_node_with_allocatable(

@@ -61,6 +61,7 @@ const DEFAULT_FIELDS = [
   'execution',
   'is_primary_in_job_group',
   'links',
+  'node_names',
 ];
 
 /**
@@ -290,9 +291,11 @@ export async function getManagedJobs(options = {}) {
         pool: job.pool,
         pool_hash: job.pool_hash,
         current_cluster_name: job.current_cluster_name,
+        cluster_name_on_cloud: job.cluster_name_on_cloud,
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
+        node_names: job.node_names, // Node names for dashboard display
         // JobGroup fields
         is_job_group: job.is_job_group,
         execution: job.execution,

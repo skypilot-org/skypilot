@@ -86,6 +86,29 @@ Managed jobs CLI
    :prog: sky jobs logs
    :nested: full
 
+Pool CLI
+^^^^^^^^
+
+.. _sky-jobs-pool-apply:
+.. click:: sky.client.cli.command:jobs_pool_apply
+   :prog: sky jobs pool apply
+   :nested: full
+
+.. _sky-jobs-pool-status:
+.. click:: sky.client.cli.command:jobs_pool_status
+   :prog: sky jobs pool status
+   :nested: full
+
+.. _sky-jobs-pool-down:
+.. click:: sky.client.cli.command:jobs_pool_down
+   :prog: sky jobs pool down
+   :nested: full
+
+.. _sky-jobs-pool-logs:
+.. click:: sky.client.cli.command:jobs_pool_logs
+   :prog: sky jobs pool logs
+   :nested: full
+
 Serving CLI
 -------------
 
@@ -185,13 +208,36 @@ Admin CLI
    :nested: full
 
 
-Utils: ``show-gpus``/``check``/``cost-report``
--------------------------------------------------
+GPUs CLI
+--------
+
+.. _sky-gpus:
+.. click:: sky.client.cli.command:gpus_cli
+   :prog: sky gpus
+   :nested: full
+
+.. _sky-gpus-list:
+.. click:: sky.client.cli.command:gpus_list
+   :prog: sky gpus list
+   :nested: full
+
+.. _sky-gpus-label:
+.. click:: sky.client.cli.command:gpus_label
+   :prog: sky gpus label
+   :nested: full
+
+
+Utils: ``check``/``cost-report``/``show-gpus``
+----------------------------------------------
 
 .. _sky-show-gpus:
 .. click:: sky.client.cli.command:show_gpus
    :prog: sky show-gpus
    :nested: full
+
+.. note::
+
+   ``sky show-gpus`` is deprecated. Use ``sky gpus list`` instead.
 
 .. _sky-check:
 .. click:: sky.client.cli.command:check

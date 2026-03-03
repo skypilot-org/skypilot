@@ -358,6 +358,8 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     if generic_cloud == 'kubernetes':
         accelerator = smoke_tests_utils.get_available_gpus()
+        if not accelerator:
+            pytest.fail('No GPUs available for kubernetes.')
     else:
         accelerator = accelerator.get(generic_cloud, 'T4')
 
