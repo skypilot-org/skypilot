@@ -295,6 +295,9 @@ class RetryableClientWrapper:
 
         def with_refresh(*args, **kwargs):
             if _should_refresh_client_by_interval():
+                logger.debug(
+                    'Refreshing Kubernetes client from kubeconfig due to '
+                    'interval expiry.')
                 _clear_kubernetes_client_caches()
                 client = self._getter(*self._getter_args, **self._getter_kwargs)
                 _mark_client_refreshed()
