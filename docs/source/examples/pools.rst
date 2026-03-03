@@ -310,6 +310,94 @@ You can also update the number of workers in a pool without a YAML file by using
 
   If there is a :code:`workdir` or :code:`file_mounts` field in the worker configuration, workers will always be recreated when the pool is updated. This is to respect any data changes in them.
 
+Autoscaling
+-----------
+
+Pools support **autoscaling** to automatically adjust the number of workers based on the job queue. When jobs pile up, the pool scales up to process them faster; when the queue empties, the pool scales down — even to zero workers — to eliminate idle costs.
+
+To enable autoscaling, replace :code:`workers` with :code:`min_workers` and :code:`max_workers` in the pool configuration:
+
+.. code-block:: yaml
+  :emphasize-lines: 2-4
+
+  # autoscaling-pool.yaml
+  pool:
+    min_workers: 0
+    max_workers: 10
+
+  resources:
+    accelerators: H100
+
+  setup: |
+    echo "Setup complete!"
+
+.. code-block:: console
+
+  $ sky jobs pool apply -p gpu-pool autoscaling-pool.yaml
+  Pool spec:
+  Worker policy:  Autoscaling from 0 to 10 workers (queue threshold: 1)
+
+The pool starts with :code:`min_workers` workers and automatically scales up toward :code:`max_workers` as jobs queue up. When all jobs complete and the queue is empty, the pool scales back down to :code:`min_workers`.
+
+.. tip::
+
+  Setting :code:`min_workers: 0` enables **scale-to-zero**: the pool terminates all workers when idle, eliminating cost entirely. Workers are provisioned automatically when new jobs are submitted.
+
+Autoscaling configuration
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The full set of autoscaling options:
+
+.. code-block:: yaml
+
+  pool:
+    # Upper bound on the number of workers. Required for autoscaling.
+    max_workers: 10
+
+    # Minimum number of workers to keep running at all times.
+    # Set to 0 (default) to allow scale-to-zero.
+    min_workers: 0
+
+    # Number of pending jobs that triggers scaling up or down (default: 1).
+    # - Scale up by 1 worker when pending jobs > queue_length_threshold.
+    # - Scale down by 1 worker when 0 < pending jobs < queue_length_threshold.
+    # - Scale down to min_workers immediately when there are no pending jobs.
+    queue_length_threshold: 1
+
+    # How long to wait (seconds) after demand is detected before adding
+    # a worker (default: 300). Lower values are more responsive but may
+    # cause unnecessary scale-ups.
+    upscale_delay_seconds: 60
+
+    # How long to wait (seconds) after demand drops before removing
+    # a worker (default: 1200). Lower values reduce idle costs but may
+    # cause premature scale-downs.
+    downscale_delay_seconds: 120
+
+.. note::
+
+  The autoscaler will **never scale down a worker that is currently running a job**. Only idle workers (with no active jobs) are terminated during scale-down, so running jobs are never interrupted.
+
+Combining a fixed baseline with autoscaling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can combine a fixed starting count with autoscaling bounds. The :code:`workers` key sets the initial count. If :code:`min_workers` is omitted, it defaults to the value of :code:`workers`:
+
+.. code-block:: yaml
+
+  pool:
+    workers: 2      # Start with 2 workers
+    min_workers: 1  # Never scale below 1
+    max_workers: 8  # Scale up to at most 8
+
+The following configuration is equivalent (with :code:`min_workers` implied as 2):
+
+.. code-block:: yaml
+
+  pool:
+    workers: 2
+    max_workers: 8
+
 Terminate a pool
 ----------------
 
@@ -323,11 +411,63 @@ After usage, the pool can be terminated with :code:`sky jobs pool down`:
 
 The pool will be torn down in the background, and any remaining resources will be automatically cleaned up.
 
+Debugging and monitoring pools
+-------------------------------
+
+Use :code:`sky jobs pool status` to check the state of your pools and their workers:
+
+.. code-block:: console
+
+  # Show status of all pools
+  $ sky jobs pool status
+
+  # Show status of a specific pool
+  $ sky jobs pool status gpu-pool
+
+  # Show all individual workers (not just a summary)
+  $ sky jobs pool status gpu-pool --all
+
+To debug pool provisioning issues, use :code:`sky jobs pool logs --controller` to view the controller logs, which include details about worker provisioning, scaling, and any errors:
+
+.. code-block:: console
+
+  # Tail the controller logs (follows by default)
+  $ sky jobs pool logs --controller gpu-pool
+
+  # Show the last 100 lines of controller logs
+  $ sky jobs pool logs --controller --tail 100 gpu-pool
+
+  # Print controller logs so far and exit
+  $ sky jobs pool logs --controller --no-follow gpu-pool
+
+To view logs from a specific worker, pass the worker ID:
+
+.. code-block:: console
+
+  # Tail the logs of worker 1
+  $ sky jobs pool logs gpu-pool 1
+
+  # Print worker 1 logs so far and exit
+  $ sky jobs pool logs --no-follow gpu-pool 1
+
+To download all logs locally for offline analysis, use :code:`--sync-down`:
+
+.. code-block:: console
+
+  # Sync down all logs (controller + all workers)
+  $ sky jobs pool logs gpu-pool --sync-down
+
+  # Sync down controller and specific worker logs
+  $ sky jobs pool logs gpu-pool 1 3 --controller --sync-down
+
+.. tip::
+
+  If workers are stuck in a provisioning state, :code:`sky jobs pool logs --controller <pool-name>` is the best place to start debugging. The controller logs show the full provisioning lifecycle for each worker.
+
 .. admonition:: Coming Soon
 
   Some improved features are under development and will be available soon:
 
-  - **Autoscaling**: Automatically scale down to 0 workers when idle, and scale up when new jobs are submitted.
   - **Multi-job per worker**: Support for running multiple jobs concurrently on the same worker.
   - **Fractional GPU support**: Allow jobs to request and share fractional GPU resources.
 

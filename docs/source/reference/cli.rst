@@ -86,6 +86,29 @@ Managed jobs CLI
    :prog: sky jobs logs
    :nested: full
 
+Pool CLI
+^^^^^^^^
+
+.. _sky-jobs-pool-apply:
+.. click:: sky.client.cli.command:jobs_pool_apply
+   :prog: sky jobs pool apply
+   :nested: full
+
+.. _sky-jobs-pool-status:
+.. click:: sky.client.cli.command:jobs_pool_status
+   :prog: sky jobs pool status
+   :nested: full
+
+.. _sky-jobs-pool-down:
+.. click:: sky.client.cli.command:jobs_pool_down
+   :prog: sky jobs pool down
+   :nested: full
+
+.. _sky-jobs-pool-logs:
+.. click:: sky.client.cli.command:jobs_pool_logs
+   :prog: sky jobs pool logs
+   :nested: full
+
 Serving CLI
 -------------
 

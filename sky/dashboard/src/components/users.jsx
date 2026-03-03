@@ -61,6 +61,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import { statusGroups } from '@/components/jobs';
 import {
   FilterDropdown,
@@ -390,6 +391,8 @@ export function Users() {
       const tab = router.query.tab;
       if (tab === 'service-accounts' && serviceAccountTokenEnabled) {
         setActiveMainTab('service-accounts');
+      } else if (tab && tab !== 'users') {
+        setActiveMainTab(tab); // plugin-managed tab
       } else {
         setActiveMainTab('users');
       }
@@ -692,6 +695,18 @@ export function Users() {
   };
 
   // Show loading while fetching health check
+  const handleTabChange = useCallback(
+    (tab) => {
+      setActiveMainTab(tab);
+      if (tab === 'users') {
+        router.push('/users', undefined, { shallow: true });
+      } else {
+        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
+      }
+    },
+    [router]
+  );
+
   if (healthCheckLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -707,39 +722,32 @@ export function Users() {
       <div className="flex items-center justify-between mb-2">
         <div className="text-base flex items-center">
           <button
-            className={
-              serviceAccountTokenEnabled
-                ? `leading-none mr-6 pb-2 px-2 border-b-2 ${
-                    activeMainTab === 'users'
-                      ? 'text-sky-blue border-sky-500'
-                      : 'text-gray-500 hover:text-gray-700 border-transparent'
-                  }`
-                : 'leading-none mr-6 pb-2 px-2'
-            }
-            onClick={() => {
-              setActiveMainTab('users');
-              router.push('/users', undefined, { shallow: true });
-            }}
+            className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
+              activeMainTab === 'users'
+                ? 'text-sky-blue border-sky-500'
+                : 'text-gray-500 hover:text-gray-700 border-transparent'
+            }`}
+            onClick={() => handleTabChange('users')}
           >
             Users
           </button>
           {serviceAccountTokenEnabled && (
             <button
-              className={`leading-none pb-2 px-2 border-b-2 ${
+              className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
                 activeMainTab === 'service-accounts'
                   ? 'text-sky-blue border-sky-500'
                   : 'text-gray-500 hover:text-gray-700 border-transparent'
               }`}
-              onClick={() => {
-                setActiveMainTab('service-accounts');
-                router.push('/users?tab=service-accounts', undefined, {
-                  shallow: true,
-                });
-              }}
+              onClick={() => handleTabChange('service-accounts')}
             >
               Service Accounts
             </button>
           )}
+          <PluginSlot
+            name="users.tabs"
+            context={{ activeTab: activeMainTab, onTabChange: handleTabChange }}
+            wrapperClassName="contents"
+          />
         </div>
 
         <div className="flex items-center">
@@ -810,7 +818,7 @@ export function Users() {
               placeholder="Filter users"
             />
           </div>
-        ) : (
+        ) : activeMainTab === 'service-accounts' ? (
           <div className="relative flex-1 max-w-md">
             <input
               type="text"
@@ -845,6 +853,12 @@ export function Users() {
               </button>
             )}
           </div>
+        ) : (
+          <PluginSlot
+            name="users.tab-filter"
+            context={{ activeTab: activeMainTab }}
+            wrapperClassName="contents"
+          />
         )}
 
         {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
@@ -876,6 +890,9 @@ export function Users() {
             </span>
           </label>
         )}
+
+        {/* Plugin actions slot for users tab */}
+        {activeMainTab === 'users' && <PluginSlot name="users.actions" />}
 
         {/* Create Service Account Button for Service Accounts Tab */}
         {activeMainTab === 'service-accounts' && serviceAccountTokenEnabled && (
@@ -938,7 +955,7 @@ export function Users() {
           deduplicateUsers={deduplicateUsers}
           setLastFetchedTime={setLastFetchedTime}
         />
-      ) : (
+      ) : activeMainTab === 'service-accounts' ? (
         serviceAccountTokenEnabled && (
           <ServiceAccountTokensView
             checkPermissionAndAct={checkPermissionAndAct}
@@ -957,6 +974,11 @@ export function Users() {
             setSearchQuery={setServiceAccountSearchQuery}
           />
         )
+      ) : (
+        <PluginSlot
+          name="users.tab-content"
+          context={{ activeTab: activeMainTab }}
+        />
       )}
 
       {/* Create User Dialog */}

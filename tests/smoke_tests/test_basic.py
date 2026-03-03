@@ -464,6 +464,47 @@ def test_autostop_hook_timeout(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_shadeform
 @pytest.mark.no_seeweb
+def test_autostop_with_docker_image(generic_cloud: str):
+    """Test that autostop works with Docker image clusters.
+
+    When using image_id: docker:<image>, the container entrypoint holds
+    /dev/pts/0. This should not prevent autostop from triggering.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    autostop_timeout = 600 if generic_cloud == 'azure' else 250
+
+    test = smoke_tests_utils.Test(
+        'test_autostop_with_docker_image',
+        [
+            # Launch a Docker cluster with 1-min autostop (default: jobs_and_ssh)
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --infra {generic_cloud} -i 1 '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} --image-id docker:ubuntu:22.04 '
+            f'tests/test_yamls/minimal.yaml) && '
+            f'{smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+            f'sky status -r {name} | grep UP',
+
+            # Verify the cluster autostops despite Docker's entrypoint PTY
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.STOPPED],
+                timeout=autostop_timeout),
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# See cloud exclusion explanations in test_autostop
+@pytest.mark.no_fluidstack
+@pytest.mark.no_lambda_cloud
+@pytest.mark.no_ibm
+@pytest.mark.no_kubernetes
+@pytest.mark.no_slurm
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_shadeform
+@pytest.mark.no_seeweb
 def test_launch_waits_for_autostopping(generic_cloud: str):
     """Test that launch waits for autostopping to complete.
 
@@ -1458,14 +1499,14 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky logs {name}-1 --status',
                 # It should be launched not on kind-skypilot
                 f'sky status -v {name}-1 | grep "{context}"',
-                f'sky exec {name}-1 ls /home/sky/.kube',
+                f'! sky exec {name}-1 ls /home/sky/.kube',
                 f"sky logs {name}-1 2 | grep \"'/home/sky/.kube': No such file or directory\"",
                 # Test failure for launching H100 on other cluster
                 f'sky launch -y -c {name}-2 --gpus H100 --cpus 1 --infra kubernetes/{context} echo hi && exit 1 || true',
                 # Test failover
                 f'sky launch -y -c {name}-3 --gpus H100 --cpus 1 --infra kubernetes echo hi',
                 f'sky logs {name}-3 --status',
-                f'sky exec {name}-3 ls /home/sky/.kube',
+                f'! sky exec {name}-3 ls /home/sky/.kube',
                 f"sky logs {name}-3 2 | grep \"'/home/sky/.kube': No such file or directory\"",
                 # Test pods
                 f'kubectl get pods --context kind-skypilot | grep "{name}-3"',
@@ -1481,7 +1522,7 @@ def test_kubernetes_context_failover(unreachable_context):
                 f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --infra kubernetes/{unreachable_context} echo hi && exit 1 || true',
                 # Test failover from unreachable context
                 f'sky launch -y -c {name}-5 --cpus 1 --infra kubernetes echo hi',
-                f'sky exec {name}-5 ls /home/sky/.kube',
+                f'! sky exec {name}-5 ls /home/sky/.kube',
                 f"sky logs {name}-5 2 | grep \"'/home/sky/.kube': No such file or directory\"",
                 # switch back to kind-skypilot where GPU cluster is launched
                 f'kubectl config use-context kind-skypilot',
