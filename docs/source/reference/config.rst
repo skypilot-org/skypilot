@@ -1309,6 +1309,9 @@ Example:
 Custom labels to apply as tags to Azure VM instances (optional). Labels are key-value
 pairs of strings. These are merged with SkyPilot's internal tags on each VM.
 
+Users should guarantee that these key-values are valid Azure tags, otherwise
+errors from the cloud provider will be surfaced.
+
 .. code-block:: yaml
 
   azure:
