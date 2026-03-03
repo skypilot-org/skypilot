@@ -48,6 +48,7 @@ class MessageType(enum.Enum):
     USAGE = 'usage'
     HEARTBEAT = 'heartbeat'
     SERVER_HEARTBEAT = 'server_heartbeat'
+    # TODO(zhwu): Add more types, e.g., cluster_lifecycle.
 
 
 class MessageToReport:
