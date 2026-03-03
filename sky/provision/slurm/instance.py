@@ -134,26 +134,16 @@ def _wait_for_job_ready(
     job_id: str,
     ready_signal: str,
     slurm_log: str,
-    timeout: Optional[float] = None,
 ) -> None:
     """Wait for Slurm job initialization to complete.
 
     Polls while the job is running. Fails if:
     1. The job exits/fails (state not in PENDING/RUNNING/CONFIGURING)
     2. The ready signal file never appears
-    3. The timeout is exceeded (if specified)
     """
     poll_interval_seconds = 1
-    start_time = time.time()
 
     while True:
-        if timeout is not None:
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                raise TimeoutError(f'Slurm job {job_id} initialization timed '
-                                   'out. See sbatch logs for details: '
-                                   f'{slurm_log}')
-
         rc, _, _ = login_node_runner.run(f'test -f {ready_signal}',
                                          require_outputs=True,
                                          stream_logs=False)
@@ -559,7 +549,7 @@ touch {sky_cluster_home_dir}/.hushlogin
             ready_signal,
             slurm_log,
         )
-    except (TimeoutError, RuntimeError, exceptions.CommandError) as e:
+    except (RuntimeError, exceptions.CommandError) as e:
         _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
                                              require_outputs=True,
                                              stream_logs=False)
