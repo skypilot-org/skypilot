@@ -1,5 +1,6 @@
 """Request execution threads management."""
 
+import asyncio
 import concurrent.futures
 import sys
 import threading
@@ -55,7 +56,12 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         try:
             result = fn(*args, **kwargs)
             fut.set_result(result)
-        except Exception as e:  # pylint: disable=broad-except
+        except asyncio.CancelledError:
+            # Cancellation is expected behavior (e.g., user pressed Ctrl-C).
+            # Log at debug level and don't treat it as an error.
+            logger.debug(f'Executor [{self.name}] task {fn} was cancelled')
+            fut.cancel()
+        except BaseException as e:  # pylint: disable=broad-except
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
             fut.set_exception(e)
         finally:
