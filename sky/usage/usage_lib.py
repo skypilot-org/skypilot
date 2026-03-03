@@ -441,9 +441,10 @@ def prepare_json_from_yaml_config(
         yaml_info = [yaml_config_or_path]
         comment_lines = []
     else:
-        with open(yaml_config_or_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            comment_lines = [line for line in lines if line.startswith('#')]
+        # Handle both local files and URLs
+        yaml_content = yaml_utils.read_file_or_url(yaml_config_or_path)
+        lines = yaml_content.splitlines()
+        comment_lines = [line for line in lines if line.startswith('#')]
         yaml_info = yaml_utils.read_yaml_all(yaml_config_or_path)
 
     for i in range(len(yaml_info)):
