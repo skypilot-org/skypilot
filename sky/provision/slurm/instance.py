@@ -134,26 +134,16 @@ def _wait_for_job_ready(
     job_id: str,
     ready_signal: str,
     slurm_log: str,
-    timeout: Optional[float] = None,
 ) -> None:
     """Wait for Slurm job initialization to complete.
 
     Polls while the job is running. Fails if:
     1. The job exits/fails (state not in PENDING/RUNNING/CONFIGURING)
     2. The ready signal file never appears
-    3. The timeout is exceeded (if specified)
     """
     poll_interval_seconds = 1
-    start_time = time.time()
 
     while True:
-        if timeout is not None:
-            elapsed = time.time() - start_time
-            if elapsed >= timeout:
-                raise TimeoutError(f'Slurm job {job_id} initialization timed '
-                                   'out. See sbatch logs for details: '
-                                   f'{slurm_log}')
-
         rc, _, _ = login_node_runner.run(f'test -f {ready_signal}',
                                          require_outputs=True,
                                          stream_logs=False)
@@ -522,9 +512,6 @@ touch {sky_cluster_home_dir}/.hushlogin
                  f'{partition} for cluster {cluster_name_on_cloud} '
                  f'with {num_nodes} nodes')
 
-    # Track start time to calculate remaining timeout after node allocation
-    provision_start_time = time.time()
-
     _wait_for_job_nodes(client, job_id, provision_timeout, partition,
                         _on_pending)
     nodes, _ = client.get_job_nodes(job_id)
@@ -532,11 +519,11 @@ touch {sky_cluster_home_dir}/.hushlogin
         slurm_utils.instance_id(job_id, node) for node in nodes
     ]
 
-    # Calculate remaining timeout for job initialization
-    remaining_timeout = None
-    if provision_timeout is not None:
-        elapsed = time.time() - provision_start_time
-        remaining_timeout = max(0, provision_timeout - elapsed)
+    # No timeout for job initialization: once nodes are allocated, the
+    # provision has effectively succeeded. Container image pulls and
+    # package installation can take a long time for large images, and
+    # should not be subject to the provision timeout (which is meant for
+    # the Slurm scheduler queue, not for container setup).
 
     # Wait for the sbatch script to create the cluster's sky directories,
     # to avoid a race condition where post-provision commands try to
@@ -561,9 +548,8 @@ touch {sky_cluster_home_dir}/.hushlogin
             job_id,
             ready_signal,
             slurm_log,
-            remaining_timeout,
         )
-    except (TimeoutError, RuntimeError, exceptions.CommandError) as e:
+    except (RuntimeError, exceptions.CommandError) as e:
         _, stdout, _ = login_node_runner.run(f'cat {slurm_log} 2>/dev/null',
                                              require_outputs=True,
                                              stream_logs=False)
