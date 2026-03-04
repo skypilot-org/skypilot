@@ -3,7 +3,6 @@
 import concurrent.futures
 import gc
 import os
-import ssl
 import tempfile
 import time
 from types import SimpleNamespace
@@ -89,10 +88,9 @@ def test_watch_cleanup(monkeypatch):
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 
     w = kubernetes.watch()
-    # Keep a handle to the underlying watch (skip RetryableClientWrapper and
-    # ClientWrapper) so we can assert its _api_client.close() was called.
-    underlying = w._client._client if hasattr(w._client,
-                                              '_client') else w._client
+    # Keep a handle to the underlying watch object so we can assert its
+    # _api_client.close() was called on GC.
+    underlying = w._client
     del w
     annotations.clear_request_level_cache()
     gc.collect()
