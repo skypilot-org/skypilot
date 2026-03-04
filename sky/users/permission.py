@@ -294,25 +294,30 @@ class PermissionService:
         return enforcer.get_users_for_role(role)
 
     def get_accessible_workspace_names(self, user_id: str,
-                                       workspace_names: List[str]) -> Set[str]:
+                                       workspace_names: Set[str]) -> Set[str]:
         """Return workspace names the user can access (batch, O(1) enforcer).
 
         Use instead of check_workspace_permission in a loop when filtering
         many workspaces, to avoid N enforcer calls.
         """
         if os.getenv(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
-            return set(workspace_names)
+            return workspace_names
         roles = self.get_user_roles(user_id)
         if rbac.RoleName.ADMIN.value in roles:
-            return set(workspace_names)
+            return workspace_names
         enforcer = self._ensure_enforcer()
-        # Workspace policies: (sub, obj, act) with act=='*'; sub is user or '*'
-        names_set = set(workspace_names)
+        # Scan policy rules directly for workspace access.
+        # NOTE: this only matches direct (user_id, workspace, '*') and wildcard
+        # ('*', workspace, '*') policies.  It does NOT traverse casbin role
+        # hierarchies (the g() function in the model matcher).  If role-based
+        # workspace grants are ever added, this method must be updated to use
+        # enforcer.enforce() per workspace or expand roles via
+        # enforcer.get_implicit_permissions_for_user().
         accessible = set()
         for rule in enforcer.get_policy():
             if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
                                                       rule[0] == '*'):
-                if rule[1] in names_set:
+                if rule[1] in workspace_names:
                     accessible.add(rule[1])
         return accessible
 

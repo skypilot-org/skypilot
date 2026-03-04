@@ -70,13 +70,23 @@ def get_workspaces() -> Dict[str, Any]:
 
 
 @annotations.lru_cache(scope='request', maxsize=1)
-def _accessible_workspace_names_for_user(user_id: str) -> Set[str]:
-    """Batch-compute accessible workspace names (cached per request)."""
+def _load_workspaces() -> Dict[str, Any]:
+    """Read workspaces from config once per request (cached).
+
+    Both workspace name filtering and full config lookup call this so they
+    always operate on the same config snapshot within a single request.
+    """
     workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
     if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
         workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    return workspaces
+
+
+@annotations.lru_cache(scope='request', maxsize=1)
+def _accessible_workspace_names_for_user(user_id: str) -> Set[str]:
+    """Batch-compute accessible workspace names (cached per request)."""
     return permission.permission_service.get_accessible_workspace_names(
-        user_id, list(workspaces.keys()))
+        user_id, set(_load_workspaces().keys()))
 
 
 def get_accessible_workspace_names() -> Set[str]:
@@ -666,8 +676,6 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
     Returns:
         A map from workspace name to workspace configuration.
     """
-    workspaces = skypilot_config.get_nested(('workspaces',), default_value={})
-    if constants.SKYPILOT_DEFAULT_WORKSPACE not in workspaces:
-        workspaces[constants.SKYPILOT_DEFAULT_WORKSPACE] = {}
+    workspaces = _load_workspaces()
     accessible_names = _accessible_workspace_names_for_user(user_id)
     return {name: workspaces[name] for name in accessible_names}
