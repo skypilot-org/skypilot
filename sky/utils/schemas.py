@@ -1181,6 +1181,30 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_PRICING_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'cpu': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'memory': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'accelerators': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'type': 'number',
+                'minimum': 0
+            },
+        },
+    },
+}
+
 _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
@@ -1288,6 +1312,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
+    'pricing': _PRICING_SCHEMA,
 }
 
 
@@ -1477,7 +1502,18 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
-            }
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }]
+                },
+                **_LABELS_SCHEMA,
+                **_CAPABILITIES_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
@@ -1560,6 +1596,39 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'pricing': _PRICING_SCHEMA,
+                'cluster_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'workdir': {
+                                'type': 'string',
+                            },
+                            'tmpdir': {
+                                'type': 'string',
+                            },
+                            'pricing': _PRICING_SCHEMA,
+                            'partition_configs': {
+                                'type': 'object',
+                                'required': [],
+                                'properties': {},
+                                'additionalProperties': {
+                                    'type': 'object',
+                                    'required': [],
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'pricing': _PRICING_SCHEMA,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             }
         },
         'oci': {
@@ -1632,6 +1701,9 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             'project_id': {
+                                'type': 'string',
+                            },
+                            'subnet_id': {
                                 'type': 'string',
                             },
                             'fabric': {

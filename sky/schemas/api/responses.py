@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
 
@@ -129,6 +129,7 @@ class StatusResponse(ResponseBaseModel):
     accelerators: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
+    node_names: Optional[str] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
@@ -211,6 +212,8 @@ class ManagedJobRecord(ResponseBaseModel):
     accelerators: Optional[Dict[str, int]] = None
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
+    # Node names for dashboard display (comma-separated)
+    node_names: Optional[str] = None
     # JobGroup fields
     # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single job)
     execution: Optional[str] = None
@@ -219,6 +222,12 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Network endpoint information (extracted from cluster handle)
+    # List of (internal_ip, external_ip) tuples for all nodes
+    internal_external_ips: Optional[List[Tuple[str, str]]] = None
+    # K8s DNS entries mapping Pod name to internal_svc
+    # Only populated for Kubernetes clusters
+    internal_services: Optional[Dict[str, Optional[str]]] = None
 
 
 class VolumeRecord(ResponseBaseModel):

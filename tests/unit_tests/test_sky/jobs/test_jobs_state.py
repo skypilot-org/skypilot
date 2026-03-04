@@ -35,8 +35,8 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(state.migration_utils, 'db_lock', _tmp_db_lock)
 
     # Monkeypatch module-level engines used by state
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE', engine)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE_ASYNC', async_engine)
+    monkeypatch.setattr(state._db_manager, '_engine', engine)
+    monkeypatch.setattr(state._db_manager, '_engine_async', async_engine)
 
     # Create schema
     state.create_table(engine)

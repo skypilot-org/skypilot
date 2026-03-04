@@ -2365,7 +2365,7 @@ def api_status(
 
     # Backward compatibility check for the new flag cluster_name
     version = versions.get_remote_api_version()
-    if (cluster_name is not None) and (version is not None and version < 37):
+    if (cluster_name is not None) and (version is None or version < 38):
         logger.warning(
             'The flag is ignored because the server does not support it yet.')
 
@@ -2955,7 +2955,7 @@ def api_login(endpoint: Optional[str] = None,
 
     # see https://github.com/python/mypy/issues/5107 on why
     # typing is disabled on this line
-    server_common.get_api_server_status.cache_clear()  # type: ignore
+    server_common.get_api_server_status_response.cache_clear()  # type: ignore
     # After successful authentication, check server health again to get user
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(

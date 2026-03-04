@@ -143,6 +143,7 @@ class TaskCodeGen:
         """
         return textwrap.dedent(f"""\
 
+        __skypilot_user_exit_code=$?
         # Only waits if cached mount is enabled (RCLONE_MOUNT_CACHED_LOG_DIR is not empty)
         # findmnt alone is not enough, as some clouds (e.g. AWS on ARM64) uses
         # rclone for normal mounts as well.
@@ -188,7 +189,28 @@ class TaskCodeGen:
             done
             TOTAL_FLUSH_TIME=$(($(date +%s) - FLUSH_START_TIME))
             echo "skypilot: cached mount upload complete (took ${{TOTAL_FLUSH_TIME}}s)"
-        fi""")
+        fi
+        exit $__skypilot_user_exit_code""")
+
+    @staticmethod
+    def build_task_bash_script(bash_script: str,
+                               env_prefix: Optional[str] = None) -> str:
+        """Build the complete bash script for a task.
+
+        Prepends env_prefix (if any) and appends the rclone flush script.
+
+        Args:
+            bash_script: The user's bash command.
+            env_prefix: Optional shell commands to prepend (e.g. unsetting
+                Ray env vars).
+
+        Returns:
+            Complete bash string ready to execute on the cluster.
+        """
+        if env_prefix:
+            bash_script = f'{env_prefix}; {bash_script}'
+        bash_script += TaskCodeGen.get_rclone_flush_script()
+        return bash_script
 
     def add_prologue(self, job_id: int) -> None:
         """Initialize code generator and add prologue code.
@@ -614,18 +636,17 @@ class RayCodeGen(TaskCodeGen):
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
-        rclone_flush_script = self.get_rclone_flush_script()
         unset_ray_env_vars = ' && '.join(
             [f'unset {var}' for var in UNSET_RAY_ENV_VARS])
+        task_bash_script = (self.build_task_bash_script(
+            bash_script, env_prefix=unset_ray_env_vars)
+                            if bash_script is not None else None)
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
-        script = {bash_script!r}
-        rclone_flush_script = {rclone_flush_script!r}
+        script = {task_bash_script!r}
 
         if script is not None:
-            script=f'{unset_ray_env_vars}; {{script}}'
-            script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
@@ -813,9 +834,10 @@ class SlurmCodeGen(TaskCodeGen):
                                          for k, v in env_vars.items())
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
-        rclone_flush_script = self.get_rclone_flush_script()
-        streaming_msg = self._get_job_started_msg()
         has_setup_cmd = self._setup_cmd is not None
+        task_bash_script = (self.build_task_bash_script(bash_script or '')
+                            if bash_script or has_setup_cmd else '')
+        streaming_msg = self._get_job_started_msg()
 
         container_flags = ''
         if self._container_name is not None:
@@ -828,13 +850,9 @@ class SlurmCodeGen(TaskCodeGen):
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
-            script = {bash_script!r}
-            if script is None:
-                script = ''
-            rclone_flush_script = {rclone_flush_script!r}
+            script = {task_bash_script!r}
 
             if script or {has_setup_cmd!r}:
-                script += rclone_flush_script
                 sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {num_gpus}
 
                 # Signal files for setup/run synchronization:
@@ -852,7 +870,7 @@ class SlurmCodeGen(TaskCodeGen):
                 setup_done_signal_file = os.path.expanduser(setup_done_signal_file)
 
                 # Start exclusive srun in a thread to reserve allocation (similar to ray.get(pg.ready()))
-                gpu_arg = f'--gpus-per-node={num_gpus}' if {num_gpus} > 0 else ''
+                gpu_arg = f'--gpus-per-node={num_gpus}'
 
                 def build_task_runner_cmd(user_script, extra_flags, log_dir, env_vars_dict,
                                           task_name=None, is_setup=False,

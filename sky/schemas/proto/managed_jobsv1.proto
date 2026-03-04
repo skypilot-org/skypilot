@@ -136,6 +136,18 @@ message ManagedJobInfo {
   map<string, string> labels = 33;
   // Name of the cluster on the cloud provider (populated from cluster handle)
   optional string cluster_name_on_cloud = 34;
+  // Network endpoint information (replaces pickled handle)
+  // List of (internal_ip, external_ip) tuples for all nodes
+  repeated IpPair internal_external_ips = 35;
+  // K8s DNS entries mapping instance_id to internal_svc
+  // Only populated for Kubernetes clusters
+  map<string, string> internal_services = 36;
+}
+
+// A pair of internal and external IP addresses
+message IpPair {
+  string internal_ip = 1;
+  string external_ip = 2;
 }
 
 message GetJobTableResponse {
@@ -163,6 +175,9 @@ message CancelJobsRequest {
     string job_name = 5;
     string pool_name = 6;
   }
+
+  optional bool graceful = 7;
+  optional int64 graceful_timeout = 8;
 }
 
 message CancelJobsResponse {

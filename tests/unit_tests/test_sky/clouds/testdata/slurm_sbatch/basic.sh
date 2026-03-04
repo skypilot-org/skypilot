@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=test-cluster-no-container
-#SBATCH --output=.sky_provision/slurm-%j.out
-#SBATCH --error=.sky_provision/slurm-%j.out
+#SBATCH --output=/home/testuser/.sky_provision/slurm-%j.out
+#SBATCH --error=/home/testuser/.sky_provision/slurm-%j.out
 #SBATCH --nodes=1
 #SBATCH --time=7-00:00:00
 #SBATCH --wait-all-nodes=1

@@ -30,8 +30,8 @@ def _mock_managed_jobs_db_conn(tmp_path, monkeypatch):
             yield
 
     monkeypatch.setattr(state.migration_utils, 'db_lock', _tmp_db_lock)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE', engine)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE_ASYNC', async_engine)
+    monkeypatch.setattr(state._db_manager, '_engine', engine)
+    monkeypatch.setattr(state._db_manager, '_engine_async', async_engine)
 
     # Create schema via migrations
     state.create_table(engine)
@@ -67,10 +67,11 @@ def _insert_job_info(engine,
                      controller_logs_cleaned_at: Optional[float] = None):
     with orm.Session(engine) as session:
         # Insert row; let PK autoincrement.
-        if (state._SQLALCHEMY_ENGINE.dialect.name ==
-                state.db_utils.SQLAlchemyDialect.SQLITE.value):
+        engine = state._db_manager.get_engine()
+        if (engine.dialect.name == state.db_utils.SQLAlchemyDialect.SQLITE.value
+           ):
             insert_func = state.sqlite.insert
-        elif (state._SQLALCHEMY_ENGINE.dialect.name ==
+        elif (engine.dialect.name ==
               state.db_utils.SQLAlchemyDialect.POSTGRESQL.value):
             insert_func = state.postgresql.insert
         else:
@@ -101,10 +102,10 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         pool_hash=None,
         user_hash='u',
     )
-
+    engine = state._db_manager.get_engine()
     # Qualifies: terminal + old + not cleaned
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -114,7 +115,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Not old enough
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         1,
         status=ManagedJobStatus.SUCCEEDED,
@@ -124,7 +125,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Already cleaned
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         2,
         status=ManagedJobStatus.FAILED,
@@ -134,7 +135,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Non-terminal
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         3,
         status=ManagedJobStatus.RUNNING,
@@ -144,7 +145,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     )
     # Terminal and old, but local_log_file is None -> should not qualify
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         6,
         status=ManagedJobStatus.SUCCEEDED,
@@ -164,7 +165,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
 
     # Batch size respected: add two more qualifying tasks
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         4,
         status=ManagedJobStatus.CANCELLED,
@@ -173,7 +174,7 @@ def test_get_task_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         5,
         status=ManagedJobStatus.SUCCEEDED,
@@ -198,8 +199,9 @@ def test_set_task_logs_cleaned(_mock_managed_jobs_db_conn):
         pool_hash=None,
         user_hash='u',
     )
+    engine = state._db_manager.get_engine()
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_id,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -217,7 +219,7 @@ def test_set_task_logs_cleaned(_mock_managed_jobs_db_conn):
     state.set_task_logs_cleaned([(job_id, 0)], ts)
 
     # Verify updated
-    with orm.Session(state._SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         row = session.execute(
             state.sqlalchemy.select(state.spot_table.c.logs_cleaned_at).where(
                 state.sqlalchemy.and_(
@@ -236,10 +238,10 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     retention = 60
 
     # Job A: qualifies (max end_at old, controller logs not cleaned)
-    job_a = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    engine = state._db_manager.get_engine()
+    job_a = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_a,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -248,7 +250,7 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_a,
         1,
         status=ManagedJobStatus.FAILED,
@@ -259,10 +261,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     state.scheduler_set_done(job_a)
 
     # Job B: not old enough
-    job_b = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_b = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_b,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -273,10 +274,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     state.scheduler_set_done(job_b)
 
     # Job C: already cleaned controller logs
-    job_c = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=now - 10)
+    job_c = _insert_job_info(engine, controller_logs_cleaned_at=now - 10)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_c,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -287,10 +287,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     state.scheduler_set_done(job_c)
 
     # Job D: terminal but end_at is None -> does not qualify
-    job_d = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_d = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_d,
         0,
         status=ManagedJobStatus.CANCELLED,
@@ -305,10 +304,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
     assert job_ids == {job_a}
 
     # Batch size respected: clone more qualifying jobs
-    job_e = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_e = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_e,
         0,
         status=ManagedJobStatus.SUCCEEDED,
@@ -317,10 +315,9 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
         logs_cleaned_at=None,
     )
     state.scheduler_set_done(job_e)
-    job_f = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                             controller_logs_cleaned_at=None)
+    job_f = _insert_job_info(engine, controller_logs_cleaned_at=None)
     _insert_task(
-        state._SQLALCHEMY_ENGINE,
+        engine,
         job_f,
         0,
         status=ManagedJobStatus.FAILED,
@@ -337,12 +334,12 @@ def test_get_controller_logs_to_clean_basic(_mock_managed_jobs_db_conn):
 def test_set_controller_logs_cleaned(_mock_managed_jobs_db_conn):
     now = time.time()
 
-    job_id = _insert_job_info(state._SQLALCHEMY_ENGINE,
-                              controller_logs_cleaned_at=None)
+    engine = state._db_manager.get_engine()
+    job_id = _insert_job_info(engine, controller_logs_cleaned_at=None)
 
     state.set_controller_logs_cleaned([job_id], now)
 
-    with orm.Session(state._SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         row = session.execute(
             state.sqlalchemy.select(
                 state.job_info_table.c.controller_logs_cleaned_at).where(

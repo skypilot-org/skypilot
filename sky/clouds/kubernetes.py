@@ -59,7 +59,9 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+    # Limit the length of the volume name to match the label value
+    # limit (63 characters)
+    _MAX_VOLUME_NAME_LEN_LIMIT = 63
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -360,10 +362,10 @@ class Kubernetes(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        # TODO(romilb): Investigate how users can provide their own cost catalog
-        #  for Kubernetes clusters.
-        # For now, assume zero cost for Kubernetes clusters
-        return 0.0
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import kubernetes_catalog
+        return kubernetes_catalog.get_hourly_cost(instance_type, use_spot,
+                                                  region, zone)
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],

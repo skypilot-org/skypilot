@@ -743,7 +743,10 @@ class SkyPilotReplicaManager(ReplicaManager):
     def __init__(self, service_name: str, spec: 'service_spec.SkyServiceSpec',
                  version: int) -> None:
         super().__init__(service_name, spec, version)
-        self.yaml_content = serve_state.get_yaml_content(service_name, version)
+        yaml_content = serve_state.get_yaml_content(service_name, version)
+        assert yaml_content is not None, (
+            f'yaml content not found for {service_name} version {version}')
+        self.yaml_content: str = yaml_content
         task = task_lib.Task.from_yaml_str(self.yaml_content)
         self._spot_placer: Optional[spot_placer.SpotPlacer] = (
             spot_placer.SpotPlacer.from_task(spec, task))
@@ -1474,9 +1477,13 @@ class SkyPilotReplicaManager(ReplicaManager):
             logger.error(f'Invalid version: {version}, '
                          f'latest version: {self.latest_version}')
             return
-        yaml_content = serve_state.get_yaml_content(self._service_name, version)
+        new_yaml_content = serve_state.get_yaml_content(self._service_name,
+                                                        version)
+        assert new_yaml_content is not None, (
+            f'yaml content not found for {self._service_name} version {version}'
+        )
         self.latest_version = version
-        self.yaml_content = yaml_content
+        self.yaml_content = new_yaml_content
         self._update_mode = update_mode
 
         # Reuse all replicas that have the same config as the new version
@@ -1484,7 +1491,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # the latest version. This can significantly improve the speed
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
-        new_config = yaml_utils.safe_load(yaml_content)
+        new_config = yaml_utils.safe_load(new_yaml_content)
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
         if new_config.get('file_mounts', None) != {}:

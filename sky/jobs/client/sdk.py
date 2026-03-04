@@ -86,6 +86,9 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+    if name is not None:
+        dag.name = name
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
@@ -184,6 +187,8 @@ def queue_v2(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
         total (int): Total number of jobs after filter,
@@ -269,6 +274,8 @@ def queue(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
 
@@ -299,6 +306,8 @@ def cancel(
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
     pool: Optional[str] = None,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -310,6 +319,10 @@ def cancel(
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
         pool: Pool name to cancel.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Returns:
         The request ID of the cancel request.
@@ -324,12 +337,20 @@ def cancel(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
+    if graceful and (remote_api_version is None or remote_api_version < 39):
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
+    if graceful and pool is not None:
+        logger.warning('Pools are not cleaned up after job cancel, so '
+                       '`--graceful` is ignored.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
         all=all,
         all_users=all_users,
         pool=pool,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST',
