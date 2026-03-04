@@ -1131,6 +1131,8 @@ def test_azure_vpc_name():
         test = smoke_tests_utils.Test(
             'azure_vpc_name',
             [
+                # Launch cloud-cmd cluster for remote verification
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
                 # Create a resource group and VNet for the test
                 f'az group create -n {rg_name} -l {region}',
                 f'az network vnet create -g {rg_name} -n {vnet_name} '
