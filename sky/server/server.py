@@ -1047,8 +1047,8 @@ async def enabled_clouds_batch(request: fastapi.Request,
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
-        request_body=payloads.EnabledCloudsBatchBody(
-            workspaces=workspace_list, expand=expand),
+        request_body=payloads.EnabledCloudsBatchBody(workspaces=workspace_list,
+                                                     expand=expand),
         func=core.enabled_clouds_batch,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
