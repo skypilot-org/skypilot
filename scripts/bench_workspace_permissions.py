@@ -17,6 +17,7 @@ import sqlalchemy_adapter
 os.environ['SKYPILOT_SERVER'] = '1'
 
 from sky.skylet import constants
+
 os.environ[constants.ENV_VAR_IS_SKYPILOT_SERVER] = '1'
 
 MODEL_CONF = os.path.join(os.path.dirname(__file__), '../sky/users/model.conf')
@@ -53,7 +54,7 @@ def new_approach(enforcer: casbin.Enforcer, user_id: str,
     accessible = set()
     for rule in enforcer.get_policy():
         if len(rule) >= 3 and rule[2] == '*' and (rule[0] == user_id or
-                                                   rule[0] == '*'):
+                                                  rule[0] == '*'):
             if rule[1] in workspace_names:
                 accessible.add(rule[1])
     return accessible
@@ -66,8 +67,8 @@ def bench(n_workspaces: int):
 
     try:
         enforcer = make_enforcer(db_path, n_workspaces, user_id)
-        workspace_names_list = [f'workspace-{i}'
-                                for i in range(n_workspaces)] + ['workspace-public']
+        workspace_names_list = [f'workspace-{i}' for i in range(n_workspaces)
+                               ] + ['workspace-public']
         workspace_names_set = set(workspace_names_list)
 
         # Warm up
