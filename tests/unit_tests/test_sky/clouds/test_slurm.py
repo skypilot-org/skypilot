@@ -808,3 +808,98 @@ class TestOnPendingMessage:
             msg = 'Launching'
 
         assert msg == expected
+
+
+class TestHelperPathFunctions:
+    """Test path helper functions in sky/provision/slurm/instance.py."""
+
+    @pytest.mark.parametrize('base_dir,job_id,expected', [
+        ('/home/user', '123', '/home/user/.sky_provision/slurm-123.out'),
+        ('/fsx/ubuntu', '456', '/fsx/ubuntu/.sky_provision/slurm-456.out'),
+        ('/home/user', '%j', '/home/user/.sky_provision/slurm-%j.out'),
+    ])
+    def test_sbatch_log_path(self, base_dir, job_id, expected):
+        assert slurm_instance._sbatch_log_path(base_dir, job_id) == expected
+
+    @pytest.mark.parametrize('base_dir,cluster,expected', [
+        ('/home/user', 'my-cluster', '/home/user/.sky_clusters/my-cluster'),
+        ('/fsx/ubuntu', 'test-abc123', '/fsx/ubuntu/.sky_clusters/test-abc123'),
+    ])
+    def test_sky_cluster_home_dir(self, base_dir, cluster, expected):
+        assert slurm_instance._sky_cluster_home_dir(base_dir,
+                                                    cluster) == expected
+
+    @pytest.mark.parametrize('base_dir,cluster,expected', [
+        ('/home/user', 'my-cluster', '/home/user/.sky_provision/my-cluster.sh'),
+        ('~', 'my-cluster', '~/.sky_provision/my-cluster.sh'),
+    ])
+    def test_sbatch_provision_script_path(self, base_dir, cluster, expected):
+        assert slurm_instance._sbatch_provision_script_path(base_dir,
+                                                            cluster) == expected
+
+    @pytest.mark.parametrize('tmpdir,cluster,expected', [
+        (None, 'my-cluster', '/tmp/my-cluster'),
+        ('/scratch/tmp', 'my-cluster', '/scratch/tmp/my-cluster'),
+    ])
+    def test_skypilot_runtime_dir(self, tmpdir, cluster, expected):
+        assert slurm_instance._skypilot_runtime_dir(tmpdir, cluster) == expected
+
+
+class TestGetEnv:
+    """Test SlurmClient.get_env() parsing."""
+
+    def test_parses_env_output(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (
+            0, 'HOME=/home/ubuntu\nUSER=ubuntu\n', '')
+        # Call the real method with the mocked client
+        env = slurm.SlurmClient.get_env(client)
+        assert env == {'HOME': '/home/ubuntu', 'USER': 'ubuntu'}
+
+    def test_handles_values_with_equals(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (0,
+                                              'PATH=/usr/bin:/bin\nFOO=a=b\n',
+                                              '')
+        env = slurm.SlurmClient.get_env(client)
+        assert env['PATH'] == '/usr/bin:/bin'
+        assert env['FOO'] == 'a=b'
+
+    def test_command_failure_returns_empty(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (1, '', 'Connection refused')
+        env = slurm.SlurmClient.get_env(client)
+        assert env == {}
+
+
+class TestExpandPathVars:
+    """Test expand_path_vars with Python-side variable expansion."""
+
+    REMOTE_ENV = {'USER': 'ubuntu', 'HOME': '/home/ubuntu'}
+
+    def test_expands_dollar_var(self):
+        result = slurm_utils.expand_path_vars('/fsx/$USER', self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_expands_braced_var(self):
+        result = slurm_utils.expand_path_vars('/fsx/${USER}', self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_expands_multiple_vars(self):
+        result = slurm_utils.expand_path_vars('$HOME/$USER', self.REMOTE_ENV)
+        assert result == '/home/ubuntu/ubuntu'
+
+    def test_unknown_var_left_unchanged(self):
+        result = slurm_utils.expand_path_vars('/fsx/$UNKNOWN', self.REMOTE_ENV)
+        assert result == '/fsx/$UNKNOWN'
+
+    def test_no_vars_passthrough(self):
+        result = slurm_utils.expand_path_vars('/fsx/ubuntu', self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_injection_not_expanded(self):
+        # Even if someone puts shell metacharacters in config,
+        # they are never sent to a shell — just literal string replacement.
+        result = slurm_utils.expand_path_vars('/home/; rm -rf /',
+                                              self.REMOTE_ENV)
+        assert result == '/home/; rm -rf /'

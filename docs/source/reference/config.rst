@@ -137,6 +137,8 @@ Below is the configuration syntax and some example values. See detailed explanat
         V100: 2.50     # $/accelerator/hr
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
+        workdir: /mnt/lustre/$USER
+        tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
 
@@ -1304,6 +1306,24 @@ Example:
     resource_group_vm: user-resource-group-name
     storage_account: user-storage-account-name
 
+.. _config-yaml-azure-labels:
+
+``azure.labels``
+~~~~~~~~~~~~~~~~
+
+Custom labels to apply as tags to Azure VM instances (optional). Labels are key-value
+pairs of strings. These are merged with SkyPilot's internal tags on each VM.
+
+Users should guarantee that these key-values are valid Azure tags, otherwise
+errors from the cloud provider will be surfaced.
+
+.. code-block:: yaml
+
+  azure:
+    labels:
+      team: ml-infra
+      environment: production
+
 .. _config-yaml-azure-vpc-name:
 
 ``azure.vpc_name``
@@ -1860,14 +1880,22 @@ Pricing can also be set per-cluster and per-partition using
 
 Per-cluster and per-partition configuration for Slurm (optional).
 
-Currently supports :ref:`pricing <config-yaml-slurm-pricing>` overrides at both
-the cluster and partition level. Pricing at each level is deep-merged with the
-parent level: only the keys you specify are overridden, and unmentioned
-accelerators are inherited.
+Supported fields:
 
-The merge order is::
+- ``workdir``: Base directory on a **shared filesystem** for SkyPilot
+  cluster files (provision scripts, cluster home directories, sbatch logs, etc).
+  Defaults to ``$HOME``. Shell variables like ``$USER`` are expanded on the
+  login node. Use this when ``$HOME`` is not on a shared filesystem.
 
-    cloud-level  <  cluster-level  <  partition-level
+- ``tmpdir``: Per-node temporary storage for the SkyPilot runtime.
+  Defaults to ``/tmp``.
+
+- ``pricing``: :ref:`Pricing <config-yaml-slurm-pricing>` overrides at both
+  the cluster and partition level. Pricing at each level is deep-merged with the
+  parent level: only the keys you specify are overridden, and unmentioned
+  accelerators are inherited. The merge order is::
+
+      cloud-level  <  cluster-level  <  partition-level
 
 Example:
 
@@ -1884,6 +1912,10 @@ Example:
 
     cluster_configs:
       mycluster1:
+        # Use a shared Lustre mount instead of $HOME.
+        workdir: /mnt/lustre/$USER
+        # Use a fast local scratch disk for runtime files.
+        tmpdir: /local_scratch/sky
         # Override cpu rate for this cluster; memory and accelerators
         # are inherited from the cloud-level pricing above.
         pricing:
@@ -1892,6 +1924,7 @@ Example:
             A100: 4.00   # Override A100; V100 inherited
 
       mycluster2:
+        workdir: /home/$USER
         pricing:
           cpu: 0.03
         partition_configs:

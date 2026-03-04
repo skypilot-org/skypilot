@@ -664,6 +664,17 @@ class TestAzureSchema(unittest.TestCase):
         config = {'vpc_name': None}
         jsonschema.validate(instance=config, schema=self.azure_schema)
 
+    def test_azure_labels(self):
+        """Test that Azure accepts labels."""
+        config = {'labels': {'team': 'ml', 'env': 'prod'}}
+        jsonschema.validate(instance=config, schema=self.azure_schema)
+
+    def test_azure_labels_rejects_non_string_values(self):
+        """Test that Azure rejects non-string label values."""
+        config = {'labels': {'team': 123}}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.azure_schema)
+
     def test_azure_combined_config(self):
         """Test that Azure accepts all new options together."""
         config = {
@@ -672,6 +683,9 @@ class TestAzureSchema(unittest.TestCase):
             'vpc_name': 'my-vnet',
             'use_internal_ips': True,
             'ssh_proxy_command': 'ssh -W %h:%p bastion',
+            'labels': {
+                'team': 'ml'
+            },
         }
         jsonschema.validate(instance=config, schema=self.azure_schema)
 
