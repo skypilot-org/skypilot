@@ -1595,6 +1595,12 @@ def get_config_schema():
                         'required': [],
                         'additionalProperties': False,
                         'properties': {
+                            'workdir': {
+                                'type': 'string',
+                            },
+                            'tmpdir': {
+                                'type': 'string',
+                            },
                             'pricing': _PRICING_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
