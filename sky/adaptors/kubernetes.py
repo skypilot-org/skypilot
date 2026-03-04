@@ -273,7 +273,7 @@ class RetryableClientWrapper:
                     'interval expiry.')
                 _clear_kubernetes_client_caches()
                 self._client = self._getter(*self._getter_args,
-                                           **self._getter_kwargs)
+                                            **self._getter_kwargs)
                 _mark_client_refreshed()
             method = getattr(self._client, name)
             return method(*args, **kwargs)
