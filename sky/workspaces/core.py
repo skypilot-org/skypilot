@@ -82,11 +82,11 @@ def _load_workspaces() -> Dict[str, Any]:
     return workspaces
 
 
-@annotations.lru_cache(scope='request', maxsize=1)
-def _accessible_workspace_names_for_user(user_id: str) -> Set[str]:
-    """Batch-compute accessible workspace names (cached per request)."""
+def _accessible_workspace_names_for_user(user_id: str,
+                                         workspace_names: Set[str]) -> Set[str]:
+    """Return the subset of workspace_names the user can access."""
     return permission.permission_service.get_accessible_workspace_names(
-        user_id, set(_load_workspaces().keys()))
+        user_id, workspace_names)
 
 
 def get_accessible_workspace_names() -> Set[str]:
@@ -95,8 +95,9 @@ def get_accessible_workspace_names() -> Set[str]:
     Use this when only workspace names are needed (e.g. filtering clusters/jobs)
     to avoid building the full workspace config dict.
     """
+    workspaces = _load_workspaces()
     return _accessible_workspace_names_for_user(
-        common_utils.get_current_user().id)
+        common_utils.get_current_user().id, set(workspaces.keys()))
 
 
 def _update_workspaces_config(
@@ -677,5 +678,6 @@ def workspaces_for_user(user_id: str) -> Dict[str, Any]:
         A map from workspace name to workspace configuration.
     """
     workspaces = _load_workspaces()
-    accessible_names = _accessible_workspace_names_for_user(user_id)
+    accessible_names = _accessible_workspace_names_for_user(
+        user_id, set(workspaces.keys()))
     return {name: workspaces[name] for name in accessible_names}
