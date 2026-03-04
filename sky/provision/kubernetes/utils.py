@@ -3604,21 +3604,12 @@ def set_autodown_annotations(handle: 'backends.CloudVmRayResourceHandle',
 
 
 def get_context_from_config(provider_config: Dict[str, Any]) -> Optional[str]:
-    raw_context = provider_config.get('context')
-    if raw_context is not None:
-        # Context is explicitly set in provider config (e.g. from a stored
-        # cluster handle). Use it directly — do NOT null it out even if it
-        # matches in_cluster_context_name(), because the env var
-        # SKYPILOT_IN_CLUSTER_CONTEXT_NAME may be polluted by the client's
-        # environment being forwarded to the API server executor.
-        context = raw_context
-    else:
-        context = get_current_kube_config_context_name()
-        in_cluster = kubernetes.in_cluster_context_name()
-        if context == in_cluster:
-            # If the context (also used as the region) is in-cluster, we need
-            # to use in-cluster auth by setting the context to None.
-            context = None
+    context = provider_config.get('context',
+                                  get_current_kube_config_context_name())
+    if context == kubernetes.in_cluster_context_name():
+        # If the context (also used as the region) is in-cluster, we need
+        # to use in-cluster auth by setting the context to None.
+        context = None
     return context
 
 
