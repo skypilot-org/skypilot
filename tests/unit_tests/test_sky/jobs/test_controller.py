@@ -760,7 +760,7 @@ class TestDownloadLogsForCancelledJob:
         mock_handle = MagicMock()
 
         with patch('sky.jobs.controller.managed_job_state'
-                   '.get_pool_submit_info',
+                   '.get_pool_submit_info_async',
                    return_value=('pool-cluster-1', 42)) as mock_pool_info, \
              patch('sky.jobs.controller._get_dag') as mock_get_dag, \
              patch('sky.jobs.controller.backend_utils.get_clusters',
@@ -812,7 +812,7 @@ class TestDownloadLogsForCancelledJob:
         task_id = 0
 
         with patch('sky.jobs.controller.managed_job_state'
-                   '.get_pool_submit_info',
+                   '.get_pool_submit_info_async',
                    return_value=(None, None)) as mock_pool_info, \
              patch('sky.jobs.controller.backend_utils.get_clusters'
                    ) as mock_get_cl:

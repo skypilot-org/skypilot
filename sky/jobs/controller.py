@@ -1825,7 +1825,7 @@ class ControllerManager:
 
         if pool is not None:
             cluster_name, job_id_on_pool_cluster = (
-                managed_job_state.get_pool_submit_info(job_id))
+                await managed_job_state.get_pool_submit_info_async(job_id))
         else:
             dag = _get_dag(job_id)
             task = dag.tasks[task_id]
@@ -1851,10 +1851,12 @@ class ControllerManager:
                         'Skipping log download.')
             return
 
+        assert len(clusters) == 1, (clusters, cluster_name)
         handle = clusters[0].get('handle')
 
-        # Reuse the existing _download_log_and_stream method from JobController
-        # - same code path as SUCCEEDED/FAILED jobs (lines 704 and 815)
+        # Reuse the existing _download_log_and_stream method from
+        # JobController - same code path as the success/failure paths
+        # in _run_one_task.
         # pylint: disable-next=protected-access
         await asyncio.to_thread(controller._download_log_and_stream, task_id,
                                 handle, job_id_on_pool_cluster)
