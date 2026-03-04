@@ -3956,7 +3956,8 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
             for capacity in ijson.items(response,
                                         'items.item.status.capacity',
                                         buf_size=IJSON_BUFFER_SIZE):
-                capacity_keys.update(supported_gpu_keys.intersection(capacity.keys()))
+                capacity_keys.update(
+                    supported_gpu_keys.intersection(capacity.keys()))
                 if len(capacity_keys) == len(supported_gpu_keys):
                     break
             for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
