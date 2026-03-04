@@ -2085,6 +2085,10 @@ async def api_status(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 cluster_names=[cluster_name] if cluster_name else None,
+                exclude_request_names=[
+                    server_constants.REQUEST_NAME_PREFIX + d.value
+                    for d in daemons.HIDDEN_REQUEST_NAMES
+                ],
                 limit=limit,
                 fields=fields,
                 sort=True,

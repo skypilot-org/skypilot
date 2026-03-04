@@ -146,7 +146,7 @@ TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '34'  # Add fields to ManagedJobInfo proto for GPU metrics.
+SKYLET_VERSION = '35'  # Add fields to ManagedJobInfo proto for handle.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -488,6 +488,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
     ('azure', 'remote_identity'),
+    ('azure', 'vpc_name'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
@@ -518,6 +519,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+    # Slurm cluster configs (workdir, tmpdir, etc.) are admin-managed
+    # server-side settings and should not be overridden by clients.
+    ('slurm', 'cluster_configs'),
 ]
 
 # Constants for Azure blob storage

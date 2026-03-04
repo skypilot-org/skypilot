@@ -187,6 +187,8 @@ def queue_v2(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
         total (int): Total number of jobs after filter,
@@ -272,6 +274,8 @@ def queue(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
 

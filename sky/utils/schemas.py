@@ -1502,7 +1502,18 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
-            }
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }]
+                },
+                **_LABELS_SCHEMA,
+                **_CAPABILITIES_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
@@ -1595,6 +1606,12 @@ def get_config_schema():
                         'required': [],
                         'additionalProperties': False,
                         'properties': {
+                            'workdir': {
+                                'type': 'string',
+                            },
+                            'tmpdir': {
+                                'type': 'string',
+                            },
                             'pricing': _PRICING_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
