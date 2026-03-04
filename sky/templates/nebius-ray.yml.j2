@@ -49,6 +49,7 @@ available_node_types:
       DiskSize: {{disk_size}}
       use_spot: {{ use_spot }}
       network_tier: {{network_tier}}
+      disk_tier: {{disk_tier}}
       filesystems:
         {%- for fs in filesystems %}
         - filesystem_id: {{ fs.filesystem_id }}

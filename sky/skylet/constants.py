@@ -104,7 +104,9 @@ SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # set UV_SYSTEM_PYTHON to false in case the
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
-SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
+# UV_LINK_MODE=copy avoids a uv >=0.10.5 bug where clone/reflink mode
+# strips execute permissions on XFS filesystems, breaking Ray binaries.
+SKY_UV_CMD = ('UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false '
               f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
@@ -599,7 +601,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform', 'yotta')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.

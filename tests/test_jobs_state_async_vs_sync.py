@@ -38,8 +38,8 @@ def _mock_jobs_db_conn(tmp_path, monkeypatch):
     monkeypatch.setattr(state.migration_utils, 'db_lock', _tmp_db_lock)
 
     # Monkeypatch module-level engines used by state
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE', engine)
-    monkeypatch.setattr(state, '_SQLALCHEMY_ENGINE_ASYNC', async_engine)
+    monkeypatch.setattr(state._db_manager, '_engine', engine)
+    monkeypatch.setattr(state._db_manager, '_engine_async', async_engine)
 
     # Create schema
     state.create_table(engine)
@@ -96,7 +96,7 @@ def _seed_complex_job(_mock_jobs_db_conn) -> int:
 
 def _set_statuses(job_id: int, updates: Dict[int, state.ManagedJobStatus]):
     """Helper to set statuses for specific task_ids for the mocked DB."""
-    engine = state._SQLALCHEMY_ENGINE
+    engine = state._db_manager.engine
     assert engine is not None
     from sqlalchemy import and_
     from sqlalchemy import orm as sa_orm
@@ -224,7 +224,7 @@ async def test_schedule_state_transitions_same(_mock_jobs_db_conn):
     # LAUNCHING
     from sqlalchemy import orm as sa_orm
     from sqlalchemy import update as sa_update
-    eng = state._SQLALCHEMY_ENGINE
+    eng = state._db_manager.engine
     assert eng is not None
     with sa_orm.Session(eng) as sess:
         sess.execute(

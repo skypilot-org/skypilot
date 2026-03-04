@@ -126,7 +126,7 @@ def add_column_to_table(
 
 def add_all_tables_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
-    engine: sqlalchemy.Engine,
+    engine: Union[sqlalchemy.Engine, sqlalchemy.engine.Connection],
 ):
     """Add tables to the database."""
     for table in metadata.tables.values():
@@ -142,7 +142,7 @@ def add_all_tables_to_db_sqlalchemy(
 
 def add_table_to_db_sqlalchemy(
     metadata: sqlalchemy.MetaData,
-    engine: sqlalchemy.Engine,
+    engine: Union[sqlalchemy.Engine, sqlalchemy.engine.Connection],
     table_name: str,
 ):
     """Add a specific table to the database."""
@@ -414,6 +414,66 @@ class SQLiteConn(threading.local):
         if self._async_conn is not None:
             await self._async_conn.close()
         self.conn.close()
+
+
+class DatabaseManager:
+    """Encapsulates lazy engine initialization with double-checked locking.
+
+    Replaces the common pattern of module-level globals (_SQLALCHEMY_ENGINE,
+    _SQLALCHEMY_ENGINE_LOCK) and per-module initialize_and_get_db() functions.
+
+    Usage:
+        _db_manager = DatabaseManager('my_db', create_table_fn)
+    """
+
+    def __init__(
+        self,
+        db_name: str,
+        create_table_fn: Callable[[sqlalchemy.engine.Engine], Any],
+        post_init_fn: Optional[Callable[[sqlalchemy.engine.Engine],
+                                        Any]] = None,
+    ):
+        self._db_name = db_name
+        self._create_table_fn = create_table_fn
+        self._post_init_fn = post_init_fn
+        self._lock = threading.Lock()
+        self._engine: Optional[sqlalchemy.engine.Engine] = None
+        self._engine_async: Optional[sqlalchemy_async.AsyncEngine] = None
+
+    def get_engine(self) -> sqlalchemy.engine.Engine:
+        """Lazy sync engine init with double-checked locking."""
+        if self._engine is not None:
+            return self._engine
+        with self._lock:
+            if self._engine is not None:
+                return self._engine
+            engine = get_engine(self._db_name)
+            self._create_table_fn(engine)
+            # Set _engine before post_init_fn so that post_init_fn
+            # can access self.engine (e.g. _sqlite_supports_returning).
+            self._engine = engine
+            if self._post_init_fn is not None:
+                self._post_init_fn(engine)
+            return self._engine
+
+    async def get_async_engine(self) -> sqlalchemy_async.AsyncEngine:
+        """Lazy async engine init; delegates table creation to get_engine."""
+        if self._engine_async is not None:
+            return self._engine_async
+
+        def init_db():
+            with self._lock:
+                if self._engine_async is not None:
+                    return
+                self._engine_async = get_engine(self._db_name,
+                                                async_engine=True)
+            # Ensure tables are created via the sync path.
+            self.get_engine()
+
+        # Use asyncio.to_thread to avoid blocking the event loop, matching the
+        # original _init_db_async pattern.
+        await asyncio.to_thread(init_db)
+        return self._engine_async
 
 
 _max_connections = 0

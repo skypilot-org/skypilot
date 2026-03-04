@@ -681,6 +681,39 @@ def test_docker_login_config_no_mixed_envs_secrets():
             resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
 
+def test_docker_login_config_redacted_in_display_yaml_secrets():
+    """Test that _docker_login_config password is redacted in display YAML
+    when docker vars are in secrets."""
+    task_obj = task.Task(name='test-docker-redact',
+                         run='echo hello',
+                         secrets={
+                             'SKYPILOT_DOCKER_USERNAME': 'myuser',
+                             'SKYPILOT_DOCKER_SERVER': 'registry.example.com',
+                             'SKYPILOT_DOCKER_PASSWORD': 'super-secret-password'
+                         })
+    task_obj.set_resources(
+        resources_lib.Resources(image_id='docker:nginx:latest'))
+
+    # Display YAML should have redacted password
+    display_config = task_obj.to_yaml_config(use_user_specified_yaml=True)
+    resources_config = display_config.get('resources', {})
+    docker_config = resources_config.get('_docker_login_config')
+    assert docker_config is not None
+    assert docker_config['password'] == '<redacted>'
+    assert docker_config['username'] == 'myuser'
+    assert docker_config['server'] == 'registry.example.com'
+
+    # Secrets should also be redacted
+    assert display_config['secrets']['SKYPILOT_DOCKER_PASSWORD'] == '<redacted>'
+
+    # Execution YAML should have the actual password
+    exec_config = task_obj.to_yaml_config(use_user_specified_yaml=False)
+    exec_resources = exec_config.get('resources', {})
+    exec_docker = exec_resources.get('_docker_login_config')
+    assert exec_docker is not None
+    assert exec_docker['password'] == 'super-secret-password'
+
+
 def make_mock_volume_config(name='vol1',
                             type='pvc',
                             cloud='aws',

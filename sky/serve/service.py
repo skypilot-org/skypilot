@@ -252,6 +252,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
             return f.read()
 
     if is_recovery:
+        assert service is not None
         yaml_content = service['yaml_content']
         # Backward compatibility for old service records that
         # does not dump the yaml content to version database.
@@ -304,9 +305,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
         serve_state.add_or_update_version(service_name, version, service_spec,
                                           yaml_content)
     else:
-        version = serve_state.get_latest_version(service_name)
-        if version is None:
+        latest_version = serve_state.get_latest_version(service_name)
+        if latest_version is None:
             raise ValueError(f'No version found for service {service_name}')
+        version = latest_version
         serve_state.update_service_controller_pid(service_name, os.getpid())
 
     controller_process = None
