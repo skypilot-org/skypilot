@@ -1035,6 +1035,13 @@ async def enabled_clouds_batch(request: fastapi.Request,
                                expand: bool = False) -> None:
     """Gets enabled clouds for multiple workspaces in a single request."""
     workspace_list = [w.strip() for w in workspaces.split(',') if w.strip()]
+    # API-layer authorization: filter out workspaces the caller cannot access
+    # before the request reaches the core function (defense-in-depth).
+    auth_user = request.state.auth_user
+    if auth_user is not None and workspace_list:
+        accessible = permission.permission_service.get_accessible_workspace_names(
+            auth_user.id, set(workspace_list))
+        workspace_list = [ws for ws in workspace_list if ws in accessible]
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
