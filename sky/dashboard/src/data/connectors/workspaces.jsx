@@ -563,22 +563,9 @@ export async function getEnabledCloudsBatch(
       );
     }
 
-    let requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
     if (!requestId) {
-      try {
-        const scheduleData = await scheduleResponse.json();
-        if (scheduleData && scheduleData.request_id) {
-          requestId = scheduleData.request_id;
-        } else {
-          throw new Error(
-            'X-Skypilot-Request-ID header not found AND request_id not found in body.'
-          );
-        }
-      } catch (e) {
-        throw new Error(
-          `X-Skypilot-Request-ID header not found, fallback failed: ${e.message}`
-        );
-      }
+      throw new Error('X-Skypilot-Request-ID header not found in response.');
     }
 
     const resultResponse = await apiClient.get(
