@@ -594,7 +594,6 @@ export async function getEnabledCloudsBatch(
   }
 }
 
-
 export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
