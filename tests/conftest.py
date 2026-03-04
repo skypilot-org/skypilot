@@ -98,6 +98,7 @@ all_clouds_in_smoke_tests = [
     'coreweave',
     'slurm',
     'mithril',
+    'verda',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -122,7 +123,6 @@ cloud_to_pytest_keyword = {
     'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
-    'runpod': 'runpod',
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
     'shadeform': 'shadeform',
@@ -130,6 +130,7 @@ cloud_to_pytest_keyword = {
     'coreweave': 'coreweave',
     'slurm': 'slurm',
     'mithril': 'mithril',
+    'verda': 'verda',
 }
 
 
