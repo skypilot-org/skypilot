@@ -1306,6 +1306,14 @@ MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
 # hardcoded max limit.
 MAX_TOTAL_RUNNING_JOBS = 2000
 
+# In consolidation mode, cap the fraction of available memory (after
+# controller reservation) that server workers can consume. The remainder is
+# reserved for service/job controllers so that both workers and services
+# scale with system memory. Without this cap, short workers grow linearly
+# with memory and consume nearly all of it, leaving a roughly fixed number
+# of services regardless of system memory size.
+_CONSOLIDATION_WORKER_MEMORY_FRACTION = 0.7
+
 
 def compute_memory_reserved_for_controllers(
         reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
@@ -1324,8 +1332,15 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
                        controller_reserved)
     if not consolidation_mode:
         return total_memory_mb
+    # Cap the memory available for server workers so that both workers and
+    # services scale with system memory. Without this cap, short workers
+    # grow linearly with memory, consuming nearly all of it and leaving a
+    # roughly fixed amount for services regardless of system memory size.
+    worker_reserved = (controller_reserved +
+                       total_memory_mb *
+                       (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION))
     config = server_config.compute_server_config(
-        deploy=True, quiet=True, reserved_memory_mb=controller_reserved)
+        deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
     used = 0.0
     used += ((config.long_worker_config.garanteed_parallelism +
               config.long_worker_config.burstable_parallelism) *
