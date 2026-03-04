@@ -83,6 +83,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH = 'managed-job-status-refresh'
     REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH = 'sky-serve-status-refresh'
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
+    REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
 
     def __repr__(self):
         return self.value

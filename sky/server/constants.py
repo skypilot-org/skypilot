@@ -94,3 +94,7 @@ OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 # The env vars are read by websockets at import time.
 WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
 WEBSOCKETS_MAX_NUM_HEADERS = '256'
+
+# Interval for the server-side heartbeat daemon that sends plugin metrics
+# to Loki (e.g., GPU inventory from billing plugin).
+SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes
