@@ -586,6 +586,8 @@ class JobsCancelBody(RequestBody):
     all: bool = False
     all_users: bool = False
     pool: Optional[str] = None
+    graceful: bool = False
+    graceful_timeout: Optional[int] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -613,6 +615,7 @@ class RequestStatusBody(pydantic.BaseModel):
     all_status: bool = False
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
+    cluster_name: Optional[str] = None
 
 
 class ServeUpBody(RequestBody):

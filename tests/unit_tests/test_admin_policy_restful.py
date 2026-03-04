@@ -147,10 +147,24 @@ async def apply_policy(request: Request) -> JSONResponse:
 
 
 class PolicyServer:
-    """Test policy server that runs in a background thread with automatic port assignment."""
+    """Test policy server that runs in a background thread with automatic port assignment.
+
+    Uses pre-bound sockets to avoid TOCTOU port races when multiple xdist
+    workers start servers concurrently.
+    """
 
     def __init__(self, port=None):
-        self.port = port or common_utils.find_free_port(50000)
+        if port is not None:
+            self.port = port
+            self._socket = None
+        else:
+            # Bind immediately to avoid port races between xdist workers.
+            # Passing the bound socket to uvicorn eliminates the window
+            # between find_free_port() and server.run().
+            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._socket.bind(('127.0.0.1', 0))
+            self.port = self._socket.getsockname()[1]
         self.server = None
         self.thread = None
         self._started = False
@@ -171,9 +185,19 @@ class PolicyServer:
             access_log=False)
         self.server = uvicorn.Server(config)
 
+        # If we pre-bound a socket, pass it to uvicorn so it doesn't
+        # try to bind a new one (which could race with other workers).
+        bound_socket = self._socket
+
         def run_server():
             try:
-                self.server.run()
+                if bound_socket is not None:
+                    self.server.run(sockets=[bound_socket])
+                else:
+                    self.server.run()
+            except SystemExit:
+                # uvicorn calls sys.exit(1) on startup failure
+                pass
             except Exception:
                 # Ignore errors during shutdown
                 pass

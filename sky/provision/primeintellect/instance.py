@@ -403,6 +403,7 @@ def get_cluster_info(
                 external_ip=external_ip,
                 ssh_port=ssh_port,
                 tags={'provider': instance['providerType']},
+                node_name=instance_id,
             )
         ]
         if instance['name'].endswith('-head'):

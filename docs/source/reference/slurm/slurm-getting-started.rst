@@ -5,7 +5,7 @@ Getting Started on Slurm
 
 .. note::
 
-    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    Slurm support is under active development. We'd love to hear from you —
     please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 Quickstart
@@ -263,13 +263,222 @@ To restrict which clusters SkyPilot can use, add the following to your ``~/.sky/
         - mycluster2
 
 
+.. _slurm-pricing:
+
+Configuring pricing
+-------------------
+
+By default, Slurm virtual instance types report a cost of ``$0.00`` in
+``sky launch``, ``sky status``, and ``sky gpus list``.
+
+To display meaningful cost estimates, add hourly rates in your
+``~/.sky/config.yaml``:
+
+.. code-block:: yaml
+
+    slurm:
+      pricing:
+        cpu: 0.04        # $/vCPU/hr  (CPU-only instances)
+        memory: 0.01     # $/GB/hr    (CPU-only instances)
+        accelerators:
+          V100: 2.50     # $/accelerator/hr (all-in, includes cpu/memory)
+          A100: 3.50
+
+Pricing uses two mutually exclusive tiers: **CPU-only instances** (no
+accelerator) use the ``cpu`` and ``memory`` rates, while **accelerator
+instances** use only the per-accelerator rate (an all-in price that includes
+cpu and memory). All fields are optional; unset fields contribute ``$0.00``.
+
+You can also set different pricing per cluster and per partition using
+``cluster_configs``. Each level deep-merges with the parent — only the keys you
+specify are overridden:
+
+.. code-block:: yaml
+
+    slurm:
+      pricing:
+        cpu: 0.04
+        memory: 0.01
+        accelerators:
+          V100: 2.50
+      cluster_configs:
+        mycluster1:
+          pricing:
+            cpu: 0.06  # overrides; memory and accelerators inherited
+
+See :ref:`slurm.pricing <config-yaml-slurm-pricing>` and
+:ref:`slurm.cluster_configs <config-yaml-slurm-cluster-configs>` in the
+:ref:`advanced configuration reference <config-yaml>` for the full example with
+partition-level overrides.
+
+
+.. _slurm-container-images:
+
+Containers
+----------
+
+SkyPilot supports running tasks inside container images on Slurm, using
+`Pyxis <https://github.com/NVIDIA/pyxis>`_ and
+`enroot <https://github.com/NVIDIA/enroot>`_ under the hood.
+
+To use a container image, specify ``image_id`` in your task YAML or use the
+``--image-id`` CLI flag:
+
+.. code-block:: yaml
+
+    # task.yaml
+    resources:
+      image_id: docker:ubuntu:22.04
+
+    run: |
+      echo "Running inside container"
+      cat /etc/os-release
+
+.. code-block:: bash
+
+    # Or via CLI
+    $ sky launch --image-id docker:ubuntu:22.04 -- echo "hello from container"
+
+Images from any Docker-compatible registry are supported, including but not
+limited to Docker Hub, AWS ECR, GCP Artifact Registry, and NVIDIA NGC.
+
+.. note::
+
+    Container support requires the `Pyxis <https://github.com/NVIDIA/pyxis>`_
+    SPANK plugin to be installed on your Slurm cluster.
+
+Private registries
+^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+    Unlike :ref:`cloud VMs <docker-containers-private-registries>` and
+    :ref:`Kubernetes <kubernetes-custom-images-private-repos>`, private registry
+    authentication on Slurm is configured **at the cluster level** by the
+    administrator. Users do not need to set ``SKYPILOT_DOCKER_*`` environment
+    variables.
+
+To pull images from private registries, the cluster administrator must configure
+enroot's credentials file on all compute nodes. Enroot uses a
+netrc format credentials file to authenticate with container registries. For more details,
+see the `enroot import documentation <https://github.com/NVIDIA/enroot/blob/main/doc/cmd/import.md#description>`_.
+
+**Step 1: Find the credentials file path**
+
+The credentials file location depends on your cluster's enroot configuration:
+
+.. code-block:: bash
+
+    # Check the configured ENROOT_CONFIG_PATH
+    $ grep ENROOT_CONFIG_PATH /etc/enroot/enroot.conf
+
+    # If ENROOT_CONFIG_PATH is set (e.g., ${HOME}/enroot):
+    #   Credentials file: ~/enroot/.credentials
+    # If unset (default):
+    #   Credentials file: ~/.config/enroot/.credentials
+
+**Step 2: Create the credentials file on all compute nodes**
+
+Since most Slurm clusters use a shared filesystem (e.g., NFS, Lustre), creating
+the file in the user's home directory typically makes it available on all nodes:
+
+.. tab-set::
+
+    .. tab-item:: Docker Hub
+        :sync: docker-hub-tab
+
+        Docker Hub authentication requires credentials for both the registry
+        and the auth server:
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine auth.docker.io login <username> password <access-token>
+            machine registry-1.docker.io login <username> password <access-token>
+            EOF
+
+        Use a `personal access token <https://app.docker.com/settings/personal-access-tokens>`_
+        with "Read" repository permissions as the password.
+
+    .. tab-item:: AWS ECR
+        :sync: aws-ecr-tab
+
+        .. code-block:: bash
+
+            # Replace <ENROOT_CONFIG_PATH> with the path from Step 1
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine <account-id>.dkr.ecr.<region>.amazonaws.com login AWS password $(aws ecr get-login-password --region <region>)
+            EOF
+
+        The ``$(...)`` syntax is evaluated by enroot at import time, so the
+        ECR token (which expires every 12 hours) is always refreshed
+        automatically.
+
+        **Requirements:**
+
+        - AWS CLI must be installed on compute nodes
+        - IAM credentials with ``ecr:GetAuthorizationToken``,
+          ``ecr:BatchGetImage``, and ``ecr:GetDownloadUrlForLayer`` permissions
+        - **enroot >= 4.0** is required for ECR. Older versions do not support
+          ECR's non-standard authentication flow. If you see
+          ``[ERROR] Could not process JSON input`` when pulling ECR images,
+          upgrade enroot to 4.0 or later. See enroot issues
+          `#143 <https://github.com/NVIDIA/enroot/issues/143>`_ and
+          `#189 <https://github.com/NVIDIA/enroot/issues/189>`_ for details.
+
+    .. tab-item:: GCP Artifact Registry
+        :sync: gcp-tab
+
+        The service account key must be base64-encoded because raw JSON
+        contains characters that break enroot's netrc parser:
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine <location>-docker.pkg.dev login _json_key_base64 password $(base64 -w0 /path/to/service-account-key.json)
+            EOF
+
+        The service account must have the ``roles/artifactregistry.reader``
+        role. See `Artifact Registry authentication <https://cloud.google.com/artifact-registry/docs/docker/authentication#json-key>`_.
+
+        Replace ``<location>`` with your repository's location (e.g., ``us``,
+        ``us-central1``, ``europe-west1``).
+
+    .. tab-item:: NVIDIA NGC
+        :sync: nvidia-ngc-tab
+
+        .. code-block:: bash
+
+            $ mkdir -p <ENROOT_CONFIG_PATH>
+            $ cat > <ENROOT_CONFIG_PATH>/.credentials << 'EOF'
+            machine nvcr.io login $oauthtoken password <NGC_API_KEY>
+            EOF
+
+**Step 3: Verify the setup**
+
+Test that enroot can pull the private image on a compute node:
+
+.. code-block:: bash
+
+    $ srun enroot import --output /tmp/test.sqsh 'docker://<registry>#<image>:<tag>'
+    # Should succeed without authentication errors
+
+    # Clean up
+    $ rm /tmp/test.sqsh
+
+Once configured, users can launch SkyPilot tasks with private images without
+any additional setup.
+
+
 Current limitations
 -------------------
 
 Slurm support in SkyPilot is under active development. The following features are not yet supported:
 
 * **Autostop**: Slurm clusters cannot be automatically terminated after idle time.
-* **Custom images**: Docker or custom container images are not supported.
 * **SkyServe**: Serving deployments on Slurm is not yet supported.
 
 FAQs

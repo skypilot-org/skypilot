@@ -48,7 +48,13 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+# Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
+# performance issues in Kubernetes deployments where ~/sky_logs/ may be on
+# shared storage.
+REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
+# Legacy path for backward compatibility - GC will clean up logs from both
+# the new and legacy paths to handle server upgrades gracefully.
+LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
@@ -508,6 +514,11 @@ def reset_db_and_logs():
         f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
     )
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
+                  ignore_errors=True)
+    # Also clear legacy path for backward compatibility cleanup
+    logger.debug('clearing legacy API server logs directory at '
+                 f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
+    shutil.rmtree(pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     logger.debug('clearing local API server client directory at '
                  f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
@@ -1147,12 +1158,47 @@ async def _delete_requests(request_ids: List[str]):
             logger.debug(f'End deleting requests {request_ids}')
 
 
+# TODO Remove this function on or after v0.15.0
+def _get_legacy_log_path(request_id: str) -> pathlib.Path:
+    """Get the legacy log path for a request (for backward compatibility).
+
+    This is used during GC to clean up log files from the old location
+    (~/sky_logs/api_server/requests/) after server upgrades.
+    """
+    legacy_path_prefix = pathlib.Path(
+        LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+    return (legacy_path_prefix / request_id).with_suffix('.log')
+
+
+# TODO Remove this function on or after v0.15.0
+async def _cleanup_legacy_directory_if_empty():
+    """Remove legacy request log directory if empty.
+
+    This helps clean up the legacy directory once all old logs have been
+    garbage collected after a server upgrade.
+    """
+    legacy_path = pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser()
+    if not legacy_path.exists():
+        return
+    try:
+        # Check if directory is empty (no .log or .lock files)
+        if not any(legacy_path.iterdir()):
+            logger.info(f'Removing empty legacy log directory: {legacy_path}')
+            legacy_path.rmdir()
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail GC if cleanup fails
+        logger.debug(f'Failed to cleanup legacy directory: {e}')
+
+
 async def clean_finished_requests_with_retention(retention_seconds: int,
                                                  batch_size: int = 1000):
     """Clean up finished requests older than the retention period.
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
     from the database and cleans up their associated log files.
+
+    For backward compatibility, it also cleans up log files from the legacy
+    path (~/sky_logs/api_server/requests/) to handle server upgrades.
 
     Args:
         retention_seconds: Requests older than this many seconds will be
@@ -1177,16 +1223,27 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
         for req in reqs:
             # req.log_path is derived from request_id,
             # so it's ok to just grab the request_id in the above query.
+            # Delete from current path
             futs.append(
                 asyncio.create_task(
                     anyio.Path(
                         req.log_path.absolute()).unlink(missing_ok=True)))
+            # Also delete from legacy path for backward compatibility
+            # TODO Remove this on or after v0.15.0
+            legacy_log_path = _get_legacy_log_path(req.request_id)
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(legacy_log_path).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break
+
+    # Try to clean up the legacy directory if it's empty
+    # TODO Remove this on or after v0.15.0
+    await _cleanup_legacy_directory_if_empty()
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.

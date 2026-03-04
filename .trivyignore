@@ -1,2 +1,6 @@
 CVE-2025-47906
 CVE-2025-47907
+
+# Go stdlib CVE in kubectl/gcloud-crc32c/nebius binaries - requires Go 1.24.13+
+# which is not yet available in any released kubectl or gcloud SDK version
+CVE-2025-68121

@@ -26,8 +26,8 @@ class TestVolumeIsEphemeralHandling:
     @pytest.fixture
     def mock_engine(self):
         """Mock SQLAlchemy engine."""
-        with mock.patch.object(global_user_state,
-                               '_SQLALCHEMY_ENGINE') as engine:
+        with mock.patch.object(global_user_state._db_manager,
+                               '_engine') as engine:
             engine.dialect.name = 'sqlite'
             yield engine
 

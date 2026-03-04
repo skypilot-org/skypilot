@@ -462,14 +462,21 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
+
+    def _omit(version: int) -> bool:
+        return remote_api_version is None or remote_api_version < version
+
     # TODO(kevin): remove this in v0.13.0
-    omit_user_specified_yaml = (remote_api_version is None or
-                                remote_api_version < 15)
+    omit_user_specified_yaml = _omit(15)
     # TODO (kyuds): remove this in v0.13.0
-    omit_local_disk = (remote_api_version is None or remote_api_version < 35)
+    omit_local_disk = _omit(35)
+    omit_mount_cached_config = _omit(37)
     if omit_local_disk:
         logger.debug('`local_disk` is ignored because the server does '
                      'not support it yet.')
+    if omit_mount_cached_config:
+        logger.debug('`mount_cached_config` is ignored because the server '
+                     'does not support it yet.')
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -481,6 +488,9 @@ def validate(
             for resource in task.resources:
                 # pylint: disable=protected-access
                 resource._set_local_disk(None)
+        if omit_mount_cached_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_cached_config = None
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
@@ -2331,6 +2341,7 @@ def api_status(
     all_status: bool = False,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    cluster_name: Optional[str] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2341,6 +2352,8 @@ def api_status(
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
         fields: The fields to get. If None, get all fields.
+        cluster_name: Filter requests by cluster name.
+            If None, show all requests.
 
     Returns:
         A list of request payloads.
@@ -2349,11 +2362,18 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
+    # Backward compatibility check for the new flag cluster_name
+    version = versions.get_remote_api_version()
+    if (cluster_name is not None) and (version is None or version < 38):
+        logger.warning(
+            'The flag is ignored because the server does not support it yet.')
+
     body = payloads.RequestStatusBody(
         request_ids=request_ids,
         all_status=all_status,
         limit=limit,
         fields=fields,
+        cluster_name=cluster_name,
     )
     response = server_common.make_authenticated_request(
         'GET',
@@ -2934,7 +2954,7 @@ def api_login(endpoint: Optional[str] = None,
 
     # see https://github.com/python/mypy/issues/5107 on why
     # typing is disabled on this line
-    server_common.get_api_server_status.cache_clear()  # type: ignore
+    server_common.get_api_server_status_response.cache_clear()  # type: ignore
     # After successful authentication, check server health again to get user
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(

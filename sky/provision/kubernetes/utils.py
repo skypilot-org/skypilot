@@ -765,13 +765,52 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
 
 
+class NebiusLabelFormatter(GPULabelFormatter):
+    """Custom label formatter for Nebius
+
+    Uses nebius.com/gpu-name as the key, and the uppercase SkyPilot
+    accelerator str as the value.
+    """
+
+    LABEL_KEY = 'nebius.com/gpu-name'
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY]
+
+    @classmethod
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        # For Nebius formatter, we use the uppercase accelerator str.
+        return [accelerator.upper()]
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value.upper()
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Values must be all uppercase for the Nebius formatter."""
+        is_valid = value == value.upper()
+        return is_valid, (f'Label value {value!r} must be uppercase if using '
+                          f'the {cls.get_label_key()} label.'
+                          if not is_valid else '')
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
-    GFDLabelFormatter, CoreWeaveLabelFormatter
+    GFDLabelFormatter, CoreWeaveLabelFormatter, NebiusLabelFormatter
 ]
 
 
@@ -1213,6 +1252,14 @@ class CoreweaveAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class NebiusAutoscaler(Autoscaler):
+    """Nebius autoscaler
+    """
+
+    label_formatter: Any = NebiusLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1226,6 +1273,7 @@ AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.NEBIUS: NebiusAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
@@ -1360,6 +1408,7 @@ class V1Node:
         exclude_not_ready: bool = False,
         exclude_effects: Optional[List[str]] = None,
         exclude_keys: Optional[List[str]] = None,
+        exclude_key_prefixes: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get the taints on the node.
 
@@ -1369,6 +1418,8 @@ class V1Node:
             exclude_effects: The taint effects to exclude,
               e.g. ['PreferNoSchedule'].
             exclude_keys: The taint keys to exclude.
+            exclude_key_prefixes: Taint key prefixes to exclude,
+              e.g. ['node-role.kubernetes.io/'].
 
         Returns:
             List[Dict[str, Any]]: The taints on the node.
@@ -1386,6 +1437,9 @@ class V1Node:
             if exclude_effects and t.effect in exclude_effects:
                 continue
             if exclude_keys and t.key in exclude_keys:
+                continue
+            if exclude_key_prefixes and any(
+                    t.key.startswith(p) for p in exclude_key_prefixes):
                 continue
             taints.append({
                 'key': t.key,
@@ -3222,6 +3276,14 @@ def get_handled_taint_keys() -> List[str]:
     return keys
 
 
+# Taint key prefixes that indicate node roles rather than problems.
+# These are excluded when determining if a node has problematic taints.
+_ROLE_TAINT_KEY_PREFIXES = [
+    'node-role.kubernetes.io/master',
+    'node-role.kubernetes.io/control-plane',
+]
+
+
 def get_kubernetes_node_info(
         context: Optional[str] = None) -> models.KubernetesNodesInfo:
     """Gets the resource information for all the nodes in the cluster.
@@ -3366,10 +3428,12 @@ def get_kubernetes_node_info(
 
         # Check if node is ready
         node_is_ready = node.is_ready()
-        node_taints = node.get_taints(exclude_cordon=True,
-                                      exclude_not_ready=True,
-                                      exclude_effects=['PreferNoSchedule'],
-                                      exclude_keys=get_handled_taint_keys())
+        node_taints = node.get_taints(
+            exclude_cordon=True,
+            exclude_not_ready=True,
+            exclude_effects=['PreferNoSchedule'],
+            exclude_keys=get_handled_taint_keys(),
+            exclude_key_prefixes=_ROLE_TAINT_KEY_PREFIXES)
         node_is_tainted = len(node_taints) > 0
 
         if accelerator_count == 0:

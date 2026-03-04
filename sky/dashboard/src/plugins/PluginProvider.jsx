@@ -6,11 +6,15 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
 } from 'react';
+import { useRouter } from 'next/router';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -255,7 +259,10 @@ function normalizeNavLink(link) {
       link.external ??
       (/^(https?:)?\/\//.test(String(link.href)) || link.target === '_blank'),
     badge: typeof link.badge === 'string' ? link.badge : null,
-    icon: typeof link.icon === 'string' ? link.icon : null,
+    icon:
+      typeof link.icon === 'string' || React.isValidElement(link.icon)
+        ? link.icon
+        : null,
     description:
       typeof link.description === 'string' ? link.description : undefined,
   };
@@ -600,13 +607,61 @@ function createPluginApi(dispatch) {
         basePath: BASE_PATH,
         apiEndpoint: ENDPOINT,
         dashboardCache: dashboardCache,
+        cachePreloader: cachePreloader,
         grafanaUtils: {
           checkGrafanaAvailability,
           getGrafanaUrl,
         },
+        gpuUtils: {
+          canonicalizeGpuName,
+          CANONICAL_GPU_NAMES,
+        },
         // Provide URL normalization utility for plugins
         normalizeUrl: normalizeUrlForHistory,
+        // Navigate using the Next.js router (SPA navigation)
+        navigate: (path) => {
+          const router = window.__pluginRouterRef?.current;
+          if (router) {
+            router.push(path);
+          } else {
+            window.location.href = path;
+          }
+        },
+        // Get current grouped nav links (from all registered plugins)
+        getNavLinks: () => {
+          const stateRef = window.__pluginStateRef;
+          if (!stateRef?.current) return { ungrouped: [], groups: {} };
+          const sorted = [...(stateRef.current.topNavLinks || [])].sort(
+            (a, b) => a.order - b.order
+          );
+          const ungrouped = sorted.filter((link) => !link.group);
+          const grouped = sorted.filter((link) => link.group);
+          const groups = grouped.reduce((acc, link) => {
+            const groupName = link.group;
+            if (!acc[groupName]) acc[groupName] = [];
+            acc[groupName].push(link);
+            return acc;
+          }, {});
+          return { ungrouped, groups };
+        },
+        // Get current plugin routes
+        getPluginRoutes: () => {
+          const stateRef = window.__pluginStateRef;
+          return stateRef?.current?.routes || [];
+        },
+        // Get registered components for a slot
+        getSlotComponents: (slot) => {
+          const stateRef = window.__pluginStateRef;
+          if (!stateRef?.current || !slot) return [];
+          return stateRef.current.components[slot] || [];
+        },
       };
+    },
+    getComponents() {
+      // Lazy import to avoid circular dependencies.
+      // This dynamically provides all components from the ui directory.
+      // eslint-disable-next-line no-undef
+      return require('@/components/ui');
     },
     registerDataProvider(config) {
       if (!config?.id) {
@@ -633,6 +688,25 @@ function createPluginApi(dispatch) {
 
 export function PluginProvider({ children }) {
   const [state, dispatch] = useReducer(pluginReducer, initialState);
+  const router = useRouter();
+  const routerRef = useRef(router);
+
+  // Keep router ref up to date
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  // Expose router reference for plugin API navigate()
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__pluginRouterRef = routerRef;
+      return () => {
+        if (window.__pluginRouterRef === routerRef) {
+          delete window.__pluginRouterRef;
+        }
+      };
+    }
+  }, []);
 
   // Expose state reference for getDataEnhancements to access outside React context
   useEffect(() => {
@@ -742,7 +816,17 @@ export function usePluginRoute(pathname) {
     if (!pathname) {
       return null;
     }
-    return routes.find((route) => route.path === pathname) || null;
+    // Use prefix matching so plugin sub-routes (e.g. /plugins/my-plugin/details)
+    // are handled by the plugin that registered the base path (/plugins/my-plugin).
+    // Sort by path length descending so the most specific match wins.
+    return (
+      [...routes]
+        .sort((a, b) => b.path.length - a.path.length)
+        .find(
+          (route) =>
+            pathname === route.path || pathname.startsWith(route.path + '/')
+        ) || null
+    );
   }, [pathname, routes]);
 }
 

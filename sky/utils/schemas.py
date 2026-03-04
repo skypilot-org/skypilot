@@ -526,6 +526,17 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
+    # Refer to https://rclone.org/docs/#options for more information
+    # on rclone-specific nomenclature.
+    rclone_memory_units = ('B', 'K', 'M', 'G', 'T', 'P')
+    rclone_memory_pattern = (
+        '^[0-9]+('
+        f'{"|".join([unit.lower() for unit in rclone_memory_units])}|'
+        f'{"|".join([unit.upper() for unit in rclone_memory_units])})?$')
+    rclone_duration_pattern = (
+        r'^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
+        r'(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -580,6 +591,47 @@ def get_storage_schema():
                     },
                     'attach_mode': {
                         'type': 'string',
+                    },
+                    'mount_cached': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'transfers': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'buffer_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_age': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'vfs_read_ahead': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_streams': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'vfs_write_back': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
                     },
                 },
             },
@@ -1129,6 +1181,30 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_PRICING_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'cpu': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'memory': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'accelerators': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'type': 'number',
+                'minimum': 0
+            },
+        },
+    },
+}
+
 _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
@@ -1236,6 +1312,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
+    'pricing': _PRICING_SCHEMA,
 }
 
 
@@ -1508,6 +1585,33 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'pricing': _PRICING_SCHEMA,
+                'cluster_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'pricing': _PRICING_SCHEMA,
+                            'partition_configs': {
+                                'type': 'object',
+                                'required': [],
+                                'properties': {},
+                                'additionalProperties': {
+                                    'type': 'object',
+                                    'required': [],
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'pricing': _PRICING_SCHEMA,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             }
         },
         'oci': {
@@ -1580,6 +1684,9 @@ def get_config_schema():
                         'additionalProperties': False,
                         'properties': {
                             'project_id': {
+                                'type': 'string',
+                            },
+                            'subnet_id': {
                                 'type': 'string',
                             },
                             'fabric': {
@@ -1976,6 +2083,7 @@ def get_config_schema():
         else:
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
 
+    # TODO (kyuds): deprecated; remove v0.13.0
     data_schema = {
         'type': 'object',
         'required': [],

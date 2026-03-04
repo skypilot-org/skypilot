@@ -3,8 +3,11 @@
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+import colorama
+
 from sky import catalog
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import slurm
@@ -49,10 +52,28 @@ class Slurm(clouds.Cloud):
             'Slurm.',
         clouds.CloudImplementationFeatures.LOCAL_DISK:
             (f'Local disk is not supported on {_REPR}'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            'Docker image is not supported on this Slurm cluster because '
+            'the Pyxis plugin is not installed. Please ask your cluster '
+            'administrator to install Pyxis '
+            '(https://github.com/NVIDIA/pyxis).',
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
     _INDENT_PREFIX = '    '
+    # Known shared filesystem types that SkyPilot requires for Slurm.
+    # Names as returned by `stat -f -c %T`.
+    _SHARED_FS_TYPES = frozenset({
+        'nfs',
+        'nfs4',
+        'lustre',
+        'gpfs',
+        'beegfs',
+        'ceph',
+        'fuse.ceph',
+        'glusterfs',
+        'fuse.glusterfs',
+    })
 
     # Same as Kubernetes.
     _DEFAULT_NUM_VCPUS_WITH_GPU = 4
@@ -73,9 +94,28 @@ class Slurm(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        del region  # unused
-        # logger.critical('[BYPASS] Check Slurm's unsupported features...')
-        return cls._CLOUD_UNSUPPORTED_FEATURES
+        unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
+        # Docker image support requires the Pyxis SPANK plugin.
+        # When region is None, we check all clusters and mark Docker as
+        # supported if ANY cluster has Pyxis. This is intentionally
+        # permissive -- per-cluster filtering happens in
+        # regions_with_offering(), which calls check_features_are_supported()
+        # with a specific region to filter out non-Pyxis clusters.
+        cluster = region if region is not None else resources.region
+        if cluster is None:
+            clusters = cls.existing_allowed_clusters()
+        else:
+            clusters = [cluster]
+        for c in clusters:
+            try:
+                if slurm_utils.check_pyxis_enabled(c):
+                    unsupported.pop(
+                        clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
+                    break
+            except Exception as e:  # pylint: disable=broad-except
+                logger.debug(f'Failed to check Pyxis on cluster {c}: '
+                             f'{common_utils.format_exception(e)}')
+        return unsupported
 
     @classmethod
     def _max_cluster_name_length(cls) -> Optional[int]:
@@ -199,7 +239,7 @@ class Slurm(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None
     ) -> List[clouds.Region]:
-        del accelerators, use_spot, resources  # unused
+        del accelerators, use_spot  # unused
         existing_clusters = cls.existing_allowed_clusters()
 
         regions: List[clouds.Region] = []
@@ -223,6 +263,23 @@ class Slurm(clouds.Cloud):
             if zones:
                 r.set_zones(zones)
             regions.append(r)
+
+        # Filter out clusters that do not support the requested features
+        # (e.g., Docker image requires Pyxis).
+        if resources is not None:
+            resources_required_features = (
+                resources.get_required_cloud_features())
+            filtered_regions = []
+            for r in regions:
+                try:
+                    cls.check_features_are_supported(
+                        resources, resources_required_features, r.name)
+                    filtered_regions.append(r)
+                except exceptions.NotSupportedError as e:
+                    logger.info(f'Excluding Slurm cluster '
+                                f'{r.name!r}: {e}')
+                    continue
+            regions = filtered_regions
 
         # Check if requested instance type will fit in the cluster.
         if instance_type is None:
@@ -259,8 +316,10 @@ class Slurm(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        """For now, we assume zero cost for Slurm clusters."""
-        return 0.0
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import slurm_catalog
+        return slurm_catalog.get_hourly_cost(instance_type, use_spot, region,
+                                             zone)
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -367,6 +426,24 @@ class Slurm(clouds.Cloud):
 
         image_id = resources.extract_docker_image()
 
+        provision_timeout = skypilot_config.get_effective_region_config(
+            cloud='slurm',
+            region=cluster,
+            keys=('provision_timeout',),
+            default_value=None)
+        if provision_timeout is None:
+            if resources.zone is not None:
+                # When zone/partition is specified, there will be no failover,
+                # so we can let Slurm hold on to the job and let it be queued
+                # for a long time.
+                provision_timeout = 24 * 60 * 60  # 24 hours
+            else:
+                # Otherwise, we still want failover, but also wait sufficiently
+                # long for the Slurm scheduler to allocate the resources. We
+                # have seen Slurm taking minutes to schedule a job, when there
+                # are a lot of pending jobs to be processed.
+                provision_timeout = 2 * 60  # 2 minutes
+
         deploy_vars = {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -376,6 +453,7 @@ class Slurm(clouds.Cloud):
             'accelerator_type': acc_type,
             'slurm_cluster': cluster,
             'slurm_partition': partition,
+            'provision_timeout': provision_timeout,
             # TODO(jwj): Pass SSH config in a smarter way
             'ssh_hostname': ssh_config_dict['hostname'],
             'ssh_port': str(ssh_config_dict.get('port', 22)),
@@ -522,7 +600,22 @@ class Slurm(clouds.Cloud):
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                ctx2text[cluster] = 'enabled'
+                fs_type = client.check_homedir_shared_fs()
+                if fs_type is not None and fs_type not in cls._SHARED_FS_TYPES:
+                    ctx2text[cluster] = (
+                        f'{colorama.Fore.GREEN}enabled.'
+                        f'{colorama.Style.RESET_ALL} '
+                        f'{colorama.Fore.LIGHTYELLOW_EX}'
+                        'Warning: Home directory (~) filesystem '
+                        f'type is {fs_type!r}, not a shared '
+                        'filesystem. SkyPilot requires ~ to be '
+                        'on a shared filesystem (e.g., NFS) '
+                        'visible to all nodes. Customizing the '
+                        'home directory will be supported in a '
+                        'future release.'
+                        f'{colorama.Style.RESET_ALL}')
+                else:
+                    ctx2text[cluster] = 'enabled'
                 success = True
             except KeyError as e:
                 key = e.args[0]

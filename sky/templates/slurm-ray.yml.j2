@@ -13,6 +13,7 @@ provider:
 
   cluster: {{slurm_cluster}}
   partition: {{slurm_partition}}
+  provision_timeout: {{provision_timeout}}
 
   ssh:
     hostname: {{ssh_hostname}}
@@ -124,6 +125,7 @@ setup_commands:
     # lightweight SSH server popular in embedded and resource-constrained
     # environments. It's actively maintained (https://github.com/mkj/dropbear/releases)
     # and doesn't have the same issue with OpenSSH.
+    # Mirror: https://dropbear.nl/mirror/releases/ (fallback if primary is down)
     #
     # This section runs on both host and container; only install when root (container).
     # TODO(kevin): Host the binary somewhere, so we don't have to build it every time.
@@ -161,7 +163,9 @@ setup_commands:
       if ! /usr/local/bin/dropbear -V 2>&1 | grep -q "$DROPBEAR_VERSION"; then
         cd /tmp
         apt_install_with_retries build-essential $PACKAGES
-        curl -sL https://matt.ucc.asn.au/dropbear/releases/dropbear-$DROPBEAR_VERSION.tar.bz2 | tar xj
+        curl -sfL https://matt.ucc.asn.au/dropbear/releases/dropbear-$DROPBEAR_VERSION.tar.bz2 -o /tmp/dropbear.tar.bz2 || \
+          curl -sfL https://dropbear.nl/mirror/releases/dropbear-$DROPBEAR_VERSION.tar.bz2 -o /tmp/dropbear.tar.bz2
+        tar xjf /tmp/dropbear.tar.bz2 && rm -f /tmp/dropbear.tar.bz2
         cd dropbear-$DROPBEAR_VERSION
         ./configure --disable-zlib --disable-syslog --disable-wtmp --disable-lastlog >/dev/null
         BUILD_START=$SECONDS

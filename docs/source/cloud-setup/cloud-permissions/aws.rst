@@ -152,13 +152,13 @@ Using a specific VPC
 By default, SkyPilot uses the "default" VPC in each region. If a region does not have a `default VPC <https://docs.aws.amazon.com/vpc/latest/userguide/work-with-default-vpc.html#create-default-vpc>`_, SkyPilot will not be able to use the region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
-file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``
+file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_names``
 field:
 
 .. code-block:: yaml
 
     aws:
-      vpc_name: my-vpc-name
+      vpc_names: my-vpc-name
 
 See details in :ref:`config-yaml`.  Example use cases include using a private VPC or a
 VPC with fine-grained constraints, typically created via Terraform or manually.

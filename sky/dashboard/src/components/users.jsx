@@ -61,6 +61,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import { PluginSlot } from '@/plugins/PluginSlot';
 import { statusGroups } from '@/components/jobs';
 import {
   FilterDropdown,
@@ -133,6 +134,32 @@ const getGPUCount = (accelerators, source) => {
   }
 
   return 0;
+};
+
+// Helper function to fetch clusters and managed jobs data with independent error handling
+// Uses Promise.allSettled so one failure doesn't affect the other
+const fetchClustersAndJobs = async () => {
+  const [clustersResult, jobsResult] = await Promise.allSettled([
+    dashboardCache.get(getClusters),
+    // Use shared cache key (no field filtering) - preloader uses same args
+    dashboardCache.get(getManagedJobs, [
+      { allUsers: true, skipFinished: true },
+    ]),
+  ]);
+
+  const clustersData =
+    (clustersResult.status === 'fulfilled' && clustersResult.value) || [];
+  const jobsResponse = (jobsResult.status === 'fulfilled' &&
+    jobsResult.value) || { jobs: [] };
+
+  if (clustersResult.status === 'rejected') {
+    console.error('Error fetching clusters:', clustersResult.reason);
+  }
+  if (jobsResult.status === 'rejected') {
+    console.error('Error fetching managed jobs:', jobsResult.reason);
+  }
+
+  return { clustersData, jobsResponse };
 };
 
 // Helper functions for username parsing
@@ -260,6 +287,8 @@ export function Users() {
     useState(undefined);
   const [ingressBasicAuthEnabled, setIngressBasicAuthEnabled] =
     useState(undefined);
+  const [externalProxyAuthEnabled, setExternalProxyAuthEnabled] =
+    useState(undefined);
   const [healthCheckLoading, setHealthCheckLoading] = useState(true);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -362,6 +391,8 @@ export function Users() {
       const tab = router.query.tab;
       if (tab === 'service-accounts' && serviceAccountTokenEnabled) {
         setActiveMainTab('service-accounts');
+      } else if (tab && tab !== 'users') {
+        setActiveMainTab(tab); // plugin-managed tab
       } else {
         setActiveMainTab('users');
       }
@@ -378,15 +409,18 @@ export function Users() {
           setBasicAuthEnabled(!!data.basic_auth_enabled);
           setServiceAccountTokenEnabled(!!data.service_account_token_enabled);
           setIngressBasicAuthEnabled(!!data.ingress_basic_auth_enabled);
+          setExternalProxyAuthEnabled(!!data.external_proxy_auth_enabled);
         } else {
           setBasicAuthEnabled(false);
           setServiceAccountTokenEnabled(false);
           setIngressBasicAuthEnabled(false);
+          setExternalProxyAuthEnabled(false);
         }
       } catch {
         setBasicAuthEnabled(false);
         setServiceAccountTokenEnabled(false);
         setIngressBasicAuthEnabled(false);
+        setExternalProxyAuthEnabled(false);
       } finally {
         setHealthCheckLoading(false);
       }
@@ -661,6 +695,18 @@ export function Users() {
   };
 
   // Show loading while fetching health check
+  const handleTabChange = useCallback(
+    (tab) => {
+      setActiveMainTab(tab);
+      if (tab === 'users') {
+        router.push('/users', undefined, { shallow: true });
+      } else {
+        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
+      }
+    },
+    [router]
+  );
+
   if (healthCheckLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -676,39 +722,32 @@ export function Users() {
       <div className="flex items-center justify-between mb-2">
         <div className="text-base flex items-center">
           <button
-            className={
-              serviceAccountTokenEnabled
-                ? `leading-none mr-6 pb-2 px-2 border-b-2 ${
-                    activeMainTab === 'users'
-                      ? 'text-sky-blue border-sky-500'
-                      : 'text-gray-500 hover:text-gray-700 border-transparent'
-                  }`
-                : 'leading-none mr-6 pb-2 px-2'
-            }
-            onClick={() => {
-              setActiveMainTab('users');
-              router.push('/users', undefined, { shallow: true });
-            }}
+            className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
+              activeMainTab === 'users'
+                ? 'text-sky-blue border-sky-500'
+                : 'text-gray-500 hover:text-gray-700 border-transparent'
+            }`}
+            onClick={() => handleTabChange('users')}
           >
             Users
           </button>
           {serviceAccountTokenEnabled && (
             <button
-              className={`leading-none pb-2 px-2 border-b-2 ${
+              className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
                 activeMainTab === 'service-accounts'
                   ? 'text-sky-blue border-sky-500'
                   : 'text-gray-500 hover:text-gray-700 border-transparent'
               }`}
-              onClick={() => {
-                setActiveMainTab('service-accounts');
-                router.push('/users?tab=service-accounts', undefined, {
-                  shallow: true,
-                });
-              }}
+              onClick={() => handleTabChange('service-accounts')}
             >
               Service Accounts
             </button>
           )}
+          <PluginSlot
+            name="users.tabs"
+            context={{ activeTab: activeMainTab, onTabChange: handleTabChange }}
+            wrapperClassName="contents"
+          />
         </div>
 
         <div className="flex items-center">
@@ -779,7 +818,7 @@ export function Users() {
               placeholder="Filter users"
             />
           </div>
-        ) : (
+        ) : activeMainTab === 'service-accounts' ? (
           <div className="relative flex-1 max-w-md">
             <input
               type="text"
@@ -814,6 +853,12 @@ export function Users() {
               </button>
             )}
           </div>
+        ) : (
+          <PluginSlot
+            name="users.tab-filter"
+            context={{ activeTab: activeMainTab }}
+            wrapperClassName="contents"
+          />
         )}
 
         {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
@@ -845,6 +890,9 @@ export function Users() {
             </span>
           </label>
         )}
+
+        {/* Plugin actions slot for users tab */}
+        {activeMainTab === 'users' && <PluginSlot name="users.actions" />}
 
         {/* Create Service Account Button for Service Accounts Tab */}
         {activeMainTab === 'service-accounts' && serviceAccountTokenEnabled && (
@@ -899,6 +947,7 @@ export function Users() {
           onDeleteUser={handleDeleteUserClick}
           basicAuthEnabled={basicAuthEnabled}
           ingressBasicAuthEnabled={ingressBasicAuthEnabled}
+          externalProxyAuthEnabled={externalProxyAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
           filters={filters}
@@ -906,7 +955,7 @@ export function Users() {
           deduplicateUsers={deduplicateUsers}
           setLastFetchedTime={setLastFetchedTime}
         />
-      ) : (
+      ) : activeMainTab === 'service-accounts' ? (
         serviceAccountTokenEnabled && (
           <ServiceAccountTokensView
             checkPermissionAndAct={checkPermissionAndAct}
@@ -925,6 +974,11 @@ export function Users() {
             setSearchQuery={setServiceAccountSearchQuery}
           />
         )
+      ) : (
+        <PluginSlot
+          name="users.tab-content"
+          context={{ activeTab: activeMainTab }}
+        />
       )}
 
       {/* Create User Dialog */}
@@ -1324,6 +1378,7 @@ function UsersTable({
   onDeleteUser,
   basicAuthEnabled,
   ingressBasicAuthEnabled,
+  externalProxyAuthEnabled,
   currentUserRole,
   currentUserId,
   filters,
@@ -1373,21 +1428,9 @@ function UsersTable({
         if (showLoading) setIsLoading(false);
 
         // Step 2: Load clusters and jobs in background and update counts
-        let clustersData = [];
-        let managedJobsResponse = { jobs: [] };
-        try {
-          [clustersData, managedJobsResponse] = await Promise.all([
-            dashboardCache.get(getClusters),
-            // Use shared cache key (no field filtering) - preloader uses same args
-            dashboardCache.get(getManagedJobs, [
-              { allUsers: true, skipFinished: true },
-            ]),
-          ]);
-        } catch (error) {
-          console.error('Error fetching clusters and managed jobs:', error);
-        }
+        const { clustersData, jobsResponse } = await fetchClustersAndJobs();
 
-        const jobsData = managedJobsResponse.jobs || [];
+        const jobsData = jobsResponse.jobs || [];
 
         // Build combined lookup dictionary for GPU type and infra filtering
         // Structure: userId -> infra -> gpuType -> { clusterCount, jobCount, gpuCount }
@@ -2070,6 +2113,16 @@ function UsersTable({
                   Role{getSortDirection('role')}
                 </TableHead>
               )}
+              {!deduplicateUsers &&
+                !ingressBasicAuthEnabled &&
+                !externalProxyAuthEnabled && (
+                  <TableHead
+                    onClick={() => requestSort('userType')}
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  >
+                    Type{getSortDirection('userType')}
+                  </TableHead>
+                )}
               <TableHead
                 onClick={() => requestSort('created_at')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
@@ -2104,182 +2157,219 @@ function UsersTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredAndSortedUsers.map((user) => (
-              <TableRow key={user.userId}>
-                <TableCell className="truncate" title={user.username}>
-                  {user.usernameDisplay}
-                </TableCell>
-                {!deduplicateUsers && (
-                  <TableCell className="truncate" title={user.fullEmailID}>
-                    {user.fullEmailID}
+            {filteredAndSortedUsers.map((user) => {
+              const isSystemUser = user.userType === 'system';
+              const isBasicUser = user.userType === 'basic';
+              const canResetPassword =
+                isBasicUser &&
+                (currentUserRole === 'admin' || user.userId === currentUserId);
+              return (
+                <TableRow key={user.userId}>
+                  <TableCell className="truncate" title={user.username}>
+                    {user.usernameDisplay}
                   </TableCell>
-                )}
-                {!deduplicateUsers && !ingressBasicAuthEnabled && (
-                  <TableCell className="truncate" title={user.role}>
-                    <div className="flex items-center gap-2">
-                      {editingUserId === user.userId ? (
-                        <>
-                          <select
-                            value={currentEditingRole}
-                            onChange={(e) =>
-                              setCurrentEditingRole(e.target.value)
-                            }
-                            className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                          >
-                            <option value="admin">Admin</option>
-                            <option value="user">User</option>
-                          </select>
-                          <button
-                            onClick={() => handleSaveEdit(user.userId)}
-                            className="text-green-600 hover:text-green-800 p-1"
-                            title="Save"
-                          >
-                            <CheckIcon className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={handleCancelEdit}
-                            className="text-gray-500 hover:text-gray-700 p-1"
-                            title="Cancel"
-                          >
-                            <XIcon className="h-4 w-4" />
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <span className="capitalize">{user.role}</span>
-                          {/* Only show edit role button if admin */}
-                          {currentUserRole === 'admin' && (
-                            <button
-                              onClick={() =>
-                                handleEditClick(user.userId, user.role)
-                              }
-                              className="text-blue-600 hover:text-blue-700 p-1"
-                              title="Edit role"
-                            >
-                              <PenIcon className="h-3 w-3" />
-                            </button>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </TableCell>
-                )}
-                <TableCell className="truncate">
-                  {user.created_at ? (
-                    <TimestampWithTooltip
-                      date={new Date(user.created_at * 1000)}
-                    />
-                  ) : (
-                    '-'
+                  {!deduplicateUsers && (
+                    <TableCell className="truncate" title={user.fullEmailID}>
+                      {user.fullEmailID}
+                    </TableCell>
                   )}
-                </TableCell>
-                <TableCell>
-                  {user.gpuCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                      <CircularProgress size={12} />
-                    </span>
-                  ) : (
-                    <span
-                      className={`px-2 py-0.5 rounded text-xs font-medium ${
-                        user.gpuCount > 0
-                          ? 'bg-purple-100 text-purple-600'
-                          : 'bg-gray-100 text-gray-500'
-                      }`}
-                      title={`Total GPUs: ${user.gpuCount}`}
-                    >
-                      {user.gpuCount}
-                    </span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {user.clusterCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                      <CircularProgress size={12} />
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
-                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                        user.clusterCount > 0
-                          ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                      }`}
-                      title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                    >
-                      {user.clusterCount}
-                    </Link>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {user.jobCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
-                      <CircularProgress size={12} />
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
-                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                        user.jobCount > 0
-                          ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                      }`}
-                      title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                    >
-                      {user.jobCount}
-                    </Link>
-                  )}
-                </TableCell>
-                {/* Actions cell logic - hide when deduplicating */}
-                {!deduplicateUsers &&
-                  (basicAuthEnabled || currentUserRole === 'admin') && (
-                    <TableCell className="relative">
+                  {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                    <TableCell className="truncate" title={user.role}>
                       <div className="flex items-center gap-2">
-                        {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
-                        {basicAuthEnabled && (
-                          <button
-                            onClick={
-                              currentUserRole === 'admin' ||
-                              user.userId === currentUserId
-                                ? async () => {
-                                    onResetPassword(user);
-                                  }
-                                : undefined
-                            }
-                            className={
-                              currentUserRole === 'admin' ||
-                              user.userId === currentUserId
-                                ? 'text-blue-600 hover:text-blue-700 p-1'
-                                : 'text-gray-300 cursor-not-allowed p-1'
-                            }
-                            title={
-                              currentUserRole === 'admin' ||
-                              user.userId === currentUserId
-                                ? 'Reset Password'
-                                : 'You can only reset your own password'
-                            }
-                            disabled={
-                              currentUserRole !== 'admin' &&
-                              user.userId !== currentUserId
-                            }
-                          >
-                            <KeyRoundIcon className="h-4 w-4" />
-                          </button>
-                        )}
-                        {/* Delete button - only show for admin */}
-                        {currentUserRole === 'admin' && (
-                          <button
-                            onClick={() => onDeleteUser(user)}
-                            className="text-red-600 hover:text-red-700 p-1"
-                            title="Delete User"
-                          >
-                            <Trash2Icon className="h-4 w-4" />
-                          </button>
+                        {editingUserId === user.userId ? (
+                          <>
+                            <select
+                              value={currentEditingRole}
+                              onChange={(e) =>
+                                setCurrentEditingRole(e.target.value)
+                              }
+                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="user">User</option>
+                            </select>
+                            <button
+                              onClick={() => handleSaveEdit(user.userId)}
+                              className="text-green-600 hover:text-green-800 p-1"
+                              title="Save"
+                            >
+                              <CheckIcon className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="text-gray-500 hover:text-gray-700 p-1"
+                              title="Cancel"
+                            >
+                              <XIcon className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="capitalize">{user.role}</span>
+                            {/* Only show edit role button if admin and not a system user */}
+                            {currentUserRole === 'admin' && (
+                              <button
+                                onClick={
+                                  !isSystemUser
+                                    ? () =>
+                                        handleEditClick(user.userId, user.role)
+                                    : undefined
+                                }
+                                className={
+                                  !isSystemUser
+                                    ? 'text-blue-600 hover:text-blue-700 p-1'
+                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                }
+                                title={
+                                  !isSystemUser
+                                    ? 'Edit role'
+                                    : 'Cannot edit role for system users'
+                                }
+                                disabled={isSystemUser}
+                              >
+                                <PenIcon className="h-3 w-3" />
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </TableCell>
                   )}
-              </TableRow>
-            ))}
+                  {!deduplicateUsers &&
+                    !ingressBasicAuthEnabled &&
+                    !externalProxyAuthEnabled && (
+                      <TableCell className="truncate" title={user.userType}>
+                        <span className="capitalize">
+                          {user.userType === 'sso' ? 'SSO' : user.userType}
+                        </span>
+                      </TableCell>
+                    )}
+                  <TableCell className="truncate">
+                    {user.created_at ? (
+                      <TimestampWithTooltip
+                        date={new Date(user.created_at * 1000)}
+                      />
+                    ) : (
+                      '-'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.gpuCount === -1 ? (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <CircularProgress size={12} />
+                      </span>
+                    ) : (
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          user.gpuCount > 0
+                            ? 'bg-purple-100 text-purple-600'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        title={`Total GPUs: ${user.gpuCount}`}
+                      >
+                        {user.gpuCount}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.clusterCount === -1 ? (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <CircularProgress size={12} />
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                          user.clusterCount > 0
+                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                      >
+                        {user.clusterCount}
+                      </Link>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.jobCount === -1 ? (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <CircularProgress size={12} />
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                          user.jobCount > 0
+                            ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                      >
+                        {user.jobCount}
+                      </Link>
+                    )}
+                  </TableCell>
+                  {/* Actions cell logic - hide when deduplicating */}
+                  {!deduplicateUsers &&
+                    (basicAuthEnabled || currentUserRole === 'admin') && (
+                      <TableCell className="relative">
+                        <div className="flex items-center gap-2">
+                          {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
+                          {basicAuthEnabled && (
+                            <button
+                              onClick={
+                                canResetPassword
+                                  ? async () => {
+                                      onResetPassword(user);
+                                    }
+                                  : undefined
+                              }
+                              className={
+                                canResetPassword
+                                  ? 'text-blue-600 hover:text-blue-700 p-1'
+                                  : 'text-gray-300 cursor-not-allowed p-1'
+                              }
+                              title={
+                                !isBasicUser
+                                  ? 'Password reset only available for basic auth users'
+                                  : canResetPassword
+                                    ? 'Reset Password'
+                                    : 'You can only reset your own password'
+                              }
+                              disabled={!canResetPassword}
+                            >
+                              <KeyRoundIcon className="h-4 w-4" />
+                            </button>
+                          )}
+                          {/* Delete button - only show for admin, disabled for system users */}
+                          {currentUserRole === 'admin' && (
+                            <button
+                              onClick={
+                                !isSystemUser
+                                  ? () => onDeleteUser(user)
+                                  : undefined
+                              }
+                              className={
+                                !isSystemUser
+                                  ? 'text-red-600 hover:text-red-700 p-1'
+                                  : 'text-gray-300 cursor-not-allowed p-1'
+                              }
+                              title={
+                                !isSystemUser
+                                  ? 'Delete User'
+                                  : 'Cannot delete system users'
+                              }
+                              disabled={isSystemUser}
+                            >
+                              <Trash2Icon className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </TableCell>
+                    )}
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -2299,6 +2389,7 @@ UsersTable.propTypes = {
   onDeleteUser: PropTypes.func.isRequired,
   basicAuthEnabled: PropTypes.bool,
   ingressBasicAuthEnabled: PropTypes.bool,
+  externalProxyAuthEnabled: PropTypes.bool,
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
   setLastFetchedTime: PropTypes.func,
@@ -2361,21 +2452,7 @@ function ServiceAccountTokensView({
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
-      let clustersResponse = [];
-      let jobsResponse = { jobs: [] };
-      try {
-        [clustersResponse, jobsResponse] = await Promise.all([
-          dashboardCache.get(getClusters),
-          // Use shared cache key (no field filtering) - preloader uses same args
-          dashboardCache.get(getManagedJobs, [
-            { allUsers: true, skipFinished: true },
-          ]),
-        ]);
-      } catch (error) {
-        console.error('Error fetching clusters and managed jobs:', error);
-      }
-
-      const clustersData = clustersResponse || [];
+      const { clustersData, jobsResponse } = await fetchClustersAndJobs();
       const jobsData = jobsResponse?.jobs || [];
 
       // Step 3: Calculate counts for each service account

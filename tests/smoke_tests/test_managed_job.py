@@ -25,6 +25,7 @@ import io
 import os
 import pathlib
 import re
+import subprocess
 import tempfile
 import textwrap
 import time
@@ -2526,3 +2527,183 @@ def test_job_group_primary_failure_immediate_termination(generic_cloud: str):
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_job_node_names_single_node(generic_cloud: str):
+    """Test that node_names is populated for a single-node managed job."""
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            task = sky.Task(run='echo hi')
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            try:
+                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Wait for job to be running and node_names to be populated
+                # Use longer timeout to account for controller startup
+                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=300)
+                # Give time for node_names to be populated after launch
+                time.sleep(10)
+                # Re-fetch to get updated node_names
+                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                job = [j for j in jobs_list if j['job_name'] == name][0]
+                node_names = job['node_names']
+                assert node_names, (f'node_names should not be empty, '
+                                    f'got: {node_names}')
+                print(f'node_names: {node_names}')
+            finally:
+                sky.jobs.cancel(name=name)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_job_node_names_multi_node(generic_cloud: str):
+    """Test that node_names contains multiple nodes for a multi-node job."""
+    with smoke_tests_utils.override_sky_config():
+        with skypilot_config.override_skypilot_config(
+                smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+            name = smoke_tests_utils.get_cluster_name()
+            task = sky.Task(run='echo hi', num_nodes=2)
+            task.set_resources(
+                sky.Resources(infra=generic_cloud,
+                              **smoke_tests_utils.LOW_RESOURCE_PARAM))
+            try:
+                sky.stream_and_get(sky.jobs.launch(task, name=name))
+                # Wait for job to be running
+                # Use longer timeout to account for controller startup
+                job = smoke_tests_utils.wait_for_managed_job_status_sdk(
+                    name, [sky.ManagedJobStatus.SUCCEEDED], timeout=300)
+                # Give time for node_names to be populated after launch
+                time.sleep(10)
+                # Re-fetch to get updated node_names
+                jobs_list = sky.get(sky.jobs.queue(refresh=False))
+                job = [j for j in jobs_list if j['job_name'] == name][0]
+                node_names = job['node_names']
+                assert node_names, (f'node_names should not be empty, '
+                                    f'got: {node_names}')
+                nodes = node_names.split(',')
+                assert len(nodes) >= 2, (f'Expected 2+ nodes, '
+                                         f'got {len(nodes)}: {nodes}')
+                print(f'node_names: {node_names} ({len(nodes)} nodes)')
+            finally:
+                sky.jobs.cancel(name=name)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
+    """Test that stream_logs processes are cleaned up on client disconnect.
+
+    When `sky jobs logs` (with follow) is killed, the stream_logs process
+    on the controller should be cleaned up. Without the fix, kubectl exec -i
+    (no PTY) means no SIGHUP on disconnect, and the retry loop in
+    stream_logs_by_id never detects the broken connection, leaking processes.
+    """
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Not supported in consolidation mode.')
+
+    name = smoke_tests_utils.get_cluster_name()
+
+    def _get_controller_name() -> str:
+        result = subprocess.run(['sky', 'status'],
+                                capture_output=True,
+                                text=True,
+                                timeout=60,
+                                check=False)
+        for line in result.stdout.splitlines():
+            if 'sky-jobs-controller-' in line:
+                return line.split()[0]
+        raise RuntimeError('No jobs controller found in sky status.')
+
+    def _count_stream_logs(controller: str) -> int:
+        result = subprocess.run(
+            ['ssh', controller, 'ps aux | grep "[s]tream_logs" | wc -l'],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False)
+        return int(result.stdout.strip())
+
+    def _get_stream_logs_details(controller: str) -> str:
+        result = subprocess.run(
+            ['ssh', controller, 'ps aux | grep "[s]tream_logs"'],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False)
+        return result.stdout.strip()
+
+    def check_log_tail_cleanup():
+        controller = _get_controller_name()
+        yield f'Controller: {controller}'
+
+        # Count baseline stream_logs processes
+        baseline = _count_stream_logs(controller)
+        yield f'Baseline stream_logs processes: {baseline}'
+
+        # Start tailing logs in background (follow=True is the default)
+        log_proc = subprocess.Popen(
+            ['sky', 'jobs', 'logs', '-n', name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        # Wait for the log stream to establish on the controller
+        yield 'Waiting 30s for log stream to establish...'
+        time.sleep(30)
+
+        during = _count_stream_logs(controller)
+        yield f'stream_logs during log tail: {during}'
+
+        # Kill the log tail (simulating client disconnect)
+        log_proc.terminate()
+        try:
+            log_proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            log_proc.kill()
+            log_proc.wait(timeout=5)
+        yield f'Killed log tail process (pid={log_proc.pid})'
+
+        # Wait for cleanup
+        yield 'Waiting 60s for cleanup...'
+        time.sleep(60)
+
+        # Check for leaked stream_logs processes
+        after = _count_stream_logs(controller)
+        details = _get_stream_logs_details(controller)
+        yield f'stream_logs after kill + 60s wait: {after}'
+        yield f'Baseline was: {baseline}'
+
+        leaked = after - baseline
+        assert leaked <= 0, (
+            f'PROCESS LEAK: {leaked} stream_logs process(es) still '
+            f'running on controller after client disconnect.\n'
+            f'Baseline: {baseline}, After: {after}\n'
+            f'Details:\n{details}')
+        yield 'No leaked processes - cleanup working correctly!'
+
+    test = smoke_tests_utils.Test(
+        'managed-jobs-log-tail-cleanup',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} -y -d -- '
+            f'"echo job started; sleep 3600"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=360),
+            check_log_tail_cleanup,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

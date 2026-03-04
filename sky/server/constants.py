@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 36  # add per-cluster error field for realtime_slurm_gpu_availability.
+API_VERSION = 39  # add graceful flag for managed jobs
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -29,6 +29,9 @@ API_VERSION_HEADER = 'X-SkyPilot-API-Version'
 
 # The HTTP header name for the SkyPilot version of the sender.
 VERSION_HEADER = 'X-SkyPilot-Version'
+
+# Minimum client API version required to launch recipes.
+MIN_RECIPE_LAUNCH_API_VERSION = 33
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
@@ -84,3 +87,13 @@ EMPTY_PICKLED_VALUE = 'gAROLg=='
 # confusing to users.
 OAUTH2_PROXY_BASE_URL_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_BASE_URL'
 OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
+
+# The websockets library (used by uvicorn for WebSocket upgrades) defaults to
+# MAX_LINE_LENGTH=8192 bytes per header line. Enterprise SSO cookies from
+# oauth2proxy (Azure AD, Okta, etc.) commonly exceed 8KB, causing WebSocket
+# upgrade requests to be rejected with HTTP 400. Regular HTTP requests (parsed
+# by h11 with a 16KB default) are unaffected. These constants raise the limit
+# so that WebSocket upgrades succeed with large auth cookies.
+# The env vars are read by websockets at import time.
+WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
+WEBSOCKETS_MAX_NUM_HEADERS = '256'

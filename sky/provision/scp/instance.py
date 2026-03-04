@@ -654,7 +654,8 @@ def get_cluster_info(
                 internal_ip=instance['ip'],
                 external_ip=scp_utils.SCPClient().get_external_ip(
                     instance['virtualServerId'], instance['ip']),
-                tags={})
+                tags={},
+                node_name=instance['virtualServerId'])
         ]
 
     # max-worker-port - min-worker-port should be at least 3 * nproc

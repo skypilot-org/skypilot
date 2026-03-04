@@ -1,3 +1,4 @@
+import asyncio
 import os
 import pathlib
 import subprocess
@@ -11,6 +12,7 @@ import pytest
 import requests
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
+import websockets
 
 import sky
 from sky import jobs
@@ -793,3 +795,43 @@ def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
          f'sky down -y {name}'),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test WebSocket large cookie header ----------
+@pytest.mark.no_remote_server
+def test_websocket_large_cookie_accepted():
+    """Test that WebSocket connections with large cookies (>8KB) are accepted.
+
+    Enterprise SSO cookies from oauth2proxy (Azure AD, Okta, etc.) can exceed
+    8KB, which hits the websockets library's default MAX_LINE_LENGTH=8192 limit
+    and causes WebSocket upgrade requests to be rejected with HTTP 400. Regular
+    HTTP requests (parsed by h11 with a 16KB default) are unaffected, which is
+    why sky status works but sky ssh fails.
+
+    The server must increase the websockets library limit so that WebSocket
+    upgrade requests with large cookie headers are not rejected at the protocol
+    parsing layer.
+    """
+    server_url = server_common.get_server_url()
+    ws_url = server_url.replace('http://',
+                                'ws://').replace('https://', 'wss://')
+    ws_url += '/kubernetes-pod-ssh-proxy'
+
+    async def _test():
+        # 12KB cookie simulating an enterprise SSO session cookie.
+        pad = 'X' * 12000
+        try:
+            ws = await websockets.connect(
+                ws_url,
+                additional_headers={'Cookie': f'_oauth2_proxy={pad}'},
+                open_timeout=5)
+            await ws.close()
+        except websockets.exceptions.InvalidStatus as e:
+            # HTTP 403 = auth rejection (expected, no valid auth token)
+            # HTTP 400 = header parsing failure (the bug)
+            assert e.response.status_code != 400, (
+                'WebSocket rejected with HTTP 400 due to large cookie '
+                'header. The websockets library MAX_LINE_LENGTH is too '
+                'small for enterprise SSO cookies (>8KB).')
+
+    asyncio.run(_test())

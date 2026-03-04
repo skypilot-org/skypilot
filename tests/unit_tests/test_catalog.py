@@ -361,3 +361,319 @@ def test_filter_with_local_disk_instance_sets(local_disk, expected_instances):
                                                      local_disk)
     assert sorted(
         filtered['InstanceType'].tolist()) == sorted(expected_instances)
+
+
+# ---------------------------------------------------------------------------
+# Config-based pricing tests (Kubernetes / Slurm)
+# ---------------------------------------------------------------------------
+
+# -- get_hourly_cost_from_pricing (common function, dict-based) ------------
+
+
+def test_cpu_only_instance_uses_cpu_memory_pricing():
+    """CPU-only: 4CPU--16GB with rates 0.05/0.01 -> $0.36/hr."""
+    pricing = {'cpu': 0.05, 'memory': 0.01}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.05 + 16 * 0.01)
+
+
+def test_gpu_instance_uses_accelerator_pricing_only():
+    """GPU instance uses ONLY accelerator rate; cpu/memory ignored."""
+    pricing = {
+        'cpu': 0.05,
+        'memory': 0.01,
+        'accelerators': {
+            'A100': 3.50,
+        },
+    }
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=8,
+                                                       memory=64,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=2)
+    # All-in accelerator pricing: 2 * 3.50 = 7.00 (NOT 8*0.05+64*0.01+7.00)
+    assert cost == pytest.approx(2 * 3.50)
+
+
+def test_accelerator_name_case_insensitive():
+    """Accelerator lookup should be case-insensitive."""
+    pricing = {'accelerators': {'A100': 3.50}}
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=0,
+                                                       memory=0,
+                                                       accelerator_name='a100',
+                                                       accelerator_count=1)
+    assert cost == pytest.approx(3.50)
+
+
+def test_unknown_accelerator_returns_zero():
+    """GPU instance with unconfigured accelerator returns $0.00."""
+    pricing = {'cpu': 0.05, 'memory': 0.01, 'accelerators': {'A100': 3.50}}
+    cost = catalog_common.get_hourly_cost_from_pricing(
+        pricing,
+        cpus=4,
+        memory=16,
+        accelerator_name='TPUv5e',
+        accelerator_count=4)
+    assert cost == 0.0
+
+
+def test_empty_pricing_returns_zero():
+    """Empty pricing dict returns 0.0."""
+    cost = catalog_common.get_hourly_cost_from_pricing({},
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=4)
+    assert cost == 0.0
+
+
+# -- merge_pricing_dicts ---------------------------------------------------
+
+
+def test_merge_pricing_dicts_partial_override():
+    """Override only cpu; memory and accelerators inherited."""
+    base = {'cpu': 0.04, 'memory': 0.01, 'accelerators': {'V100': 2.50}}
+    override = {'cpu': 0.06}
+    merged = catalog_common.merge_pricing_dicts(base, override)
+    assert merged == {
+        'cpu': 0.06,
+        'memory': 0.01,
+        'accelerators': {
+            'V100': 2.50
+        },
+    }
+
+
+def test_merge_pricing_dicts_accelerator_addition():
+    """Override adds A100; V100 inherited from base."""
+    base = {'cpu': 0.04, 'accelerators': {'V100': 2.50}}
+    override = {'accelerators': {'A100': 4.00}}
+    merged = catalog_common.merge_pricing_dicts(base, override)
+    assert merged['accelerators'] == {'V100': 2.50, 'A100': 4.00}
+    assert merged['cpu'] == 0.04
+
+
+def test_merge_pricing_dicts_does_not_mutate_base():
+    """Merge must not modify the original dicts."""
+    base = {'cpu': 0.04, 'accelerators': {'V100': 2.50}}
+    override = {'cpu': 0.06, 'accelerators': {'A100': 4.00}}
+    catalog_common.merge_pricing_dicts(base, override)
+    assert base == {'cpu': 0.04, 'accelerators': {'V100': 2.50}}
+
+
+# -- K8s config resolution (kubernetes_catalog._get_pricing) ---------------
+
+# Kubernetes pricing config: cloud-level default with A100 and H100.
+_K8S_CONFIG = {
+    'kubernetes': {
+        'pricing': {
+            'cpu': 0.05,
+            'memory': 0.01,
+            'accelerators': {
+                'A100': 3.50,
+                'H100': 5.00,
+            },
+        },
+        'context_configs': {
+            'expensive-ctx': {
+                'pricing': {
+                    'cpu': 0.08,
+                    'accelerators': {
+                        'A100': 4.00,
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_context_override_inherits_cloud_defaults(mock_nested):
+    """Context override inherits missing keys from cloud-level via merge."""
+    mock_nested.side_effect = _mock_get_nested(_K8S_CONFIG)
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = kubernetes_catalog._get_pricing('expensive-ctx')
+    # cpu overridden to 0.08, memory inherited 0.01
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.08 + 16 * 0.01)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_context_override_accelerator(mock_nested):
+    """Context override A100 at $4.00/GPU, H100 inherited at $5.00/GPU."""
+    mock_nested.side_effect = _mock_get_nested(_K8S_CONFIG)
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = kubernetes_catalog._get_pricing('expensive-ctx')
+    cost_a100 = catalog_common.get_hourly_cost_from_pricing(
+        pricing, cpus=0, memory=0, accelerator_name='A100', accelerator_count=1)
+    assert cost_a100 == pytest.approx(4.00)
+    cost_h100 = catalog_common.get_hourly_cost_from_pricing(
+        pricing, cpus=0, memory=0, accelerator_name='H100', accelerator_count=2)
+    assert cost_h100 == pytest.approx(2 * 5.00)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_no_pricing_config_returns_zero(mock_nested):
+    """No pricing config at all returns 0.0."""
+    mock_nested.side_effect = _mock_get_nested({})
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = kubernetes_catalog._get_pricing('some-ctx')
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name='A100',
+                                                       accelerator_count=4)
+    assert cost == 0.0
+
+
+# -- Slurm config resolution (slurm_catalog._get_pricing) -----------------
+
+# Slurm config with partial overrides at each level to test merging:
+# - Cloud-level: cpu=0.04, memory=0.01, V100=2.50
+# - my-slurm cluster: overrides only cpu (0.06) and A100 (4.00);
+#     memory and V100 should be inherited from cloud-level.
+# - high-pri partition: overrides only A100 (5.00);
+#     cpu, memory, V100 should be inherited from merged cluster level.
+_SLURM_CONFIG = {
+    'slurm': {
+        'pricing': {
+            'cpu': 0.04,
+            'memory': 0.01,
+            'accelerators': {
+                'V100': 2.50,
+            },
+        },
+        'cluster_configs': {
+            'my-slurm': {
+                'pricing': {
+                    'cpu': 0.06,
+                    'accelerators': {
+                        'A100': 4.00,
+                    },
+                },
+                'partition_configs': {
+                    'high-pri': {
+                        'pricing': {
+                            'accelerators': {
+                                'A100': 5.00,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+def _mock_get_nested(config):
+    """Create a mock for skypilot_config.get_nested."""
+
+    def _get(keys, default_value, override_configs=None):
+        del override_configs
+        obj = config
+        for key in keys:
+            if not isinstance(obj, dict) or key not in obj:
+                return default_value
+            obj = obj[key]
+        return obj
+
+    return _get
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_cluster_inherits_cloud_defaults(mock_nested):
+    """Cluster overrides cpu and adds A100; memory and V100 inherited."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='my-slurm')
+    # cpu overridden to 0.06, memory inherited 0.01
+    assert pricing['cpu'] == 0.06
+    assert pricing['memory'] == 0.01
+    # V100 inherited from cloud, A100 added by cluster
+    assert pricing['accelerators']['V100'] == 2.50
+    assert pricing['accelerators']['A100'] == 4.00
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_partition_inherits_cluster_and_cloud(mock_nested):
+    """Partition overrides only A100; cpu, memory, V100 inherited."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='my-slurm', zone='high-pri')
+    # cpu from cluster (0.06), memory from cloud (0.01)
+    assert pricing['cpu'] == 0.06
+    assert pricing['memory'] == 0.01
+    # A100 overridden by partition to 5.00, V100 inherited from cloud
+    assert pricing['accelerators']['A100'] == 5.00
+    assert pricing['accelerators']['V100'] == 2.50
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_fallback_to_cluster_when_partition_unmatched(mock_nested):
+    """Unknown partition falls back to merged cluster pricing."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='my-slurm', zone='unknown-part')
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.06 + 16 * 0.01)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_fallback_to_cloud_level(mock_nested):
+    """Unknown cluster falls back to cloud-level default."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    pricing = slurm_catalog._get_pricing(region='unknown-cluster')
+    cost = catalog_common.get_hourly_cost_from_pricing(pricing,
+                                                       cpus=4,
+                                                       memory=16,
+                                                       accelerator_name=None,
+                                                       accelerator_count=None)
+    assert cost == pytest.approx(4 * 0.04 + 16 * 0.01)
+
+
+# -- End-to-end get_hourly_cost tests (instance type string -> cost) ---------
+# These exercise the full pipeline: instance type parsing + config resolution.
+# One per cloud, with accelerators, to verify the parser ↔ pricing glue.
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_k8s_get_hourly_cost_end_to_end(mock_nested):
+    """K8s get_hourly_cost: instance type string → parsed resources → cost."""
+    mock_nested.side_effect = _mock_get_nested(_K8S_CONFIG)
+    from sky.catalog import kubernetes_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    cost = kubernetes_catalog.get_hourly_cost('8CPU--64GB--A100:2',
+                                              use_spot=False,
+                                              region=None)
+    # Accelerator-only pricing: cpu/memory ignored for GPU instances
+    expected = 2 * 3.50
+    assert cost == pytest.approx(expected)
+
+
+@mock.patch('sky.skypilot_config.get_nested')
+def test_slurm_get_hourly_cost_end_to_end(mock_nested):
+    """Slurm get_hourly_cost: full 3-level merge via the public API."""
+    mock_nested.side_effect = _mock_get_nested(_SLURM_CONFIG)
+    from sky.catalog import slurm_catalog  # isort: skip  # pylint: disable=import-outside-toplevel
+    cost = slurm_catalog.get_hourly_cost('8CPU--64GB--A100:4',
+                                         use_spot=False,
+                                         region='my-slurm',
+                                         zone='high-pri')
+    # Accelerator-only pricing: partition A100=5.00, cpu/memory ignored
+    expected = 4 * 5.00
+    assert cost == pytest.approx(expected)

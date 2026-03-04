@@ -574,6 +574,19 @@ function JobDetails() {
               />
             )}
 
+            {/* Plugin Slot: Job Infra Nodes */}
+            <PluginSlot
+              name="jobs.detail.nodes"
+              context={{
+                clusterName: detailJobData.current_cluster_name,
+                clusterNameOnCloud: detailJobData.cluster_name_on_cloud,
+                nodeNames: detailJobData.node_names,
+                infra: detailJobData.full_infra,
+                status: detailJobData.status,
+              }}
+              wrapperClassName="mt-6"
+            />
+
             {/* Logs Section */}
             <div id="logs-section" className="mt-6">
               <Card>

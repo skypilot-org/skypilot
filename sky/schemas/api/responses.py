@@ -86,6 +86,8 @@ class APIHealthResponse(ResponseBaseModel):
     ingress_basic_auth_enabled: bool = False
     # Latest version info (if available)
     latest_version: Optional[str] = None
+    # Whether external proxy auth is enabled
+    external_proxy_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
@@ -127,6 +129,7 @@ class StatusResponse(ResponseBaseModel):
     accelerators: Optional[str] = None
     labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
+    node_names: Optional[str] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
@@ -209,6 +212,8 @@ class ManagedJobRecord(ResponseBaseModel):
     accelerators: Optional[Dict[str, int]] = None
     labels: Optional[Dict[str, str]] = None
     links: Optional[Dict[str, str]] = None
+    # Node names for dashboard display (comma-separated)
+    node_names: Optional[str] = None
     # JobGroup fields
     # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single job)
     execution: Optional[str] = None

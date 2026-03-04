@@ -291,6 +291,7 @@ def _get_cluster_config_template(cloud):
         clouds.Hyperbolic: 'hyperbolic-ray.yml.j2',
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
+        clouds.Mithril: 'mithril-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 
@@ -6019,7 +6020,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 action_message = 'Mounting'
             else:
                 assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
-                mount_cmd = store.mount_cached_command(dst)
+                mount_cmd = store.mount_cached_command(
+                    dst, config=storage_obj.mount_cached_config)
                 action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)

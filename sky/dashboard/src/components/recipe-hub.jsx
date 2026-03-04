@@ -15,6 +15,8 @@ import {
   RotateCwIcon,
   PlusIcon,
   PinIcon,
+  PinOffIcon,
+  Trash2Icon,
   AlertTriangleIcon,
   FileCode,
 } from 'lucide-react';
@@ -56,7 +58,12 @@ import {
 } from '@/components/utils';
 import { showToast } from '@/data/connectors/toast';
 
-import { getRecipes, createRecipe } from '@/data/connectors/recipes';
+import {
+  getRecipes,
+  createRecipe,
+  deleteRecipe,
+  togglePinRecipe,
+} from '@/data/connectors/recipes';
 import {
   RecipeType,
   ALL_RECIPE_TYPES,
@@ -99,60 +106,61 @@ function UserName({ name, className = '' }) {
 }
 
 // Recipe Card Component (for Pinned and My Recipes)
-function RecipeCard({ recipe }) {
+function RecipeCard({ recipe, onPin }) {
   const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
   const TypeIcon = typeInfo.icon;
   const slug = generateRecipeSlug(recipe.name);
 
   return (
-    <Link href={`/recipes/${slug}`} className="block">
-      <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
-        <CardContent className="p-3">
-          {/* Header with icon and name */}
-          <div className="flex items-start gap-2 mb-1.5">
-            <TypeIcon
-              className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
-                typeInfo.color === 'sky'
-                  ? 'text-sky-600'
-                  : typeInfo.color === 'purple'
-                    ? 'text-purple-600'
-                    : typeInfo.color === 'green'
-                      ? 'text-green-600'
-                      : typeInfo.color === 'orange'
-                        ? 'text-orange-600'
-                        : 'text-gray-600'
-              }`}
-            />
-            <div className="flex-1 min-w-0">
-              <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
-                {recipe.name}
-              </h3>
+    <div className="relative w-[300px]">
+      <Link href={`/recipes/${slug}`} className="block">
+        <Card className="h-full hover:bg-gray-50 transition-colors cursor-pointer group">
+          <CardContent className="p-3">
+            {/* Header with icon and name */}
+            <div className="flex items-start gap-2 mb-1.5">
+              <TypeIcon
+                className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
+                  typeInfo.color === 'sky'
+                    ? 'text-sky-600'
+                    : typeInfo.color === 'purple'
+                      ? 'text-purple-600'
+                      : typeInfo.color === 'green'
+                        ? 'text-green-600'
+                        : typeInfo.color === 'orange'
+                          ? 'text-orange-600'
+                          : 'text-gray-600'
+                }`}
+              />
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-medium text-blue-600 truncate group-hover:text-blue-800 transition-colors">
+                  {recipe.name}
+                </h3>
+              </div>
             </div>
-          </div>
 
-          {/* Bottom info section with even spacing */}
-          <div className="space-y-1.5">
-            {/* Type */}
-            <div className="text-sm text-gray-500">{typeInfo.label}</div>
+            {/* Bottom info section with even spacing - always render all 5 lines for consistent height */}
+            <div className="space-y-1.5">
+              {/* Type */}
+              <div className="text-sm text-gray-500">{typeInfo.label}</div>
 
-            {/* Description */}
-            {recipe.description && (
+              {/* Description - always render line, use invisible placeholder if empty */}
               <p
-                className="text-sm text-gray-600 truncate"
-                title={recipe.description}
+                className={`text-sm truncate ${recipe.description ? 'text-gray-600' : 'invisible'}`}
+                title={recipe.description || ''}
               >
-                {recipe.description}
+                {recipe.description || '\u00A0'}
               </p>
-            )}
 
-            {/* Authored by */}
-            <div className="text-sm text-gray-500 truncate">
-              Authored by <UserName name={recipe.user_name || recipe.user_id} />
-            </div>
-
-            {/* Last updated info - only show for editable recipes */}
-            {recipe.is_editable && recipe.user_name !== 'local' && (
+              {/* Authored by */}
               <div className="text-sm text-gray-500 truncate">
+                Authored by{' '}
+                <UserName name={recipe.user_name || recipe.user_id} />
+              </div>
+
+              {/* Last updated info - always render line for consistent height */}
+              <div
+                className={`text-sm text-gray-500 truncate ${!(recipe.is_editable && recipe.user_name !== 'local') ? 'invisible' : ''}`}
+              >
                 Updated by{' '}
                 <UserName name={recipe.updated_by_name || recipe.user_name} />{' '}
                 <TimestampWithTooltip
@@ -163,16 +171,36 @@ function RecipeCard({ recipe }) {
                   }
                 />
               </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </Link>
+      {onPin && recipe.pinned && recipe.is_pinnable !== false && (
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onPin(recipe.name, false);
+          }}
+          className="absolute top-2 right-2 p-1 rounded transition-colors text-amber-500 hover:text-amber-700 hover:bg-amber-100"
+          title="Unpin recipe"
+        >
+          <PinOffIcon className="h-4 w-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
 // Template Row Component (for Pinned and My Recipes)
-function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
+function TemplateRow({
+  title,
+  icon: Icon,
+  recipes,
+  emptyMessage,
+  iconColor,
+  onPin,
+}) {
   if (recipes.length === 0) {
     return (
       <div className="mb-6">
@@ -195,9 +223,9 @@ function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
         <h2 className="text-base text-gray-700">{title}</h2>
         <span className="text-sm text-gray-500">({recipes.length})</span>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+      <div className="flex flex-wrap gap-3">
         {recipes.map((recipe) => (
-          <RecipeCard key={recipe.name} recipe={recipe} />
+          <RecipeCard key={recipe.name} recipe={recipe} onPin={onPin} />
         ))}
       </div>
     </div>
@@ -205,7 +233,8 @@ function TemplateRow({ title, icon: Icon, recipes, emptyMessage, iconColor }) {
 }
 
 // All Recipes Section with Sortable Table and Filter Bar (same as clusters page)
-function AllRecipesSection({ recipes }) {
+function AllRecipesSection({ recipes, onPin, onDelete }) {
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [filters, setFilters] = useState([]);
   const [sortConfig, setSortConfig] = useState({
     key: 'updated_at',
@@ -340,17 +369,20 @@ function AllRecipesSection({ recipes }) {
                 >
                   Updated{getSortDirection('updated_at')}
                 </TableHead>
+                <TableHead className="whitespace-nowrap w-[100px]">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sortedAndFilteredTemplates.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="text-center py-6 text-gray-500"
                   >
                     {recipes.length === 0
-                      ? 'No recipes from other users.'
+                      ? 'No recipes available.'
                       : 'No recipes match your filter criteria.'}
                   </TableCell>
                 </TableRow>
@@ -419,6 +451,60 @@ function AllRecipesSection({ recipes }) {
                           }
                         />
                       </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (recipe.is_pinnable !== false) {
+                                onPin(recipe.name, !recipe.pinned);
+                              }
+                            }}
+                            disabled={recipe.is_pinnable === false}
+                            className={`p-1 rounded transition-colors ${
+                              recipe.is_pinnable === false
+                                ? 'text-gray-300 cursor-not-allowed'
+                                : recipe.pinned
+                                  ? 'text-amber-500 hover:text-amber-700 hover:bg-amber-100'
+                                  : 'text-amber-400 hover:text-amber-600 hover:bg-amber-100'
+                            }`}
+                            title={
+                              recipe.is_pinnable === false
+                                ? 'Default recipes cannot be pinned/unpinned'
+                                : recipe.pinned
+                                  ? 'Unpin recipe'
+                                  : 'Pin recipe'
+                            }
+                          >
+                            {recipe.pinned ? (
+                              <PinOffIcon className="h-4 w-4" />
+                            ) : (
+                              <PinIcon className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (recipe.is_editable !== false) {
+                                setDeleteTarget(recipe);
+                              }
+                            }}
+                            disabled={recipe.is_editable === false}
+                            className={`p-1 rounded transition-colors ${
+                              recipe.is_editable === false
+                                ? 'text-gray-300 cursor-not-allowed'
+                                : 'text-red-400 hover:text-red-700 hover:bg-red-100'
+                            }`}
+                            title={
+                              recipe.is_editable === false
+                                ? 'Default recipes cannot be deleted'
+                                : 'Delete recipe'
+                            }
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })
@@ -427,7 +513,71 @@ function AllRecipesSection({ recipes }) {
           </Table>
         </div>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        recipe={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onDelete={onDelete}
+      />
     </div>
+  );
+}
+
+// Inline delete confirmation dialog for the All Recipes table
+function DeleteConfirmDialog({ recipe, onClose, onDelete }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await onDelete(recipe.name);
+      onClose();
+    } catch (error) {
+      showToast(`Delete failed: ${error.message}`, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  if (!recipe) return null;
+
+  return (
+    <Dialog open={!!recipe} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl text-red-600">
+            Delete Recipe
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete &quot;{recipe.name}&quot;? This
+            action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="mt-4">
+          <Button variant="outline" onClick={onClose} disabled={isDeleting}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="bg-red-600 hover:bg-red-700 text-white"
+          >
+            {isDeleting ? (
+              <>
+                <CircularProgress size={16} className="mr-2" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2Icon className="w-4 h-4 mr-2" />
+                Delete
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -743,6 +893,7 @@ function CreateRecipeModal({
   const [recipeType, setRecipeType] = useState(RecipeType.CLUSTER);
   const [ownerName, setOwnerName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -758,6 +909,7 @@ function CreateRecipeModal({
         setContent(getExampleRecipe(RecipeType.CLUSTER));
       }
       setOwnerName('');
+      setFormError(null);
     }
   }, [initialData, isOpen]);
 
@@ -774,12 +926,13 @@ function CreateRecipeModal({
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setFormError(null);
 
     // Validate YAML syntax
     try {
       yaml.load(content);
     } catch (yamlError) {
-      showToast(`Invalid YAML: ${yamlError.message}`, 'error');
+      setFormError(`Invalid YAML: ${yamlError.message}`);
       setIsSubmitting(false);
       return;
     }
@@ -794,7 +947,7 @@ function CreateRecipeModal({
       });
       onClose();
     } catch (error) {
-      showToast(`Error: ${error.message}`, 'error');
+      setFormError(error.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -827,7 +980,10 @@ function CreateRecipeModal({
               <Input
                 id="name"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setFormError(null);
+                }}
                 placeholder="my-gpu-training"
                 className="placeholder:text-gray-400"
                 required
@@ -890,10 +1046,20 @@ function CreateRecipeModal({
             <Label htmlFor="content">YAML Content *</Label>
             <YamlEditor
               value={content}
-              onChange={setContent}
+              onChange={(val) => {
+                setContent(val);
+                setFormError(null);
+              }}
               maxHeight="400px"
             />
           </div>
+
+          {formError && (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+              <AlertTriangleIcon className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-800">{formError}</p>
+            </div>
+          )}
 
           <DialogFooter>
             <Button
@@ -1000,14 +1166,12 @@ export function RecipeHub() {
   // Separate templates into categories
   const pinnedRecipes = allRecipes.filter((r) => r.pinned);
 
-  // When not authenticated, show all non-pinned recipes in "All Recipes"
-  // When authenticated, separate into "My Recipes" and "All Recipes"
+  // When authenticated, separate user's non-pinned recipes into "My Recipes"
+  // "All Recipes" always shows every recipe regardless of pinned/ownership status
   const myRecipes = isAuthenticated
     ? allRecipes.filter((r) => !r.pinned && r.user_id === currentUserId)
     : [];
-  const otherRecipes = isAuthenticated
-    ? allRecipes.filter((r) => !r.pinned && r.user_id !== currentUserId)
-    : allRecipes.filter((r) => !r.pinned);
+  const otherRecipes = allRecipes;
 
   // Handlers
   const handleCreate = async (data) => {
@@ -1028,6 +1192,28 @@ export function RecipeHub() {
   const handleCloseCreateModal = () => {
     setIsCreateModalOpen(false);
     setInitialCreateData(null);
+  };
+
+  const handlePin = async (recipeName, pinned) => {
+    try {
+      const updated = await togglePinRecipe(recipeName, pinned);
+      if (updated) {
+        showToast(pinned ? 'Recipe pinned!' : 'Recipe unpinned!', 'success');
+        await fetchData();
+      }
+    } catch (error) {
+      showToast(`Pin operation failed: ${error.message}`, 'error');
+    }
+  };
+
+  const handleDelete = async (recipeName) => {
+    const deleted = await deleteRecipe(recipeName);
+    if (deleted) {
+      showToast('Recipe deleted successfully!', 'success');
+      await fetchData();
+    } else {
+      throw new Error('Failed to delete recipe');
+    }
   };
 
   // Empty state
@@ -1106,6 +1292,7 @@ export function RecipeHub() {
             iconColor="text-amber-500"
             recipes={pinnedRecipes}
             emptyMessage="No pinned recipes. Pin important recipes for quick access."
+            onPin={handlePin}
           />
 
           {/* My Recipes - only shown when authenticated */}
@@ -1120,7 +1307,11 @@ export function RecipeHub() {
           )}
 
           {/* All Recipes - Searchable List */}
-          <AllRecipesSection recipes={otherRecipes} />
+          <AllRecipesSection
+            recipes={otherRecipes}
+            onPin={handlePin}
+            onDelete={handleDelete}
+          />
         </div>
       )}
 

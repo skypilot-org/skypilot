@@ -91,12 +91,19 @@ Below is the configuration syntax and some example values. See detailed explanat
       max_run_duration: 10m
     :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
       - echo "hello world!"
+    :ref:`pricing <config-yaml-kubernetes-pricing>`:
+      cpu: 0.05        # $/vCPU/hr
+      memory: 0.01     # $/GB/hr
+      accelerators:
+        A100: 3.50     # $/accelerator/hr
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
           metadata:
             labels:
               my-label: my-value
+        pricing:
+          cpu: 0.08
       context2:
         remote_identity: my-k8s-service-account
 
@@ -118,11 +125,25 @@ Below is the configuration syntax and some example values. See detailed explanat
       - node-pool-1
       - node-pool-2
 
+  :ref:`slurm <config-yaml-slurm>`:
+    :ref:`allowed_clusters <config-yaml-slurm-allowed-clusters>`:
+      - mycluster1
+      - mycluster2
+    :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
+    :ref:`pricing <config-yaml-slurm-pricing>`:
+      cpu: 0.04        # $/vCPU/hr
+      memory: 0.01     # $/GB/hr
+      accelerators:
+        V100: 2.50     # $/accelerator/hr
+    :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
+      mycluster1:
+        pricing:
+          cpu: 0.06
+
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
       Owner: user-unique-name
-    :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
@@ -184,6 +205,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     region_configs:
       :ref:`eu-north1 <config-yaml-nebius>`:
         project_id: project-e00xxxxxxxxxxx
+        subnet_id: vpcsubnet-e00xxxxxxxxxxx
         fabric: fabric-3
         filesystems:
         - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
@@ -213,10 +235,6 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`store <config-yaml-logs-store>`: gcp
     gcp:
       project_id: my-project-id
-
-  :ref:`data <config-yaml-data>`:
-    :ref:`mount_cached <config-yaml-data-mount-cached>`:
-      :ref:`sequential_upload <config-yaml-data-mount-cached-sequential-upload>`: false
 
   :ref:`daemons <config-yaml-daemons>`:
     skypilot-status-refresh-daemon:
@@ -686,20 +704,6 @@ Example:
       my-tag: my-value
 
 
-.. _config-yaml-aws-vpc-name:
-
-``aws.vpc_name``
-~~~~~~~~~~~~~~~~
-
-VPC to use in each region (optional).
-
-If this is set, SkyPilot will only provision in regions that contain a VPC
-with this name (provisioner automatically looks for such regions).
-Regions without a VPC with this name will not be used to launch nodes.
-
-Default: ``null`` (use the default VPC in each region).
-
-Deprecated: use ``aws.vpc_names`` instead.
 
 .. _config-yaml-aws-vpc-names:
 
@@ -735,7 +739,7 @@ Private subnets are defined as those satisfying both of these properties:
   2. Subnets that are configured to not assign public IPs by default
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
-This flag is typically set together with ``vpc_name`` above and
+This flag is typically set together with ``vpc_names`` above and
 ``ssh_proxy_command`` or ``use_ssm`` below.
 
 Default: ``false``.
@@ -745,7 +749,7 @@ Default: ``false``.
 ``aws.use_ssm``
 ~~~~~~~~~~~~~~~~
 
-Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_name`` and
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_names`` and
 ``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
@@ -759,7 +763,7 @@ SSH proxy command (optional).
 
 Useful for using a jump server to communicate with SkyPilot nodes hosted
 in private VPC/subnets without public IPs. Typically set together with
-``vpc_name`` and ``use_internal_ips`` above.
+``vpc_names`` and ``use_internal_ips`` above.
 
 If set, this is passed as the ``-o ProxyCommand`` option for any SSH
 connections (including rsync) used to communicate between the local client
@@ -1382,7 +1386,10 @@ Can be one of:
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
 - ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
+- ``nebius``: `Nebius autoscaler <https://docs.nebius.com/kubernetes/node-groups/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
+
+If you want to use the autoscaler, set :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>` to at least 600.
 
 .. _config-yaml-kubernetes-pod-config:
 
@@ -1560,6 +1567,76 @@ This can also be configured per-context using ``context_configs``:
       prod-cluster:
         set_pod_resource_limits: 2.0
 
+.. _config-yaml-kubernetes-pricing:
+
+``kubernetes.pricing``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Hourly pricing rates for Kubernetes virtual instance types (optional).
+
+By default, Kubernetes instance types report a cost of ``$0.00`` because
+SkyPilot has no way to know the true cost of on-prem or self-managed clusters.
+Use this field to supply hourly rates so that ``sky launch``, ``sky status``,
+and ``sky gpus list`` display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
+
+Fields:
+
+``cpu``
+    Cost per vCPU per hour (e.g., ``0.05``).  Only used for CPU-only instances.
+
+``memory``
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
+
+``accelerators``
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``A100: 3.50``).  CPU and memory costs are included in this rate.
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+Default: not set (all costs report as $0.00).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    pricing:
+      cpu: 0.05
+      memory: 0.01
+      accelerators:
+        A100: 3.50
+        H100: 5.00
+
+Pricing can also be set per-context using :ref:`context_configs <config-yaml-kubernetes-context-configs>`.
+Context-level pricing is deep-merged with the cloud-level default: only the
+keys you specify are overridden, and unmentioned accelerators are inherited.
+
+.. code-block:: yaml
+
+  kubernetes:
+    pricing:
+      cpu: 0.05
+      memory: 0.01
+      accelerators:
+        A100: 3.50
+        H100: 5.00
+    context_configs:
+      on-prem-cluster:
+        pricing:
+          # Overrides only the cpu rate; memory and accelerators are
+          # inherited from the cloud-level pricing above.
+          cpu: 0.08
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -1601,6 +1678,161 @@ Advanced SSH node pool configuration (optional).
 List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
+
+.. _config-yaml-slurm:
+
+``slurm``
+~~~~~~~~~
+
+Advanced Slurm configuration (optional).
+
+.. _config-yaml-slurm-allowed-clusters:
+
+``slurm.allowed_clusters``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed Slurm clusters (optional).
+
+List of cluster names that SkyPilot is allowed to use.
+
+If you want all available clusters to be allowed, set it to ``all`` like this:
+
+.. code-block:: yaml
+
+  slurm:
+    allowed_clusters: all
+
+.. _config-yaml-slurm-provision-timeout:
+
+``slurm.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout for Slurm job allocation (optional).
+
+Timeout in seconds for waiting on Slurm to allocate nodes for a launched job.
+If the timeout is reached, SkyPilot will fail over to other Slurm
+partitions or clusters.
+
+.. note::
+
+  If your Slurm cluster has long queueing delays, consider increasing
+  ``slurm.provision_timeout``. This helps avoid premature failover while Slurm
+  is still working to allocate resources.
+
+Default:
+
+- ``120`` seconds (2 minutes) when a partition is not specified
+- ``86400`` seconds (24 hours) when a specific partition is specified
+
+Set to a negative value (e.g., ``-1``) to wait indefinitely.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    provision_timeout: 1200
+
+.. _config-yaml-slurm-pricing:
+
+``slurm.pricing``
+~~~~~~~~~~~~~~~~~
+
+Hourly pricing rates for Slurm virtual instance types (optional).
+
+By default, Slurm instance types report a cost of ``$0.00``. Use this field to
+supply hourly rates so that ``sky launch``, ``sky status``, and ``sky gpus list``
+display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
+
+Fields:
+
+``cpu``
+    Cost per vCPU per hour (e.g., ``0.04``).  Only used for CPU-only instances.
+
+``memory``
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
+
+``accelerators``
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``V100: 2.50``).  CPU and memory costs are included in this rate.
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+Default: not set (all costs report as $0.00).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    pricing:
+      cpu: 0.04
+      memory: 0.01
+      accelerators:
+        V100: 2.50
+        A100: 3.50
+
+Pricing can also be set per-cluster and per-partition using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
+
+.. _config-yaml-slurm-cluster-configs:
+
+``slurm.cluster_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Per-cluster and per-partition configuration for Slurm (optional).
+
+Currently supports :ref:`pricing <config-yaml-slurm-pricing>` overrides at both
+the cluster and partition level. Pricing at each level is deep-merged with the
+parent level: only the keys you specify are overridden, and unmentioned
+accelerators are inherited.
+
+The merge order is::
+
+    cloud-level  <  cluster-level  <  partition-level
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    # Cloud-level defaults
+    pricing:
+      cpu: 0.04
+      memory: 0.01
+      accelerators:
+        V100: 2.50
+        A100: 3.50
+
+    cluster_configs:
+      mycluster1:
+        # Override cpu rate for this cluster; memory and accelerators
+        # are inherited from the cloud-level pricing above.
+        pricing:
+          cpu: 0.06
+          accelerators:
+            A100: 4.00   # Override A100; V100 inherited
+
+      mycluster2:
+        pricing:
+          cpu: 0.03
+        partition_configs:
+          gpu-partition:
+            # Override accelerator rate for this partition; other values
+            # are inherited from parent levels.
+            pricing:
+              accelerators:
+                H100: 5.00
 
 .. _config-yaml-oci:
 
@@ -1654,6 +1886,10 @@ Advanced Nebius configuration (optional).
     Identifier for the Nebius project (optional)
     Default: Uses first available project if not specified
 
+``subnet_id``
+    Identifier for the Nebius subnet (optional)
+    Default: Uses first available subnet if not specified
+
 ``fabric``
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
@@ -1689,6 +1925,9 @@ Example:
                 # Project identifier for this region
                 # Optional: Uses first available project if not specified
                 project_id: project-e00......
+                # Subnet identifier for this region
+                # Optional: Uses first available subnet if not specified
+                subnet_id: vpcsubnet-e00......
                 # GPU cluster fabric identifier
                 # Optional: GPU cluster disabled if not specified
                 fabric: fabric-3
@@ -1951,6 +2190,10 @@ even if ``db`` is specified.
 
   ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
 
+  This is optional. For larger deployments (for example, many nodes/clusters
+  and many pending jobs), consider configuring a PostgreSQL backend via
+  ``db`` or ``SKYPILOT_DB_CONNECTION_URI``.
+
 .. note::
 
   If ``db`` is specified in the config, no other configuration parameter can be specified in the SkyPilot config file.
@@ -1993,46 +2236,6 @@ The type of external logging storage to use. Each logging storage might have its
 
   logs:
     store: gcp
-
-.. _config-yaml-data:
-
-``data``
-~~~~~~~~
-
-Data storage configuration (optional).
-
-.. code-block:: yaml
-
-  data:
-    mount_cached:
-      sequential_upload: false
-
-.. _config-yaml-data-mount-cached:
-
-``data.mount_cached``
-~~~~~~~~~~~~~~~~~~~~~
-
-Configuration for MOUNT_CACHED storage mode.
-
-.. _config-yaml-data-mount-cached-sequential-upload:
-
-``data.mount_cached.sequential_upload``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Whether to upload files sequentially to the remote storage (default: ``false``).
-
-When set to ``true``, files written to the mounted directory are uploaded one at a time
-in the order they were written. This is useful when your framework relies on the order
-of files being uploaded (e.g., checkpoint files that need to appear in sequence).
-
-When set to ``false`` (default), files are uploaded in parallel for better performance.
-The upload order is not guaranteed, but throughput is significantly higher.
-
-.. code-block:: yaml
-
-  data:
-    mount_cached:
-      sequential_upload: true
 
 .. _config-yaml-daemons:
 
