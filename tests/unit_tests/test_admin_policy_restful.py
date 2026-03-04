@@ -419,10 +419,12 @@ def test_restful_policy_with_user(monkeypatch):
                 config_path = f.name
 
             try:
-                dag, config = _load_task_and_apply_policy(task,
-                                                          config_path,
-                                                          monkeypatch,
-                                                          at_client_side=False)
+                dag, config = _load_task_and_apply_policy(
+                    task,
+                    config_path,
+                    monkeypatch,
+                    at_client_side=False,
+                )
 
                 # Verify the policy was called with proper request structure
                 assert len(ImageIdInspectorPolicy.received_requests) == 1
