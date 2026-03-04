@@ -926,6 +926,14 @@ class TestRbac409ConflictHandling:
     (upsert semantics).
     """
 
+    @pytest.fixture(autouse=True)
+    def mock_api_client(self, monkeypatch):
+        """Mock api_client so dict_to_k8s_object works without kubeconfig."""
+        import kubernetes as k8s_lib
+        bare_client = k8s_lib.client.ApiClient(k8s_lib.client.Configuration())
+        monkeypatch.setattr('sky.adaptors.kubernetes.api_client',
+                            lambda *args, **kwargs: bare_client)
+
     @staticmethod
     def _make_existing_role(rules):
         """Create a mock existing role with the given rules."""
