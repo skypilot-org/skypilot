@@ -1108,6 +1108,54 @@ def test_task_labels_gcp():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Custom VNet on Azure ----------
+@pytest.mark.azure
+def test_azure_vpc_name():
+    """Test Azure vpc_name with a custom VNet.
+
+    Creates a VNet, launches a cluster using it, and verifies the VM's
+    NIC is attached to the custom VNet's subnet.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    vnet_name = f'sky-test-vnet-{name}'
+    rg_name = f'sky-test-rg-{name}'
+    region = 'eastus'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_azure_vpc.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(vpc_name=vnet_name, region=region)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = smoke_tests_utils.Test(
+            'azure_vpc_name',
+            [
+                # Launch cloud-cmd cluster for remote verification
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
+                # Create a resource group and VNet for the test
+                f'az group create -n {rg_name} -l {region}',
+                f'az network vnet create -g {rg_name} -n {vnet_name} '
+                f'--address-prefix 10.0.0.0/16 '
+                f'--subnet-name default --subnet-prefix 10.0.0.0/24',
+                # Launch cluster using the custom VNet
+                f'sky launch -y -c {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+                # Verify the VM NIC is in the custom VNet
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'az network nic list '
+                    f'--query "[?contains(ipConfigurations[0].subnet.id, '
+                    f"'{vnet_name}'"
+                    f')].name" --output tsv | grep .'),
+            ],
+            f'sky down -y {name}; '
+            f'az group delete -n {rg_name} -y --no-wait; '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Labels from task on Azure (labels) ----------
 @pytest.mark.azure
 def test_task_labels_azure():
