@@ -47,8 +47,8 @@ def _load_task_and_apply_policy(
 ) -> Tuple[sky.Dag, config_utils.Config]:
     """Apply admin policy using real SkyPilot patterns.
 
-    This function is copied from tests/unit_tests/test_admin_policy.py
-    to avoid import path complexity while reusing the same proven pattern.
+    This function is based on the one in tests/unit_tests/test_admin_policy.py
+    and has been modified for the specific needs of these tests.
     """
     # Use monkeypatch instead of directly modifying os.environ
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
