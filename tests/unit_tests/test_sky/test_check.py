@@ -266,6 +266,8 @@ def _mock_k8s_env(monkeypatch,
         'default': {},
         'ws1': {}
     })
+    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
+                        lambda: {'default', 'ws1'})
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
