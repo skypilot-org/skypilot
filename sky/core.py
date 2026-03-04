@@ -1491,7 +1491,9 @@ def enabled_clouds_batch(workspaces: List[str],
         Workspaces the caller is not authorized to access are silently omitted.
     """
     from sky.workspaces import core as workspaces_core  # pylint: disable=import-outside-toplevel
-    accessible = workspaces_core.get_accessible_workspace_names()
+    accessible = set(
+        workspaces_core.workspaces_for_user(
+            common_utils.get_current_user().id).keys())
     allowed = [ws for ws in workspaces if ws in accessible]
 
     def _get(ws: str) -> List[str]:
