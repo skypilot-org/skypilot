@@ -20,6 +20,7 @@ Lifecycle::
                      └─ Return (success) or raise (failure)
 """
 import collections
+import contextvars
 import logging
 import signal
 import sys
@@ -249,28 +250,25 @@ class BatchCoordinator:
     # ------------------------------------------------------------------
 
     def _discover_workers(self) -> None:
-        """Wait for pool workers and populate ``self._workers``."""
-        expected = self._get_expected_worker_count()
+        """Discover all ready workers in the pool.
+
+        Uses all available workers — no fixed ``target_num_replicas``.
+        If no workers are found immediately, waits up to the discovery
+        timeout for at least one to appear.
+        """
         workers = self._get_ready_workers()
 
-        if len(workers) < expected:
-            logger.info(f'Waiting for all {expected} workers to be ready '
-                        f'(currently {len(workers)} ready)...')
+        if not workers:
+            logger.info('No workers ready yet, waiting for at least one...')
             deadline = time.monotonic() + constants.WORKER_DISCOVERY_TIMEOUT
 
-            while (len(workers) < expected and time.monotonic() < deadline):
+            while not workers and time.monotonic() < deadline:
                 time.sleep(5)
                 workers = self._get_ready_workers()
-                if len(workers) < expected:
+                if not workers:
                     remaining = int(deadline - time.monotonic())
-                    logger.info(f'{len(workers)}/{expected} workers ready '
+                    logger.info(f'No workers ready yet '
                                 f'(waiting up to {remaining}s more)')
-
-            if len(workers) < expected:
-                logger.warning(
-                    f'Only {len(workers)}/{expected} workers ready after '
-                    f'waiting {constants.WORKER_DISCOVERY_TIMEOUT}s. '
-                    'Proceeding with available workers.')
 
         if not workers:
             raise RuntimeError(
@@ -278,14 +276,11 @@ class BatchCoordinator:
                 f'after waiting {constants.WORKER_DISCOVERY_TIMEOUT}s')
 
         self._workers = workers
-        logger.info(f'Starting with {len(workers)} workers '
-                    f'({expected} expected)')
+        logger.info(f'Discovered {len(workers)} ready workers')
 
     def _update_resources_str(self) -> None:
         """Update the REQUESTED column with pool and worker info."""
-        n_workers = len(self._workers)
-        resources_str = (f'{self.pool_name} '
-                         f'({n_workers} worker{"s" if n_workers != 1 else ""})')
+        resources_str = self.pool_name
         try:
             managed_job_state.set_batch_resources(self._managed_job_id,
                                                   resources_str)
@@ -305,21 +300,6 @@ class BatchCoordinator:
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to fetch pool status: {e}')
         return None
-
-    def _get_expected_worker_count(self) -> int:
-        """Get expected worker count from pool configuration."""
-        status = self._fetch_pool_status()
-        if status is None:
-            logger.warning(f'Could not find pool {self.pool_name}, '
-                           'defaulting to 1 worker')
-            return 1
-        target = status.get('target_num_replicas')
-        if target is None:
-            logger.warning('target_num_replicas not available, '
-                           'defaulting to 1 worker')
-            return 1
-        logger.info(f'Pool {self.pool_name} expects {target} workers')
-        return max(1, int(target))
 
     def _get_ready_workers(self) -> List[str]:
         """Return cluster names for ready replicas via SDK."""
@@ -541,14 +521,29 @@ class BatchCoordinator:
                     logger.info(f'Batch {batch_idx} running as '
                                 f'job {job_id_on_cluster} on {cluster_name}')
 
-                    # Poll until terminal
+                    # Poll until terminal.  If the cluster goes away
+                    # (e.g. rolling update) we'll get repeated None
+                    # statuses — treat that as a failure after a grace
+                    # period so the batch can be retried.
+                    _none_count = 0
+                    _MAX_NONE = 12  # ~60s at 5s poll interval
                     while True:
                         time.sleep(constants.BATCH_POLL_INTERVAL)
                         req_id = sdk.job_status(cluster_name,
                                                 [job_id_on_cluster])
                         statuses = sdk.get(req_id)
                         status = statuses.get(job_id_on_cluster)
-                        if status is not None and status.is_terminal():
+                        if status is None:
+                            _none_count += 1
+                            if _none_count >= _MAX_NONE:
+                                raise RuntimeError(
+                                    f'Batch {batch_idx}: lost contact '
+                                    f'with {cluster_name} (job status '
+                                    f'unavailable for {_none_count} '
+                                    f'consecutive polls)')
+                            continue
+                        _none_count = 0
+                        if status.is_terminal():
                             if status != sky.JobStatus.SUCCEEDED:
                                 raise RuntimeError(
                                     f'Batch {batch_idx} failed with '
@@ -562,9 +557,9 @@ class BatchCoordinator:
                                                        batch_idx, 'COMPLETED')
                     with self._completed_lock:
                         self.completed_count += 1
-                    logger.info(f'Batch {batch_idx} completed '
-                                f'({self.completed_count}/'
-                                f'{len(self.batches)})')
+                    logger.info(
+                        f'Batch {batch_idx} completed on {cluster_name} '
+                        f'({self.completed_count}/{len(self.batches)})')
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error(f'Batch {batch_idx} failed on '
                                  f'{cluster_name}: {e}')
@@ -601,30 +596,83 @@ class BatchCoordinator:
     # ------------------------------------------------------------------
 
     def _dispatch_all(self) -> None:
-        """Launch one dispatch thread per worker and wait."""
-        dispatch_threads: List[threading.Thread] = []
+        """Launch dispatch threads per worker and dynamically add new ones.
+
+        Periodically re-discovers workers so that newly scaled-up pool
+        replicas are picked up automatically.  Individual worker thread
+        failures are tolerated as long as other workers can pick up the
+        remaining batches.
+        """
+        active_threads: Dict[str, threading.Thread] = {}
         errors: List[Exception] = []
 
         def _dispatch_wrapper(cname: str) -> None:
             try:
                 self._worker_dispatch_loop(cname)
             except Exception as e:  # pylint: disable=broad-except
+                logger.info(f'Worker thread for {cname} failed: {e}')
                 errors.append(e)
 
-        for cluster_name in self._workers:
-            t = threading.Thread(target=_dispatch_wrapper,
-                                 args=(cluster_name,),
+        def _start_worker_thread(cluster_name: str) -> None:
+            # Each thread needs its own context copy so that the log
+            # redirect set up by the jobs controller is inherited.
+            # contextvars.Context.run() is not re-entrant, so each
+            # thread must use a separate copy.
+            thread_ctx = contextvars.copy_context()
+            t = threading.Thread(target=thread_ctx.run,
+                                 args=(_dispatch_wrapper, cluster_name),
                                  daemon=True)
             t.start()
-            dispatch_threads.append(t)
+            active_threads[cluster_name] = t
 
-        for t in dispatch_threads:
-            t.join()
+        # Start initial workers.
+        for cluster_name in self._workers:
+            _start_worker_thread(cluster_name)
 
-        if errors:
-            raise errors[0]
+        # Monitor until all batches complete, periodically discovering
+        # new workers and spawning threads for them.
+        while not self._cancelled:
+            if self.completed_count >= len(self.batches):
+                break
+
+            alive = any(t.is_alive() for t in active_threads.values())
+
+            if not alive and not self.pending_batches:
+                # No threads running and no pending work — done.
+                break
+
+            # Re-discover workers and start threads for idle ones.
+            started_new = False
+            try:
+                current_workers = self._get_ready_workers()
+                for w in current_workers:
+                    already_active = (w in active_threads and
+                                      active_threads[w].is_alive())
+                    if not already_active and self.pending_batches:
+                        logger.info(f'Discovered new/idle worker: {w}')
+                        try:
+                            self._shutdown_worker(w)
+                        except Exception:  # pylint: disable=broad-except
+                            pass
+                        _start_worker_thread(w)
+                        started_new = True
+            except Exception:  # pylint: disable=broad-except
+                pass
+
+            # If all threads are dead, work remains, and we couldn't
+            # start any new threads, there's nothing more we can do.
+            if not alive and self.pending_batches and not started_new:
+                break
+
+            time.sleep(10)
+
+        # Wait for remaining threads to finish.
+        for t in active_threads.values():
+            t.join(timeout=60)
 
         if self.completed_count != len(self.batches):
+            if errors:
+                raise errors[0]
             raise RuntimeError(
                 f'Expected {len(self.batches)} completed batches, '
                 f'got {self.completed_count}')

@@ -712,6 +712,20 @@ export function ManagedJobsTable({
     }
   }, [sortConfig, fetchData, preloadingComplete]);
 
+  // Use faster refresh when there are running batch jobs with incomplete progress
+  const hasRunningBatches = React.useMemo(() => {
+    return data.some(
+      (job) =>
+        job.batch_total_batches != null &&
+        job.status === 'RUNNING' &&
+        (job.batch_completed_batches || 0) < job.batch_total_batches
+    );
+  }, [data]);
+
+  const effectiveRefreshInterval = hasRunningBatches
+    ? 1000
+    : refreshInterval;
+
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
     if (!preloadingComplete) {
@@ -723,16 +737,20 @@ export function ManagedJobsTable({
         fetchDataRef.current &&
         window.document.visibilityState === 'visible'
       ) {
-        fetchDataRef.current({ includeStatus: true });
+        // Invalidate cache for fast refresh so we get fresh data
+        if (hasRunningBatches) {
+          jobsCacheManager.invalidateCache();
+        }
+        fetchDataRef.current({ includeStatus: !hasRunningBatches });
       }
-    }, refreshInterval);
+    }, effectiveRefreshInterval);
 
     return () => {
       clearInterval(interval);
       // Don't invalidate cache on component unmount - this causes premature cache invalidation
       // Cache should only be invalidated on manual refresh or TTL expiration
     };
-  }, [refreshInterval, preloadingComplete]);
+  }, [effectiveRefreshInterval, hasRunningBatches, preloadingComplete]);
 
   // Reset to first page when activeTab changes
   useEffect(() => {

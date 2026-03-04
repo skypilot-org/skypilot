@@ -8,3 +8,5 @@ resources:
   cpus: 1  # CPU count per worker
 
 setup: echo "Setup complete!"
+
+run: echo "setup done"

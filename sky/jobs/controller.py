@@ -1765,7 +1765,13 @@ class ControllerManager:
             error = None
 
             try:
-                if pool is None:
+                if task.metadata.get('batch_coordinator'):
+                    # Batch coordinator tasks run inline on the controller
+                    # — no separate cluster was provisioned, so skip
+                    # cluster termination.
+                    logger.info('Batch coordinator task — skipping cluster '
+                                'termination.')
+                elif pool is None:
                     cluster_name = (
                         managed_job_utils.generate_managed_job_cluster_name(
                             task.name, job_id))

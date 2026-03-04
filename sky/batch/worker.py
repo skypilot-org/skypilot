@@ -112,7 +112,9 @@ class _WorkerHandler(BaseHTTPRequestHandler):
 
         # Download chunk directly from source dataset using format handler
         assert _dataset_format is not None, 'Worker not initialized'
-        cache_dir = '/tmp/sky_batch_cache'
+        # Use per-job cache directory to avoid stale data from previous jobs
+        # that used the same S3 path with different content.
+        cache_dir = f'/tmp/sky_batch_cache/{_job_id}'
         data = _dataset_format.download_chunk(dataset_path, start_idx, end_idx,
                                               cache_dir)
         logger.info('Loaded %d items for batch [%d-%d]', len(data), start_idx,
