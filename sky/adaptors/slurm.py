@@ -450,9 +450,12 @@ class SlurmClient:
         """
 
         cmd = (
-            f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
-            f'while read node; do '
+            # Use scontrol show hostnames to expand both compact Slurm
+            # hostlist notation (e.g. ml-16-node-[001-002]) and
+            # comma-separated nodes into individual node names.
             # TODO(kevin): Use json output for more robust parsing.
+            f'nodelist=$(squeue -h --jobs {job_id} -o "%N"); '
+            f'scontrol show hostnames $nodelist | while read -r node; do '
             f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
             f'echo "$node $node_addr"; '
