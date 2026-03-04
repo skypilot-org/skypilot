@@ -1336,8 +1336,7 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     # services scale with system memory. Without this cap, short workers
     # grow linearly with memory, consuming nearly all of it and leaving a
     # roughly fixed amount for services regardless of system memory size.
-    worker_reserved = (controller_reserved +
-                       total_memory_mb *
+    worker_reserved = (controller_reserved + total_memory_mb *
                        (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION))
     config = server_config.compute_server_config(
         deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
