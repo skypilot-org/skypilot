@@ -464,15 +464,15 @@ class TestPopulateJobRecordFromHandle:
         # Check network fields are set
         assert 'internal_external_ips' in job
         assert job['internal_external_ips'] == [('10.0.0.1', '35.1.2.3')]
-        assert 'k8s_internal_svcs' in job
-        assert job['k8s_internal_svcs'] is None  # Non-K8s cluster
+        assert 'internal_services' in job
+        assert job['internal_services'] is None  # Non-K8s cluster
 
         # Check other fields are also set
         assert job['cluster_resources'] == '1x[CPU:1]'
         assert job['cloud'] == 'AWS'
         assert job['region'] == 'us-east-1'
 
-    def test_populate_job_record_sets_k8s_internal_svcs(self):
+    def test_populate_job_record_sets_internal_services(self):
         """Test that K8s internal_svc entries are extracted."""
         # Create a mock handle for a K8s cluster
         mock_handle = mock.MagicMock()
@@ -507,8 +507,8 @@ class TestPopulateJobRecordFromHandle:
                                                    handle=mock_handle)
 
         # Check K8s internal_svc is extracted
-        assert 'k8s_internal_svcs' in job
-        assert job['k8s_internal_svcs'] == {'pod-0': 'pod-0.svc.cluster.local'}
+        assert 'internal_services' in job
+        assert job['internal_services'] == {'pod-0': 'pod-0.svc.cluster.local'}
 
 
 class TestClusterHandleFields:
@@ -517,14 +517,14 @@ class TestClusterHandleFields:
     def test_network_fields_in_cluster_handle_fields(self):
         """Test that network fields are in _CLUSTER_HANDLE_FIELDS."""
         assert 'internal_external_ips' in utils._CLUSTER_HANDLE_FIELDS
-        assert 'k8s_internal_svcs' in utils._CLUSTER_HANDLE_FIELDS
+        assert 'internal_services' in utils._CLUSTER_HANDLE_FIELDS
 
     def test_cluster_handle_not_required_excludes_network_fields(self):
         """Test that _cluster_handle_not_required returns False when network fields are present."""
         fields_with_ips = ['job_id', 'status', 'internal_external_ips']
         assert not utils._cluster_handle_not_required(fields_with_ips)
 
-        fields_with_k8s = ['job_id', 'status', 'k8s_internal_svcs']
+        fields_with_k8s = ['job_id', 'status', 'internal_services']
         assert not utils._cluster_handle_not_required(fields_with_k8s)
 
     def test_cluster_handle_not_required_without_handle_fields(self):

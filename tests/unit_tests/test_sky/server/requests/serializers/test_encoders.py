@@ -117,7 +117,7 @@ class TestEncodeJobsQueue:
             'task_name': 'test-task',
             'status': managed_jobs.ManagedJobStatus.RUNNING,
             'internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-            'k8s_internal_svcs': None,
+            'internal_services': None,
         }
 
         result = encoders.encode_jobs_queue([job])
@@ -130,7 +130,7 @@ class TestEncodeJobsQueue:
         # Network fields should be preserved as-is (JSON serializable)
         assert encoded_job['internal_external_ips'] == [('10.0.0.1', '35.1.2.3')
                                                        ]
-        assert encoded_job['k8s_internal_svcs'] is None
+        assert encoded_job['internal_services'] is None
 
     def test_encode_jobs_queue_v2_with_network_fields(self):
         """Test that encode_jobs_queue_v2 encodes jobs with network fields."""
@@ -143,7 +143,7 @@ class TestEncodeJobsQueue:
             task_name='test-task',
             status=managed_jobs.ManagedJobStatus.RUNNING,
             internal_external_ips=[('10.0.0.2', '35.1.2.4')],
-            k8s_internal_svcs={'pod-0': 'pod-0.svc.cluster.local'},
+            internal_services={'pod-0': 'pod-0.svc.cluster.local'},
         )
 
         result = encoders.encode_jobs_queue_v2([job])
@@ -156,7 +156,7 @@ class TestEncodeJobsQueue:
         # Network fields should be preserved as-is (JSON serializable)
         assert encoded_job['internal_external_ips'] == [('10.0.0.2', '35.1.2.4')
                                                        ]
-        assert encoded_job['k8s_internal_svcs'] == {
+        assert encoded_job['internal_services'] == {
             'pod-0': 'pod-0.svc.cluster.local'
         }
 
@@ -171,7 +171,7 @@ class TestEncodeJobsQueue:
             task_name='test-task',
             status=managed_jobs.ManagedJobStatus.RUNNING,
             internal_external_ips=[('10.0.0.1', '35.1.2.3')],
-            k8s_internal_svcs=None,
+            internal_services=None,
         )
 
         result = encoders.encode_jobs_queue_v2(([job], 1, {'RUNNING': 1}, 1))

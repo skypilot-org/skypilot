@@ -17,7 +17,7 @@ class TestDecodeJobsQueue:
             'task_name': 'test-task',
             'status': managed_jobs.ManagedJobStatus.RUNNING.value,
             'internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-            'k8s_internal_svcs': {
+            'internal_services': {
                 'pod-0': 'pod-0.svc.cluster.local'
             },
         }
@@ -32,7 +32,7 @@ class TestDecodeJobsQueue:
 
         # Network fields should be preserved
         assert job.internal_external_ips == [('10.0.0.1', '35.1.2.3')]
-        assert job.k8s_internal_svcs == {'pod-0': 'pod-0.svc.cluster.local'}
+        assert job.internal_services == {'pod-0': 'pod-0.svc.cluster.local'}
 
     def test_decode_jobs_queue_v2_with_none_network_fields(self):
         """Test that decode_jobs_queue_v2 handles None network fields."""
@@ -43,14 +43,14 @@ class TestDecodeJobsQueue:
             'task_name': 'test-task',
             'status': managed_jobs.ManagedJobStatus.PENDING.value,
             'internal_external_ips': None,
-            'k8s_internal_svcs': None,
+            'internal_services': None,
         }
 
         result = decoders.decode_jobs_queue_v2([job_data])
 
         assert len(result) == 1
         assert result[0].internal_external_ips is None
-        assert result[0].k8s_internal_svcs is None
+        assert result[0].internal_services is None
 
     def test_decode_jobs_queue_v2_dict_format(self):
         """Test decode_jobs_queue_v2 with dict return format."""
@@ -62,7 +62,7 @@ class TestDecodeJobsQueue:
                 'task_name': 'test-task',
                 'status': managed_jobs.ManagedJobStatus.RUNNING.value,
                 'internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-                'k8s_internal_svcs': None,
+                'internal_services': None,
             }],
             'total': 1,
             'total_no_filter': 1,
@@ -89,7 +89,7 @@ class TestDecodeJobsQueue:
             'task_name': 'test-task',
             'status': managed_jobs.ManagedJobStatus.RUNNING.value,
             'internal_external_ips': [('10.0.0.2', '35.1.2.4')],
-            'k8s_internal_svcs': None,
+            'internal_services': None,
         }]
 
         result = decoders.decode_jobs_queue(job_data)

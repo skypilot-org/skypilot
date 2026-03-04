@@ -227,7 +227,7 @@ class ManagedJobRecord(ResponseBaseModel):
     internal_external_ips: Optional[List[Tuple[str, str]]] = None
     # K8s DNS entries mapping Pod name to internal_svc
     # Only populated for Kubernetes clusters
-    k8s_internal_svcs: Optional[Dict[str, Optional[str]]] = None
+    internal_services: Optional[Dict[str, Optional[str]]] = None
 
 
 class VolumeRecord(ResponseBaseModel):

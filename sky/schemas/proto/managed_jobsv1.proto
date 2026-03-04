@@ -141,7 +141,7 @@ message ManagedJobInfo {
   repeated IpPair internal_external_ips = 35;
   // K8s DNS entries mapping instance_id to internal_svc
   // Only populated for Kubernetes clusters
-  map<string, string> k8s_internal_svcs = 36;
+  map<string, string> internal_services = 36;
 }
 
 // A pair of internal and external IP addresses

@@ -127,7 +127,7 @@ _CLUSTER_HANDLE_FIELDS = [
     'labels',
     # Network endpoint information (extracted from cluster handle)
     'internal_external_ips',
-    'k8s_internal_svcs',
+    'internal_services',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -1699,17 +1699,16 @@ def _populate_job_record_from_handle(
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
     # Network endpoint information
     job['internal_external_ips'] = handle.stable_internal_external_ips
-    # Extract K8s internal_svc entries if available
-    k8s_internal_svcs = None
-    if (handle.cached_cluster_info is not None and
-            handle.cached_cluster_info.provider_name == 'kubernetes'):
-        k8s_internal_svcs = {}
+    # Extract internal_svc entries if available
+    internal_services = None
+    if handle.cached_cluster_info is not None:
+        internal_services = {}
         for instance_id, instance_infos in (
                 handle.cached_cluster_info.instances.items()):
             for info in instance_infos:
                 if info.internal_svc is not None:
-                    k8s_internal_svcs[instance_id] = info.internal_svc
-    job['k8s_internal_svcs'] = k8s_internal_svcs
+                    internal_services[instance_id] = info.internal_svc
+    job['internal_services'] = internal_services
 
 
 def get_managed_job_queue(
@@ -1847,7 +1846,7 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
-                job['k8s_internal_svcs'] = None
+                job['internal_services'] = None
                 job['internal_external_ips'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
@@ -2464,9 +2463,9 @@ def _job_proto_to_dict(
             ]
         else:
             job_dict['internal_external_ips'] = None
-    # Convert empty k8s_internal_svcs dict to None for consistency
-    if 'k8s_internal_svcs' in job_dict and not job_dict['k8s_internal_svcs']:
-        job_dict['k8s_internal_svcs'] = None
+    # Convert empty internal_services dict to None for consistency
+    if 'internal_services' in job_dict and not job_dict['internal_services']:
+        job_dict['internal_services'] = None
     return job_dict
 
 
