@@ -43,6 +43,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -1490,7 +1491,6 @@ def enabled_clouds_batch(workspaces: List[str],
         A dict mapping each workspace name to its list of enabled clouds/infras.
         Workspaces the caller is not authorized to access are silently omitted.
     """
-    from sky.workspaces import core as workspaces_core  # pylint: disable=import-outside-toplevel
     accessible = set(
         workspaces_core.workspaces_for_user(
             common_utils.get_current_user().id).keys())
