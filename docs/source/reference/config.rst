@@ -1303,6 +1303,24 @@ Example:
     resource_group_vm: user-resource-group-name
     storage_account: user-storage-account-name
 
+.. _config-yaml-azure-labels:
+
+``azure.labels``
+~~~~~~~~~~~~~~~~
+
+Custom labels to apply as tags to Azure VM instances (optional). Labels are key-value
+pairs of strings. These are merged with SkyPilot's internal tags on each VM.
+
+Users should guarantee that these key-values are valid Azure tags, otherwise
+errors from the cloud provider will be surfaced.
+
+.. code-block:: yaml
+
+  azure:
+    labels:
+      team: ml-infra
+      environment: production
+
 .. _config-yaml-kubernetes:
 
 ``kubernetes``
