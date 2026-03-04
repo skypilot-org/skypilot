@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import concurrent.futures
 import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -1487,8 +1488,18 @@ def enabled_clouds_batch(workspaces: List[str],
 
     Returns:
         A dict mapping each workspace name to its list of enabled clouds/infras.
+        Workspaces the caller is not authorized to access are silently omitted.
     """
-    return {ws: enabled_clouds(workspace=ws, expand=expand) for ws in workspaces}
+    from sky.workspaces import core as workspaces_core  # pylint: disable=import-outside-toplevel
+    accessible = workspaces_core.get_accessible_workspace_names()
+    allowed = [ws for ws in workspaces if ws in accessible]
+
+    def _get(ws: str) -> List[str]:
+        return enabled_clouds(workspace=ws, expand=expand)
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {ws: executor.submit(_get, ws) for ws in allowed}
+        return {ws: future.result() for ws, future in futures.items()}
 
 
 @usage_lib.entrypoint
