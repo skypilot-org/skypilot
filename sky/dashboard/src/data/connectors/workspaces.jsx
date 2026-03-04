@@ -542,6 +542,72 @@ async function pollForTaskCompletion(requestId, taskName) {
 }
 
 // Update workspace configuration
+export async function getEnabledCloudsBatch(
+  workspaceNames = [],
+  expand = false
+) {
+  try {
+    const params = new URLSearchParams();
+    if (workspaceNames.length > 0) {
+      params.append('workspaces', workspaceNames.join(','));
+    }
+    if (expand) {
+      params.append('expand', 'true');
+    }
+    const url = `/enabled_clouds/batch?${params.toString()}`;
+
+    const scheduleResponse = await apiClient.get(url);
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling getEnabledCloudsBatch: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    let requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      try {
+        const scheduleData = await scheduleResponse.json();
+        if (scheduleData && scheduleData.request_id) {
+          requestId = scheduleData.request_id;
+        } else {
+          throw new Error(
+            'X-Skypilot-Request-ID header not found AND request_id not found in body.'
+          );
+        }
+      } catch (e) {
+        throw new Error(
+          `X-Skypilot-Request-ID header not found, fallback failed: ${e.message}`
+        );
+      }
+    }
+
+    const resultResponse = await apiClient.get(
+      `/api/get?request_id=${requestId}`
+    );
+    if (!resultResponse.ok) {
+      throw new Error(
+        `Error fetching enabled_clouds_batch result for request ID ${requestId}: ${resultResponse.statusText}`
+      );
+    }
+
+    const resultData = await resultResponse.json();
+    if (resultData.status === 'FAILED') {
+      throw new Error(
+        resultData.error || 'Unknown error during enabled_clouds_batch'
+      );
+    }
+
+    if (resultData.status === 'SUCCEEDED' && resultData.return_value) {
+      return JSON.parse(resultData.return_value);
+    }
+    return {};
+  } catch (error) {
+    console.error('Failed to fetch enabled_clouds_batch:', error.message);
+    throw error;
+  }
+}
+
+
 export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);

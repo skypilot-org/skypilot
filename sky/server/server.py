@@ -1029,6 +1029,23 @@ async def enabled_clouds(request: fastapi.Request,
     )
 
 
+@app.get('/enabled_clouds/batch')
+async def enabled_clouds_batch(request: fastapi.Request,
+                               workspaces: str = '',
+                               expand: bool = False) -> None:
+    """Gets enabled clouds for multiple workspaces in a single request."""
+    workspace_list = [w.strip() for w in workspaces.split(',') if w.strip()]
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
+        request_body=payloads.EnabledCloudsBatchBody(
+            workspaces=workspace_list, expand=expand),
+        func=core.enabled_clouds_batch,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,

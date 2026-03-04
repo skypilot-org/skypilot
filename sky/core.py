@@ -1477,6 +1477,21 @@ def enabled_clouds(workspace: Optional[str] = None,
 
 
 @usage_lib.entrypoint
+def enabled_clouds_batch(workspaces: List[str],
+                         expand: bool = False) -> Dict[str, List[str]]:
+    """Returns enabled clouds for multiple workspaces in a single call.
+
+    Args:
+        workspaces: List of workspace names to query.
+        expand: Whether to expand Kubernetes and SSH to list of resource pools.
+
+    Returns:
+        A dict mapping each workspace name to its list of enabled clouds/infras.
+    """
+    return {ws: enabled_clouds(workspace=ws, expand=expand) for ws in workspaces}
+
+
+@usage_lib.entrypoint
 def realtime_kubernetes_gpu_availability(
     context: Optional[str] = None,
     name_filter: Optional[str] = None,
