@@ -986,6 +986,7 @@ available_node_types:
                   fi;
                 fi;
                 export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                touch /tmp/env_setup_complete
                 ) > /tmp/${STEPS[2]}.log 2>&1
                 if [ "$?" -ne "0" ]; then
                   {
@@ -1042,6 +1043,21 @@ available_node_types:
                   sleep 0.1
                 done
               }
+
+              # Wait for all three background setup steps to complete by
+              # polling their completion/failure markers. If any step fails,
+              # exit the container so the pod enters a failed state instead
+              # of hanging indefinitely.
+              STEP_COMPLETE_FILES=(/tmp/apt_ssh_setup_complete /tmp/ray_skypilot_installation_complete /tmp/env_setup_complete)
+              for i in "${!STEPS[@]}"; do
+                until [ -f "${STEP_COMPLETE_FILES[$i]}" ] || [ -f "/tmp/${STEPS[$i]}.failed" ]; do
+                  sleep 1
+                done
+                if [ -f "/tmp/${STEPS[$i]}.failed" ]; then
+                  echo "Error: setup step '${STEPS[$i]}' failed. Pod will exit."
+                  exit 1
+                fi
+              done
 
               {% if high_availability %}
               mkdir -p {{k8s_high_availability_deployment_run_script_dir}}

@@ -21,6 +21,9 @@ from sky.utils.db import kv_cache
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
+
+_VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
+
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
@@ -37,6 +40,24 @@ _SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
 _SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
 # FUSE availability is unlikely to change frequently.
 _SLURM_FUSE_CHECK_CACHE_TTL = 24 * 60 * 60
+
+
+def expand_path_vars(path: str, env: Dict[str, str]) -> str:
+    """Expand $VAR and ${VAR} in path using the given environment dict.
+
+    Inspired by os.path.expandvars from CPython:
+    https://github.com/python/cpython/blob/56c4f10d/Lib/posixpath.py#L284-L334
+    Only $name and ${name} forms are expanded. Unknown variables are
+    left unchanged.
+    """
+
+    def _repl(m: re.Match) -> str:
+        name = m.group(1)
+        if name.startswith('{') and name.endswith('}'):
+            name = name[1:-1]
+        return env.get(name, m.group(0))
+
+    return _VAR_PATTERN.sub(_repl, path)
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
