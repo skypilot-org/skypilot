@@ -1340,8 +1340,7 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     # In low-memory scenarios (total_memory_mb <= MIN_AVAIL_MB), skip the
     # service reservation so workers get all available memory; otherwise
     # guarantee workers at least MIN_AVAIL_MB and cap them at the fraction.
-    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE *
-                    1024)
+    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
     service_reserved = min(
         total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
         max(0, total_memory_mb - min_avail_mb))
