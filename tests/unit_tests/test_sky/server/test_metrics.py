@@ -101,39 +101,6 @@ def prometheus_middleware():
     return middleware
 
 
-def _get_metric_value_from_registry(metric_name, labels=None):
-    """Helper function to get metric value from the prometheus registry."""
-    registry = CollectorRegistry()
-    # Register the actual metrics to the test registry
-    registry.register(metrics_utils.SKY_APISERVER_REQUESTS_TOTAL)
-    registry.register(metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS)
-
-    # Generate the metrics output
-    output = generate_latest(registry).decode('utf-8')
-
-    # Parse the output to find the specific metric value
-    lines = output.split('\n')
-    for line in lines:
-        if line.startswith(metric_name):
-            if labels:
-                # Check if all labels are present in the line
-                if all(f'{k}="{v}"' in line for k, v in labels.items()):
-                    # Extract the value at the end of the line
-                    value = line.split()[-1]
-                    try:
-                        return float(value)
-                    except ValueError:
-                        continue
-            else:
-                # No labels specified, just get the first match
-                value = line.split()[-1]
-                try:
-                    return float(value)
-                except ValueError:
-                    continue
-    return 0.0
-
-
 @pytest.mark.asyncio
 async def test_middleware_successful_request(prometheus_middleware):
     """Test middleware with successful non-streaming request."""
@@ -154,16 +121,15 @@ async def test_middleware_successful_request(prometheus_middleware):
     call_next.assert_called_once_with(request)
 
     # Check that request count was recorded
-    total_requests = _get_metric_value_from_registry(
-        'sky_apiserver_requests_total', {
-            'path': '/api/v1/status',
-            'method': 'GET',
-            'status': '2xx'
-        })
+    total_requests = _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/api/v1/status',
+        'method': 'GET',
+        'status': '2xx'
+    })
     assert total_requests == 1.0
 
     # Check that duration was recorded for non-streaming APIs
-    duration_count = _get_metric_value_from_registry(
+    duration_count = _get_metric_value(
         'sky_apiserver_request_duration_seconds_count', {
             'path': '/api/v1/status',
             'method': 'GET',
@@ -172,7 +138,7 @@ async def test_middleware_successful_request(prometheus_middleware):
     assert duration_count == 1.0
 
     # Check that the duration sum is reasonable
-    duration_sum = _get_metric_value_from_registry(
+    duration_sum = _get_metric_value(
         'sky_apiserver_request_duration_seconds_sum', {
             'path': '/api/v1/status',
             'method': 'GET',
@@ -198,16 +164,15 @@ async def test_middleware_streaming_request(prometheus_middleware):
     assert result == response
 
     # Check that request count was recorded
-    total_requests = _get_metric_value_from_registry(
-        'sky_apiserver_requests_total', {
-            'path': '/api/v1/logs',
-            'method': 'GET',
-            'status': '2xx'
-        })
+    total_requests = _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/api/v1/logs',
+        'method': 'GET',
+        'status': '2xx'
+    })
     assert total_requests == 1.0
 
     # Check that duration was NOT recorded for streaming APIs
-    duration_count = _get_metric_value_from_registry(
+    duration_count = _get_metric_value(
         'sky_apiserver_request_duration_seconds_count', {
             'path': '/api/v1/logs',
             'method': 'GET',
@@ -229,12 +194,11 @@ async def test_middleware_exception_handling(prometheus_middleware):
         await prometheus_middleware.dispatch(request, call_next)
 
     # Check that 5xx metric was recorded even with exception
-    total_requests = _get_metric_value_from_registry(
-        'sky_apiserver_requests_total', {
-            'path': '/api/v1/failing',
-            'method': 'POST',
-            'status': '5xx'
-        })
+    total_requests = _get_metric_value('sky_apiserver_requests_total', {
+        'path': '/api/v1/failing',
+        'method': 'POST',
+        'status': '5xx'
+    })
     assert total_requests == 1.0
 
 
@@ -260,7 +224,7 @@ async def test_middleware_different_status_codes(prometheus_middleware):
         await prometheus_middleware.dispatch(request, call_next)
 
         # Verify the correct status group was recorded
-        total_requests = _get_metric_value_from_registry(
+        total_requests = _get_metric_value(
             'sky_apiserver_requests_total', {
                 'path': f'/test/{status_code}',
                 'method': 'GET',
@@ -308,10 +272,23 @@ def test_get_user_label_empty_name():
     assert result == 'anonymous'
 
 
-def _get_user_metric_value_from_registry(metric_name, labels=None):
-    """Helper function to get user metric value from the prometheus registry."""
+def _get_metric_value(metric_name, labels=None, collectors=None):
+    """Helper function to get metric value from the prometheus registry.
+
+    Args:
+        metric_name: The metric name prefix to search for.
+        labels: Optional dict of label key-value pairs to match.
+        collectors: List of prometheus collectors to register. If None,
+            registers the default request total and duration metrics.
+    """
+    if collectors is None:
+        collectors = [
+            metrics_utils.SKY_APISERVER_REQUESTS_TOTAL,
+            metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS,
+        ]
     registry = CollectorRegistry()
-    registry.register(metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL)
+    for collector in collectors:
+        registry.register(collector)
 
     output = generate_latest(registry).decode('utf-8')
 
@@ -337,14 +314,7 @@ def _get_user_metric_value_from_registry(metric_name, labels=None):
 @pytest.fixture
 def prometheus_middleware_user():
     """Create PrometheusMiddleware instance for user metrics testing."""
-    middleware = metrics.PrometheusMiddleware(app=MagicMock())
-
-    # Clear metric values before each test
-    metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.clear()
-    metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.clear()
-    metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.clear()
-
-    return middleware
+    return metrics.PrometheusMiddleware(app=MagicMock())
 
 
 @pytest.mark.asyncio
@@ -364,12 +334,13 @@ async def test_middleware_records_user_metrics(prometheus_middleware_user):
     await prometheus_middleware_user.dispatch(request, call_next)
 
     # Check that user metric was recorded
-    user_requests = _get_user_metric_value_from_registry(
-        'sky_apiserver_requests_by_user_total', {
-            'user': 'alice@example.com',
-            'method': 'GET',
-            'status': '2xx'
-        })
+    user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
+    user_requests = _get_metric_value('sky_apiserver_requests_by_user_total', {
+        'user': 'alice@example.com',
+        'method': 'GET',
+        'status': '2xx'
+    },
+                                      collectors=user_collectors)
     assert user_requests == 1.0
 
 
@@ -390,12 +361,43 @@ async def test_middleware_records_anonymous_user_metrics(
     await prometheus_middleware_user.dispatch(request, call_next)
 
     # Check that anonymous user metric was recorded
-    user_requests = _get_user_metric_value_from_registry(
-        'sky_apiserver_requests_by_user_total', {
-            'user': 'anonymous',
-            'method': 'GET',
-            'status': '2xx'
-        })
+    user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
+    user_requests = _get_metric_value('sky_apiserver_requests_by_user_total', {
+        'user': 'anonymous',
+        'method': 'GET',
+        'status': '2xx'
+    },
+                                      collectors=user_collectors)
+    assert user_requests == 1.0
+
+
+@pytest.mark.asyncio
+async def test_middleware_user_metrics_with_basic_auth(
+        prometheus_middleware_user):
+    """Test that middleware records correct user label for basic auth users."""
+    request = MagicMock()
+    request.url.path = '/api/v1/clusters'
+    request.method = 'POST'
+    # Simulate basic auth: BasicAuthMiddleware sets request.state.auth_user
+    # to a user object with a .name attribute (the username).
+    request.state.auth_user = MagicMock()
+    request.state.auth_user.name = 'bob'
+
+    response = MagicMock()
+    response.status_code = 200
+
+    call_next = AsyncMock(return_value=response)
+
+    await prometheus_middleware_user.dispatch(request, call_next)
+
+    # Verify the metric uses the basic auth username
+    user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
+    user_requests = _get_metric_value('sky_apiserver_requests_by_user_total', {
+        'user': 'bob',
+        'method': 'POST',
+        'status': '2xx'
+    },
+                                      collectors=user_collectors)
     assert user_requests == 1.0
 
 
