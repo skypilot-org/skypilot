@@ -8,6 +8,7 @@ jest.mock('posthog-js', () => ({
   identify: jest.fn(),
   register: jest.fn(),
   capture: jest.fn(),
+  opt_out_capturing: jest.fn(),
 }));
 
 // Use a fresh module for each test so _initialized resets.
@@ -185,6 +186,45 @@ describe('domain-specific tracking', () => {
       plugin: 'gpu_healer',
       path: '/health',
     });
+  });
+});
+
+describe('optOut', () => {
+  test('disables isEnabled after init', () => {
+    analytics.initPostHog();
+    expect(analytics.isEnabled()).toBe(true);
+
+    analytics.optOut();
+    expect(analytics.isEnabled()).toBe(false);
+  });
+
+  test('calls posthog.opt_out_capturing when initialized', () => {
+    analytics.initPostHog();
+    analytics.optOut();
+
+    expect(posthog.opt_out_capturing).toHaveBeenCalledTimes(1);
+  });
+
+  test('tracking functions are no-ops after optOut', () => {
+    analytics.initPostHog();
+    analytics.optOut();
+
+    analytics.trackPageView('/clusters');
+    analytics.trackEvent('test_event');
+    analytics.trackClusterAction('ssh');
+
+    expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  test('identify and register are no-ops after optOut', () => {
+    analytics.initPostHog();
+    analytics.optOut();
+
+    analytics.identifyUser('hash123', 'alice');
+    analytics.registerDeployment({ sky_version: '1.0' });
+
+    expect(posthog.identify).not.toHaveBeenCalled();
+    expect(posthog.register).not.toHaveBeenCalled();
   });
 });
 

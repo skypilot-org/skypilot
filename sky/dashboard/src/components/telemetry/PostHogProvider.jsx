@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import {
   initPostHog,
+  optOut,
   identifyUser,
   registerDeployment,
   trackPageView,
@@ -32,6 +33,24 @@ export default function PostHogProvider({ children }) {
     identified.current = true;
 
     const identify = async () => {
+      // Fetch health first to check opt-out before any other analytics calls.
+      try {
+        const res = await fetch(`${ENDPOINT}/api/health`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.usage_collection_disabled) {
+            optOut();
+            return;
+          }
+          registerDeployment({
+            sky_version: data.version || 'unknown',
+            api_version: data.api_version || 'unknown',
+          });
+        }
+      } catch {
+        // Ignore – analytics should never break the app
+      }
+
       try {
         const res = await fetch(`${ENDPOINT}/users/role`);
         if (!res.ok) return;
@@ -39,18 +58,6 @@ export default function PostHogProvider({ children }) {
         const userHash = data.user_hash || data.user_id || 'anonymous';
         const username = data.username || data.user || '';
         identifyUser(userHash, username);
-      } catch {
-        // Ignore – analytics should never break the app
-      }
-
-      try {
-        const res = await fetch(`${ENDPOINT}/api/health`);
-        if (!res.ok) return;
-        const data = await res.json();
-        registerDeployment({
-          sky_version: data.version || 'unknown',
-          api_version: data.api_version || 'unknown',
-        });
       } catch {
         // Ignore
       }

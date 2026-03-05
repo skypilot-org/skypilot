@@ -1,8 +1,8 @@
 /**
  * Product analytics utilities for SkyPilot Dashboard.
  *
- * Thin wrapper around posthog-js that respects the
- * SKYPILOT_DISABLE_USAGE_COLLECTION opt-out flag.
+ * Thin wrapper around posthog-js. The PostHogProvider is responsible for
+ * calling optOut() when the server reports that usage collection is disabled.
  */
 import posthog from 'posthog-js';
 
@@ -10,11 +10,11 @@ const POSTHOG_API_KEY = 'phc_NP0EO5Koq1dWqXEHwR14Po7bVqqtAdWINXiWypKU6H7';
 const POSTHOG_HOST = 'https://us.i.posthog.com';
 
 let _initialized = false;
+let _optedOut = false;
 
 /**
  * Initialize PostHog. Safe to call multiple times – only the first call has
- * any effect.  If the user has opted out via SKYPILOT_DISABLE_USAGE_COLLECTION
- * we silently skip initialization.
+ * any effect. Call optOut() after init to disable collection at runtime.
  */
 export function initPostHog() {
   if (_initialized) return;
@@ -32,9 +32,20 @@ export function initPostHog() {
   });
 }
 
-/** Returns true when analytics collection is active. */
+/**
+ * Opt out of all analytics collection. Called by PostHogProvider when the
+ * server reports SKYPILOT_DISABLE_USAGE_COLLECTION=1.
+ */
+export function optOut() {
+  _optedOut = true;
+  if (_initialized && typeof window !== 'undefined') {
+    posthog.opt_out_capturing();
+  }
+}
+
+/** Returns true when analytics collection is active (initialized and not opted out). */
 export function isEnabled() {
-  return _initialized && typeof window !== 'undefined';
+  return _initialized && !_optedOut && typeof window !== 'undefined';
 }
 
 // ── Identification ──────────────────────────────────────────────────────────
