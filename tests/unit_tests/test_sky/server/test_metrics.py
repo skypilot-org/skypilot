@@ -1,5 +1,6 @@
 """Unit tests for the metrics system."""
 
+import base64
 import os
 import time
 from unittest.mock import AsyncMock
@@ -14,6 +15,7 @@ import pytest
 
 from sky.metrics import utils as metrics_utils
 from sky.server import metrics
+from sky.server.server import BasicAuthMiddleware
 
 
 def test_get_status_code_group():
@@ -374,23 +376,53 @@ async def test_middleware_records_anonymous_user_metrics(
 @pytest.mark.asyncio
 async def test_middleware_user_metrics_with_basic_auth(
         prometheus_middleware_user):
-    """Test that middleware records correct user label for basic auth users."""
-    request = MagicMock()
+    """E2E test: BasicAuthMiddleware -> PrometheusMiddleware chain records
+    correct user label for basic auth.
+
+    Verifies that when BasicAuthMiddleware authenticates via Basic auth
+    and sets request.state.auth_user, PrometheusMiddleware records the
+    correct username in per-user metrics.
+    """
+    # Create request with Basic Auth header (bob:secret)
+    request = MagicMock(spec=['url', 'method', 'headers', 'state'])
+    request.url = MagicMock()
     request.url.path = '/api/v1/clusters'
     request.method = 'POST'
-    # Simulate basic auth: BasicAuthMiddleware sets request.state.auth_user
-    # to a user object with a .name attribute (the username).
-    request.state.auth_user = MagicMock()
-    request.state.auth_user.name = 'bob'
+    request.headers = {
+        'authorization': 'Basic ' + base64.b64encode(b'bob:secret').decode(),
+    }
+    request.state = MagicMock()
+    request.state.auth_user = None  # As InitializeRequestAuthUserMiddleware
 
-    response = MagicMock()
-    response.status_code = 200
+    # Final handler returning success
+    async def final_handler(_req):
+        return fastapi.responses.JSONResponse({'status': 'ok'})
 
-    call_next = AsyncMock(return_value=response)
+    basic_auth_middleware = BasicAuthMiddleware(app=MagicMock())
 
-    await prometheus_middleware_user.dispatch(request, call_next)
+    # Chain: BasicAuth -> Prometheus -> final_handler
+    async def prometheus_call_next(req):
+        return await prometheus_middleware_user.dispatch(req, final_handler)
 
-    # Verify the metric uses the basic auth username
+    mock_user = MagicMock()
+    mock_user.name = 'bob'
+    mock_user.password = 'hashed'
+
+    with patch('sky.global_user_state.get_user_by_name',
+               return_value=[mock_user]), \
+         patch('sky.server.common.crypt_ctx.verify', return_value=True), \
+         patch('sky.server.auth.loopback.is_loopback_request',
+               return_value=False), \
+         patch('sky.jobs.utils.is_consolidation_mode', return_value=False):
+
+        response = await basic_auth_middleware.dispatch(request,
+                                                        prometheus_call_next)
+
+    assert response.status_code == 200
+    # BasicAuth should have set auth_user
+    assert request.state.auth_user.name == 'bob'
+
+    # PrometheusMiddleware should have recorded the correct user label
     user_collectors = [metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL]
     user_requests = _get_metric_value('sky_apiserver_requests_by_user_total', {
         'user': 'bob',
