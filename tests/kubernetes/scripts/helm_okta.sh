@@ -259,23 +259,26 @@ deploy_and_login() {
     echo "Deploying SkyPilot with OAuth mode: $mode"
     echo "============================================="
 
-    # Check if namespace is actively being terminated, if so wait.
-    status=$(kubectl get namespace "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-
-    if [[ "$status" == "Terminating" ]]; then
-      echo "⏳ Namespace '$NAMESPACE' is terminating. Waiting for it to be deleted..."
-      # Poll until it's gone
+    # Ensure namespace is fully cleaned up before deploying.
+    # Delete namespace if it exists (active or terminating), then wait for
+    # it to be completely gone. This avoids a race condition where helm
+    # install --create-namespace fails with "namespace is being terminated".
+    if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+      status=$(kubectl get namespace "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+      if [[ "$status" == "Active" ]]; then
+        echo "⏳ Namespace '$NAMESPACE' is active. Deleting it first..."
+        kubectl delete namespace "$NAMESPACE" --ignore-not-found=true
+      else
+        echo "⏳ Namespace '$NAMESPACE' is terminating. Waiting for it to be deleted..."
+      fi
       while kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; do
+        echo "Waiting for namespace '$NAMESPACE' to be fully deleted..."
         sleep 2
       done
       echo "✅ Namespace '$NAMESPACE' has been fully deleted."
-    elif [[ "$status" == "Active" ]]; then
-      echo "✅ Namespace '$NAMESPACE' exists and is active — nothing to wait for."
     else
       echo "✅ Namespace '$NAMESPACE' does not exist."
     fi
-
-    echo "✅ Namespace $NAMESPACE deleted"
 
     echo "Installing Skypilot Helm chart..."
     if [[ "$mode" == "legacy" ]]; then
@@ -498,6 +501,12 @@ deploy_and_login "legacy"
 echo ""
 echo "🧹 Cleaning up SkyPilot resources between tests..."
 kubectl delete namespace $NAMESPACE --ignore-not-found=true
+# Wait until namespace is fully terminated to avoid race condition where
+# helm install --create-namespace fails with "namespace is being terminated"
+while kubectl get namespace $NAMESPACE >/dev/null 2>&1; do
+    echo "Waiting for namespace $NAMESPACE to be deleted..."
+    sleep 2
+done
 echo "✅ Namespace $NAMESPACE deleted"
 
 deploy_and_login "new"
