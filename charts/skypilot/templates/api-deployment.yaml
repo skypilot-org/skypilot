@@ -63,7 +63,7 @@ spec:
       {{- end }}
       containers:
       - name: skypilot-api
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         imagePullPolicy: {{ .Values.apiService.imagePullPolicy }}
         {{- with .Values.securityContext }}
         securityContext:
@@ -389,7 +389,7 @@ spec:
         {{- end }}
       {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         # Warn if logrotate is missing in the image and keep the sidecar running
         args:
@@ -434,7 +434,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -473,7 +473,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -523,7 +523,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.gcpCredentials.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.gcpCredentials.image "componentRegistry" .Values.gcpCredentials.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         env:
         {{- with $.Values.global.extraEnvs }}
@@ -548,7 +548,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         {{- if $.Values.global.extraEnvs }}
         env:
@@ -571,7 +571,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -605,7 +605,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ .Values.apiService.image }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -637,7 +637,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
@@ -670,7 +670,7 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
-        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
+        image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image "componentRegistry" .Values.apiService.imageRegistry) }}
         command: ["/bin/sh", "-c"]
         args:
         - |
