@@ -27,6 +27,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.server import config as server_config
+from sky.server import constants as server_constants
 from sky.server import plugin_utils
 from sky.server import plugins
 from sky.setup_files import dependencies
@@ -1336,8 +1337,15 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
     # services scale with system memory. Without this cap, short workers
     # grow linearly with memory, consuming nearly all of it and leaving a
     # roughly fixed amount for services regardless of system memory size.
-    worker_reserved = (controller_reserved + total_memory_mb *
-                       (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION))
+    # In low-memory scenarios (total_memory_mb <= MIN_AVAIL_MB), skip the
+    # service reservation so workers get all available memory; otherwise
+    # guarantee workers at least MIN_AVAIL_MB and cap them at the fraction.
+    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE *
+                    1024)
+    service_reserved = min(
+        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
+        max(0, total_memory_mb - min_avail_mb))
+    worker_reserved = controller_reserved + service_reserved
     config = server_config.compute_server_config(
         deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
     used = 0.0
