@@ -16,6 +16,7 @@ from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
 from sky.utils import common_utils
+from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
 
@@ -131,6 +132,12 @@ def bootstrap_instances(
             logger.error(message)
             raise TimeoutError(message)
 
+    # Resolve custom managed identity before ARM deployment.
+    remote_identity = provider_config.get('remote_identity')
+    custom_msi_id = _resolve_custom_managed_identity(remote_identity,
+                                                     subscription_id,
+                                                     resource_group)
+
     # Resolve custom VNet before ARM deployment.
     vpc_name = provider_config.get('vpc_name')
     custom_vnet = _resolve_custom_vnet(vpc_name, subscription_id,
@@ -142,6 +149,12 @@ def bootstrap_instances(
     template_path = current_path.joinpath('azure-config-template.json')
     with open(template_path, 'r', encoding='utf-8') as template_fp:
         template = json.load(template_fp)
+
+    # When using a custom MSI, remove MSI and role assignment resources
+    # from the ARM template. The user may not have permissions to create
+    # role assignments (Microsoft.Authorization/roleAssignments/write).
+    if custom_msi_id is not None:
+        _remove_msi_resources_from_template(template)
 
     # When using a custom VNet, remove networking resources from the
     # ARM template since we use the existing VNet/Subnet.
@@ -236,9 +249,55 @@ def bootstrap_instances(
         provider_config['nsg'] = outputs['nsg']['value']
         provider_config['subnet'] = outputs['subnet']['value']
 
-    provider_config['msi'] = outputs['msi']['value']
+    if custom_msi_id is not None:
+        logger.info(f'Using custom managed identity: {custom_msi_id}')
+        provider_config['msi'] = custom_msi_id
+    else:
+        provider_config['msi'] = outputs['msi']['value']
 
     return config
+
+
+def _resolve_custom_managed_identity(remote_identity: Optional[str],
+                                     subscription_id: str,
+                                     resource_group: str) -> Optional[str]:
+    """Resolve a custom managed identity name to a full resource ID.
+
+    Returns None if remote_identity is not a custom identity (i.e., it is
+    None or an enum value like LOCAL_CREDENTIALS / SERVICE_ACCOUNT).
+    """
+    if not isinstance(remote_identity, str) or not remote_identity:
+        return None
+
+    enum_values = {opt.value for opt in schemas.RemoteIdentityOptions}
+    if remote_identity in enum_values:
+        return None
+
+    if remote_identity.startswith('/'):
+        return remote_identity
+
+    return (f'/subscriptions/{subscription_id}'
+            f'/resourceGroups/{resource_group}'
+            f'/providers/Microsoft.ManagedIdentity'
+            f'/userAssignedIdentities/{remote_identity}')
+
+
+def _remove_msi_resources_from_template(template: dict) -> None:
+    """Remove MSI and role assignment resources from an ARM template.
+
+    When using a custom managed identity, we don't need the ARM template
+    to create a new MSI or assign roles. Removing these resources avoids
+    requiring Microsoft.Authorization/roleAssignments/write permissions.
+    """
+    msi_types = {
+        'Microsoft.ManagedIdentity/userAssignedIdentities',
+        'Microsoft.Authorization/roleAssignments',
+    }
+    template['resources'] = [
+        r for r in template['resources'] if r.get('type') not in msi_types
+    ]
+    # Remove the MSI output since it references the removed resource.
+    template.get('outputs', {}).pop('msi', None)
 
 
 def _resolve_custom_vnet(vpc_name: Optional[str], subscription_id: str,

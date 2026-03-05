@@ -1108,6 +1108,38 @@ def test_task_labels_gcp():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Remote identity on Azure ----------
+@pytest.mark.azure
+def test_azure_remote_identity():
+    """Test Azure remote_identity with SERVICE_ACCOUNT and LOCAL_CREDENTIALS.
+
+    Verifies that:
+    1. With SERVICE_ACCOUNT, Azure credentials are not uploaded and the
+       VM has a managed identity.
+    2. With LOCAL_CREDENTIALS, Azure credentials are uploaded.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'azure_remote_identity',
+        [
+            # Test SERVICE_ACCOUNT: credentials should NOT be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_service_account.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky down -y {name}',
+            # Test LOCAL_CREDENTIALS: credentials should be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Custom VNet on Azure ----------
 @pytest.mark.azure
 def test_azure_vpc_name():
