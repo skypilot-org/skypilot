@@ -219,9 +219,8 @@ class PluginAnalyticsMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             plugin_name = parts[2] if len(parts) > 2 else 'unknown'
 
             posthog_lib = usage_lib.posthog_lib
-            posthog_lib.api_key = usage_lib.constants.POSTHOG_API_KEY
-            posthog_lib.project_api_key = usage_lib.constants.POSTHOG_API_KEY
-            posthog_lib.host = usage_lib.constants.POSTHOG_HOST
+            # pylint: disable=protected-access
+            usage_lib._configure_posthog()
             posthog_lib.capture(
                 distinct_id=common_utils.get_user_hash(),
                 event='plugin_api_call',

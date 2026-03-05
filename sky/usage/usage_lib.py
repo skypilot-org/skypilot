@@ -520,6 +520,12 @@ def prepare_json_from_yaml_config(
     return yaml_info
 
 
+def _configure_posthog():
+    """Configure the PostHog client with API key and host."""
+    posthog_lib.project_api_key = constants.POSTHOG_API_KEY
+    posthog_lib.host = constants.POSTHOG_HOST
+
+
 def _send_to_posthog(message_type: MessageType):
     """Send the message to PostHog for product analytics.
 
@@ -557,11 +563,7 @@ def _send_to_posthog(message_type: MessageType):
     if start and send:
         posthog_properties['duration_ms'] = (send - start) / 1e6
 
-    # Set both api_key and project_api_key for cross-version compatibility.
-    # posthog v3.x reads project_api_key, v6+ reads api_key.
-    posthog_lib.api_key = constants.POSTHOG_API_KEY
-    posthog_lib.project_api_key = constants.POSTHOG_API_KEY
-    posthog_lib.host = constants.POSTHOG_HOST
+    _configure_posthog()
     posthog_lib.capture(
         distinct_id=user_hash,
         event=f'cli_{message_type.value}',
