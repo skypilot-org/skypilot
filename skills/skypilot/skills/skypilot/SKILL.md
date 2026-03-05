@@ -324,6 +324,15 @@ pool:
   queue_length_threshold: 5  # Scale up when 5+ jobs pending
 ```
 
+```yaml
+# job.yaml — a regular task YAML (no pool: section needed)
+name: batch-inference
+
+run: |
+  echo "Processing partition ${SKYPILOT_JOB_RANK} of ${SKYPILOT_NUM_JOBS}"
+  python process.py --job-rank ${SKYPILOT_JOB_RANK} --num-jobs ${SKYPILOT_NUM_JOBS}
+```
+
 ```bash
 # Create a pool with 3 workers
 sky jobs pool apply -p my-pool pool.yaml
