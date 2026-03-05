@@ -1017,7 +1017,7 @@ It will do nothing if the API server is remotely hosted.
 ### `sky.api_status`
 
 ```python
-sky.api_status(request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None, all_status: bool = False, limit: Optional[int] = None, fields: Optional[List[str]] = None) -> List[payloads.RequestPayload]
+sky.api_status(request_ids: Optional[List[Union[server_common.RequestId[T], str]]] = None, all_status: bool = False, limit: Optional[int] = None, fields: Optional[List[str]] = None, cluster_name: Optional[str] = None) -> List[payloads.RequestPayload]
 ```
 
 Lists all requests.
@@ -1029,6 +1029,8 @@ Lists all requests.
         is ignored if request_ids is not None.
     limit: The number of requests to show. If None, show all requests.
     fields: The fields to get. If None, get all fields.
+    cluster_name: Filter requests by cluster name.
+        If None, show all requests.
 
 **Returns:**
     A list of request payloads.

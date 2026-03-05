@@ -294,6 +294,8 @@ Cancel managed jobs.
 - `--name`, `-n` — Managed job name to cancel.
 - `--pool`, `-p` — Pool name to cancel.
 - `JOB_IDS` — integer
+- `--graceful` — Wait for MOUNT_CACHED uploads to complete before stopping/terminating. Will cancel current jobs first.
+- `--graceful-timeout` — Timeout in seconds for `--graceful` flag. When not set, will wait for MOUNT_CACHED uploads until they are finished.
 - `--all`, `-a` — Cancel all managed jobs for the current user.
 - `--yes`, `-y` — Skip confirmation prompt.
 - `--all-users`, `-u` — Cancel all managed jobs from all users.
@@ -367,7 +369,7 @@ Tail or sync down the log of a managed job.
 
 ### `sky jobs pool apply`
 
-Either apply a config to a pool for managed jobs submission     or update the number of workers in the pool. One of POOL_YAML or --workers     must be provided.     Config:         If the pool is already running, the config will be applied to the pool.         Otherwise, a new pool will be created.     Workers:         The --workers option can be used to override the number of workers         specified in the YAML file, or to update workers without a YAML file.         Example:             sky jobs pool apply -p my-pool --workers 5
+Either apply a config to a pool for managed jobs submission     or update the number of workers in the pool. One of POOL_YAML or --workers     must be provided.
 
 **Options:**
 
@@ -706,6 +708,7 @@ List requests on SkyPilot API server.
 - `REQUEST_ID_PREFIXES` — text
 - `--all-status`, `-a` — Show requests of all statuses, including finished ones (SUCCEEDED, FAILED, CANCELLED). By default, only active requests (PENDING, RUNNING) are shown.
 - `--limit`, `-l` (default: `50`) — Number of requests to show, default is 50, set to "none" or "all" to show all requests.
+- `--cluster`, `-c` — Filter request by cluster name.
 - `--verbose`, `-v` — Show more details.
 
 ### `sky api stop`

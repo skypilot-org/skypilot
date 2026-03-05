@@ -937,7 +937,7 @@ envs:
   MY_LOCAL_PATH: tmp-workdir
 ```
 
-  For customized non-root docker image in RunPod, you need to set `SKYPILOT_RUNPOD_DOCKER_USERNAME` to specify the login username for the docker image. See docker-containers-as-runtime-environments for more.
+  For costumized non-root docker image in RunPod, you need to set `SKYPILOT_RUNPOD_DOCKER_USERNAME` to specify the login username for the docker image. See docker-containers-as-runtime-environments for more.
 
   If you want to use a docker image as runtime environment in a private registry, you can specify your username, password, and registry server as task environment variable.  For example:
 
@@ -1362,4 +1362,111 @@ Port to run your service on each replica.
 ```yaml
 resources:
   ports: 8080
+```
+
+
+# Job Pools
+
+To define a YAML for use with job pools, use previously mentioned fields to describe each worker, then add a pool section to configure the pool's scaling behavior.
+
+Syntax
+
+```yaml
+pool:
+  workers: 3
+
+pool:
+  min_workers: 1
+  max_workers: 10
+  queue_length_threshold: 5
+  upscale_delay_seconds: 300
+  downscale_delay_seconds: 1200
+
+```
+
+## Fields
+
+
+### ``pool.workers``
+
+Number of workers in the pool.
+
+If `min_workers` and `max_workers` are not specified, the pool maintains a fixed number of workers with no autoscaling. If autoscaling is enabled (`min_workers`/`max_workers` are set), this serves as the initial number of workers.
+
+```yaml
+pool:
+  workers: 3
+
+```
+
+
+### ``pool.min_workers``
+
+Minimum number of workers when autoscaling is enabled (required with `max_workers`).
+
+The pool never scales below this count. Setting to `0` enables **scale-to-zero**: the pool terminates all workers when idle, and provisions workers automatically when new jobs are submitted.
+
+```yaml
+pool:
+  min_workers: 1
+  max_workers: 10
+
+```
+
+
+### ``pool.max_workers``
+
+Maximum number of workers when autoscaling is enabled (required with `min_workers`).
+
+The pool never scales above this count. Must be greater than or equal to `min_workers`.
+
+```yaml
+pool:
+  min_workers: 1
+  max_workers: 10
+
+```
+
+
+### ``pool.queue_length_threshold``
+
+Number of pending jobs that triggers upscaling (default: 1).
+
+When the number of pending jobs exceeds this threshold, the pool scales up. Requires `max_workers` to be set.
+
+```yaml
+pool:
+  min_workers: 1
+  max_workers: 10
+  queue_length_threshold: 5
+
+```
+
+
+### ``pool.upscale_delay_seconds``
+
+Delay in seconds between upscaling decisions (default: 300).
+
+Controls how frequently the pool evaluates whether to add workers.
+
+```yaml
+pool:
+  min_workers: 1
+  max_workers: 10
+  upscale_delay_seconds: 60
+
+```
+
+
+### ``pool.downscale_delay_seconds``
+
+Delay in seconds between downscaling decisions (default: 1200).
+
+Controls how frequently the pool evaluates whether to remove workers.
+
+```yaml
+pool:
+  min_workers: 1
+  max_workers: 10
+  downscale_delay_seconds: 600
 ```
