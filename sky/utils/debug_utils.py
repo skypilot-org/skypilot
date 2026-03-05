@@ -55,6 +55,71 @@ def _epoch_to_human(epoch: Optional[float]) -> Optional[str]:
         return None
 
 
+def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a cluster DB record to a JSON-friendly dict.
+
+    Shared by the API server dump (_dump_cluster_info) and the controller
+    manifest (_collect_cluster_debug_manifest in jobs/utils.py).
+    """
+    handle = cluster_record.get('handle')
+    handle_info: Dict[str, Any] = {}
+    if handle:
+        handle_info = {
+            'cluster_name': getattr(handle, 'cluster_name', None),
+            'cluster_name_on_cloud': getattr(handle, 'cluster_name_on_cloud',
+                                             None),
+            'head_ip': getattr(handle, 'head_ip', None),
+            'launched_nodes': getattr(handle, 'launched_nodes', None),
+            'launched_resources': str(
+                getattr(handle, 'launched_resources', None)),
+        }
+
+    launched_at = cluster_record.get('launched_at')
+    status_updated_at = cluster_record.get('status_updated_at')
+    return {
+        'name': cluster_record.get('name'),
+        'cluster_hash': cluster_record.get('cluster_hash'),
+        'status': str(cluster_record.get('status')),
+        'launched_at': launched_at,
+        'launched_at_human': _epoch_to_human(launched_at),
+        'autostop': cluster_record.get('autostop'),
+        'to_down': cluster_record.get('to_down'),
+        'cluster_ever_up': cluster_record.get('cluster_ever_up'),
+        'status_updated_at': status_updated_at,
+        'status_updated_at_human': _epoch_to_human(status_updated_at),
+        'config_hash': cluster_record.get('config_hash'),
+        'workspace': cluster_record.get('workspace'),
+        'is_managed': cluster_record.get('is_managed'),
+        'user_hash': cluster_record.get('user_hash'),
+        'user_name': cluster_record.get('user_name'),
+        'handle': handle_info,
+    }
+
+
+def get_cluster_events_data(cluster_hash: str,) -> List[Dict[str, Any]]:
+    """Get cluster events for all event types.
+
+    Returns a list of (event_type_lower, events) pairs for non-empty event
+    types.  Shared by the API server dump and the controller manifest.
+    """
+    results: List[Dict[str, Any]] = []
+    for event_type in [
+            global_user_state.ClusterEventType.DEBUG,
+            global_user_state.ClusterEventType.STATUS_CHANGE,
+            global_user_state.ClusterEventType.TERMINAL,
+    ]:
+        events = global_user_state.get_cluster_events(cluster_name=None,
+                                                      cluster_hash=cluster_hash,
+                                                      event_type=event_type,
+                                                      include_timestamps=True)
+        if events:
+            results.append({
+                'event_type': event_type.value.lower(),
+                'events': events,
+            })
+    return results
+
+
 def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
     """Get all request IDs associated with the given clusters."""
     if not debug_dump_context['cluster_names']:
@@ -536,43 +601,7 @@ def _dump_cluster_info(cluster_names: Set[str],
             cluster_record = global_user_state.get_cluster_from_name(
                 cluster_name)
             if cluster_record is not None:
-                # Serialize handle carefully - exclude non-serializable parts
-                handle = cluster_record.get('handle')
-                handle_info: Dict[str, Any] = {}
-                if handle:
-                    handle_info = {
-                        'cluster_name': getattr(handle, 'cluster_name', None),
-                        'cluster_name_on_cloud': getattr(
-                            handle, 'cluster_name_on_cloud', None),
-                        'head_ip': getattr(handle, 'head_ip', None),
-                        'launched_nodes': getattr(handle, 'launched_nodes',
-                                                  None),
-                        'launched_resources': str(
-                            getattr(handle, 'launched_resources', None)),
-                    }
-
-                launched_at = cluster_record.get('launched_at')
-                status_updated_at = cluster_record.get('status_updated_at')
-                cluster_info: Dict[str, Any] = {
-                    'name': cluster_record.get('name'),
-                    'cluster_hash': cluster_record.get('cluster_hash'),
-                    'status': str(cluster_record.get('status')),
-                    'launched_at': launched_at,
-                    'launched_at_human': _epoch_to_human(launched_at),
-                    'autostop': cluster_record.get('autostop'),
-                    'to_down': cluster_record.get('to_down'),
-                    'cluster_ever_up': cluster_record.get('cluster_ever_up'),
-                    'status_updated_at': status_updated_at,
-                    'status_updated_at_human':
-                        _epoch_to_human(status_updated_at),
-                    'config_hash': cluster_record.get('config_hash'),
-                    'workspace': cluster_record.get('workspace'),
-                    'is_managed': cluster_record.get('is_managed'),
-                    'user_hash': cluster_record.get('user_hash'),
-                    'user_name': cluster_record.get('user_name'),
-                    'handle': handle_info,
-                }
-
+                cluster_info = serialize_cluster_record(cluster_record)
                 cluster_info_path = os.path.join(cluster_dir,
                                                  'cluster_info.json')
                 with open(cluster_info_path, 'w', encoding='utf-8') as f:
@@ -592,34 +621,14 @@ def _dump_cluster_info(cluster_names: Set[str],
             cluster_hash = (cluster_record.get('cluster_hash')
                             if cluster_record else None)
             if cluster_hash:
-                for event_type in [
-                        global_user_state.ClusterEventType.DEBUG,
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        global_user_state.ClusterEventType.TERMINAL
-                ]:
-                    try:
-                        events = global_user_state.get_cluster_events(
-                            cluster_name=None,
-                            cluster_hash=cluster_hash,
-                            event_type=event_type,
-                            include_timestamps=True)
-                        if events:
-                            event_type_lower = event_type.value.lower()
-                            event_file = f'events_{event_type_lower}.json'
-                            event_path = os.path.join(cluster_dir, event_file)
-                            with open(event_path, 'w', encoding='utf-8') as f:
-                                json.dump(events, f, indent=2, default=str)
-                    except Exception as e:  # pylint: disable=broad-except
-                        logger.warning(f'Failed to get {event_type.value} '
-                                       f'events for cluster {cluster_name}: '
-                                       f'{e}')
-                        if errors is not None:
-                            errors.append({
-                                'component': 'clusters',
-                                'resource': f'{cluster_name}/events_'
-                                            f'{event_type.value}',
-                                'error': str(e)
-                            })
+                for event_data in get_cluster_events_data(cluster_hash):
+                    event_file = f'events_{event_data["event_type"]}.json'
+                    event_path = os.path.join(cluster_dir, event_file)
+                    with open(event_path, 'w', encoding='utf-8') as f:
+                        json.dump(event_data['events'],
+                                  f,
+                                  indent=2,
+                                  default=str)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get events for cluster '
                            f'{cluster_name}: {e}')

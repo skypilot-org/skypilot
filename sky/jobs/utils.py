@@ -855,11 +855,26 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'error': str(e),
         })
 
-    # 2. Job events from DB (inline — small data)
+    # 2. Job info from DB (inline — small data)
+    import json  # pylint: disable=import-outside-toplevel
+    try:
+        tasks = managed_job_state.get_managed_job_tasks(job_id)
+        if tasks:
+            inline_data.append({
+                'relative_path': f'{job_prefix}/job_info.json',
+                'content': json.dumps(tasks, indent=2, default=str),
+            })
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append({
+            'component': 'managed_jobs',
+            'resource': f'{job_id}/job_info',
+            'error': str(e),
+        })
+
+    # 3. Job events from DB (inline — small data)
     try:
         events = managed_job_state.get_job_events(job_id, limit=1000)
         if events:
-            import json  # pylint: disable=import-outside-toplevel
             serializable_events = []
             for e in events:
                 serializable_events.append({
@@ -883,7 +898,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'error': str(e),
         })
 
-    # 3. Job run logs (FILE — needs rsync)
+    # 4. Job run logs (FILE — needs rsync)
     try:
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
@@ -901,7 +916,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'error': str(e),
         })
 
-    # 4. Cluster info and events (inline — DB data)
+    # 5. Cluster info and events (inline — DB data)
     try:
         cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
         if cluster_name is None:
@@ -929,79 +944,31 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
                                     errors: List[Dict[str, str]]) -> None:
     """Collect cluster info and events for a managed job's cluster."""
     import json  # pylint: disable=import-outside-toplevel
+
+    from sky.utils import debug_utils  # pylint: disable=import-outside-toplevel
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
 
     try:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
         if cluster_record is not None:
-            handle = cluster_record.get('handle')
-            handle_info: Dict[str, Any] = {}
-            if handle:
-                handle_info = {
-                    'cluster_name': getattr(handle, 'cluster_name', None),
-                    'cluster_name_on_cloud': getattr(handle,
-                                                     'cluster_name_on_cloud',
-                                                     None),
-                    'head_ip': getattr(handle, 'head_ip', None),
-                    'launched_nodes': getattr(handle, 'launched_nodes', None),
-                    'launched_resources': str(
-                        getattr(handle, 'launched_resources', None)),
-                }
-
-            launched_at = cluster_record.get('launched_at')
-            status_updated_at = cluster_record.get('status_updated_at')
-            cluster_info: Dict[str, Any] = {
-                'name': cluster_record.get('name'),
-                'cluster_hash': cluster_record.get('cluster_hash'),
-                'status': str(cluster_record.get('status')),
-                'launched_at': launched_at,
-                'autostop': cluster_record.get('autostop'),
-                'to_down': cluster_record.get('to_down'),
-                'cluster_ever_up': cluster_record.get('cluster_ever_up'),
-                'status_updated_at': status_updated_at,
-                'config_hash': cluster_record.get('config_hash'),
-                'workspace': cluster_record.get('workspace'),
-                'is_managed': cluster_record.get('is_managed'),
-                'user_hash': cluster_record.get('user_hash'),
-                'user_name': cluster_record.get('user_name'),
-                'handle': handle_info,
-            }
+            cluster_info = debug_utils.serialize_cluster_record(cluster_record)
             inline_data.append({
                 'relative_path': f'{cluster_prefix}/cluster_info.json',
                 'content': json.dumps(cluster_info, indent=2, default=str),
             })
 
-            # Cluster events
             cluster_hash = cluster_record.get('cluster_hash')
             if cluster_hash:
-                for event_type in [
-                        global_user_state.ClusterEventType.DEBUG,
-                        global_user_state.ClusterEventType.STATUS_CHANGE,
-                        global_user_state.ClusterEventType.TERMINAL,
-                ]:
-                    try:
-                        events = global_user_state.get_cluster_events(
-                            cluster_name=None,
-                            cluster_hash=cluster_hash,
-                            event_type=event_type,
-                            include_timestamps=True)
-                        if events:
-                            event_type_lower = event_type.value.lower()
-                            inline_data.append({
-                                'relative_path':
-                                    f'{cluster_prefix}/'
-                                    f'events_{event_type_lower}.json',
-                                'content': json.dumps(events,
-                                                      indent=2,
-                                                      default=str),
-                            })
-                    except Exception as e:  # pylint: disable=broad-except
-                        errors.append({
-                            'component': 'managed_jobs',
-                            'resource': f'{cluster_name}/'
-                                        f'events_{event_type.value}',
-                            'error': str(e),
-                        })
+                for event_data in debug_utils.get_cluster_events_data(
+                        cluster_hash):
+                    inline_data.append({
+                        'relative_path':
+                            f'{cluster_prefix}/'
+                            f'events_{event_data["event_type"]}.json',
+                        'content': json.dumps(event_data['events'],
+                                              indent=2,
+                                              default=str),
+                    })
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
             'component': 'managed_jobs',
@@ -1021,13 +988,13 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
                 if log_file.is_file():
                     file_paths.append({
                         'remote_path': str(log_file),
-                        'relative_path': f'managed_jobs/_controller_system/'
+                        'relative_path': f'managed_jobs/controller_system/'
                                          f'{log_file.name}',
                     })
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
             'component': 'managed_jobs',
-            'resource': '_controller_system/logs',
+            'resource': 'controller_system/logs',
             'error': str(e),
         })
 
