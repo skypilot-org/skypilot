@@ -793,7 +793,7 @@ class NebiusLabelFormatter(GPULabelFormatter):
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
-        return value
+        return value.upper()
 
     @classmethod
     def validate_label_value(cls, value: str) -> Tuple[bool, str]:

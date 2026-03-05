@@ -27,6 +27,11 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
+# Each executor process imports this module during executor_initializer(),
+# so this captures the user's original env setting.
+_user_disabled_usage_collection = env_options.Options.DISABLE_LOGGING.get()
+
 
 def _default_should_skip():
     return False
@@ -257,6 +262,34 @@ def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
 
 
+def server_heartbeat_event():
+    """Periodically send server-side plugin metrics to Loki."""
+    # pylint: disable=import-outside-toplevel
+    from sky.usage import usage_lib
+
+    # Skip if no plugins registered providers (check inside event_fn, not
+    # should_skip, because providers register in executor processes via
+    # plugin install(), not in the main process where should_skip runs),
+    # or if the user explicitly disabled usage collection.
+    if (not usage_lib.ServerHeartbeatMessage.has_providers() or
+            _user_disabled_usage_collection):
+        time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
+        return
+
+    # _send_to_loki checks DISABLE_LOGGING, but run_event() sets it to '1'
+    # to prevent usage messages from daemons. We temporarily unset it here
+    # because the server heartbeat's purpose IS to send to Loki.
+    disable_key = env_options.Options.DISABLE_LOGGING.env_key
+    original_val = os.environ.pop(disable_key, None)
+    try:
+        usage_lib.send_server_heartbeat()
+        logger.info('Server heartbeat sent')
+    finally:
+        if original_val is not None:
+            os.environ[disable_key] = original_val
+    time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
+
+
 # Register the events to run in the background.
 INTERNAL_REQUEST_DAEMONS = [
     # This status refresh daemon can cause the autostopp'ed/autodown'ed cluster
@@ -287,6 +320,14 @@ INTERNAL_REQUEST_DAEMONS = [
         name=request_names.RequestName.REQUEST_DAEMON_POOL_STATUS_REFRESH,
         event_fn=pool_status_refresh_event,
         should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(
+        id='server-heartbeat-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
+        event_fn=server_heartbeat_event),
+]
+
+HIDDEN_REQUEST_NAMES = [
+    request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
 ]
 
 

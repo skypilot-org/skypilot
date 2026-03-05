@@ -911,7 +911,9 @@ def test_efa():
     test = smoke_tests_utils.Test(
         'efa',
         [
-            f'sky launch -y -c {name} --infra aws/ap-northeast-1 --gpus L4:1 --instance-type g6.8xlarge examples/aws_efa/efa_vm.yaml',
+            # Use any_of with multiple EFA-capable instance types across all
+            # AWS regions for better resource availability.
+            f'sky launch -y -c {name} tests/smoke_tests/test_yamls/test_efa.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky logs {name} 1 | grep "Selected provider is efa, fabric is efa"',  # Ensure efa is enabled.
         ],
@@ -1106,6 +1108,116 @@ def test_task_labels_gcp():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Remote identity on Azure ----------
+@pytest.mark.azure
+def test_azure_remote_identity():
+    """Test Azure remote_identity with SERVICE_ACCOUNT and LOCAL_CREDENTIALS.
+
+    Verifies that:
+    1. With SERVICE_ACCOUNT, Azure credentials are not uploaded and the
+       VM has a managed identity.
+    2. With LOCAL_CREDENTIALS, Azure credentials are uploaded.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'azure_remote_identity',
+        [
+            # Test SERVICE_ACCOUNT: credentials should NOT be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_service_account.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky down -y {name}',
+            # Test LOCAL_CREDENTIALS: credentials should be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Custom VNet on Azure ----------
+@pytest.mark.azure
+def test_azure_vpc_name():
+    """Test Azure vpc_name with a custom VNet.
+
+    Creates a VNet, launches a cluster using it, and verifies the VM's
+    NIC is attached to the custom VNet's subnet.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    vnet_name = f'sky-test-vnet-{name}'
+    rg_name = f'sky-test-rg-{name}'
+    region = 'eastus'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_azure_vpc.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(vpc_name=vnet_name, region=region)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = smoke_tests_utils.Test(
+            'azure_vpc_name',
+            [
+                # Launch cloud-cmd cluster for remote verification
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
+                # Create a resource group and VNet for the test
+                f'az group create -n {rg_name} -l {region}',
+                f'az network vnet create -g {rg_name} -n {vnet_name} '
+                f'--address-prefix 10.0.0.0/16 '
+                f'--subnet-name default --subnet-prefix 10.0.0.0/24',
+                # Launch cluster using the custom VNet
+                f'sky launch -y -c {name} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+                # Verify the VM NIC is in the custom VNet
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, f'az network nic list '
+                    f'--query "[?contains(ipConfigurations[0].subnet.id, '
+                    f"'{vnet_name}'"
+                    f')].name" --output tsv | grep .'),
+            ],
+            f'sky down -y {name}; '
+            f'az group delete -n {rg_name} -y --no-wait; '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+            timeout=25 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Labels from task on Azure (labels) ----------
+@pytest.mark.azure
+def test_task_labels_azure():
+    name = smoke_tests_utils.get_cluster_name()
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_labels.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(cloud='azure', region='eastus')
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test = smoke_tests_utils.Test(
+            'task_labels_azure',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
+                f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
+                # Verify with az cli that the tags are set.
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, 'az vm list '
+                    f'--query "[?starts_with(name, \'{name}\') '
+                    '&& tags.inlinelabel1==\'inlinevalue1\' '
+                    '&& tags.inlinelabel2==\'inlinevalue2\'].name" '
+                    '--output tsv | grep .'),
+            ],
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Labels from task on Kubernetes (labels) ----------
 @pytest.mark.kubernetes
 def test_task_labels_kubernetes():
@@ -1269,6 +1381,24 @@ def test_volumes_on_kubernetes():
                 f'EOF',
             ),
             smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl delete pvc existing1 --ignore-not-found && '
+                f'kubectl create -f - <<EOF\n'
+                f'apiVersion: v1\n'
+                f'kind: PersistentVolumeClaim\n'
+                f'metadata:\n'
+                f'  name: existing1\n'
+                f'  labels:\n'
+                f'    skypilot-name: vol-existing1\n'
+                f'spec:\n'
+                f'  accessModes:\n'
+                f'    - ReadWriteOnce\n'
+                f'  resources:\n'
+                f'    requests:\n'
+                f'      storage: 1Gi\n'
+                f'EOF',
+            ),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, 'end=$((SECONDS+60)); '
                 'while [ $SECONDS -lt $end ]; do '
                 'if kubectl get pvc existing0; then exit 0; fi; '
@@ -1276,7 +1406,8 @@ def test_volumes_on_kubernetes():
                 'done; exit 1'),
             f'sky volumes apply -y -n pvc0 --type k8s-pvc --size 2GB',
             f'sky volumes apply -y -n existing0 --type k8s-pvc --size 2GB --use-existing',
-            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0"',
+            f'sky volumes apply -y -n vol-existing1 --type k8s-pvc --size 2GB --use-existing',
+            f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "pvc0" && echo "$vols" | grep "existing0" && echo "$vols" | grep "vol-existing1"',
             f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep "{name}"',
@@ -1286,20 +1417,22 @@ def test_volumes_on_kubernetes():
             # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
             f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
-            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 -y',
+            f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then echo "pvc1 not deleted" && exit 1; else echo "pvc1 deleted"; fi',
+            f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then echo "vol-existing1 not deleted" && exit 1; else echo "vol-existing1 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "{name}"); if [ -n "$vol" ]; then echo "ephemeral volume for cluster {name} not deleted" && exit 1; else echo "ephemeral volume for cluster {name} deleted"; fi',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 'pvcs=$(kubectl get pvc) && echo "$pvcs" && pvc=$(echo "$pvcs" | grep "pvc0"); if [ -n "$pvc" ]; then echo "pvc for volume pvc0 not deleted" && exit 1; else echo "pvc for volume pvc0 deleted"; fi && '
                 'pvc=$(echo "$pvcs" | grep "existing0"); if [ -n "$pvc" ]; then echo "pvc for volume existing0 not deleted" && exit 1; else echo "pvc for volume existing0 deleted"; fi && '
                 'pvc=$(echo "$pvcs" | grep "pvc1"); if [ -n "$pvc" ]; then echo "pvc for volume pvc1 not deleted" && exit 1; else echo "pvc for volume pvc1 deleted"; fi && '
+                'pvc=$(echo "$pvcs" | grep "vol-existing1"); if [ -n "$pvc" ]; then echo "pvc for volume vol-existing1 not deleted" && exit 1; else echo "pvc for volume vol-existing1 deleted"; fi && '
                 f'pvc=$(echo "$pvcs" | grep "{name}"); if [ -n "$pvc" ]; then echo "pvc for ephemeral volume of cluster {name} not deleted" && exit 1; else echo "pvc for ephemeral volume of cluster {name} deleted"; fi',
             ),
         ],
-        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then sky volumes delete pvc1 -y; fi',
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} && vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then sky volumes delete existing0 -y; fi && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then sky volumes delete pvc0 -y; fi && vol=$(echo "$vols" | grep "pvc1"); if [ -n "$vol" ]; then sky volumes delete pvc1 -y; fi && vol=$(echo "$vols" | grep "vol-existing1"); if [ -n "$vol" ]; then sky volumes delete vol-existing1 -y; fi',
     )
     smoke_tests_utils.run_one_test(test)
 

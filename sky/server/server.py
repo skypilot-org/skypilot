@@ -637,6 +637,55 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Shutdown: Add any cleanup code here if needed
 
 
+class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add security headers to all HTTP responses.
+
+    Adds Content-Security-Policy and other security headers to mitigate
+    XSS, clickjacking, and content-type sniffing attacks.
+
+    Reference: OWASP A02:2025 - Security Misconfiguration (CWE-1021).
+    """
+
+    # Content-Security-Policy directives:
+    # - default-src 'self': Only allow resources from the same origin
+    # - script-src 'self' 'unsafe-inline': Allow same-origin scripts and
+    #   inline scripts (needed for Next.js __NEXT_DATA__)
+    # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
+    #   inline styles (needed for MUI/Emotion dynamic style injection)
+    # - font-src 'self': Only allow same-origin fonts
+    # - connect-src 'self': Only allow same-origin fetch/XHR/WebSocket
+    # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
+    # - img-src 'self' data:: Allow same-origin images and data URIs
+    # - object-src 'none': Block all plugin content (Flash, Java, etc.)
+    # - base-uri 'self': Restrict <base> element to same origin
+    # - form-action 'self': Restrict form submissions to same origin
+    # - frame-ancestors 'self': Prevent clickjacking via framing
+    _CSP_POLICY = ('default-src \'self\'; '
+                   'script-src \'self\' \'unsafe-inline\'; '
+                   'style-src \'self\' \'unsafe-inline\'; '
+                   'font-src \'self\'; '
+                   'connect-src \'self\'; '
+                   'frame-src \'self\'; '
+                   'img-src \'self\' data:; '
+                   'object-src \'none\'; '
+                   'base-uri \'self\'; '
+                   'form-action \'self\'; '
+                   'frame-ancestors \'self\'')
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        response = await call_next(request)
+        response.headers['Content-Security-Policy'] = self._CSP_POLICY
+        # X-Frame-Options for legacy browsers that don't support CSP
+        # frame-ancestors directive.
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = (
+            'strict-origin-when-cross-origin')
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=()')
+        return response
+
+
 # Add a new middleware class to handle /internal/dashboard prefix
 class InternalDashboardPrefixMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
@@ -777,6 +826,9 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+# SecurityHeadersMiddleware is the outermost middleware to ensure security
+# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.
@@ -2085,6 +2137,10 @@ async def api_status(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 cluster_names=[cluster_name] if cluster_name else None,
+                exclude_request_names=[
+                    server_constants.REQUEST_NAME_PREFIX + d.value
+                    for d in daemons.HIDDEN_REQUEST_NAMES
+                ],
                 limit=limit,
                 fields=fields,
                 sort=True,

@@ -971,6 +971,7 @@ def write_cluster_config(
             # controller_utils.shared_controller_vars_to_fill().
             'user': common_utils.get_cleaned_username(
                 os.environ.get(constants.USER_ENV_VAR, '')),
+            'workspace': skypilot_config.get_active_workspace(),
 
             # Networking configs
             'use_internal_ips': skypilot_config.get_effective_region_config(
@@ -987,7 +988,8 @@ def write_cluster_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
                 keys=('vpc_name',),
-                default_value=None),
+                default_value=None,
+                override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.
             'labels': labels,
             # User-supplied remote_identity
@@ -1216,6 +1218,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_primeintellect_authentication(config)
     elif isinstance(cloud, clouds.Seeweb):
         config = auth.setup_seeweb_authentication(config)
+    elif isinstance(cloud, clouds.Mithril):
+        config = auth.setup_mithril_authentication(config)
     else:
         assert False, cloud
     yaml_utils.dump_yaml(tmp_yaml_path, config)

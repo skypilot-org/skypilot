@@ -713,14 +713,14 @@ def test_optimize_disk_tier(enable_all_clouds):
     low_tier_candidates = _get_all_candidate_cloud(low_tier_resources)
     assert low_tier_candidates == set(
         map(registry.CLOUD_REGISTRY.get,
-            ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
+            ['aws', 'gcp', 'azure', 'oci', 'nebius'])), low_tier_candidates
 
     # Only AWS, GCP, Azure, OCI supports HIGH disk tier.
     high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
     high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
     assert high_tier_candidates == set(
         map(registry.CLOUD_REGISTRY.get,
-            ['aws', 'gcp', 'azure', 'oci'])), high_tier_candidates
+            ['aws', 'gcp', 'azure', 'oci', 'nebius'])), high_tier_candidates
 
     # Only AWS, GCP supports ULTRA disk tier.
     ultra_tier_resources = sky.Resources(
