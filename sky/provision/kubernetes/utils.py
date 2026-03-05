@@ -1814,7 +1814,7 @@ def get_accelerator_label_key_values(
         context, 'ssh-') if (context and is_ssh_node_pool) else context
 
     autoscaler_type = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
         region=context,
         keys=('autoscaler',),
         default_value=None)
@@ -3169,8 +3169,9 @@ def get_autoscaler_type(
     context: Optional[str] = None
 ) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
     autoscaler_type = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
         region=context,
         keys=('autoscaler',),
         default_value=None)
