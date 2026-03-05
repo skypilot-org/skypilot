@@ -26,3 +26,7 @@ USAGE_RUN_ID_ENV_VAR = 'SKYPILOT_USAGE_RUN_ID'
 # initialized when the cluster is firstly launched in:
 # sky.provision.instance_setup.start_skylet_on_head_node
 USAGE_RUN_ID_FILE = '~/.sky/usage_run_id'
+
+# PostHog product analytics
+POSTHOG_API_KEY = 'phc_NP0EO5Koq1dWqXEHwR14Po7bVqqtAdWINXiWypKU6H7'
+POSTHOG_HOST = 'https://us.i.posthog.com'

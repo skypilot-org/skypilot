@@ -54,6 +54,9 @@ install_requires = [
     'ijson',
     'orjson',
     'requests',
+    # PostHog product analytics (dual-write alongside Loki).
+    # Pin to v3.x for api_key/project_api_key compatibility.
+    'posthog>=3.0.0,<4.0.0',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
     # changes.
@@ -253,7 +256,6 @@ cloud_dependencies: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
-    'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
     'yotta': [],  # No dependencies needed for Yotta

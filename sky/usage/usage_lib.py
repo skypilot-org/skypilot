@@ -25,6 +25,7 @@ from sky.utils import yaml_utils
 if typing.TYPE_CHECKING:
     import inspect
 
+    import posthog as posthog_lib
     import requests
 
     from sky import resources as resources_lib
@@ -35,6 +36,7 @@ else:
     # collection phase or skipped if user specifies no collection
     requests = adaptors_common.LazyImport('requests')
     inspect = adaptors_common.LazyImport('inspect')
+    posthog_lib = adaptors_common.LazyImport('posthog')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -461,7 +463,6 @@ def _send_to_loki(message_type: MessageType):
     if response.status_code != 204:
         logger.debug(
             f'Grafana Loki failed with response: {response.text}\n{payload}')
-    messages.reset(message_type)
 
 
 def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
@@ -519,8 +520,57 @@ def prepare_json_from_yaml_config(
     return yaml_info
 
 
+def _send_to_posthog(message_type: MessageType):
+    """Send the message to PostHog for product analytics.
+
+    Forwards all properties from the message including sanitized YAML
+    structures (user_task_yaml, actual_task, ray_yamls). These are
+    redacted by _clean_yaml() (setup/run/envs/secrets replaced with
+    line counts) and typically 5-50KB each, well within PostHog's 1MB
+    event limit. They provide workload structure insights (resource
+    specs, file mounts, storage patterns) queryable via HogQL.
+    Stacktraces are truncated to 4KB max.
+    """
+    if env_options.Options.DISABLE_LOGGING.get():
+        return
+
+    message = messages[message_type]
+    properties = message.get_properties()
+
+    # Use anonymized user hash as distinct_id.
+    user_hash = properties.pop('user', 'unknown')
+
+    posthog_properties = dict(properties)
+
+    # Truncate stacktrace to 4KB max.
+    max_stacktrace_len = 4096
+    stacktrace = posthog_properties.get('stacktrace')
+    if stacktrace and len(stacktrace) > max_stacktrace_len:
+        posthog_properties['stacktrace'] = (stacktrace[:max_stacktrace_len] +
+                                            '...[truncated]')
+
+    posthog_properties['source'] = 'cli'
+
+    # Compute duration_ms from start_time and send_time (nanoseconds).
+    start = posthog_properties.get('start_time')
+    send = posthog_properties.get('send_time')
+    if start and send:
+        posthog_properties['duration_ms'] = (send - start) / 1e6
+
+    # Set both api_key and project_api_key for cross-version compatibility.
+    # posthog v3.x reads project_api_key, v6+ reads api_key.
+    posthog_lib.api_key = constants.POSTHOG_API_KEY
+    posthog_lib.project_api_key = constants.POSTHOG_API_KEY
+    posthog_lib.host = constants.POSTHOG_HOST
+    posthog_lib.capture(
+        distinct_id=user_hash,
+        event=f'cli_{message_type.value}',
+        properties=posthog_properties,
+    )
+
+
 def _send_local_messages():
-    """Send all messages not been uploaded to Loki."""
+    """Send all messages not been uploaded to Loki and PostHog."""
     for msg_type, message in messages.items():
         if not message.message_sent and msg_type not in (
                 MessageType.HEARTBEAT, MessageType.SERVER_HEARTBEAT):
@@ -531,6 +581,14 @@ def _send_local_messages():
             except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
+            try:
+                _send_to_posthog(msg_type)
+            except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                logger.debug(f'PostHog logging for {msg_type.value} '
+                             f'exception caught: {type(e)}({e})')
+            # Reset after both sends complete so PostHog can read the
+            # message data that _send_to_loki() populated (send_time, etc.).
+            messages.reset(msg_type)
 
 
 def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
@@ -548,7 +606,15 @@ def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
 
 def send_heartbeat(interval_seconds: int = 600):
     messages.heartbeat.interval_seconds = interval_seconds
-    _send_to_loki(MessageType.HEARTBEAT)
+    try:
+        _send_to_loki(MessageType.HEARTBEAT)
+    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+        logger.debug(f'Heartbeat Loki exception caught: {type(e)}({e})')
+    try:
+        _send_to_posthog(MessageType.HEARTBEAT)
+    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+        logger.debug(f'Heartbeat PostHog exception caught: {type(e)}({e})')
+    messages.reset(MessageType.HEARTBEAT)
 
 
 def send_server_heartbeat():
