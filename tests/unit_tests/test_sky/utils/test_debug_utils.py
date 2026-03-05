@@ -265,11 +265,11 @@ class TestGetRequestsFromManagedJobs:
         call_args = mock_get_tasks.call_args
         task_filter = call_args[0][0]
         assert task_filter.include_request_names is not None
-        assert 'jobs.launch' in task_filter.include_request_names
-        assert 'jobs.cancel' in task_filter.include_request_names
-        assert 'jobs.logs' in task_filter.include_request_names
+        assert 'sky.jobs.launch' in task_filter.include_request_names
+        assert 'sky.jobs.cancel' in task_filter.include_request_names
+        assert 'sky.jobs.logs' in task_filter.include_request_names
         # Queue is read-only, should not be included
-        assert 'jobs.queue' not in task_filter.include_request_names
+        assert 'sky.jobs.queue' not in task_filter.include_request_names
 
     @mock.patch(MOCK_QUEUE_V2)
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
@@ -484,7 +484,7 @@ class TestGetManagedJobsFromRequests:
         body = SimpleNamespace(job_id=42, job_ids=None)
         mock_get_request.return_value = _make_request(request_id='req-1',
                                                       request_body=body,
-                                                      name='jobs.launch')
+                                                      name='sky.jobs.launch')
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
@@ -497,7 +497,7 @@ class TestGetManagedJobsFromRequests:
         body = SimpleNamespace(job_id=None, job_ids=[10, 20])
         mock_get_request.return_value = _make_request(request_id='req-1',
                                                       request_body=body,
-                                                      name='jobs.cancel')
+                                                      name='sky.jobs.cancel')
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)
@@ -523,7 +523,7 @@ class TestGetManagedJobsFromRequests:
         """Should skip requests with None body."""
         mock_get_request.return_value = _make_request(request_id='req-1',
                                                       request_body=None,
-                                                      name='jobs.launch')
+                                                      name='sky.jobs.launch')
         ctx = _make_context(request_ids={'req-1'})
 
         debug_utils._get_managed_jobs_from_requests(ctx)

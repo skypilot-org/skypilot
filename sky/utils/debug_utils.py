@@ -110,11 +110,13 @@ def _get_requests_from_managed_jobs(
             'error': str(e)
         })
 
-    # Request names related to managed jobs (excludes read-only queue)
+    # Request names related to managed jobs (excludes read-only queue).
+    # DB stores names with 'sky.' prefix (see server_constants).
+    prefix = server_constants.REQUEST_NAME_PREFIX
     managed_job_request_names = [
-        request_names.RequestName.JOBS_LAUNCH.value,
-        request_names.RequestName.JOBS_CANCEL.value,
-        request_names.RequestName.JOBS_LOGS.value,
+        prefix + request_names.RequestName.JOBS_LAUNCH.value,
+        prefix + request_names.RequestName.JOBS_CANCEL.value,
+        prefix + request_names.RequestName.JOBS_LOGS.value,
     ]
 
     try:
@@ -198,10 +200,12 @@ def _get_managed_jobs_from_requests(
     logger.debug(f'Getting managed jobs for '
                  f'{len(debug_dump_context["request_ids"])} requests')
 
+    # DB stores names with 'sky.' prefix (see server_constants).
+    prefix = server_constants.REQUEST_NAME_PREFIX
     managed_job_request_names = {
-        request_names.RequestName.JOBS_LAUNCH.value,
-        request_names.RequestName.JOBS_CANCEL.value,
-        request_names.RequestName.JOBS_LOGS.value,
+        prefix + request_names.RequestName.JOBS_LAUNCH.value,
+        prefix + request_names.RequestName.JOBS_CANCEL.value,
+        prefix + request_names.RequestName.JOBS_LOGS.value,
     }
 
     for request_id in debug_dump_context['request_ids']:
