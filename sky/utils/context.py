@@ -302,7 +302,7 @@ class ContextualEnviron(MutableMapping[str, str]):
         ctx = get()
         if ctx is not None:
             # Snapshot to avoid RuntimeError from concurrent modification.
-            overrides_snapshot = dict(ctx.env_overrides)
+            overrides_snapshot = ctx.env_overrides.copy()
             for key, value in overrides_snapshot.items():
                 if value is None:
                     copied.pop(key, None)
