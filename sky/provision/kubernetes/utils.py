@@ -3885,10 +3885,23 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
     gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
-        nodes = kubernetes.core_api(context).list_node().items
-        for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-            if any(gpu_key in node.status.capacity for node in nodes):
-                return gpu_key
+        response = kubernetes.core_api(context).list_node(
+            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+        try:
+            supported_gpu_keys = set(SUPPORTED_GPU_RESOURCE_KEYS.values())
+            capacity_keys: typing.Set[str] = set()
+            for capacity in ijson.items(response,
+                                        'items.item.status.capacity',
+                                        buf_size=IJSON_BUFFER_SIZE):
+                capacity_keys.update(
+                    supported_gpu_keys.intersection(capacity.keys()))
+                if len(capacity_keys) == len(supported_gpu_keys):
+                    break
+            for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
+                if gpu_key in capacity_keys:
+                    return gpu_key
+        finally:
+            response.release_conn()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')
