@@ -55,8 +55,7 @@ install_requires = [
     'orjson',
     'requests',
     # PostHog product analytics (dual-write alongside Loki).
-    # Pin to v3.x for api_key/project_api_key compatibility.
-    'posthog>=3.0.0,<4.0.0',
+    'posthog',
     # SkyPilot inherits from uvicorn.Server to customize the behavior of
     # uvicorn, so we need to pin uvicorn version to avoid potential break
     # changes.
