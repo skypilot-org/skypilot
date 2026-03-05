@@ -216,7 +216,7 @@ class RunPod(clouds.Cloud):
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
-        gpu_count = list(acc_dict.values())[0] if acc_dict else 1
+        gpu_count = list(acc_dict.values())[0] if acc_dict is not None else 1
 
         # default to root
         docker_username_for_runpod = (resources.docker_username_for_runpod
