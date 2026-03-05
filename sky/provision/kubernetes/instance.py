@@ -514,8 +514,9 @@ def _wait_for_pods_to_schedule(namespace, context, new_nodes, timeout: int,
     start_time = time.time()
 
     # Variables for autoscaler detection
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
     autoscaler_type = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
         region=context,
         keys=('autoscaler',),
         default_value=None)
