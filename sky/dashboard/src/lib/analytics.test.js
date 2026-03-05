@@ -113,6 +113,117 @@ describe('trackPageView', () => {
       })
     );
   });
+
+  test('normalizes dynamic paths', () => {
+    analytics.initPostHog();
+    analytics.trackPageView('/clusters/my-gpu-vm');
+
+    expect(posthog.capture).toHaveBeenCalledWith(
+      '$pageview',
+      expect.objectContaining({
+        path: '/clusters/[cluster]',
+        raw_path: '/clusters/my-gpu-vm',
+      })
+    );
+  });
+});
+
+describe('normalizePath', () => {
+  test('normalizes cluster detail paths', () => {
+    expect(analytics.normalizePath('/clusters/my-gpu-vm')).toBe(
+      '/clusters/[cluster]'
+    );
+    expect(analytics.normalizePath('/clusters/training-cluster')).toBe(
+      '/clusters/[cluster]'
+    );
+  });
+
+  test('normalizes cluster job paths', () => {
+    expect(analytics.normalizePath('/clusters/my-cluster/job-123')).toBe(
+      '/clusters/[cluster]/[job]'
+    );
+  });
+
+  test('normalizes job detail paths', () => {
+    expect(analytics.normalizePath('/jobs/42')).toBe('/jobs/[job]');
+    expect(analytics.normalizePath('/jobs/job-abc-123')).toBe('/jobs/[job]');
+  });
+
+  test('normalizes job task paths', () => {
+    expect(analytics.normalizePath('/jobs/42/3')).toBe('/jobs/[job]/[task]');
+    expect(analytics.normalizePath('/jobs/job-123/task-456')).toBe(
+      '/jobs/[job]/[task]'
+    );
+  });
+
+  test('normalizes job pool paths', () => {
+    expect(analytics.normalizePath('/jobs/pools/gpu-pool')).toBe(
+      '/jobs/pools/[pool]'
+    );
+    expect(analytics.normalizePath('/jobs/pools/default')).toBe(
+      '/jobs/pools/[pool]'
+    );
+  });
+
+  test('normalizes recipe detail paths', () => {
+    expect(analytics.normalizePath('/recipes/llama-serve')).toBe(
+      '/recipes/[recipe]'
+    );
+    expect(analytics.normalizePath('/recipes/stable-diffusion')).toBe(
+      '/recipes/[recipe]'
+    );
+  });
+
+  test('normalizes workspace detail paths', () => {
+    expect(analytics.normalizePath('/workspaces/default')).toBe(
+      '/workspaces/[name]'
+    );
+    expect(analytics.normalizePath('/workspaces/team-a')).toBe(
+      '/workspaces/[name]'
+    );
+  });
+
+  test('normalizes infra context paths', () => {
+    expect(analytics.normalizePath('/infra/k8s-prod')).toBe('/infra/[context]');
+    expect(analytics.normalizePath('/infra/aws-us-east-1')).toBe(
+      '/infra/[context]'
+    );
+  });
+
+  test('normalizes plugin paths', () => {
+    expect(analytics.normalizePath('/plugins/gpu_healer')).toBe(
+      '/plugins/[...slug]'
+    );
+    expect(analytics.normalizePath('/plugins/gpu_healer/health')).toBe(
+      '/plugins/[...slug]'
+    );
+    expect(analytics.normalizePath('/plugins/monitor/dashboard/stats')).toBe(
+      '/plugins/[...slug]'
+    );
+  });
+
+  test('leaves static routes unchanged', () => {
+    expect(analytics.normalizePath('/clusters')).toBe('/clusters');
+    expect(analytics.normalizePath('/jobs')).toBe('/jobs');
+    expect(analytics.normalizePath('/jobs/pools')).toBe('/jobs/pools');
+    expect(analytics.normalizePath('/recipes')).toBe('/recipes');
+    expect(analytics.normalizePath('/workspaces')).toBe('/workspaces');
+    expect(analytics.normalizePath('/infra')).toBe('/infra');
+    expect(analytics.normalizePath('/settings')).toBe('/settings');
+    expect(analytics.normalizePath('/settings/config')).toBe(
+      '/settings/config'
+    );
+    expect(analytics.normalizePath('/')).toBe('/');
+  });
+
+  test('handles edge cases', () => {
+    // Empty string
+    expect(analytics.normalizePath('')).toBe('');
+    // Root path
+    expect(analytics.normalizePath('/')).toBe('/');
+    // Unknown dynamic paths pass through
+    expect(analytics.normalizePath('/unknown/path')).toBe('/unknown/path');
+  });
 });
 
 describe('domain-specific tracking', () => {

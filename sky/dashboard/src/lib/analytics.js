@@ -75,13 +75,57 @@ export function registerDeployment(properties) {
   });
 }
 
+// ── Path Normalization ──────────────────────────────────────────────────────
+
+// Route patterns for normalization (order matters - more specific first)
+const ROUTE_PATTERNS = [
+  // Jobs: /jobs/pools/[pool] (must be before /jobs/[job]/[task])
+  [/^\/jobs\/pools\/[^/]+$/, '/jobs/pools/[pool]'],
+  // Jobs: /jobs/[job]/[task] (must be before /jobs/[job])
+  [/^\/jobs\/[^/]+\/[^/]+$/, '/jobs/[job]/[task]'],
+  // Jobs: /jobs/[job] - must not match /jobs/pools (static route)
+  [
+    /^\/jobs\/[^/]+$/,
+    (path) => (path === '/jobs/pools' ? path : '/jobs/[job]'),
+  ],
+  // Clusters: /clusters/[cluster]/[job] (must be before /clusters/[cluster])
+  [/^\/clusters\/[^/]+\/[^/]+$/, '/clusters/[cluster]/[job]'],
+  // Clusters: /clusters/[cluster]
+  [/^\/clusters\/[^/]+$/, '/clusters/[cluster]'],
+  // Recipes: /recipes/[recipe]
+  [/^\/recipes\/[^/]+$/, '/recipes/[recipe]'],
+  // Workspaces: /workspaces/[name]
+  [/^\/workspaces\/[^/]+$/, '/workspaces/[name]'],
+  // Infra: /infra/[context]
+  [/^\/infra\/[^/]+$/, '/infra/[context]'],
+  // Plugins: catch-all /plugins/[...slug]
+  [/^\/plugins\/.*$/, '/plugins/[...slug]'],
+];
+
+/**
+ * Normalize a path by replacing dynamic segments with parameter names.
+ * Static routes pass through unchanged.
+ * @param {string} path - The raw path to normalize
+ * @returns {string} The normalized path
+ */
+export function normalizePath(path) {
+  for (const [pattern, normalized] of ROUTE_PATTERNS) {
+    if (pattern.test(path)) {
+      return typeof normalized === 'function' ? normalized(path) : normalized;
+    }
+  }
+  return path;
+}
+
 // ── Pageviews ───────────────────────────────────────────────────────────────
 
 export function trackPageView(path, properties = {}) {
   if (!isEnabled()) return;
+  const normalized = normalizePath(path);
   posthog.capture('$pageview', {
     $current_url: window.location.href,
-    path,
+    path: normalized,
+    raw_path: path,
     ...properties,
   });
 }
