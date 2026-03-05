@@ -195,6 +195,50 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
+class PluginAnalyticsMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to track plugin API calls via PostHog.
+
+    Captures a ``plugin_api_call`` event for every request whose path
+    starts with ``/plugins/``.  Failures are silently swallowed so that
+    analytics never break the request pipeline.
+    """
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        path = request.url.path
+        response = await call_next(request)
+
+        if not path.startswith('/plugins/'):
+            return response
+
+        if env_options.Options.DISABLE_LOGGING.get():
+            return response
+
+        try:
+            # Extract plugin name: /plugins/api/{name}/... -> name
+            parts = path.strip('/').split('/')
+            plugin_name = parts[2] if len(parts) > 2 else 'unknown'
+
+            posthog_lib = usage_lib.posthog_lib
+            posthog_lib.api_key = usage_lib.constants.POSTHOG_API_KEY
+            posthog_lib.project_api_key = usage_lib.constants.POSTHOG_API_KEY
+            posthog_lib.host = usage_lib.constants.POSTHOG_HOST
+            posthog_lib.capture(
+                distinct_id=common_utils.get_user_hash(),
+                event='plugin_api_call',
+                properties={
+                    'source': 'server',
+                    'plugin': plugin_name,
+                    'endpoint': path,
+                    'method': request.method,
+                    'status_code': response.status_code,
+                },
+            )
+        except Exception:  # pylint: disable=broad-except
+            logger.debug(f'PluginAnalyticsMiddleware: failed to capture '
+                         f'event for {path}')
+        return response
+
+
 def _extract_identity_from_jwt(jwt_token: str, claim: str) -> Optional[str]:
     """Extract identity claim from a JWT token without verification.
 
@@ -826,6 +870,7 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+app.add_middleware(PluginAnalyticsMiddleware)
 # SecurityHeadersMiddleware is the outermost middleware to ensure security
 # headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
 app.add_middleware(SecurityHeadersMiddleware)
