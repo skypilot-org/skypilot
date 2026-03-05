@@ -326,26 +326,28 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     )
     out = strip_ansi(capsys.readouterr().out)
 
+    # Helper to extract a workspace section from the output, bounded by the
+    # next "Checking enabled infra" header (or end of string). This makes the
+    # test independent of workspace processing order.
+    def _get_workspace_section(output, ws_name):
+        marker = f"Enabled infra for workspace: '{ws_name}'"
+        assert marker in output, f'{marker!r} not found in output'
+        start = output.index(marker)
+        # Find the next workspace boundary after this section
+        next_check = output.find('Checking enabled infra for workspace:',
+                                 start + len(marker))
+        end = next_check if next_check != -1 else len(output)
+        return output[start:end]
+
     # default workspace section should include ctx-a and ctx-b only
-    assert "Enabled infra for workspace: 'default'" in out
-    start = out.index("Enabled infra for workspace: 'default'")
-    # Bound the section to before the next workspace's "Checking" header
-    try:
-        end = out.index("Checking enabled infra for workspace: 'ws1'", start)
-    except ValueError:
-        end = len(out)
-    default_section = out[start:end]
+    default_section = _get_workspace_section(out, 'default')
     assert 'Kubernetes [compute]' in default_section
     assert 'ctx-a' in default_section
     assert 'ctx-b' in default_section
     assert 'ctx-c' not in default_section
 
     # ws1 workspace section should include ctx-c only
-    assert "Enabled infra for workspace: 'ws1'" in out
-    start = out.index("Enabled infra for workspace: 'ws1'")
-    # Bound to end of string
-    end = len(out)
-    ws1_section = out[start:end]
+    ws1_section = _get_workspace_section(out, 'ws1')
     assert 'Kubernetes [compute]' in ws1_section
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
