@@ -287,7 +287,11 @@ sky jobs cancel <job_id>
 
 Use job pools to pre-provision warm workers and submit jobs to them. Workers stay running with setup already done, so jobs start instantly without re-provisioning.
 
-**IMPORTANT:** The pool YAML must contain a top-level `pool:` section — this is what distinguishes it from a regular task YAML. The `pool:` section specifies the number of workers. You cannot combine `--workers` CLI flag with a YAML file.
+**IMPORTANT:** The pool YAML must contain a top-level `pool:` section — this is what distinguishes it from a regular task YAML. Key constraints:
+- The `pool:` section is top-level (NOT nested under `resources:`)
+- You cannot combine `--workers` CLI flag with a YAML file
+- Do NOT use `num_workers:` as a top-level field (that's not valid — use `pool: workers:` instead)
+- The *job* YAML submitted with `sky jobs launch -p` is a regular task YAML (no `pool:` section needed)
 
 ```yaml
 # pool.yaml — defines the pool (worker resources + pool config)
@@ -433,6 +437,8 @@ When using SkyPilot programmatically, follow this loop:
 | Using deprecated `cloud:`/`region:`/`zone:` fields | Deprecated in favor of `infra:` | Use `infra: aws/us-east-1` instead |
 | Creating pool YAML without `pool:` section | `sky jobs pool apply` requires a `pool:` section in the YAML | Always include `pool: workers: N` in pool YAMLs |
 | Using `--workers` flag together with a YAML file | CLI rejects combining `--workers` with `POOL_YAML` | Put `workers:` in the YAML's `pool:` section, or use `--workers` alone for existing pools |
+| Using `num_workers:` as a top-level YAML field | Not a valid field — error says "did you mean num_nodes?" | Use `pool: workers: N` instead (workers goes inside the `pool:` section) |
+| Nesting `pool:` under `resources:` | `pool:` is a top-level field, not a resource property | Put `pool:` at the same level as `resources:`, `setup:`, `run:` |
 
 ## Common Issues Quick Reference
 
