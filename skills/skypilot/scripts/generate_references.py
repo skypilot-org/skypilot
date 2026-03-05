@@ -168,7 +168,10 @@ def _rst_to_markdown(rst_text: str) -> str:
             dtype = warning_match.group(2).upper()
             first_line = warning_match.group(3).strip()
             directive_indent = indent + 3
-            out.append(f'> **{dtype}**: {first_line}')
+            if first_line:
+                out.append(f'> **{dtype}**: {first_line}')
+            else:
+                out.append(f'> **{dtype}**:')
             in_directive_body = True
             i += 1
             continue
@@ -276,10 +279,11 @@ def generate_yaml_spec():
               '<!-- Run: python skills/skypilot/scripts/'
               'generate_references.py -->\n\n')
     output_path = os.path.join(REFERENCES_DIR, 'yaml-spec.md')
+    full_content = (header + md_content).rstrip('\n') + '\n'
     with open(output_path, 'w') as f:
-        f.write(header + md_content + '\n')
+        f.write(full_content)
 
-    line_count = md_content.count('\n') + 1
+    line_count = full_content.count('\n')
     print(f'Generated {output_path} ({line_count} lines)')
 
 
@@ -459,7 +463,7 @@ def generate_cli_reference():
             lines.append(_format_command(name, remaining[name]))
 
     output_path = os.path.join(REFERENCES_DIR, 'cli-reference.md')
-    content = '\n'.join(lines) + '\n'
+    content = '\n'.join(lines).rstrip('\n') + '\n'
     with open(output_path, 'w') as f:
         f.write(content)
 
@@ -713,7 +717,7 @@ def generate_python_sdk():
                 lines.append('')
 
     output_path = os.path.join(REFERENCES_DIR, 'python-sdk.md')
-    content = '\n'.join(lines) + '\n'
+    content = '\n'.join(lines).rstrip('\n') + '\n'
     with open(output_path, 'w') as f:
         f.write(content)
 
