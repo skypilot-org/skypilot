@@ -60,6 +60,9 @@ SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
 )
 
 # Total number of API server requests, grouped by path, method, and status.
+# TODO(kevinzwang): Panels that only need method/status grouping should migrate
+# to SKY_APISERVER_REQUESTS_BY_USER_TOTAL (aggregated across users). Remove
+# this metric after v0.14.0 if all consumers have migrated.
 SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     'sky_apiserver_requests_total',
     'Total number of API server requests',

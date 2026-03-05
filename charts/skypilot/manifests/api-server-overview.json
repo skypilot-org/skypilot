@@ -555,7 +555,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(sky_apiserver_requests_total{app=\"$app\"}[2m])) by (status)",
+          "expr": "sum(rate(sky_apiserver_requests_by_user_total{app=\"$app\"}[2m])) by (status)",
           "hide": false,
           "instant": false,
           "legendFormat": "{{status}}",
