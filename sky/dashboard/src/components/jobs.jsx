@@ -70,6 +70,7 @@ import {
   buildFilterUrl,
   evaluateCondition,
 } from '@/components/shared/FilterSystem';
+import { trackJobAction, trackFilterUsed } from '@/lib/analytics';
 
 // Define status groups for active and finished jobs
 export const statusGroups = {
@@ -325,6 +326,12 @@ export function ManagedJobs() {
   // Helper function to update URL query parameters
   const updateURLParams = (filters) => {
     sharedUpdateURLParams(router, filters);
+    // Track each active filter for analytics
+    (filters || []).forEach((f) => {
+      if (f.property && f.value) {
+        trackFilterUsed('job', { property: f.property, value: f.value });
+      }
+    });
   };
 
   const updateFiltersByURLParams = React.useCallback(() => {
@@ -2085,6 +2092,7 @@ export function Status2Actions({
   const handleLogsClick = (e, type) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('view_logs', { jobId });
     router.push({
       pathname: `${jobParent}/${jobId}`,
       query: { tab: type },
@@ -2094,6 +2102,7 @@ export function Status2Actions({
   const handleDownloadLogs = (e, controller = false) => {
     e.preventDefault();
     e.stopPropagation();
+    trackJobAction('download_logs', { jobId });
 
     if (managed) {
       // For managed jobs

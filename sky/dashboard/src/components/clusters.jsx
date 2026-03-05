@@ -63,6 +63,7 @@ import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import yaml from 'js-yaml';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { evaluateCondition } from '@/components/shared/FilterSystem';
+import { trackClusterAction, trackFilterUsed } from '@/lib/analytics';
 
 // Helper function to format cost (copied from workspaces.jsx)
 // const formatCost = (cost) => { // Cost function removed
@@ -1308,6 +1309,7 @@ export function Status2Actions({
   const isMobile = useMobile();
 
   const handleActionClick = (actionName) => {
+    trackClusterAction(actionName, { cluster, status });
     switch (actionName) {
       case 'connect':
         handleConnect(cluster, onOpenSSHModal);
@@ -1504,6 +1506,7 @@ const FilterDropdown = ({
   };
 
   const handleOptionSelect = (option) => {
+    trackFilterUsed('cluster', { property: propertyValue, value: option });
     setFilters((prevFilters) => {
       const updatedFilters = [
         ...prevFilters,

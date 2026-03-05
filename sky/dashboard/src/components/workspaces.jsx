@@ -49,6 +49,7 @@ import { REFRESH_INTERVALS } from '@/lib/config';
 import cachePreloader from '@/lib/cache-preloader';
 import { apiClient } from '@/data/connectors/client';
 import { sortData } from '@/data/utils';
+import { trackWorkspaceAction } from '@/lib/analytics';
 import {
   CLOUD_CANONICALIZATIONS,
   CLUSTER_NOT_UP_ERROR,
@@ -576,6 +577,7 @@ export function Workspaces() {
   }, [fetchData]);
 
   const handleRefresh = useCallback(async () => {
+    trackWorkspaceAction('refresh');
     // Set loading states immediately for responsive UI
     setClustersLoading(true);
     setJobsLoading(true);
@@ -672,6 +674,7 @@ export function Workspaces() {
   }, [workspaceDetails, sortConfig, searchQuery, rawWorkspacesData]);
 
   const handleDeleteWorkspace = (workspaceName) => {
+    trackWorkspaceAction('delete', { workspace: workspaceName });
     checkPermissionAndAct('cannot delete workspace', () => {
       setDeleteState({
         confirmOpen: true,
@@ -730,12 +733,14 @@ export function Workspaces() {
   };
 
   const handleCreateWorkspace = () => {
+    trackWorkspaceAction('create');
     checkPermissionAndAct('cannot create workspace', () => {
       router.push('/workspace/new');
     });
   };
 
   const handleEditWorkspace = (workspaceName) => {
+    trackWorkspaceAction('edit', { workspace: workspaceName });
     checkPermissionAndAct('cannot edit workspace', () => {
       router.push(`/workspaces/${workspaceName}`);
     });

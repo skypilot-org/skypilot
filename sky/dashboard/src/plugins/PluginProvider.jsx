@@ -15,6 +15,7 @@ import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
+import { trackEvent, trackPluginPageView } from '@/lib/analytics';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -662,6 +663,12 @@ function createPluginApi(dispatch) {
       // This dynamically provides all components from the ui directory.
       // eslint-disable-next-line no-undef
       return require('@/components/ui');
+    },
+    trackEvent(eventName, properties = {}) {
+      trackEvent(eventName, properties);
+    },
+    trackPluginPageView(pluginName, pagePath) {
+      trackPluginPageView(pluginName, pagePath);
     },
     registerDataProvider(config) {
       if (!config?.id) {

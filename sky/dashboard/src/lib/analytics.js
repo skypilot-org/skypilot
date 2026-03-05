@@ -1,0 +1,113 @@
+/**
+ * Product analytics utilities for SkyPilot Dashboard.
+ *
+ * Thin wrapper around posthog-js that respects the
+ * SKYPILOT_DISABLE_USAGE_COLLECTION opt-out flag.
+ */
+import posthog from 'posthog-js';
+
+const POSTHOG_API_KEY = 'phc_NP0EO5Koq1dWqXEHwR14Po7bVqqtAdWINXiWypKU6H7';
+const POSTHOG_HOST = 'https://us.i.posthog.com';
+
+let _initialized = false;
+
+/**
+ * Initialize PostHog. Safe to call multiple times – only the first call has
+ * any effect.  If the user has opted out via SKYPILOT_DISABLE_USAGE_COLLECTION
+ * we silently skip initialization.
+ */
+export function initPostHog() {
+  if (_initialized) return;
+  _initialized = true;
+
+  if (typeof window === 'undefined') return;
+
+  posthog.init(POSTHOG_API_KEY, {
+    api_host: POSTHOG_HOST,
+    autocapture: true,
+    capture_pageview: false, // we fire manual pageviews on route change
+    capture_pageleave: true,
+    persistence: 'localStorage',
+    disable_session_recording: false,
+  });
+}
+
+/** Returns true when analytics collection is active. */
+export function isEnabled() {
+  return _initialized && typeof window !== 'undefined';
+}
+
+// ── Identification ──────────────────────────────────────────────────────────
+
+/**
+ * Identify the current user and register "super properties" that are attached
+ * to every subsequent event.
+ */
+export function identifyUser(userHash, username, extraProperties = {}) {
+  if (!isEnabled()) return;
+  posthog.identify(userHash, {
+    username,
+    source: 'dashboard',
+    ...extraProperties,
+  });
+}
+
+/**
+ * Register deployment-level super properties (version, auth mode, etc.).
+ * These are sent with every event automatically.
+ */
+export function registerDeployment(properties) {
+  if (!isEnabled()) return;
+  posthog.register({
+    source: 'dashboard',
+    ...properties,
+  });
+}
+
+// ── Pageviews ───────────────────────────────────────────────────────────────
+
+export function trackPageView(path, properties = {}) {
+  if (!isEnabled()) return;
+  posthog.capture('$pageview', {
+    $current_url: window.location.href,
+    path,
+    ...properties,
+  });
+}
+
+// ── Generic event helper ────────────────────────────────────────────────────
+
+export function trackEvent(eventName, properties = {}) {
+  if (!isEnabled()) return;
+  posthog.capture(eventName, { source: 'dashboard', ...properties });
+}
+
+// ── Domain-specific helpers ─────────────────────────────────────────────────
+
+export function trackClusterAction(action, properties = {}) {
+  trackEvent('cluster_action', { action, ...properties });
+}
+
+export function trackJobAction(action, properties = {}) {
+  trackEvent('job_action', { action, ...properties });
+}
+
+export function trackWorkspaceAction(action, properties = {}) {
+  trackEvent('workspace_action', { action, ...properties });
+}
+
+export function trackRecipeAction(action, properties = {}) {
+  trackEvent('recipe_action', { action, ...properties });
+}
+
+export function trackInfraAction(action, properties = {}) {
+  trackEvent('infra_action', { action, ...properties });
+}
+
+export function trackFilterUsed(filterType, properties = {}) {
+  trackEvent('filter_used', { filter_type: filterType, ...properties });
+}
+
+export function trackPluginPageView(pluginName, pagePath) {
+  trackEvent('plugin_page_view', { plugin: pluginName, path: pagePath });
+}
