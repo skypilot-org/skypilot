@@ -286,6 +286,8 @@ run: |
 A minimal `train_ddp.py` would use:
 
 ```python
+import os
+
 import torch
 import torch.distributed as dist
 

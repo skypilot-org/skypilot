@@ -75,6 +75,7 @@ This shows which clouds are configured. If the user's target cloud is not enable
 | `sky logs NAME` | Stream job logs from a cluster |
 | `sky stop NAME` / `sky start NAME` | Stop/restart to save costs (preserves disk) |
 | `sky down NAME` | Tear down a cluster completely |
+| `sky gpus list` | List available GPU types across clouds |
 
 **Managed Jobs** — long-running unattended workloads:
 
