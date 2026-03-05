@@ -41,6 +41,12 @@ RELEASE_NAME=skypilot
 cleanup() {
     echo ""
     echo "🧹 Cleaning up resources..."
+    # Uninstall helm release first to ensure clean state for retries
+    if helm status $RELEASE_NAME -n $NAMESPACE >/dev/null 2>&1; then
+        echo "Uninstalling helm release $RELEASE_NAME..."
+        helm uninstall $RELEASE_NAME -n $NAMESPACE --wait 2>/dev/null || true
+        echo "✅ Helm release uninstalled"
+    fi
     if kubectl get namespace $NAMESPACE >/dev/null 2>&1; then
         echo "Deleting namespace $NAMESPACE..."
         kubectl delete namespace $NAMESPACE --ignore-not-found=true
@@ -259,18 +265,17 @@ deploy_and_login() {
     echo "Deploying SkyPilot with OAuth mode: $mode"
     echo "============================================="
 
-    # Ensure namespace is fully cleaned up before deploying.
-    # Delete namespace if it exists (active or terminating), then wait for
-    # it to be completely gone. This avoids a race condition where helm
-    # install --create-namespace fails with "namespace is being terminated".
+    # Ensure a clean state before deploying. First uninstall any existing
+    # helm release (critical for retries on the same container), then delete
+    # the namespace and wait for it to be fully gone.
+    if helm status "$RELEASE_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
+      echo "⏳ Uninstalling existing helm release '$RELEASE_NAME'..."
+      helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" --wait 2>/dev/null || true
+      echo "✅ Helm release uninstalled."
+    fi
     if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-      status=$(kubectl get namespace "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null || true)
-      if [[ "$status" == "Active" ]]; then
-        echo "⏳ Namespace '$NAMESPACE' is active. Deleting it first..."
-        kubectl delete namespace "$NAMESPACE" --ignore-not-found=true
-      else
-        echo "⏳ Namespace '$NAMESPACE' is terminating. Waiting for it to be deleted..."
-      fi
+      echo "⏳ Deleting namespace '$NAMESPACE'..."
+      kubectl delete namespace "$NAMESPACE" --ignore-not-found=true
       while kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; do
         echo "Waiting for namespace '$NAMESPACE' to be fully deleted..."
         sleep 2
@@ -455,28 +460,42 @@ deploy_and_login() {
     ENDPOINT=http://${CLUSTER_HOST}:${NODEPORT}
     echo "API server endpoint: $ENDPOINT"
 
-    # Test the API server with retry logic
+    # Test the API server with retry logic.
+    # For legacy mode, the OAuth2 proxy must be intercepting requests (HTTP 302).
+    # For new mode, the SkyPilot API server handles auth directly (HTTP 307).
+    # Accepting any code < 400 is too permissive - a 307 in legacy mode means
+    # the OAuth2 proxy annotations haven't taken effect yet.
     echo "Testing API server endpoint ($mode)..."
     MAX_RETRIES=10
     RETRY_INTERVAL=30
     RETRY_COUNT=0
+    if [[ "$mode" == "legacy" ]]; then
+        EXPECTED_CODE=302
+    else
+        EXPECTED_CODE=307
+    fi
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing endpoint..."
+        echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES: Testing endpoint (expecting HTTP $EXPECTED_CODE)..."
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${ENDPOINT})
         echo "HTTP response code: $HTTP_CODE"
-        if [ "$HTTP_CODE" -lt 400 ]; then
-            echo "API server is responding successfully (HTTP $HTTP_CODE)!"
+        if [ "$HTTP_CODE" -eq "$EXPECTED_CODE" ]; then
+            echo "API server is responding correctly (HTTP $HTTP_CODE)!"
             break
-        else
+        elif [ "$HTTP_CODE" -ge 400 ]; then
             echo "API server not ready yet (HTTP $HTTP_CODE - nginx error). Waiting ${RETRY_INTERVAL} seconds..."
-            if [ $RETRY_COUNT -lt $((MAX_RETRIES - 1)) ]; then
-                sleep $RETRY_INTERVAL
-            fi
-            RETRY_COUNT=$((RETRY_COUNT + 1))
+        else
+            echo "Got HTTP $HTTP_CODE but expected $EXPECTED_CODE (auth proxy may not be ready). Waiting ${RETRY_INTERVAL} seconds..."
         fi
+        if [ $RETRY_COUNT -lt $((MAX_RETRIES - 1)) ]; then
+            sleep $RETRY_INTERVAL
+        fi
+        RETRY_COUNT=$((RETRY_COUNT + 1))
     done
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-        echo "Error: API server failed to become ready after $((MAX_RETRIES * RETRY_INTERVAL)) seconds"
+        echo "Error: API server failed to return expected HTTP $EXPECTED_CODE after $((MAX_RETRIES * RETRY_INTERVAL)) seconds"
+        echo "Last HTTP code: $HTTP_CODE"
+        echo "Debugging info:"
+        kubectl get ingress -n $NAMESPACE -o yaml 2>&1 | head -60
         exit 1
     fi
 
@@ -500,6 +519,12 @@ deploy_and_login "legacy"
 # Clean up SkyPilot resources between tests
 echo ""
 echo "🧹 Cleaning up SkyPilot resources between tests..."
+# Uninstall helm release first to ensure clean state for next deploy
+if helm status $RELEASE_NAME -n $NAMESPACE >/dev/null 2>&1; then
+    echo "Uninstalling helm release $RELEASE_NAME..."
+    helm uninstall $RELEASE_NAME -n $NAMESPACE --wait 2>/dev/null || true
+    echo "✅ Helm release uninstalled"
+fi
 kubectl delete namespace $NAMESPACE --ignore-not-found=true
 # Wait until namespace is fully terminated to avoid race condition where
 # helm install --create-namespace fails with "namespace is being terminated"
