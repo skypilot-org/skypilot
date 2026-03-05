@@ -13,8 +13,6 @@ service ManagedJobsService {
   rpc CancelJobs(CancelJobsRequest) returns (CancelJobsResponse);
   // Stream managed job logs.
   rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
-  // Collect debug dump data from the controller.
-  rpc GetDebugDumpData(GetDebugDumpDataRequest) returns (GetDebugDumpDataResponse);
 }
 
 enum ManagedJobStatus {
@@ -185,24 +183,4 @@ message StreamLogsRequest {
 message StreamLogsResponse {
   string log_line = 1;
   optional int32 exit_code = 2;
-}
-
-message GetDebugDumpDataRequest {
-  repeated int64 job_ids = 1;
-}
-
-message DebugDumpFileEntry {
-  string relative_path = 1;
-  bytes content = 2;
-}
-
-message DebugDumpError {
-  string component = 1;
-  string resource = 2;
-  string error = 3;
-}
-
-message GetDebugDumpDataResponse {
-  repeated DebugDumpFileEntry files = 1;
-  repeated DebugDumpError errors = 2;
 }

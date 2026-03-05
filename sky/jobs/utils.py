@@ -798,47 +798,55 @@ def event_callback_func(
 # ======== user functions ========
 
 
-def collect_debug_dump_data(job_ids: List[int]) -> Dict[str, Any]:
-    """Collect debug dump data from the controller.
+def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
+    """Collect a debug dump manifest from the controller.
 
-    This function runs ON the controller (either via gRPC or CodeGen/SSH).
-    It gathers controller logs, job events, job run logs, and cluster info
-    for the specified job IDs.
+    This function runs ON the controller via CodeGen/SSH. It gathers small
+    DB-derived data inline (as JSON strings) and returns remote file paths
+    for large log files (to be rsynced by the caller).
 
     Returns:
-        Dict with 'files' (list of {'relative_path': str, 'content': bytes})
-        and 'errors' (list of {'component': str, 'resource': str,
-        'error': str}).
+        Dict with:
+          'inline_data': list of {'relative_path': str, 'content': str}
+          'file_paths': list of {'remote_path': str, 'relative_path': str}
+          'errors': list of {'component': str, 'resource': str, 'error': str}
     """
-    files: List[Dict[str, Any]] = []
+    inline_data: List[Dict[str, str]] = []
+    file_paths: List[Dict[str, str]] = []
     errors: List[Dict[str, str]] = []
 
     # Collect per-job data
     seen_cluster_names: Set[str] = set()
     for job_id in job_ids:
-        _collect_job_debug_data(job_id, files, errors, seen_cluster_names)
+        _collect_job_debug_manifest(job_id, inline_data, file_paths, errors,
+                                    seen_cluster_names)
 
-    # Collect controller system logs (shared, not per-job)
-    _collect_controller_system_logs(files, errors)
+    # Collect controller system log paths (shared, not per-job)
+    _collect_controller_system_log_paths(file_paths, errors)
 
-    return {'files': files, 'errors': errors}
+    return {
+        'inline_data': inline_data,
+        'file_paths': file_paths,
+        'errors': errors,
+    }
 
 
-def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
-                            errors: List[Dict[str, str]],
-                            seen_cluster_names: Set[str]) -> None:
-    """Collect debug data for a single managed job."""
+def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
+                                file_paths: List[Dict[str, str]],
+                                errors: List[Dict[str, str]],
+                                seen_cluster_names: Set[str]) -> None:
+    """Collect debug manifest entries for a single managed job."""
     job_prefix = f'managed_jobs/{job_id}'
 
-    # 1. Controller log for this job
+    # 1. Controller log for this job (FILE — needs rsync)
     try:
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
         log_file = controller_logs_dir / f'{job_id}.log'
         if log_file.is_file():
-            files.append({
+            file_paths.append({
+                'remote_path': str(log_file),
                 'relative_path': f'{job_prefix}/{job_id}.log',
-                'content': log_file.read_bytes(),
             })
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
@@ -847,7 +855,7 @@ def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
             'error': str(e),
         })
 
-    # 2. Job events from DB
+    # 2. Job events from DB (inline — small data)
     try:
         events = managed_job_state.get_job_events(job_id, limit=1000)
         if events:
@@ -862,11 +870,11 @@ def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
                     'reason': e.get('reason'),
                     'timestamp': str(e.get('timestamp')),
                 })
-            files.append({
+            inline_data.append({
                 'relative_path': f'{job_prefix}/job_events.json',
                 'content': json.dumps(serializable_events,
                                       indent=2,
-                                      default=str).encode('utf-8'),
+                                      default=str),
             })
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
@@ -875,17 +883,16 @@ def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
             'error': str(e),
         })
 
-    # 3. Job run logs
+    # 3. Job run logs (FILE — needs rsync)
     try:
         task_info = managed_job_state.get_all_task_ids_names_statuses_logs(
             job_id)
         for task_idx, (_, _, _, local_log_file, _) in enumerate(task_info):
             if local_log_file and os.path.exists(local_log_file):
                 suffix = f'_task{task_idx}' if len(task_info) > 1 else ''
-                log_path = pathlib.Path(local_log_file)
-                files.append({
+                file_paths.append({
+                    'remote_path': str(pathlib.Path(local_log_file)),
                     'relative_path': f'{job_prefix}/run{suffix}.log',
-                    'content': log_path.read_bytes(),
                 })
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
@@ -894,7 +901,7 @@ def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
             'error': str(e),
         })
 
-    # 4. Cluster info and events
+    # 4. Cluster info and events (inline — DB data)
     try:
         cluster_name, _ = managed_job_state.get_pool_submit_info(job_id)
         if cluster_name is None:
@@ -907,7 +914,8 @@ def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
                     task_name, job_id)
         if cluster_name and cluster_name not in seen_cluster_names:
             seen_cluster_names.add(cluster_name)
-            _collect_cluster_debug_data(cluster_name, job_prefix, files, errors)
+            _collect_cluster_debug_manifest(cluster_name, job_prefix,
+                                            inline_data, errors)
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
             'component': 'managed_jobs',
@@ -916,9 +924,9 @@ def _collect_job_debug_data(job_id: int, files: List[Dict[str, Any]],
         })
 
 
-def _collect_cluster_debug_data(cluster_name: str, job_prefix: str,
-                                files: List[Dict[str, Any]],
-                                errors: List[Dict[str, str]]) -> None:
+def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
+                                    inline_data: List[Dict[str, str]],
+                                    errors: List[Dict[str, str]]) -> None:
     """Collect cluster info and events for a managed job's cluster."""
     import json  # pylint: disable=import-outside-toplevel
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
@@ -958,10 +966,9 @@ def _collect_cluster_debug_data(cluster_name: str, job_prefix: str,
                 'user_name': cluster_record.get('user_name'),
                 'handle': handle_info,
             }
-            files.append({
+            inline_data.append({
                 'relative_path': f'{cluster_prefix}/cluster_info.json',
-                'content': json.dumps(cluster_info, indent=2,
-                                      default=str).encode('utf-8'),
+                'content': json.dumps(cluster_info, indent=2, default=str),
             })
 
             # Cluster events
@@ -980,13 +987,13 @@ def _collect_cluster_debug_data(cluster_name: str, job_prefix: str,
                             include_timestamps=True)
                         if events:
                             event_type_lower = event_type.value.lower()
-                            files.append({
+                            inline_data.append({
                                 'relative_path':
                                     f'{cluster_prefix}/'
                                     f'events_{event_type_lower}.json',
-                                'content': json.dumps(
-                                    events, indent=2,
-                                    default=str).encode('utf-8'),
+                                'content': json.dumps(events,
+                                                      indent=2,
+                                                      default=str),
                             })
                     except Exception as e:  # pylint: disable=broad-except
                         errors.append({
@@ -1003,19 +1010,19 @@ def _collect_cluster_debug_data(cluster_name: str, job_prefix: str,
         })
 
 
-def _collect_controller_system_logs(files: List[Dict[str, Any]],
-                                    errors: List[Dict[str, str]]) -> None:
-    """Collect controller system logs (controller_*.log files)."""
+def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
+                                         errors: List[Dict[str, str]]) -> None:
+    """Collect controller system log file paths (controller_*.log files)."""
     try:
         controller_logs_dir = pathlib.Path(
             managed_job_constants.JOBS_CONTROLLER_LOGS_DIR).expanduser()
         if controller_logs_dir.exists():
             for log_file in controller_logs_dir.glob('controller_*.log'):
                 if log_file.is_file():
-                    files.append({
+                    file_paths.append({
+                        'remote_path': str(log_file),
                         'relative_path': f'managed_jobs/_controller_system/'
                                          f'{log_file.name}',
-                        'content': log_file.read_bytes(),
                     })
     except Exception as e:  # pylint: disable=broad-except
         errors.append({
@@ -2817,18 +2824,15 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_debug_dump_data(cls, job_ids: List[int]) -> str:
+    def get_debug_dump_manifest(cls, job_ids: List[int]) -> str:
         code = textwrap.dedent(f"""\
-        import base64
         from sky.utils import message_utils
         if managed_job_version >= 17:
-            result = utils.collect_debug_dump_data({job_ids!r})
-            # Base64-encode file content for safe stdout transport
-            for f in result.get('files', []):
-                f['content'] = base64.b64encode(f['content']).decode('ascii')
+            result = utils.collect_debug_dump_manifest({job_ids!r})
             print(message_utils.encode_payload(result), end="", flush=True)
         else:
-            print(message_utils.encode_payload({{'files': [], 'errors': [
+            print(message_utils.encode_payload({{
+                'inline_data': [], 'file_paths': [], 'errors': [
                 {{'component': 'managed_jobs', 'resource': 'debug_dump',
                   'error': 'Controller version too old (requires >= 17)'}}
             ]}}), end="", flush=True)

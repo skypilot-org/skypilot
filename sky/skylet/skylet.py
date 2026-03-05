@@ -50,12 +50,7 @@ def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     max_workers = min(32, (os.cpu_count() or 1) + 4)
     # There's only a single skylet process per cluster, so disable
     # SO_REUSEPORT to raise an error if the port is already in use.
-    options = (
-        ('grpc.so_reuseport', 0),
-        # Allow large responses for debug dump data (32MB).
-        # The client already sets unlimited receive size.
-        ('grpc.max_send_message_length', 32 * 1024 * 1024),
-    )
+    options = (('grpc.so_reuseport', 0),)
     server = grpc.server(
         concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
         options=options)

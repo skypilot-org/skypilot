@@ -724,22 +724,22 @@ def _collect_controller_debug_data(
         job_ids: List[int],
         dump_dir: str,
         errors: Optional[List[Dict[str, str]]] = None) -> None:
-    """Collect controller-side debug data via gRPC or CodeGen fallback.
+    """Collect controller-side debug data via CodeGen manifest + rsync.
 
-    This fetches controller logs, job events, job run logs, and cluster
-    info/events from the jobs controller. Works in both consolidation mode
-    (LocalResourcesHandle → runs locally) and non-consolidation mode
-    (remote controller via gRPC or SSH).
+    Phase 1: Run CodeGen on the controller to get a manifest containing:
+      - inline_data: small DB-derived JSON (written directly to disk)
+      - file_paths: remote paths of large log files (downloaded via rsync)
+    Phase 2: Use the controller handle's command runners to rsync
+             each listed file.
+
+    Works in both consolidation mode (LocalResourcesHandle → runs locally)
+    and non-consolidation mode (remote controller via SSH).
     """
     # Lazy imports to avoid circular dependencies
     # pylint: disable=import-outside-toplevel
-    import base64
-
     from sky.backends import backend_utils
     from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
-    from sky.backends.cloud_vm_ray_backend import SkyletClient
     from sky.jobs import utils as managed_job_utils
-    from sky.schemas.generated import managed_jobsv1_pb2
     from sky.utils import controller_utils
     from sky.utils import message_utils
     from sky.utils import subprocess_utils
@@ -762,84 +762,95 @@ def _collect_controller_debug_data(
             })
         return
 
-    # Try gRPC first, fall back to CodeGen
-    result = None
-    use_legacy = not handle.is_grpc_enabled_with_flag
-    if not use_legacy:
-        try:
-            request = managed_jobsv1_pb2.GetDebugDumpDataRequest(
-                job_ids=job_ids)
-            response = backend_utils.invoke_skylet_with_retries(
-                lambda: SkyletClient(handle.get_grpc_channel()
-                                    ).get_debug_dump_data(request))
-            # Write files from gRPC response (raw bytes)
-            for file_entry in response.files:
-                file_path = os.path.join(dump_dir, file_entry.relative_path)
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, 'wb') as f:
-                    f.write(file_entry.content)
-            # Propagate controller-side errors
-            if errors is not None:
-                for err in response.errors:
-                    errors.append({
-                        'component': err.component,
-                        'resource': err.resource,
-                        'error': err.error,
-                    })
-            logger.debug(f'Collected {len(response.files)} files from '
-                         f'controller via gRPC')
-            return
-        except exceptions.SkyletMethodNotImplementedError:
-            use_legacy = True
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'gRPC debug dump failed, falling back to '
-                           f'CodeGen: {e}')
-            use_legacy = True
+    # Phase 1: Get manifest via CodeGen
+    manifest = None
+    try:
+        code = managed_job_utils.ManagedJobCodeGen.get_debug_dump_manifest(
+            job_ids)
+        backend = CloudVmRayBackend()
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                         code,
+                                                         stream_logs=False,
+                                                         require_outputs=True,
+                                                         separate_stderr=True)
+        subprocess_utils.handle_returncode(
+            returncode, code,
+            'Failed to collect debug dump manifest from controller.', stderr)
+        manifest = message_utils.decode_payload(stdout)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to collect controller debug manifest '
+                       f'via CodeGen: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'managed_jobs',
+                'resource': 'controller_manifest',
+                'error': str(e)
+            })
+        return
 
-    if use_legacy:
+    if manifest is None:
+        return
+
+    # Write inline data (small DB-derived JSON)
+    for item in manifest.get('inline_data', []):
         try:
-            code = managed_job_utils.ManagedJobCodeGen.get_debug_dump_data(
-                job_ids)
-            backend = CloudVmRayBackend()
-            returncode, stdout, stderr = backend.run_on_head(
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
-            subprocess_utils.handle_returncode(
-                returncode, code,
-                'Failed to collect debug dump data from controller.', stderr)
-            result = message_utils.decode_payload(stdout)
+            file_path = os.path.join(dump_dir, item['relative_path'])
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(item['content'])
         except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to collect controller debug data '
-                           f'via CodeGen: {e}')
+            logger.warning(f'Failed to write inline data '
+                           f'{item.get("relative_path")}: {e}')
+
+    # Phase 2: Rsync large log files from controller
+    file_path_entries = manifest.get('file_paths', [])
+    if file_path_entries:
+        try:
+            runners = handle.get_command_runners()
+            runner = runners[0]
+
+            def _rsync_file(file_info):
+                remote_path = file_info['remote_path']
+                relative_path = file_info['relative_path']
+                local_path = os.path.join(dump_dir, relative_path)
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                try:
+                    runner.rsync(
+                        source=remote_path,
+                        target=local_path,
+                        up=False,
+                        stream_logs=False,
+                    )
+                except exceptions.CommandError as e:
+                    if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+                        logger.debug(f'Remote file not found: {remote_path}')
+                    else:
+                        logger.warning(f'Failed to rsync {remote_path}: {e}')
+                        if errors is not None:
+                            errors.append({
+                                'component': 'managed_jobs',
+                                'resource': f'rsync/{relative_path}',
+                                'error': str(e)
+                            })
+
+            subprocess_utils.run_in_parallel(_rsync_file, file_path_entries)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(f'Failed to rsync controller debug files: {e}')
             if errors is not None:
                 errors.append({
                     'component': 'managed_jobs',
-                    'resource': 'controller_debug_data',
+                    'resource': 'controller_rsync',
                     'error': str(e)
                 })
-            return
 
-    if result is not None:
-        # Write files from CodeGen response (base64-encoded content)
-        for file_entry in result.get('files', []):
-            try:
-                file_path = os.path.join(dump_dir, file_entry['relative_path'])
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                content = base64.b64decode(file_entry['content'])
-                with open(file_path, 'wb') as f:
-                    f.write(content)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Failed to write file '
-                               f'{file_entry.get("relative_path")}: {e}')
-        # Propagate controller-side errors
-        if errors is not None:
-            for err in result.get('errors', []):
-                errors.append(err)
-        logger.debug(f'Collected {len(result.get("files", []))} files from '
-                     f'controller via CodeGen')
+    # Propagate controller-side errors
+    if errors is not None:
+        for err in manifest.get('errors', []):
+            errors.append(err)
+
+    logger.debug(
+        f'Collected {len(manifest.get("inline_data", []))} inline files '
+        f'and {len(file_path_entries)} rsynced files from controller')
 
 
 def _build_debug_dump(

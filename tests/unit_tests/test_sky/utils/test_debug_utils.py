@@ -1163,68 +1163,35 @@ class TestCollectControllerDebugData:
         assert len(errors) == 1
         assert 'controller_access' in errors[0]['resource']
 
-    @mock.patch('sky.backends.backend_utils.invoke_skylet_with_retries')
-    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
-    def test_grpc_writes_files(self, mock_accessible, mock_invoke, tmp_path):
-        """gRPC path should write files from response."""
-        from sky.schemas.generated import managed_jobsv1_pb2
-
-        mock_handle = mock.MagicMock()
-        mock_handle.is_grpc_enabled_with_flag = True
-        mock_accessible.return_value = mock_handle
-
-        response = managed_jobsv1_pb2.GetDebugDumpDataResponse(
-            files=[
-                managed_jobsv1_pb2.DebugDumpFileEntry(
-                    relative_path='managed_jobs/1/test.log',
-                    content=b'hello world',
-                ),
-            ],
-            errors=[
-                managed_jobsv1_pb2.DebugDumpError(
-                    component='managed_jobs',
-                    resource='1/events',
-                    error='No events found',
-                ),
-            ],
-        )
-        mock_invoke.return_value = response
-
-        errors: List[Dict[str, str]] = []
-        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
-
-        # File should be written
-        file_path = os.path.join(str(tmp_path), 'managed_jobs', '1', 'test.log')
-        assert os.path.exists(file_path)
-        with open(file_path, 'rb') as f:
-            assert f.read() == b'hello world'
-
-        # Errors from controller should be propagated
-        assert len(errors) == 1
-        assert errors[0]['error'] == 'No events found'
-
     @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
     @mock.patch('sky.backends.backend_utils.is_controller_accessible')
-    def test_codegen_fallback(self, mock_accessible, mock_backend_cls,
-                              tmp_path):
-        """CodeGen fallback should work when gRPC is not enabled."""
-        import base64
-
+    def test_manifest_and_rsync(self, mock_accessible, mock_backend_cls,
+                                tmp_path):
+        """Should write inline data and rsync file paths from manifest."""
         from sky.utils import message_utils
 
         mock_handle = mock.MagicMock()
-        mock_handle.is_grpc_enabled_with_flag = False
+        mock_runner = mock.MagicMock()
+        mock_handle.get_command_runners.return_value = [mock_runner]
         mock_accessible.return_value = mock_handle
 
-        # Simulate CodeGen response with base64-encoded content
-        result = {
-            'files': [{
+        # Simulate CodeGen manifest response
+        manifest = {
+            'inline_data': [{
                 'relative_path': 'managed_jobs/1/job_events.json',
-                'content': base64.b64encode(b'{"events": []}').decode('ascii'),
+                'content': '{"events": []}',
             }],
-            'errors': [],
+            'file_paths': [{
+                'remote_path': '/home/user/sky_logs/jobs_controller/1.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [{
+                'component': 'managed_jobs',
+                'resource': '1/events',
+                'error': 'No events found',
+            }],
         }
-        encoded = message_utils.encode_payload(result)
+        encoded = message_utils.encode_payload(manifest)
 
         mock_backend = mock.MagicMock()
         mock_backend.run_on_head.return_value = (0, encoded, '')
@@ -1233,50 +1200,95 @@ class TestCollectControllerDebugData:
         errors: List[Dict[str, str]] = []
         debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
 
-        # File should be written (base64-decoded)
-        file_path = os.path.join(str(tmp_path), 'managed_jobs', '1',
-                                 'job_events.json')
-        assert os.path.exists(file_path)
-        with open(file_path, 'rb') as f:
-            assert f.read() == b'{"events": []}'
-        assert not errors
+        # Inline data should be written
+        events_path = os.path.join(str(tmp_path), 'managed_jobs', '1',
+                                   'job_events.json')
+        assert os.path.exists(events_path)
+        with open(events_path, 'r', encoding='utf-8') as f:
+            assert f.read() == '{"events": []}'
 
-    @mock.patch('sky.backends.backend_utils.invoke_skylet_with_retries')
+        # Rsync should be called for file_paths
+        mock_runner.rsync.assert_called_once()
+        call_kwargs = mock_runner.rsync.call_args
+        assert call_kwargs[1]['source'] == (
+            '/home/user/sky_logs/jobs_controller/1.log')
+        assert call_kwargs[1]['up'] is False
+
+        # Controller-side errors should be propagated
+        assert len(errors) == 1
+        assert errors[0]['error'] == 'No events found'
+
     @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
     @mock.patch('sky.backends.backend_utils.is_controller_accessible')
-    def test_grpc_fallback_to_codegen_on_not_implemented(
-            self, mock_accessible, mock_backend_cls, mock_invoke, tmp_path):
-        """Should fall back to CodeGen when gRPC method is not implemented."""
-        import base64
-
+    def test_rsync_file_not_found_graceful(self, mock_accessible,
+                                           mock_backend_cls, tmp_path):
+        """Should handle RSYNC_FILE_NOT_FOUND gracefully."""
         from sky import exceptions as sky_exceptions
         from sky.utils import message_utils
 
         mock_handle = mock.MagicMock()
-        mock_handle.is_grpc_enabled_with_flag = True
+        mock_runner = mock.MagicMock()
+        mock_runner.rsync.side_effect = sky_exceptions.CommandError(
+            returncode=sky_exceptions.RSYNC_FILE_NOT_FOUND_CODE,
+            command='rsync ...',
+            error_msg='file not found',
+            detailed_reason=None)
+        mock_handle.get_command_runners.return_value = [mock_runner]
         mock_accessible.return_value = mock_handle
 
-        # gRPC raises SkyletMethodNotImplementedError
-        mock_invoke.side_effect = (
-            sky_exceptions.SkyletMethodNotImplementedError('GetDebugDumpData'))
-
-        # CodeGen should succeed
-        result = {
-            'files': [{
-                'relative_path': 'managed_jobs/1/test.log',
-                'content': base64.b64encode(b'fallback').decode('ascii'),
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/missing/file.log',
+                'relative_path': 'managed_jobs/1/1.log',
             }],
             'errors': [],
         }
         mock_backend = mock.MagicMock()
         mock_backend.run_on_head.return_value = (
-            0, message_utils.encode_payload(result), '')
+            0, message_utils.encode_payload(manifest), '')
         mock_backend_cls.return_value = mock_backend
 
         errors: List[Dict[str, str]] = []
         debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
 
-        file_path = os.path.join(str(tmp_path), 'managed_jobs', '1', 'test.log')
-        assert os.path.exists(file_path)
-        with open(file_path, 'rb') as f:
-            assert f.read() == b'fallback'
+        # Should NOT record an error for file-not-found
+        assert not errors
+
+    @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
+    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    def test_rsync_error_recorded(self, mock_accessible, mock_backend_cls,
+                                  tmp_path):
+        """Should record errors for non-file-not-found rsync failures."""
+        from sky import exceptions as sky_exceptions
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        mock_runner.rsync.side_effect = sky_exceptions.CommandError(
+            returncode=1,
+            command='rsync ...',
+            error_msg='connection refused',
+            detailed_reason=None)
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [{
+                'remote_path': '/some/file.log',
+                'relative_path': 'managed_jobs/1/1.log',
+            }],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # Should record the rsync error
+        assert len(errors) == 1
+        assert 'rsync/' in errors[0]['resource']
