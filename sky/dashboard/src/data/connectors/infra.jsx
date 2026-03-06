@@ -415,39 +415,41 @@ export async function getWorkspaceContexts() {
     const allContextsAcrossWorkspaces = [];
     const contextWorkspaceMap = {};
 
-    Object.entries(workspacesData).forEach(([workspaceName, workspaceConfig]) => {
-      const expandedClouds = batchResult[workspaceName] || [];
-      workspaceInfraData[workspaceName] = {
-        config: workspaceConfig,
-        clouds: expandedClouds,
-        contexts: [],
-      };
+    Object.entries(workspacesData).forEach(
+      ([workspaceName, workspaceConfig]) => {
+        const expandedClouds = batchResult[workspaceName] || [];
+        workspaceInfraData[workspaceName] = {
+          config: workspaceConfig,
+          clouds: expandedClouds,
+          contexts: [],
+        };
 
-      expandedClouds.forEach((infraItem) => {
-        if (infraItem.toLowerCase().startsWith('kubernetes/')) {
-          const context = infraItem.replace(/^kubernetes\//i, '');
-          allContextsAcrossWorkspaces.push(context);
-          if (!contextWorkspaceMap[context]) {
-            contextWorkspaceMap[context] = [];
+        expandedClouds.forEach((infraItem) => {
+          if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+            const context = infraItem.replace(/^kubernetes\//i, '');
+            allContextsAcrossWorkspaces.push(context);
+            if (!contextWorkspaceMap[context]) {
+              contextWorkspaceMap[context] = [];
+            }
+            if (!contextWorkspaceMap[context].includes(workspaceName)) {
+              contextWorkspaceMap[context].push(workspaceName);
+            }
+            workspaceInfraData[workspaceName].contexts.push(context);
+          } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+            const poolName = infraItem.replace(/^ssh\//i, '');
+            const sshContextName = `ssh-${poolName}`;
+            allContextsAcrossWorkspaces.push(sshContextName);
+            if (!contextWorkspaceMap[sshContextName]) {
+              contextWorkspaceMap[sshContextName] = [];
+            }
+            if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
+              contextWorkspaceMap[sshContextName].push(workspaceName);
+            }
+            workspaceInfraData[workspaceName].contexts.push(sshContextName);
           }
-          if (!contextWorkspaceMap[context].includes(workspaceName)) {
-            contextWorkspaceMap[context].push(workspaceName);
-          }
-          workspaceInfraData[workspaceName].contexts.push(context);
-        } else if (infraItem.toLowerCase().startsWith('ssh/')) {
-          const poolName = infraItem.replace(/^ssh\//i, '');
-          const sshContextName = `ssh-${poolName}`;
-          allContextsAcrossWorkspaces.push(sshContextName);
-          if (!contextWorkspaceMap[sshContextName]) {
-            contextWorkspaceMap[sshContextName] = [];
-          }
-          if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
-            contextWorkspaceMap[sshContextName].push(workspaceName);
-          }
-          workspaceInfraData[workspaceName].contexts.push(sshContextName);
-        }
-      });
-    });
+        });
+      }
+    );
 
     return {
       workspaces: workspaceInfraData,
