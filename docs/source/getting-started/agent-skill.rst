@@ -45,7 +45,7 @@ Installation
   when it decides to use SkyPilot to do something. You can also ask it to do this immediately
   by telling it "Bootstrap skypilot".
 
-What You Can Do
+What you can do
 ---------------
 
 .. list-table::

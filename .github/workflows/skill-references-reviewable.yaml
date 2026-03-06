@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[all]"
       - name: Generate references
-        run: python skills/skypilot/scripts/generate_references.py
+        run: python agent/scripts/generate_references.py
       - name: Check for diff
         run: |
           if ! git diff --exit-code skills/skypilot/skills/skypilot/references/; then
