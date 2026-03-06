@@ -107,10 +107,10 @@ logger = sky_logging.init_logger(__name__)
 hinted_for_server_install_version_mismatch = False
 _upgrade_hint_shown = False
 # Cached from the latest health check response. Used to determine whether
-# to include end_user in usage reports and request env vars.
+# to include client user hash in usage reports and request env vars.
 _basic_auth_enabled: Optional[bool] = None
-# Cached end-user hash (machine-local identity), computed once.
-_end_user_hash: Optional[str] = None
+# Cached client user hash (machine-local identity), computed once.
+_client_user_hash: Optional[str] = None
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -464,13 +464,13 @@ def is_basic_auth_enabled() -> bool:
     return _basic_auth_enabled is True
 
 
-def end_user_hash() -> Optional[str]:
-    """Returns the cached end-user hash (machine-local identity).
+def client_user_hash() -> Optional[str]:
+    """Returns the cached client user hash (machine-local identity).
 
     Only non-None when basic auth is enabled at the API server level.
     Updated as a side effect of get_api_server_status().
     """
-    return _end_user_hash
+    return _client_user_hash
 
 
 def _handle_non_200_server_status(
@@ -557,13 +557,13 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         basic_auth_enabled = result.get('basic_auth_enabled')
         latest_version = result.get('latest_version')
         # Cache basic_auth_enabled for use by is_basic_auth_enabled()
-        # and set end_user on the client-side usage singleton.
-        global _basic_auth_enabled, _end_user_hash
+        # and set client user hash on the client-side usage singleton.
+        global _basic_auth_enabled, _client_user_hash
         _basic_auth_enabled = basic_auth_enabled
         if basic_auth_enabled:
-            if _end_user_hash is None:
-                _end_user_hash = common_utils.generate_user_hash()
-            usage_lib.messages.usage.end_user = _end_user_hash
+            if _client_user_hash is None:
+                _client_user_hash = common_utils.generate_user_hash()
+            usage_lib.messages.usage.client_user_hash = _client_user_hash
         server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                     api_version=api_version,
                                     version=version,

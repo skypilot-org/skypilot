@@ -83,10 +83,10 @@ class UsageMessageToReport(MessageToReport):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
         self.user: str = common_utils.get_user_hash()
-        # The end-user hash for per-user aggregation. Only set when basic
+        # The client user hash for per-user aggregation. Only set when basic
         # auth is enabled at the API server level.
-        self.end_user: Optional[str] = os.environ.get(
-            skylet_constants.END_USER_ID_ENV_VAR)
+        self.client_user_hash: Optional[str] = os.environ.get(
+            skylet_constants.CLIENT_USER_HASH_ENV_VAR)
         self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
         self.sky_commit: str = sky.__commit__
