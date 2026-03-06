@@ -1847,11 +1847,10 @@ async def get_pool_submit_info_async(
         return info[0], info[1]
 
 
-@_init_db
 def set_api_access_token_id(job_id: int, token_id: str) -> None:
     """Store the API access token ID for a managed job."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         session.execute(
             sqlalchemy.update(job_info_table).where(
                 job_info_table.c.spot_job_id == job_id).values(
@@ -1859,18 +1858,16 @@ def set_api_access_token_id(job_id: int, token_id: str) -> None:
         session.commit()
 
 
-@_init_db
 def get_api_access_token_id(job_id: int) -> Optional[str]:
     """Get the API access token ID for a managed job."""
-    assert _SQLALCHEMY_ENGINE is not None
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         result = session.execute(
             sqlalchemy.select(job_info_table.c.api_access_token_id).where(
                 job_info_table.c.spot_job_id == job_id)).fetchone()
         if result is None:
             return None
         return result[0]
-
 
 
 async def scheduler_set_launching_async(job_id: int):
