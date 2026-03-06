@@ -166,6 +166,11 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('cloud', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('region', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
+    # Whether this job is a batch coordinator (ds.map()).  Batch jobs are
+    # serialized one-at-a-time per pool by the scheduler.
+    sqlalchemy.Column('is_batch',
+                      sqlalchemy.Boolean,
+                      server_default=sqlalchemy.sql.expression.false()),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -812,7 +817,8 @@ def set_job_info_without_job_id(name: str,
                                 pool: Optional[str],
                                 pool_hash: Optional[str],
                                 user_hash: Optional[str],
-                                execution: Optional[str] = None) -> int:
+                                execution: Optional[str] = None,
+                                is_batch: bool = False) -> int:
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -833,6 +839,7 @@ def set_job_info_without_job_id(name: str,
             pool_hash=pool_hash,
             user_hash=user_hash,
             execution=execution,
+            is_batch=is_batch,
         )
 
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2383,15 +2390,47 @@ async def get_waiting_job_async(
     """
     assert _SQLALCHEMY_ENGINE_ASYNC is not None
     async with sql_async.AsyncSession(_SQLALCHEMY_ENGINE_ASYNC) as session:
-        # Select the highest priority waiting job for update (locks the row)
+        # Subquery: pools that already have an active *batch* job.
+        # Batch coordinator jobs (ds.map()) are serialized one-at-a-time
+        # per pool, so we skip WAITING batch jobs whose pool already has
+        # another active batch job.  Regular (non-batch) pool jobs are
+        # unaffected — they can run concurrently on the same pool.
+        active_batch_states = [
+            ManagedJobScheduleState.LAUNCHING.value,
+            ManagedJobScheduleState.ALIVE.value,
+            ManagedJobScheduleState.ALIVE_WAITING.value,
+            ManagedJobScheduleState.ALIVE_BACKOFF.value,
+        ]
+        busy_batch_pools_subq = sqlalchemy.select(
+            job_info_table.c.pool,
+        ).where(
+            sqlalchemy.and_(
+                job_info_table.c.pool.isnot(None),
+                job_info_table.c.is_batch.is_(True),
+                job_info_table.c.schedule_state.in_(active_batch_states),
+            )
+        ).correlate(None).scalar_subquery()
+
+        # Select the highest priority waiting job for update (locks the row).
+        # Batch jobs are skipped when their pool already has an active batch
+        # job; non-batch jobs (including regular pool jobs) are always eligible.
         select_query = sqlalchemy.select(
             job_info_table.c.spot_job_id,
             job_info_table.c.schedule_state,
             job_info_table.c.pool,
         ).where(
-            job_info_table.c.schedule_state.in_([
-                ManagedJobScheduleState.WAITING.value,
-            ])).order_by(
+            sqlalchemy.and_(
+                job_info_table.c.schedule_state.in_([
+                    ManagedJobScheduleState.WAITING.value,
+                ]),
+                sqlalchemy.or_(
+                    # Non-batch jobs: always eligible.
+                    job_info_table.c.is_batch.isnot(True),
+                    # Batch jobs: only if pool has no active batch job.
+                    ~job_info_table.c.pool.in_(busy_batch_pools_subq),
+                ),
+            )
+        ).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
             ).limit(1).with_for_update()
@@ -2917,7 +2956,8 @@ def set_job_info(job_id: int,
                  pool: Optional[str],
                  pool_hash: Optional[str],
                  user_hash: Optional[str] = None,
-                 execution: Optional[str] = None):
+                 execution: Optional[str] = None,
+                 is_batch: bool = False):
     assert _SQLALCHEMY_ENGINE is not None
     with orm.Session(_SQLALCHEMY_ENGINE) as session:
         if (_SQLALCHEMY_ENGINE.dialect.name ==
@@ -2938,6 +2978,7 @@ def set_job_info(job_id: int,
             pool_hash=pool_hash,
             user_hash=user_hash,
             execution=execution,
+            is_batch=is_batch,
         )
         session.execute(insert_stmt)
         session.commit()

@@ -292,6 +292,9 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # single jobs
         execution_mode = (dag.execution.value
                           if dag.execution else DEFAULT_EXECUTION.value)
+        # Detect batch coordinator jobs (ds.map()) via task metadata.
+        is_batch = any(
+            t.metadata.get('batch_coordinator', False) for t in dag.tasks)
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -301,7 +304,8 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
                 pool=pool,
                 pool_hash=pool_hash,
                 user_hash=common_utils.get_user_hash(),
-                execution=execution_mode))
+                execution=execution_mode,
+                is_batch=is_batch))
         for task_id, task in enumerate(dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
                 task, is_managed_job=True)
