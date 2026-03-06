@@ -2239,7 +2239,11 @@ def test_kubernetes_container_status_unknown_status_refresh():
     test = smoke_tests_utils.Test(
         'kubernetes_container_status_unknown_status_refresh',
         [
-            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
+            # First, launch the cluster with an idle task so provisioning
+            # completes fully (ray, skylet started) before pods get evicted.
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 -- "echo cluster ready"',
+            # Now trigger eviction via exec --detach-run on the running cluster.
+            f'sky exec {name} --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
             # Poll sky status --refresh, fail fast if error found.
             # Before the fix this logged: "Failed to query ... [TypeError]..."
             (f'for i in $(seq 1 20); do '
