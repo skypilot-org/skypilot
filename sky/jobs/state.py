@@ -1898,7 +1898,6 @@ def get_api_access_token_id(job_id: int) -> Optional[str]:
         return result[0]
 
 
-
 async def scheduler_set_launching_async(job_id: int):
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
