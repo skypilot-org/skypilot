@@ -125,7 +125,6 @@ class BatchCoordinator:
 
             self._discover_workers()
             self._shutdown_stale_workers()
-            self._update_resources_str()
             self._dispatch_all()
             self._merge_results()
             logger.info('Batch job completed successfully.')
@@ -277,15 +276,6 @@ class BatchCoordinator:
 
         self._workers = workers
         logger.info(f'Discovered {len(workers)} ready workers')
-
-    def _update_resources_str(self) -> None:
-        """Update the REQUESTED column with pool and worker info."""
-        resources_str = self.pool_name
-        try:
-            managed_job_state.set_batch_resources(self._managed_job_id,
-                                                  resources_str)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to update resources string: {e}')
 
     def _fetch_pool_status(self) -> Optional[Dict[str, Any]]:
         """Fetch pool status via the SDK.

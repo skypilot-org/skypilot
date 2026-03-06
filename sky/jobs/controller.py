@@ -623,7 +623,7 @@ class JobController:
                 task_id,
                 self._backend.run_timestamp,
                 submitted_at,
-                resources_str='BatchCoordinator',
+                resources_str='-',
                 specs={
                     'max_restarts_on_errors': 0,
                     'recover_on_exit_codes': []
