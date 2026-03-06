@@ -2213,27 +2213,27 @@ async def _get_cluster_and_validate(
     cloud_type: Type[clouds.Cloud],
 ) -> 'backends.CloudVmRayResourceHandle':
     """Fetch cluster status and validate it's UP and correct cloud type."""
-    # Use a lightweight database lookup instead of the full core.status() call.
-    # core.status() calls backend_utils.get_clusters() which does workspace
-    # lookups, resource string formatting, and other overhead unnecessary for
-    # simple cluster validation. With many concurrent WebSocket connections
-    # (e.g., 20 parallel SSH sessions), the overhead of core.status() can cause
-    # WebSocket handshake timeouts.
-    # TODO(aylei): this will be called with server user, which has permission to
-    # all workspaces, this will break workspace isolation. It is ok for now, as
-    # users with limited access will not get the ssh config for the clusters in
-    # non-accessible workspaces.
+    # Run core.status in another thread to avoid blocking the event loop.
+    # Use summary_response=True to skip expensive DB columns (owner, metadata,
+    # last_creation_yaml) and cluster event queries that are unnecessary for
+    # simple cluster validation. This keeps per-call overhead low enough to
+    # handle 20+ concurrent WebSocket SSH connections without timeout.
+    # TODO(aylei): core.status() will be called with server user, which has
+    # permission to all workspaces, this will break workspace isolation.
+    # It is ok for now, as users with limited access will not get the ssh config
+    # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
-        cluster_record = await context_utils.to_thread_with_executor(
+        cluster_records = await context_utils.to_thread_with_executor(
             thread_pool_executor,
-            global_user_state.get_cluster_from_name,
+            core.status,
             cluster_name,
-            include_user_info=False,
+            all_users=True,
             summary_response=True)
 
-    if cluster_record is None:
+    if not cluster_records:
         raise fastapi.HTTPException(status_code=404,
                                     detail=f'Cluster {cluster_name} not found')
+    cluster_record = cluster_records[0]
 
     if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
                                         status_lib.ClusterStatus.UP,
