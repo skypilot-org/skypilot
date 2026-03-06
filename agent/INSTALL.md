@@ -16,7 +16,7 @@ Determine which agent platform you are running as. Use the first match:
 Run the following command:
 
 ```bash
-claude plugin marketplace add skypilot-org/skypilot && claude plugin install skypilot-skills@skypilot
+claude plugin marketplace add skypilot-org/skypilot#skill-doc && claude plugin install skypilot-skills@skypilot
 ```
 
 **Restart Claude Code** to load the skill.
@@ -27,7 +27,7 @@ claude plugin marketplace add skypilot-org/skypilot && claude plugin install sky
 
    ```bash
    mkdir -p ~/.agent
-   git clone https://github.com/skypilot-org/skypilot.git ~/.agent/.skypilot
+   git clone https://github.com/skypilot-org/skypilot.git --branch skill-doc ~/.agent/.skypilot
    ```
 
 2. **Create the skills symlink:**
