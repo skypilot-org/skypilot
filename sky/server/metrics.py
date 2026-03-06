@@ -102,6 +102,17 @@ def _is_streaming_api(path: str) -> bool:
     return path.endswith('/logs') or path.endswith('/api/stream')
 
 
+def _get_user_label(request: fastapi.Request) -> str:
+    """Extract user label from request for metrics.
+
+    Returns the authenticated user's name if available, otherwise 'anonymous'.
+    """
+    auth_user = getattr(request.state, 'auth_user', None)
+    if auth_user is not None and auth_user.name:
+        return auth_user.name
+    return 'anonymous'
+
+
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to collect Prometheus metrics for HTTP requests."""
 
@@ -125,6 +136,10 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         finally:
             metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
                 path=path, method=method, status=status_code_group).inc()
+            # Record per-user metrics
+            user = _get_user_label(request)
+            metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
+                user=user, method=method, status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
                 metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(
