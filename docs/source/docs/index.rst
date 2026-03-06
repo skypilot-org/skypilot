@@ -39,7 +39,7 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
     :align: center
     :class: only-dark
 
-.. grid:: 1 1 2 2
+.. grid:: 1 1 1 1
     :gutter: 3
 
     .. grid-item-card::
