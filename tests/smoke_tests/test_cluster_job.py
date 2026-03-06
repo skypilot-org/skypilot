@@ -2861,6 +2861,51 @@ def test_kubernetes_recovery():
 
 
 @pytest.mark.kubernetes
+def test_kubernetes_sigterm_keepalive():
+    """Test that worker pods survive SIGTERM (node drain) via keep-alive fix."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    worker1 = f'{name_on_cloud}-worker1'
+    verify_two_pods_running = (
+        f'count=$(kubectl get pod -l ray-cluster-name={name_on_cloud} '
+        '--no-headers 2>/dev/null | grep -c Running || echo 0); '
+        'if [ "$count" -ne 2 ]; then echo "Expected 2 Running pods, got $count"; exit 1; fi; '
+        'echo "Both pods Running"')
+    verify_worker_running = (
+        f'status=$(kubectl get pod {worker1} -o jsonpath="{{.status.phase}}"); '
+        'echo "Worker pod status: $status"; '
+        'if [ "$status" != "Running" ]; then echo "ERROR: expected Running, got $status"; exit 1; fi'
+    )
+    test = smoke_tests_utils.Test(
+        'kubernetes_sigterm_keepalive',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            (f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ '
+             f'--num-nodes 2 -- "echo ready"'),
+            f'sky logs {name} --status 1',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                verify_two_pods_running,
+            ),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl exec {worker1} -- kill -TERM -1',
+            ),
+            'sleep 5',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                verify_worker_running,
+            ),
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
 def test_kubernetes_service_cleanup_on_down():
     """Test that Kubernetes services are cleaned up when running sky down
     after pods have been externally deleted."""
