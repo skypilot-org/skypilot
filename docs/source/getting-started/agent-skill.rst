@@ -35,7 +35,7 @@ Installation
 
     .. code-block:: plaintext
 
-      Fetch and follow https://github.com/skypilot-org/skypilot/blob/master/agent/INSTALL.md to install the skypilot skill
+      Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the skypilot skill
 
     You may need to restart the agent to reload the skill after installation.
 
