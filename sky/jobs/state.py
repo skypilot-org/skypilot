@@ -522,6 +522,9 @@ class ManagedJobStatus(enum.Enum):
     # The start_at timestamp of the managed job in the 'spot' table will be set
     # to the time when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    # WINDING_DOWN: All batches are done; the coordinator is waiting for
+    # worker threads to finish and merging per-batch output files.
+    WINDING_DOWN = 'WINDING_DOWN'
     # RECOVERING: The cluster is preempted, and the controller process is
     # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
@@ -593,6 +596,7 @@ class ManagedJobStatus(enum.Enum):
             cls.PENDING,
             cls.STARTING,
             cls.RUNNING,
+            cls.WINDING_DOWN,
             cls.RECOVERING,
         ]
 
@@ -621,6 +625,8 @@ class ManagedJobStatus(enum.Enum):
                 cls.FAILED_PRECHECKS,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE:
                 cls.FAILED_NO_RESOURCE,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN:
+                cls.WINDING_DOWN,
         }
 
         if protobuf_value not in protobuf_to_enum:
@@ -658,6 +664,8 @@ class ManagedJobStatus(enum.Enum):
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_PRECHECKS,
             ManagedJobStatus.FAILED_NO_RESOURCE:
                 managed_jobsv1_pb2.MANAGED_JOB_STATUS_FAILED_NO_RESOURCE,
+            ManagedJobStatus.WINDING_DOWN:
+                managed_jobsv1_pb2.MANAGED_JOB_STATUS_WINDING_DOWN,
         }
 
         if self not in enum_to_protobuf:
@@ -670,6 +678,7 @@ _SPOT_STATUS_TO_COLOR = {
     ManagedJobStatus.PENDING: colorama.Fore.BLUE,
     ManagedJobStatus.STARTING: colorama.Fore.BLUE,
     ManagedJobStatus.RUNNING: colorama.Fore.GREEN,
+    ManagedJobStatus.WINDING_DOWN: colorama.Fore.CYAN,
     ManagedJobStatus.RECOVERING: colorama.Fore.CYAN,
     ManagedJobStatus.SUCCEEDED: colorama.Fore.GREEN,
     ManagedJobStatus.FAILED: colorama.Fore.RED,
@@ -2390,15 +2399,12 @@ async def get_waiting_job_async(
             ManagedJobScheduleState.ALIVE_WAITING.value,
             ManagedJobScheduleState.ALIVE_BACKOFF.value,
         ]
-        busy_batch_pools_subq = sqlalchemy.select(
-            job_info_table.c.pool,
-        ).where(
+        busy_batch_pools_subq = sqlalchemy.select(job_info_table.c.pool,).where(
             sqlalchemy.and_(
                 job_info_table.c.pool.isnot(None),
                 job_info_table.c.is_batch.is_(True),
                 job_info_table.c.schedule_state.in_(active_batch_states),
-            )
-        ).correlate(None).scalar_subquery()
+            )).correlate(None).scalar_subquery()
 
         # Select the highest priority waiting job for update (locks the row).
         # Batch jobs are skipped when their pool already has an active batch
@@ -2418,8 +2424,7 @@ async def get_waiting_job_async(
                     # Batch jobs: only if pool has no active batch job.
                     ~job_info_table.c.pool.in_(busy_batch_pools_subq),
                 ),
-            )
-        ).order_by(
+            )).order_by(
                 job_info_table.c.priority.desc(),
                 job_info_table.c.spot_job_id.asc(),
             ).limit(1).with_for_update()
@@ -2692,6 +2697,31 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
     await callback_func('RECOVERED')
 
 
+@_init_db
+def set_winding_down(job_id: int, task_id: int) -> None:
+    """Transition task from RUNNING to WINDING_DOWN (sync).
+
+    Called by the batch coordinator (which runs in a thread) before
+    merging per-batch output files.
+    """
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        result = session.execute(
+            sqlalchemy.update(spot_table).where(
+                sqlalchemy.and_(
+                    spot_table.c.spot_job_id == job_id,
+                    spot_table.c.task_id == task_id,
+                    spot_table.c.status == ManagedJobStatus.RUNNING.value,
+                    spot_table.c.end_at.is_(None),
+                )).values(
+                    {spot_table.c.status: ManagedJobStatus.WINDING_DOWN.value}))
+        session.commit()
+        if result.rowcount != 1:
+            logger.warning(f'set_winding_down: expected 1 row updated, '
+                           f'got {result.rowcount} for job_id={job_id}, '
+                           f'task_id={task_id}')
+
+
 @_init_db_async
 async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                               callback_func: AsyncCallbackType):
@@ -2705,7 +2735,10 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
                 sqlalchemy.and_(
                     spot_table.c.spot_job_id == job_id,
                     spot_table.c.task_id == task_id,
-                    spot_table.c.status == ManagedJobStatus.RUNNING.value,
+                    spot_table.c.status.in_([
+                        ManagedJobStatus.RUNNING.value,
+                        ManagedJobStatus.WINDING_DOWN.value,
+                    ]),
                     spot_table.c.end_at.is_(None),
                 )).values({
                     spot_table.c.status: ManagedJobStatus.SUCCEEDED.value,

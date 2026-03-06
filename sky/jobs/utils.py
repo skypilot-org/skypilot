@@ -2039,6 +2039,10 @@ def format_job_table(
         total = t.get('batch_total_batches')
         if not total:
             return '-'
+        status = t.get('status')
+        if (isinstance(status, managed_job_state.ManagedJobStatus) and
+                status == managed_job_state.ManagedJobStatus.WINDING_DOWN):
+            return 'Winding down'
         completed = t.get('batch_completed_batches') or 0
         pct = int(completed * 100 / total)
         return f'{pct}% {completed}/{total}'

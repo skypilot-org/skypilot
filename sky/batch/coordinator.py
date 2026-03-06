@@ -547,6 +547,9 @@ class BatchCoordinator:
                                                        batch_idx, 'COMPLETED')
                     with self._completed_lock:
                         self.completed_count += 1
+                        if self.completed_count == len(self.batches):
+                            managed_job_state.set_winding_down(
+                                self._managed_job_id, task_id=0)
                     logger.info(
                         f'Batch {batch_idx} completed on {cluster_name} '
                         f'({self.completed_count}/{len(self.batches)})')

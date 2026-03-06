@@ -718,7 +718,7 @@ export function ManagedJobsTable({
     return data.some(
       (job) =>
         job.batch_total_batches != null &&
-        job.status === 'RUNNING' &&
+        (job.status === 'RUNNING' || job.status === 'WINDING_DOWN') &&
         (job.batch_completed_batches || 0) < job.batch_total_batches
     );
   }, [data]);
