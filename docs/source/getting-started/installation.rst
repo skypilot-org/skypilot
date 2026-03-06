@@ -132,6 +132,12 @@ SkyPilot supports installation with ``uv`` or ``pip``.
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
+.. tip::
+
+   Using an AI coding agent (Claude Code, Cursor, etc.)? After installing
+   SkyPilot, install the :ref:`SkyPilot Skill <agent-skill>` to give your
+   agent full SkyPilot expertise.
+
 Run locally or connect to a remote API server
 ---------------------------------------------
 

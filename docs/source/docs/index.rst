@@ -39,15 +39,21 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
     :align: center
     :class: only-dark
 
-.. grid:: 1 1 1 1
+.. grid:: 1 1 2 2
     :gutter: 3
-
 
     .. grid-item-card::
         :link: https://demo.skypilot.co/dashboard/
         :text-align: center
 
         🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
+
+    .. grid-item-card::
+        :link: agent-skill
+        :link-type: ref
+        :text-align: center
+
+        Using an AI coding agent? Install the SkyPilot Skill
 
 Why SkyPilot
 ----------------------
@@ -282,6 +288,7 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
+   Use SkyPilot with AI Agents <../getting-started/agent-skill>
    ../examples/index
    ../sky-computing
 
@@ -378,4 +385,3 @@ Read the research:
    ../reference/config
    SkyPilot Internals <../reference/architecture/internals>
    ../developers/index
-
