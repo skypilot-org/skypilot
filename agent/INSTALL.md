@@ -15,6 +15,8 @@ claude plugin marketplace add skypilot-org/skypilot#skill-doc
 claude plugin install skypilot@skypilot
 ```
 
+The installation is successful as long as you don't see any error.
+
 ### Generic
 
 1. Clone the repository:
