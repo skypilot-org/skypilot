@@ -43,6 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
         { selector: '.toctree-l1 > a', text: 'SkyPilot Recipes' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot Skill' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

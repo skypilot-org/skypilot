@@ -1,5 +1,5 @@
 <!-- AUTO-GENERATED from sky/client/sdk.py -->
-<!-- Run: python skills/skypilot/scripts/generate_references.py -->
+<!-- Run: python agent/scripts/generate_references.py -->
 
 # SkyPilot Python SDK Reference
 
