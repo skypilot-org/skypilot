@@ -41,7 +41,7 @@ You should see a symlink pointing to the skypilot skills directory.
 
 ## Reload
 
-If `skypilot` skill is not available after successful installation, you need to (or ask user to) restart the agent to reload the skills.
+If `skypilot` skill is not available after successful installation, you need to (or ask user to) restart the agent to reload the skills. Hint user to ask "Bootstrap skypilot" after they are back.
 
 ## Updating
 
