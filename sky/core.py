@@ -1496,11 +1496,11 @@ def enabled_clouds_batch(workspaces: List[str],
             common_utils.get_current_user().id).keys())
     allowed = [ws for ws in workspaces if ws in accessible]
 
-    def _get(ws: str) -> List[str]:
-        return enabled_clouds(workspace=ws, expand=expand)
-
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {ws: executor.submit(_get, ws) for ws in allowed}
+        futures = {
+            ws: executor.submit(enabled_clouds, workspace=ws, expand=expand)
+            for ws in allowed
+        }
         return {ws: future.result() for ws, future in futures.items()}
 
 

@@ -11,7 +11,7 @@ import { buildContextStatsKeyFromCloud } from '@/utils/infraUtils';
  * Used for progressive loading - display cloud rows immediately, then overlay counts.
  */
 export async function getEnabledCloudsList() {
-  const { getWorkspaces, getEnabledClouds } = await import(
+  const { getWorkspaces, getEnabledCloudsBatch } = await import(
     '@/data/connectors/workspaces'
   );
 
@@ -26,31 +26,22 @@ export async function getEnabledCloudsList() {
       return { clouds: [], totalClouds: CLOUDS_LIST.length, enabledClouds: 0 };
     }
 
-    // Fetch enabled clouds for each workspace and aggregate
-    const enabledCloudsSet = new Set();
+    // Fetch enabled clouds for all workspaces in a single batch call
+    const batchResult = await dashboardCache.get(getEnabledCloudsBatch, [
+      workspaceNames,
+      false,
+    ]);
 
-    await Promise.all(
-      workspaceNames.map(async (workspaceName) => {
-        try {
-          const workspaceClouds = await dashboardCache.get(getEnabledClouds, [
-            workspaceName,
-            false,
-          ]);
-          if (Array.isArray(workspaceClouds)) {
-            workspaceClouds.forEach((cloud) => {
-              if (cloud) {
-                enabledCloudsSet.add(cloud.toLowerCase());
-              }
-            });
+    const enabledCloudsSet = new Set();
+    Object.values(batchResult || {}).forEach((workspaceClouds) => {
+      if (Array.isArray(workspaceClouds)) {
+        workspaceClouds.forEach((cloud) => {
+          if (cloud) {
+            enabledCloudsSet.add(cloud.toLowerCase());
           }
-        } catch (error) {
-          console.error(
-            `Error fetching enabled clouds for workspace ${workspaceName}:`,
-            error
-          );
-        }
-      })
-    );
+        });
+      }
+    });
 
     // Build cloud objects with just name and enabled status (no counts)
     const enabledCloudsList = Array.from(enabledCloudsSet);
@@ -411,68 +402,52 @@ export async function getWorkspaceContexts() {
       };
     }
 
-    // Step 2: For each workspace, fetch enabled clouds with expanded infrastructure
-    const { getEnabledClouds } = await import('@/data/connectors/workspaces');
+    // Step 2: Fetch expanded clouds for all workspaces in a single batch call
+    const { getEnabledCloudsBatch } = await import(
+      '@/data/connectors/workspaces'
+    );
+    const workspaceNames = Object.keys(workspacesData);
+    const batchResult = await dashboardCache
+      .get(getEnabledCloudsBatch, [workspaceNames, true])
+      .catch(() => ({}));
+
     const workspaceInfraData = {};
     const allContextsAcrossWorkspaces = [];
     const contextWorkspaceMap = {};
 
-    await Promise.allSettled(
-      Object.entries(workspacesData).map(
-        async ([workspaceName, workspaceConfig]) => {
-          try {
-            // Get enabled clouds with expanded infrastructure for this workspace
-            const expandedClouds = await dashboardCache.get(getEnabledClouds, [
-              workspaceName,
-              true,
-            ]);
+    Object.entries(workspacesData).forEach(([workspaceName, workspaceConfig]) => {
+      const expandedClouds = batchResult[workspaceName] || [];
+      workspaceInfraData[workspaceName] = {
+        config: workspaceConfig,
+        clouds: expandedClouds,
+        contexts: [],
+      };
 
-            workspaceInfraData[workspaceName] = {
-              config: workspaceConfig,
-              clouds: expandedClouds,
-              contexts: [],
-            };
-
-            // Extract contexts from expanded cloud data
-            if (expandedClouds && Array.isArray(expandedClouds)) {
-              expandedClouds.forEach((infraItem) => {
-                if (infraItem.toLowerCase().startsWith('kubernetes/')) {
-                  const context = infraItem.replace(/^kubernetes\//i, '');
-                  allContextsAcrossWorkspaces.push(context);
-                  if (!contextWorkspaceMap[context]) {
-                    contextWorkspaceMap[context] = [];
-                  }
-                  if (!contextWorkspaceMap[context].includes(workspaceName)) {
-                    contextWorkspaceMap[context].push(workspaceName);
-                  }
-                  workspaceInfraData[workspaceName].contexts.push(context);
-                } else if (infraItem.toLowerCase().startsWith('ssh/')) {
-                  const poolName = infraItem.replace(/^ssh\//i, '');
-                  const sshContextName = `ssh-${poolName}`;
-                  allContextsAcrossWorkspaces.push(sshContextName);
-                  if (!contextWorkspaceMap[sshContextName]) {
-                    contextWorkspaceMap[sshContextName] = [];
-                  }
-                  if (
-                    !contextWorkspaceMap[sshContextName].includes(workspaceName)
-                  ) {
-                    contextWorkspaceMap[sshContextName].push(workspaceName);
-                  }
-                  workspaceInfraData[workspaceName].contexts.push(
-                    sshContextName
-                  );
-                }
-              });
-            }
-          } catch (error) {
-            console.error(
-              `Failed to fetch infrastructure for workspace ${workspaceName}:`,
-              error
-            );
+      expandedClouds.forEach((infraItem) => {
+        if (infraItem.toLowerCase().startsWith('kubernetes/')) {
+          const context = infraItem.replace(/^kubernetes\//i, '');
+          allContextsAcrossWorkspaces.push(context);
+          if (!contextWorkspaceMap[context]) {
+            contextWorkspaceMap[context] = [];
           }
+          if (!contextWorkspaceMap[context].includes(workspaceName)) {
+            contextWorkspaceMap[context].push(workspaceName);
+          }
+          workspaceInfraData[workspaceName].contexts.push(context);
+        } else if (infraItem.toLowerCase().startsWith('ssh/')) {
+          const poolName = infraItem.replace(/^ssh\//i, '');
+          const sshContextName = `ssh-${poolName}`;
+          allContextsAcrossWorkspaces.push(sshContextName);
+          if (!contextWorkspaceMap[sshContextName]) {
+            contextWorkspaceMap[sshContextName] = [];
+          }
+          if (!contextWorkspaceMap[sshContextName].includes(workspaceName)) {
+            contextWorkspaceMap[sshContextName].push(workspaceName);
+          }
+          workspaceInfraData[workspaceName].contexts.push(sshContextName);
         }
-      )
-    );
+      });
+    });
 
     return {
       workspaces: workspaceInfraData,
