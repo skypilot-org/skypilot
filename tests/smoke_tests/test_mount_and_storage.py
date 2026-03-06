@@ -463,8 +463,14 @@ def test_azure_mount_options():
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     mount_options = ('--read-only '
-                     '--file-cache-timeout-in-seconds=0 '
-                     '--disable-compression')
+                     '--block-cache '
+                     '--disable-compression '
+                     '--block-cache-prefetch-on-open=true '
+                     '--block-cache-block-size=16 '
+                     '--block-cache-strong-consistency=false '
+                     '--block-cache-disk-size=512 '
+                     '--block-cache-disk-timeout=1 '
+                     '--block-cache-pool-size=512')
     template_str = pathlib.Path(
         'tests/test_yamls/test_azure_mount_options.yaml.j2').read_text(
             encoding='utf-8')

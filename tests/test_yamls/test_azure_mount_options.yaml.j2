@@ -16,3 +16,11 @@ run: |
     exit 1
   fi
   echo "Write correctly denied on read-only mount."
+  # Verify that block-cache is active by checking blobfuse2 process flags
+  if ps aux | grep -v grep | grep blobfuse2 | grep -q block-cache; then
+    echo "SUCCESS: blobfuse2 running with block-cache enabled"
+  else
+    echo "ERROR: blobfuse2 not running with block-cache flags"
+    ps aux | grep blobfuse2
+    exit 1
+  fi
