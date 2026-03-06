@@ -1799,7 +1799,8 @@ class ControllerManager:
             raise error
 
     async def _download_logs_for_cancelled_job(self, controller: JobController,
-                                               job_id: int, task_id: int,
+                                               job_id: int, task_ids: List[int],
+                                               dag: 'sky.Dag',
                                                pool: Optional[str]) -> None:
         """Download logs for a cancelled job before cleanup.
 
@@ -1807,59 +1808,86 @@ class ControllerManager:
         using the same code path as successful/failed jobs by calling the
         JobController's _download_log_and_stream method.
 
-        The download is best-effort - if the cluster is already down or
-        unreachable, we skip gracefully.
+        The download is best-effort - if a cluster is already down or
+        unreachable, we skip gracefully. For job groups, multiple tasks
+        may have been running simultaneously, so we download logs for all
+        of them.
 
         Args:
             controller: The JobController instance for this job.
             job_id: The managed job ID.
-            task_id: The task ID within the job.
+            task_ids: The task IDs that were actively running (need log
+                download). For single tasks and pipelines this is typically
+                one ID; for job groups it can be multiple.
+            dag: The DAG for the job (used to get task names for cluster
+                name generation).
             pool: Optional pool name if using a pool.
         """
         logger.info(f'Downloading logs for cancelled job {job_id}, '
-                    f'task {task_id}')
-
-        # Get cluster info to download logs from
-        cluster_name: Optional[str] = None
-        job_id_on_pool_cluster: Optional[int] = None
+                    f'task_ids {task_ids}')
 
         if pool is not None:
+            # Pool jobs are single-task; job groups don't support pools.
             cluster_name, job_id_on_pool_cluster = (
                 await managed_job_state.get_pool_submit_info_async(job_id))
-        else:
-            dag = _get_dag(job_id)
-            task = dag.tasks[task_id]
-            assert task.name is not None, task
-            cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-                task.name, job_id)
 
-        if cluster_name is None:
-            logger.info(f'No cluster found for job {job_id}. '
-                        'Skipping log download.')
+            if cluster_name is None:
+                logger.info(f'No cluster found for job {job_id}. '
+                            'Skipping log download.')
+                return
+
+            clusters = await asyncio.to_thread(
+                backend_utils.get_clusters,
+                cluster_names=[cluster_name],
+                refresh=common.StatusRefreshMode.NONE,
+                all_users=True,
+                _include_is_managed=True)
+
+            if not clusters:
+                logger.info(
+                    f'Cluster {cluster_name} not found for job {job_id}. '
+                    'Skipping log download.')
+                return
+
+            assert len(clusters) == 1, (clusters, cluster_name)
+            handle = clusters[0].get('handle')
+            # pylint: disable-next=protected-access
+            await asyncio.to_thread(controller._download_log_and_stream,
+                                    task_ids[0], handle, job_id_on_pool_cluster)
             return
 
-        # Try to get the cluster handle - same approach as success/failure paths
-        clusters = await asyncio.to_thread(
-            backend_utils.get_clusters,
-            cluster_names=[cluster_name],
-            refresh=common.StatusRefreshMode.NONE,
-            all_users=True,
-            _include_is_managed=True)
+        # Non-pool path: download logs for each active task.
+        for task_id in task_ids:
+            try:
+                task = dag.tasks[task_id]
+                assert task.name is not None, task
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task.name, job_id))
 
-        if not clusters:
-            logger.info(f'Cluster {cluster_name} not found for job {job_id}. '
-                        'Skipping log download.')
-            return
+                clusters = await asyncio.to_thread(
+                    backend_utils.get_clusters,
+                    cluster_names=[cluster_name],
+                    refresh=common.StatusRefreshMode.NONE,
+                    all_users=True,
+                    _include_is_managed=True)
 
-        assert len(clusters) == 1, (clusters, cluster_name)
-        handle = clusters[0].get('handle')
+                if not clusters:
+                    logger.info(
+                        f'Cluster {cluster_name} not found for job {job_id}, '
+                        f'task {task_id}. Skipping log download.')
+                    continue
 
-        # Reuse the existing _download_log_and_stream method from
-        # JobController - same code path as the success/failure paths
-        # in _run_one_task.
-        # pylint: disable-next=protected-access
-        await asyncio.to_thread(controller._download_log_and_stream, task_id,
-                                handle, job_id_on_pool_cluster)
+                assert len(clusters) == 1, (clusters, cluster_name)
+                handle = clusters[0].get('handle')
+
+                # pylint: disable-next=protected-access
+                await asyncio.to_thread(controller._download_log_and_stream,
+                                        task_id, handle, None)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to download logs for job {job_id}, '
+                    f'task {task_id}: {common_utils.format_exception(e)}')
 
     # Use context.contextual to enable per-job output redirection and env var
     # isolation.
@@ -1953,11 +1981,34 @@ class ControllerManager:
                              f'graceful={graceful}, timeout={graceful_timeout}')
 
             dag = _get_dag(job_id)
-            task_id, _ = await (
-                managed_job_state.get_latest_task_id_status_async(job_id))
+
+            # Query all task statuses BEFORE set_cancelling_async changes
+            # them. At this point, statuses accurately reflect which tasks
+            # were actually started vs still pending.
+            id_statuses = await (
+                managed_job_state.get_all_task_ids_statuses_async(job_id))
+
+            # The "latest" non-terminal task - needed for
+            # set_cancelling_async callback and set_cancelled_async later.
+            task_id, _ = (
+                managed_job_state.get_latest_task_id_from_statuses(id_statuses))
             assert task_id is not None, job_id
             logger.info(f'Cancelling managed job, job_id: {job_id}, '
                         f'task_id: {task_id}')
+
+            # Tasks that were actually started (have clusters with logs to
+            # download). PENDING tasks never had a cluster; terminal tasks
+            # already had logs downloaded via the normal path.
+            # - Pipeline: only the currently-running task is active; later
+            #   tasks are still PENDING.
+            # - Job group: all tasks that haven't already finished are
+            #   active (they run in parallel).
+            active_task_ids = [
+                tid for tid, status in id_statuses
+                if not status.is_terminal() and
+                status != managed_job_state.ManagedJobStatus.PENDING
+            ]
+
             await managed_job_state.set_cancelling_async(
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(
@@ -1966,13 +2017,14 @@ class ControllerManager:
             # Download logs before cleanup so they remain accessible after
             # cancellation. This is best-effort - if the cluster is already
             # down, we skip gracefully.
-            try:
-                await self._download_logs_for_cancelled_job(
-                    controller, job_id, task_id, pool)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.warning(
-                    f'Failed to download logs for cancelled job {job_id}: '
-                    f'{common_utils.format_exception(e)}')
+            if active_task_ids:
+                try:
+                    await self._download_logs_for_cancelled_job(
+                        controller, job_id, active_task_ids, dag, pool)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to download logs for cancelled job '
+                        f'{job_id}: {common_utils.format_exception(e)}')
 
             cancelling = True
             raise

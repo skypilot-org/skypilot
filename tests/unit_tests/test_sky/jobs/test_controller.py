@@ -725,21 +725,20 @@ class TestDownloadLogsForCancelledJob:
 
         mock_handle = MagicMock()
 
-        with patch('sky.jobs.controller._get_dag',
-                   return_value=mock_dag) as mock_get_dag, \
-             patch('sky.jobs.controller.managed_job_utils'
+        with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-1-test-job') as mock_gen_name, \
              patch('sky.jobs.controller.backend_utils.get_clusters',
                    return_value=[{'handle': mock_handle}]) as mock_get_cl:
 
-            await ControllerManager._download_logs_for_cancelled_job(manager,
-                                                                     controller,
-                                                                     job_id,
-                                                                     task_id,
-                                                                     pool=None)
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager,
+                controller,
+                job_id,
+                task_ids=[task_id],
+                dag=mock_dag,
+                pool=None)
 
-            mock_get_dag.assert_called_once_with(job_id)
             mock_gen_name.assert_called_once_with('test-job', job_id)
             mock_get_cl.assert_called_once_with(
                 cluster_names=['sky-managed-1-test-job'],
@@ -757,20 +756,24 @@ class TestDownloadLogsForCancelledJob:
         job_id = 2
         task_id = 0
 
+        mock_dag = MagicMock()
         mock_handle = MagicMock()
 
         with patch('sky.jobs.controller.managed_job_state'
                    '.get_pool_submit_info_async',
                    return_value=('pool-cluster-1', 42)) as mock_pool_info, \
-             patch('sky.jobs.controller._get_dag') as mock_get_dag, \
              patch('sky.jobs.controller.backend_utils.get_clusters',
                    return_value=[{'handle': mock_handle}]):
 
             await ControllerManager._download_logs_for_cancelled_job(
-                manager, controller, job_id, task_id, pool='my-pool')
+                manager,
+                controller,
+                job_id,
+                task_ids=[task_id],
+                dag=mock_dag,
+                pool='my-pool')
 
             mock_pool_info.assert_called_once_with(job_id)
-            mock_get_dag.assert_not_called()
             controller._download_log_and_stream.assert_called_once_with(
                 task_id, mock_handle, 42)
 
@@ -787,19 +790,19 @@ class TestDownloadLogsForCancelledJob:
         mock_task.name = 'test-job'
         mock_dag.tasks = [mock_task]
 
-        with patch('sky.jobs.controller._get_dag',
-                   return_value=mock_dag), \
-             patch('sky.jobs.controller.managed_job_utils'
+        with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-3-test-job'), \
              patch('sky.jobs.controller.backend_utils.get_clusters',
                    return_value=[]):
 
-            await ControllerManager._download_logs_for_cancelled_job(manager,
-                                                                     controller,
-                                                                     job_id,
-                                                                     task_id,
-                                                                     pool=None)
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager,
+                controller,
+                job_id,
+                task_ids=[task_id],
+                dag=mock_dag,
+                pool=None)
 
             controller._download_log_and_stream.assert_not_called()
 
@@ -811,6 +814,8 @@ class TestDownloadLogsForCancelledJob:
         job_id = 4
         task_id = 0
 
+        mock_dag = MagicMock()
+
         with patch('sky.jobs.controller.managed_job_state'
                    '.get_pool_submit_info_async',
                    return_value=(None, None)) as mock_pool_info, \
@@ -818,17 +823,24 @@ class TestDownloadLogsForCancelledJob:
                    ) as mock_get_cl:
 
             await ControllerManager._download_logs_for_cancelled_job(
-                manager, controller, job_id, task_id, pool='my-pool')
+                manager,
+                controller,
+                job_id,
+                task_ids=[task_id],
+                dag=mock_dag,
+                pool='my-pool')
 
             mock_pool_info.assert_called_once_with(job_id)
             mock_get_cl.assert_not_called()
             controller._download_log_and_stream.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_download_exception_propagates(self):
-        """Exceptions from _download_log_and_stream propagate up.
+    async def test_download_exception_caught_per_task(self):
+        """Exceptions from _download_log_and_stream are caught per-task.
 
-        The caller in run_job_loop catches exceptions, not this method.
+        The method catches and logs exceptions for each task individually
+        so that a failure for one task doesn't prevent downloading logs
+        for other tasks.
         """
         manager = MagicMock(spec=ControllerManager)
         controller = MagicMock()
@@ -844,14 +856,129 @@ class TestDownloadLogsForCancelledJob:
 
         mock_handle = MagicMock()
 
-        with patch('sky.jobs.controller._get_dag',
-                   return_value=mock_dag), \
-             patch('sky.jobs.controller.managed_job_utils'
+        with patch('sky.jobs.controller.managed_job_utils'
                    '.generate_managed_job_cluster_name',
                    return_value='sky-managed-5-test-job'), \
              patch('sky.jobs.controller.backend_utils.get_clusters',
                    return_value=[{'handle': mock_handle}]):
 
-            with pytest.raises(RuntimeError, match='download failed'):
-                await ControllerManager._download_logs_for_cancelled_job(
-                    manager, controller, job_id, task_id, pool=None)
+            # Should NOT raise - exceptions are caught per-task
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager,
+                controller,
+                job_id,
+                task_ids=[task_id],
+                dag=mock_dag,
+                pool=None)
+
+            controller._download_log_and_stream.assert_called_once_with(
+                task_id, mock_handle, None)
+
+    @pytest.mark.asyncio
+    async def test_job_group_downloads_for_multiple_tasks(self):
+        """Job group: downloads logs for all active tasks."""
+        manager = MagicMock(spec=ControllerManager)
+        controller = MagicMock()
+        job_id = 6
+
+        mock_task_0 = MagicMock()
+        mock_task_0.name = 'job-a'
+        mock_task_1 = MagicMock()
+        mock_task_1.name = 'job-b-done'
+        mock_task_2 = MagicMock()
+        mock_task_2.name = 'job-c'
+
+        mock_dag = MagicMock()
+        mock_dag.tasks = [mock_task_0, mock_task_1, mock_task_2]
+
+        mock_handle_0 = MagicMock()
+        mock_handle_2 = MagicMock()
+
+        def get_clusters_side_effect(cluster_names, **kwargs):
+            name = cluster_names[0]
+            if 'job-a' in name:
+                return [{'handle': mock_handle_0}]
+            elif 'job-c' in name:
+                return [{'handle': mock_handle_2}]
+            return []
+
+        with patch('sky.jobs.controller.managed_job_utils'
+                   '.generate_managed_job_cluster_name',
+                   side_effect=lambda name, jid: f'sky-managed-{jid}-{name}'
+                   ), \
+             patch('sky.jobs.controller.backend_utils.get_clusters',
+                   side_effect=get_clusters_side_effect):
+
+            # task 1 already succeeded, so only tasks 0 and 2 are active
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager,
+                controller,
+                job_id,
+                task_ids=[0, 2],
+                dag=mock_dag,
+                pool=None)
+
+            assert controller._download_log_and_stream.call_count == 2
+            controller._download_log_and_stream.assert_any_call(
+                0, mock_handle_0, None)
+            controller._download_log_and_stream.assert_any_call(
+                2, mock_handle_2, None)
+
+    @pytest.mark.asyncio
+    async def test_per_task_exception_continues_to_next(self):
+        """Exception downloading one task's logs doesn't block the next."""
+        manager = MagicMock(spec=ControllerManager)
+        controller = MagicMock()
+        job_id = 7
+
+        mock_task_0 = MagicMock()
+        mock_task_0.name = 'job-a'
+        mock_task_1 = MagicMock()
+        mock_task_1.name = 'job-b'
+
+        mock_dag = MagicMock()
+        mock_dag.tasks = [mock_task_0, mock_task_1]
+
+        mock_handle_0 = MagicMock()
+        mock_handle_1 = MagicMock()
+
+        def get_clusters_side_effect(cluster_names, **kwargs):
+            name = cluster_names[0]
+            if 'job-a' in name:
+                return [{'handle': mock_handle_0}]
+            elif 'job-b' in name:
+                return [{'handle': mock_handle_1}]
+            return []
+
+        # Task 0 fails, task 1 succeeds
+        call_count = [0]
+
+        def download_side_effect(task_id, handle, job_id_on_pool):
+            call_count[0] += 1
+            if task_id == 0:
+                raise RuntimeError('download failed for task 0')
+
+        controller._download_log_and_stream.side_effect = download_side_effect
+
+        with patch('sky.jobs.controller.managed_job_utils'
+                   '.generate_managed_job_cluster_name',
+                   side_effect=lambda name, jid: f'sky-managed-{jid}-{name}'
+                   ), \
+             patch('sky.jobs.controller.backend_utils.get_clusters',
+                   side_effect=get_clusters_side_effect):
+
+            # Should NOT raise despite task 0 failing
+            await ControllerManager._download_logs_for_cancelled_job(
+                manager,
+                controller,
+                job_id,
+                task_ids=[0, 1],
+                dag=mock_dag,
+                pool=None)
+
+            # Both tasks should have been attempted
+            assert controller._download_log_and_stream.call_count == 2
+            controller._download_log_and_stream.assert_any_call(
+                0, mock_handle_0, None)
+            controller._download_log_and_stream.assert_any_call(
+                1, mock_handle_1, None)
