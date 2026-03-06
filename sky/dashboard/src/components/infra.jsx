@@ -368,9 +368,16 @@ export function InfrastructureSection({
 
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
-                      const workspaceDisplay =
+                      const MAX_INLINE_WORKSPACES = 3;
+                      const workspaceDisplayFull =
                         workspaces.length > 1
                           ? ` (workspaces: ${workspaces.join(', ')})`
+                          : '';
+                      const workspaceDisplay =
+                        workspaces.length > 1
+                          ? workspaces.length > MAX_INLINE_WORKSPACES
+                            ? ` (workspaces: ${workspaces.slice(0, MAX_INLINE_WORKSPACES).join(', ')} +${workspaces.length - MAX_INLINE_WORKSPACES} more)`
+                            : ` (workspaces: ${workspaces.join(', ')})`
                           : '';
 
                       return (
@@ -385,7 +392,7 @@ export function InfrastructureSection({
                           <td className="p-3">
                             <div className="flex items-center gap-1.5">
                               <NonCapitalizedTooltip
-                                content={`${displayName}${workspaceDisplay}`}
+                                content={`${displayName}${workspaceDisplayFull}`}
                                 className="text-sm text-muted-foreground"
                               >
                                 <span
