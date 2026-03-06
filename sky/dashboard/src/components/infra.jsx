@@ -91,6 +91,7 @@ import {
 const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
 const NAME_TRUNCATE_LENGTH = UI_CONFIG.NAME_TRUNCATE_LENGTH;
 const TABLE_MAX_ROWS_BEFORE_SCROLL = 5;
+const MAX_INLINE_WORKSPACES = 3;
 
 // Shared GPU utilization bar to avoid duplicating percentage math and markup
 const GpuUtilizationBar = ({
@@ -368,7 +369,6 @@ export function InfrastructureSection({
 
                       // Get workspace information for this context
                       const workspaces = contextWorkspaceMap[context] || [];
-                      const MAX_INLINE_WORKSPACES = 3;
                       const workspaceDisplayFull =
                         workspaces.length > 1
                           ? ` (workspaces: ${workspaces.join(', ')})`
