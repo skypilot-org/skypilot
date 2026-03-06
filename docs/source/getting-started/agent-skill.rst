@@ -41,8 +41,8 @@ Installation
 
 .. tip::
 
-  The agent will install the SkyPilot CLI and the guide you to set up cloud credentials
-  when it decide to use SkyPilot to do something. You can also ask it to do this immediately
+  The agent will install the SkyPilot CLI and guide you to set up cloud credentials
+  when it decides to use SkyPilot to do something. You can also ask it to do this immediately
   by telling it "Bootstrap skypilot".
 
 Examples
