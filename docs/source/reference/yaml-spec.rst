@@ -767,7 +767,9 @@ It is also possible to specify your custom image's OCID with OS type, for exampl
     image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaaywwfvy67wwe7f24juvjwhyjn3u7g7s3wzkhduxcbewzaeki2nt5q:oraclelinux
     image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaa5tnuiqevhoyfnaa5pqeiwjv6w5vf6w4q2hpj3atyvu3yd6rhlhyq:ubuntu
 
-**IBM**
+.. _yaml-spec-ibm:
+ 
+ **IBM**
 
 Create a private VPC image and paste its ID in the following format:
 

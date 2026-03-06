@@ -552,7 +552,7 @@ Using multiple GCP projects
 ----------------------------------
 
 Admins can isolate different teams to use separate GCP projects. This enables fine-grained resource tracking, billing separation, and access control per team.
-For more information on configuring workspaces, see `Workspaces <https://docs.skypilot.co/en/latest/admin/workspaces.html>`__.
+For more information on configuring workspaces, see :ref:`Workspaces <workspaces>`.
 
 Prerequisites
 ~~~~~~~~~~~~~

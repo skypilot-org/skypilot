@@ -10,10 +10,10 @@ Distributed training basics
 
 SkyPilot supports all distributed training frameworks, including but not limited to:
 
-- `PyTorch Distributed Data Parallel (DDP) <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_
-- `DeepSpeed <https://docs.skypilot.co/en/latest/examples/training/deepspeed.html>`_
-- `Ray Train <https://docs.skypilot.co/en/latest/examples/training/ray.html>`_
-- `TensorFlow Distribution Strategies <https://docs.skypilot.co/en/latest/examples/training/distributed-tensorflow.html>`_
+- `PyTorch Distributed Data Parallel (DDP) <../examples/training/distributed-pytorch.html>`_
+- `DeepSpeed <../examples/training/deepspeed.html>`_
+- `Ray Train <../examples/training/ray.html>`_
+- `TensorFlow Distribution Strategies <../examples/training/distributed-tensorflow.html>`_
 
 The choice of framework depends on your specific needs, but all can be easily configured in a SkyPilot YAML.
 
@@ -57,7 +57,7 @@ Use high-performance networking
 
           num_nodes: 2
 
-        See more details in the `Nebius example <https://docs.skypilot.co/en/latest/examples/performance/nebius_infiniband.html>`_.
+        See more details in the `Nebius example <../examples/performance/nebius_infiniband.html>`_.
 
     .. tab-item:: AWS EFA
         :sync: aws-efa-tab
@@ -79,7 +79,7 @@ Use high-performance networking
                       requests:
                         vpc.amazonaws.com/efa: 4
 
-        See `EFA example <https://docs.skypilot.co/en/latest/examples/performance/aws_efa.html>`_ for more details.
+        See `EFA example <../examples/performance/aws_efa.html>`_ for more details.
 
     .. tab-item:: GCP GPUDirect-TCPX
         :sync: gcp-gpu-direct-tcpx-tab
@@ -94,7 +94,7 @@ Use high-performance networking
             gcp:
               enable_gpu_direct: true
 
-        See `GPUDirect-TCPX example <https://docs.skypilot.co/en/latest/examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
+        See `GPUDirect-TCPX example <../examples/performance/gcp_gpu_direct_tcpx.html>`_ for more details.
 
 
 Using Ray with SkyPilot
@@ -474,7 +474,7 @@ We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job
 
 .. note::
 
-  You can find all the code for this example `in the documentation <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`_
+  You can find all the code for this example `in the documentation <../examples/spot/bert_qa.html>`_
 
 In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.
 
@@ -559,8 +559,8 @@ cost savings from spot instances without worrying about preemption or losing pro
 Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
-* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://docs.skypilot.co/en/latest/llm/vicuna.html>`_, `YAML <https://docs.skypilot.co/en/latest/llm/vicuna/train.html>`__
-* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
-* BERT (shown above): `YAML <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`__
-* PyTorch DDP, ResNet: `YAML <https://docs.skypilot.co/en/latest/examples/spot/resnet.html>`__
-* PyTorch Lightning DDP, CIFAR-10: `YAML <https://docs.skypilot.co/en/latest/examples/spot/lightning_cifar10.html>`__
+* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <../llm/vicuna.html>`_, `YAML <../llm/vicuna/train.html>`__
+* `Large-scale vector database ingestion <../examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
+* BERT (shown above): `YAML <../examples/spot/bert_qa.html>`__
+* PyTorch DDP, ResNet: `YAML <../examples/spot/resnet.html>`__
+* PyTorch Lightning DDP, CIFAR-10: `YAML <../examples/spot/lightning_cifar10.html>`__
