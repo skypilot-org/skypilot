@@ -10,20 +10,10 @@
 
 If you are Claude Code, you can install the skill via marketplace and skip the generic steps:
 
-1. Install:
-
 ```bash
 claude plugin marketplace add skypilot-org/skypilot#skill-doc
 claude plugin install skypilot@skypilot
 ```
-
-2. Verify:
-
-```bash
-claude plugin list
-```
-
-You should see `skypilot@skypilot` in the list.
 
 ### Generic
 
