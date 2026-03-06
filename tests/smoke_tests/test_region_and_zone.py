@@ -269,8 +269,13 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     gsutil_command = (
         f'{{ {smoke_tests_utils.ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
         f'ls gs://{storage_name}/hello.txt; }}')
-    azure_blob_command = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
+    azure_blob_command_raw = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
+    # Guard the azure check with `command -v az` so that it is skipped
+    # (rather than failing with exit code 127) when azure-cli failed to
+    # install — e.g. on older Docker images like Ubuntu 18.04.
+    azure_blob_command = (f'{{ command -v az > /dev/null 2>&1 && '
+                          f'{azure_blob_command_raw}; }}')
     # TODO(zpoint): this is a temporary fix. We should make it more robust.
     # If azure is used, the azure blob storage checking assumes the bucket is
     # created in the centralus region when getting the storage account. We
@@ -285,7 +290,12 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
 
     enabled_cloud_storages = smoke_tests_utils.get_enabled_cloud_storages()
 
-    allowed_cloud_storages = [clouds.Azure(), clouds.AWS(), clouds.GCP()]
+    # Prefer GCP because gsutil is installed as a standalone SDK early in
+    # the dependency chain, so it remains available even if a later step
+    # (e.g. azure-cli) fails and breaks the && chain. AWS and Azure CLIs
+    # are installed in the final python-packages step which gets skipped
+    # when an earlier step fails.
+    allowed_cloud_storages = [clouds.GCP(), clouds.AWS(), clouds.Azure()]
     allowed_and_enabled = [
         cloud_storage for cloud_storage in allowed_cloud_storages
         if clouds.cloud_in_iterable(cloud_storage, enabled_cloud_storages)
