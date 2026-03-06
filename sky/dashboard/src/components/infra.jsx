@@ -374,11 +374,9 @@ export function InfrastructureSection({
                           ? ` (workspaces: ${workspaces.join(', ')})`
                           : '';
                       const workspaceDisplay =
-                        workspaces.length > 1
-                          ? workspaces.length > MAX_INLINE_WORKSPACES
-                            ? ` (workspaces: ${workspaces.slice(0, MAX_INLINE_WORKSPACES).join(', ')} +${workspaces.length - MAX_INLINE_WORKSPACES} more)`
-                            : ` (workspaces: ${workspaces.join(', ')})`
-                          : '';
+                        workspaces.length > MAX_INLINE_WORKSPACES
+                          ? ` (workspaces: ${workspaces.slice(0, MAX_INLINE_WORKSPACES).join(', ')} +${workspaces.length - MAX_INLINE_WORKSPACES} more)`
+                          : workspaceDisplayFull;
 
                       return (
                         <tr
