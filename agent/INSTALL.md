@@ -8,7 +8,7 @@
 
 ### Claude Code
 
-If you are Claude Code, you can install the skill via marketplace and skip the generic steps:
+If you are Claude Code, install the skill via marketplace and skip the generic steps:
 
 ```bash
 claude plugin marketplace add skypilot-org/skypilot#skill-doc
