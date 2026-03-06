@@ -217,6 +217,8 @@ class ManagedJobRecord(ResponseBaseModel):
     # within a job group. NULL for non-job-group jobs (single jobs and
     # pipelines).
     is_primary_in_job_group: Optional[bool] = None
+    # Whether this job is a batch coordinator (ds.map())
+    is_batch: Optional[bool] = None
     # Batch progress fields (NULL for non-batch jobs)
     batch_total_batches: Optional[int] = None
     batch_completed_batches: Optional[int] = None

@@ -52,6 +52,7 @@ import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
 import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
+import { BatchBadge } from '@/components/elements/BatchBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
 import dashboardCache from '@/lib/cache';
@@ -1155,6 +1156,9 @@ export function ManagedJobsTable({
           const { renderMode, jobId, tasks, taskIndex, toggleJobGroup } =
             ctx || {};
 
+          // Detect batch job via is_batch field or batch_total_batches presence
+          const isBatch = item.is_batch === true || item.batch_total_batches != null;
+
           if (renderMode === 'groupParent') {
             return (
               <TableCell className="whitespace-nowrap">
@@ -1162,6 +1166,9 @@ export function ManagedJobsTable({
                   <Link href={`/jobs/${jobId}`} className="text-blue-600">
                     {item.name}
                   </Link>
+                  {isBatch && (
+                    <BatchBadge className="ml-2" />
+                  )}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
                     className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
@@ -1198,9 +1205,14 @@ export function ManagedJobsTable({
           // Single task
           return (
             <TableCell className="whitespace-nowrap">
-              <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                {item.name}
-              </Link>
+              <div className="flex items-center">
+                <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                  {item.name}
+                </Link>
+                {isBatch && (
+                  <BatchBadge className="ml-2" />
+                )}
+              </div>
             </TableCell>
           );
         },

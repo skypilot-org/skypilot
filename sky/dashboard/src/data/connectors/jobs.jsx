@@ -61,6 +61,7 @@ const DEFAULT_FIELDS = [
   'execution',
   'is_primary_in_job_group',
   'links',
+  'is_batch',
   'batch_total_batches',
   'batch_completed_batches',
 ];
