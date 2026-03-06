@@ -98,7 +98,7 @@ pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,
 
 You can also use SkyPilot directly from your agent (Claude Code, Codex, etc.) by installing the [SkyPilot Skill](https://docs.skypilot.co/en/latest/getting-started/agent-skill.html), just tell your agent:
 ```
-Fetch and follow https://github.com/skypilot-org/skypilot/blob/master/agent/INSTALL.md to install the skypilot skill
+Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the skypilot skill
 ```
 
 <p align="center">
