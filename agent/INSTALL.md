@@ -8,7 +8,7 @@
 
 ### Claude Code
 
-If you are Claude Code, you can install the skill via marketplace:
+If you are Claude Code, you can install the skill via marketplace and skip the generic steps:
 
 1. Install:
 
