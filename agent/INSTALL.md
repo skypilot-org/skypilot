@@ -6,6 +6,17 @@
 
 ## Installation
 
+### Claude Code
+
+If you are Claude Code, you can install the skill via marketplace:
+
+```
+/plugin marketplace add skypilot-org/skypilot#skill-doc
+/plugin install skypilot@skypilot
+```
+
+### Generic
+
 1. **Clone the repository:**
 
    ```bash
@@ -37,22 +48,3 @@ cd ~/.agents/.skypilot && git pull
 ```
 
 Skills update instantly through the symlink.
-
-## Next step
-
-After successful installation, you can hint the user:
-
----
-
-**SkyPilot skill installed successfully!** I now have expertise in SkyPilot — launching clusters, running jobs, serving models, and managing cloud resources across 25+ clouds, Kubernetes, and Slurm.
-
-**Try asking me:**
-
-- "Launch a GPU cluster with 4 A100s and set autostop to 2 hours"
-- "Write a managed job YAML to fine-tune Llama 3 on spot instances with preemption recovery"
-- "Deploy Llama 3.1 70B with vLLM using SkyServe with autoscaling"
-- "What's the cheapest way to get 8 H100 GPUs across clouds?"
-
-**Note:** You'll need cloud credentials configured. I can help you run `sky check` to verify your setup.
-
----
