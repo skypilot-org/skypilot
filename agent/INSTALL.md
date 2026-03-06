@@ -43,12 +43,12 @@ You should see a symlink pointing to the skypilot skills directory.
 
 ## Reload
 
-You may need to restart the agent to reload the skypilot skill if it is not available after installation. Hint user to ask "Bootstrap skypilot" after the skill get loaded.
+You may need to restart the agent to reload the skypilot skill if it is not available after installation. Hint user to ask "Bootstrap skypilot" after the skill is loaded.
 
 ## Updating
 
 ```bash
-cd ~/.agents/.skypilot && git pull
+cd ~/.agents/.skypilot && git pull origin master
 ```
 
 Skills update instantly through the symlink.

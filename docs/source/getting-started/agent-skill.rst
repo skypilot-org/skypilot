@@ -35,14 +35,14 @@ Installation
 
     .. code-block:: bash
 
-      Fetch and follow https://github.com/skypilot-org/skypilot/blob/master/agent/INSTALL.md to install the skypilot skill
+      Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the skypilot skill
 
     You may need to restart the agent to reload the skill after installation.
 
 .. tip::
 
-  The agent will install the SkyPilot CLI and the guide you to set up cloud credentials
-  when it decide to use SkyPilot to do something. You can also ask it to do this immediately
+  The agent will install the SkyPilot CLI and guide you to set up cloud credentials
+  when it decides to use SkyPilot to do something. You can also ask it to do this immediately
   by telling it "Bootstrap skypilot".
 
 What You Can Do
