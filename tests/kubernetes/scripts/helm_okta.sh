@@ -37,28 +37,32 @@ NODEPORT=30082
 HTTPS_NODEPORT=30099
 RELEASE_NAME=skypilot
 
-# Cleanup function to delete namespace and resources
-cleanup() {
-    echo ""
-    echo "🧹 Cleaning up resources..."
-    # Uninstall helm release first to ensure clean state for retries
-    if helm status $RELEASE_NAME -n $NAMESPACE >/dev/null 2>&1; then
+# Uninstall helm release and delete namespace, waiting for full cleanup.
+# Reused by the trap handler, deploy_and_login pre-deploy, and between-tests.
+cleanup_helm_release() {
+    if helm status "$RELEASE_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
         echo "Uninstalling helm release $RELEASE_NAME..."
-        helm uninstall $RELEASE_NAME -n $NAMESPACE --wait 2>/dev/null || true
+        helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" --wait 2>/dev/null || true
         echo "✅ Helm release uninstalled"
     fi
-    if kubectl get namespace $NAMESPACE >/dev/null 2>&1; then
+    if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
         echo "Deleting namespace $NAMESPACE..."
-        kubectl delete namespace $NAMESPACE --ignore-not-found=true
-        # Wait until namespace actually terminated.
-        while kubectl get namespace $NAMESPACE >/dev/null 2>&1; do
+        kubectl delete namespace "$NAMESPACE" --ignore-not-found=true
+        while kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; do
             echo "Waiting for namespace $NAMESPACE to be deleted..."
-            sleep 1
+            sleep 2
         done
         echo "✅ Namespace $NAMESPACE deleted"
     else
         echo "Namespace $NAMESPACE does not exist, skipping deletion"
     fi
+}
+
+# Cleanup function to delete namespace and resources
+cleanup() {
+    echo ""
+    echo "🧹 Cleaning up resources..."
+    cleanup_helm_release
 
     # Restore sky/server/common.py to original state
     echo "Restoring sky/server/common.py..."
@@ -265,25 +269,9 @@ deploy_and_login() {
     echo "Deploying SkyPilot with OAuth mode: $mode"
     echo "============================================="
 
-    # Ensure a clean state before deploying. First uninstall any existing
-    # helm release (critical for retries on the same container), then delete
-    # the namespace and wait for it to be fully gone.
-    if helm status "$RELEASE_NAME" -n "$NAMESPACE" >/dev/null 2>&1; then
-      echo "⏳ Uninstalling existing helm release '$RELEASE_NAME'..."
-      helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" --wait 2>/dev/null || true
-      echo "✅ Helm release uninstalled."
-    fi
-    if kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
-      echo "⏳ Deleting namespace '$NAMESPACE'..."
-      kubectl delete namespace "$NAMESPACE" --ignore-not-found=true
-      while kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; do
-        echo "Waiting for namespace '$NAMESPACE' to be fully deleted..."
-        sleep 2
-      done
-      echo "✅ Namespace '$NAMESPACE' has been fully deleted."
-    else
-      echo "✅ Namespace '$NAMESPACE' does not exist."
-    fi
+    # Ensure a clean state before deploying (critical for retries on the
+    # same container where a previous helm release may still be installed).
+    cleanup_helm_release
 
     echo "Installing Skypilot Helm chart..."
     if [[ "$mode" == "legacy" ]]; then
@@ -519,20 +507,7 @@ deploy_and_login "legacy"
 # Clean up SkyPilot resources between tests
 echo ""
 echo "🧹 Cleaning up SkyPilot resources between tests..."
-# Uninstall helm release first to ensure clean state for next deploy
-if helm status $RELEASE_NAME -n $NAMESPACE >/dev/null 2>&1; then
-    echo "Uninstalling helm release $RELEASE_NAME..."
-    helm uninstall $RELEASE_NAME -n $NAMESPACE --wait 2>/dev/null || true
-    echo "✅ Helm release uninstalled"
-fi
-kubectl delete namespace $NAMESPACE --ignore-not-found=true
-# Wait until namespace is fully terminated to avoid race condition where
-# helm install --create-namespace fails with "namespace is being terminated"
-while kubectl get namespace $NAMESPACE >/dev/null 2>&1; do
-    echo "Waiting for namespace $NAMESPACE to be deleted..."
-    sleep 2
-done
-echo "✅ Namespace $NAMESPACE deleted"
+cleanup_helm_release
 
 deploy_and_login "new"
 
