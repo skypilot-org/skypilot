@@ -3,58 +3,50 @@
 SkyPilot Skill
 ==============
 
-SkyPilot provides an official skill that teaches AI coding agents (Claude Code,
-Cursor, Windsurf, etc.) how to use SkyPilot effectively. With it installed, your
-agent can launch clusters, write task YAMLs, run jobs, serve models, and manage
-cloud resources — using the same SkyPilot CLI and SDK you already know.
-
-Why use the SkyPilot Skill?
----------------------------
-
-- **Instant expertise**: Agent learns SkyPilot's CLI, YAML spec, SDK, and best practices
-- **Avoids common mistakes**: Built-in guidance prevents hardcoding clouds, forgetting cleanup, etc.
-- **Full workflow coverage**: Clusters, managed jobs, SkyServe, distributed training, spot instances
-- **Always up to date**: Includes reference docs for CLI flags, YAML fields, SDK methods
+SkyPilot provides an official skill that teaches AI agents (Claude Code,
+Codex, etc.) how to use SkyPilot. With it installed, your agent can launch
+clusters, run jobs, serve models, and manage cloud resources effectively.
 
 Installation
 ------------
 
 .. tab-set::
 
-  .. tab-item:: Claude Code (Recommended)
+  .. tab-item:: Claude Code
 
     Install the SkyPilot skill as a Claude Code plugin:
 
     .. code-block:: bash
 
-      claude plugin add skypilot-org/skypilot
-      claude install-plugin skypilot-org/skypilot
+      claude plugin marketplace add skypilot-org/skypilot
+      claude plugin install skypilot@skypilot
 
-  .. tab-item:: Claude Code (Manual)
+  .. tab-item:: npx skills
 
-    Clone the SkyPilot repo and copy the skill into your project:
+    If you have `npx skills` installed, you can install the skypilot skill with:
 
     .. code-block:: bash
 
-      git clone https://github.com/skypilot-org/skypilot.git
-      cp -r skypilot/skills/skypilot/skills/skypilot .claude/skills/
+      npx skills add skypilot-org/skypilot
 
-  .. tab-item:: Other Agents (Cursor, Windsurf, Copilot)
+  .. tab-item:: Generic
 
-    Copy the content of `SKILL.md <https://github.com/skypilot-org/skypilot/blob/master/skills/skypilot/skills/skypilot/SKILL.md>`_ into your agent's custom instructions file:
+    Just tell your agent:
 
-    - **Cursor**: ``.cursor/rules/skypilot.md``
-    - **Windsurf**: ``.windsurfrules`` or project rules
-    - **GitHub Copilot**: ``.github/copilot-instructions.md``
+    .. code-block:: plaintext
+
+      Fetch and follow https://github.com/skypilot-org/skypilot/blob/master/agent/INSTALL.md to install the skypilot skill
+
+    You may need to restart the agent to reload the skill after installation.
 
 .. tip::
 
-  The skill teaches SkyPilot-specific knowledge. The agent will install the
-  SkyPilot CLI if it's not already present. You still need cloud credentials
-  configured — the agent will guide you through ``sky check`` to verify.
+  The agent will install the SkyPilot CLI and the guide you to set up cloud credentials
+  when it decide to use SkyPilot to do something. You can also ask it to do this immediately
+  by telling it "Bootstrap skypilot".
 
-Example Prompts
----------------
+Examples
+--------
 
 Here are some examples of what you can ask your agent with the SkyPilot skill installed:
 
@@ -81,32 +73,3 @@ Here are some examples of what you can ask your agent with the SkyPilot skill in
     The agent runs ``sky show-gpus H100 --all`` to display pricing and
     availability across all configured clouds, then summarizes the cheapest
     options.
-
-What the Skill Includes
------------------------
-
-- **Core knowledge** (``SKILL.md``): When to use clusters vs managed jobs vs SkyServe, YAML structure, GPU/cloud selection, common workflows
-- **CLI Reference**: All ``sky`` commands, flags, and usage patterns
-- **YAML Specification**: Complete task YAML field reference
-- **Python SDK**: Programmatic API for launching and managing resources
-- **Advanced Patterns**: Distributed training, spot strategies, multi-cloud setups
-- **Examples**: Real-world templates for training, serving, and batch inference
-- **Troubleshooting**: Common errors and their solutions
-
-How the Skill Works
--------------------
-
-The skill is a structured knowledge base that the agent reads — it is not
-executable code. When the agent encounters a SkyPilot-related task, it consults
-the skill files to understand the correct CLI commands, YAML syntax, and best
-practices.
-
-Browse the skill files on GitHub: `skills/skypilot/ <https://github.com/skypilot-org/skypilot/tree/master/skills/skypilot>`_
-
-See also
---------
-
-- :ref:`Quickstart <quickstart>`
-- :ref:`Task YAML reference <yaml-spec>`
-- :ref:`CLI reference <cli>`
-- :ref:`Python SDK <pythonapi>`

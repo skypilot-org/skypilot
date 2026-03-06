@@ -134,7 +134,7 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 
 .. tip::
 
-   Using an AI coding agent (Claude Code, Cursor, etc.)? After installing
+   Using an AI agent (Claude Code, Codex, etc.)? After installing
    SkyPilot, install the :ref:`SkyPilot Skill <agent-skill>` to give your
    agent full SkyPilot expertise.
 

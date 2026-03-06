@@ -11,7 +11,7 @@
 If you are Claude Code, install the skill via marketplace and skip the generic steps:
 
 ```bash
-claude plugin marketplace add skypilot-org/skypilot#skill-doc
+claude plugin marketplace add skypilot-org/skypilot
 claude plugin install skypilot@skypilot
 ```
 
@@ -23,7 +23,7 @@ The installation is successful as long as you don't see any error.
 
    ```bash
    mkdir -p ~/.agents
-   git clone https://github.com/skypilot-org/skypilot.git --branch skill-doc ~/.agents/.skypilot
+   git clone https://github.com/skypilot-org/skypilot.git ~/.agents/.skypilot
    ```
 
 2. Create the skills symlink:

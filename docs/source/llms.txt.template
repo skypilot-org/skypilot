@@ -35,7 +35,7 @@ SkyPilot cuts your cloud costs & maximizes GPU availability:
 - [Overview]({{BASE_URL}}/overview.html.md): SkyPilot architecture and core concepts
 - [Installation]({{BASE_URL}}/getting-started/installation.html.md): Install SkyPilot with pip for your cloud providers
 - [Quickstart]({{BASE_URL}}/getting-started/quickstart.html.md): Launch your first cluster and run a job
-- [SkyPilot Skill]({{BASE_URL}}/getting-started/agent-skill.html.md): Install the SkyPilot skill for Claude Code, Cursor, and other AI coding agents
+- [SkyPilot Skill]({{BASE_URL}}/getting-started/agent-skill.html.md): Install the SkyPilot skill for your AI agents
 - [Examples]({{BASE_URL}}/examples/index.html.md): Browse example use cases
 - [Sky Computing]({{BASE_URL}}/sky-computing.html.md): Learn about the Sky Computing paradigm
 
