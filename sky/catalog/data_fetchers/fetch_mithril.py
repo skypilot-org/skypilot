@@ -136,9 +136,9 @@ def fetch_spot_availability(api_key: str,
 
 def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
     """Create Mithril catalog CSV file."""
-    config = mithril_utils.resolve_current_config()
-    api_key = config['api_key']
-    api_url = config['api_url']
+    api_key = os.environ.get(mithril_utils.ENV_API_KEY, None)
+    assert api_key is not None, 'Mithril Cloud api key not found.'
+    api_url = mithril_utils.DEFAULT_API_URL
 
     logger.info('Fetching Mithril instance types...')
     instance_types = fetch_instance_types(api_key, api_url)

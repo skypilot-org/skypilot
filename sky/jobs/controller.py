@@ -779,7 +779,7 @@ class JobController:
                                 f'  {timestamp}: {event["reason"]}')
                         events_str = '\n'.join(event_strs)
                         logger.info(f'Recent cluster events:\n{events_str}')
-                        cluster_event_reason = events[-1]['reason']
+                        cluster_event_reason = str(events[-1]['reason'])
                 except Exception as e:  # pylint: disable=broad-except
                     logger.debug('Failed to fetch cluster events: '
                                  f'{common_utils.format_exception(e)}')
@@ -973,10 +973,11 @@ class JobController:
 
             # Update cluster_name for pools after recovery
             if self._pool is not None:
-                cluster_name, job_id_on_pool_cluster = (
+                pool_cluster_name, job_id_on_pool_cluster = (
                     await
                     managed_job_state.get_pool_submit_info_async(self._job_id))
-                assert cluster_name is not None
+                assert pool_cluster_name is not None
+                cluster_name = pool_cluster_name
 
             await managed_job_state.set_recovered_async(
                 self._job_id,
@@ -1725,9 +1726,10 @@ class ControllerManager:
                                 f'{cluster_name} is not down: {status}')
                     logger.info(f'{cluster_name} is down')
                 else:
-                    cluster_name, job_id_on_pool_cluster = (
+                    pool_cluster_name, job_id_on_pool_cluster = (
                         managed_job_state.get_pool_submit_info(job_id))
-                    if cluster_name is not None:
+                    if pool_cluster_name is not None:
+                        cluster_name = pool_cluster_name
                         if job_id_on_pool_cluster is not None:
                             core.cancel(cluster_name=cluster_name,
                                         job_ids=[job_id_on_pool_cluster],

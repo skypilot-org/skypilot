@@ -1,6 +1,8 @@
 """Constants for usage collection."""
+import os
 
-LOG_URL = 'https://usage-v2.skypilot.co'
+LOG_URL = os.environ.get('SKYPILOT_USAGE_LOG_URL',
+                         'https://usage-v2.skypilot.co')
 
 USAGE_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
