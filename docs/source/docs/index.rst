@@ -282,7 +282,7 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
-   Use SkyPilot with Agents <../getting-started/agent-skill>
+   SkyPilot Skill <../getting-started/skill>
    ../examples/index
    ../sky-computing
 

@@ -1,4 +1,4 @@
-.. _agent-skill:
+.. _skill:
 
 SkyPilot Skill
 ==============
