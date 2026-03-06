@@ -1,0 +1,45 @@
+# SkyPilot task for launching mjlab RL training using Docker.
+#
+# Uses the pre-built Docker image from GHCR for a reproducible
+# environment.
+#
+# Usage:
+#   sky launch examples/mjlab/train-docker.yaml \
+#     --env TASK=Mjlab-Velocity-Flat-Unitree-G1
+
+name: mjlab-train-docker
+
+resources:
+  accelerators: A100:1
+  autostop:
+    idle_minutes: 5
+    down: true
+
+file_mounts:
+  ~/.netrc: ~/.netrc
+
+envs:
+  TASK: Mjlab-Velocity-Flat-Unitree-G1
+  NUM_ENVS: "4096"
+  MAX_ITERATIONS: "6000"
+  MUJOCO_GL: egl
+
+setup: |
+  # Configure NVIDIA runtime for Docker if not already set up.
+  if ! sudo docker info 2>/dev/null | grep -q "nvidia"; then
+    sudo nvidia-ctk runtime configure --runtime=docker
+    sudo systemctl restart docker
+    sleep 3  # Wait for the daemon to be ready before pulling.
+  fi
+
+  sudo docker pull ghcr.io/mujocolab/mjlab:latest
+
+run: |
+  sudo docker run --rm --runtime=nvidia --gpus all \
+    -v "$HOME/.netrc:/root/.netrc:ro" \
+    -e MUJOCO_GL=egl \
+    ghcr.io/mujocolab/mjlab:latest \
+    uv run --no-dev train "$TASK" \
+      --env.scene.num-envs "$NUM_ENVS" \
+      --agent.max-iterations "$MAX_ITERATIONS" \
+      --gpu-ids all

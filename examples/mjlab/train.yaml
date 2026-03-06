@@ -1,0 +1,43 @@
+# SkyPilot task for launching mjlab RL training on cloud GPUs.
+#
+# mjlab is a GPU-accelerated reinforcement learning framework built on
+# MuJoCo Warp. This task installs mjlab directly with uv.
+#
+# Usage:
+#   sky launch examples/mjlab/train.yaml \
+#     --env TASK=Mjlab-Velocity-Flat-Unitree-G1
+
+name: mjlab-train
+
+resources:
+  accelerators: A100:1
+  autostop:
+    idle_minutes: 5
+    down: true
+
+file_mounts:
+  ~/.netrc: ~/.netrc
+
+envs:
+  TASK: Mjlab-Velocity-Flat-Unitree-G1
+  NUM_ENVS: "4096"
+  MAX_ITERATIONS: "6000"
+  MUJOCO_GL: egl
+
+setup: |
+  # Install EGL for MuJoCo headless rendering.
+  sudo apt-get update && sudo apt-get install -y libegl-dev
+
+  # Install uv if not present.
+  command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env" 2>/dev/null || true
+
+  # Install mjlab.
+  uv pip install mjlab
+
+run: |
+  source "$HOME/.local/bin/env" 2>/dev/null || true
+  uv run train "$TASK" \
+    --env.scene.num-envs "$NUM_ENVS" \
+    --agent.max-iterations "$MAX_ITERATIONS" \
+    --gpu-ids all

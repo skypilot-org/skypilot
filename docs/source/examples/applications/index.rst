@@ -14,4 +14,5 @@ AI Applications
    Streamlit Web Apps <streamlit>
    Tabby: Coding Assistant <tabby>
    LocalGPT: Chat with PDF <localgpt>
+   mjlab: GPU-Accelerated RL with MuJoCo <mjlab>
    Stable Diffusion <stable_diffusion>
