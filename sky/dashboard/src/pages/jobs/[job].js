@@ -51,6 +51,7 @@ import {
 } from '@/data/connectors/jobs';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
+import { BatchBadge } from '@/components/elements/BatchBadge';
 import { useMobile } from '@/hooks/useMobile';
 import Head from 'next/head';
 import { NonCapitalizedTooltip } from '@/components/utils';
@@ -307,12 +308,15 @@ function JobDetails() {
               className="text-sky-blue hover:underline"
             >
               {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
-              {isMultiTask && (
-                <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
-                  {allTasks.length} tasks
-                </span>
-              )}
             </Link>
+            {(detailJobData?.is_batch === true || detailJobData?.batch_total_batches != null) && (
+              <BatchBadge className="ml-2" />
+            )}
+            {isMultiTask && (
+              <span className="ml-2 text-xs text-gray-500 bg-gray-200 px-1.5 py-0.5 rounded">
+                {allTasks.length} tasks
+              </span>
+            )}
           </div>
 
           <div className="text-sm flex items-center">
@@ -1167,6 +1171,10 @@ function JobDetailsContent({
           <span>
             {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
           </span>
+          {/* Badge for batch job */}
+          {(jobData.is_batch === true || jobData.batch_total_batches != null) && (
+            <BatchBadge />
+          )}
           {/* Badge for job group */}
           {jobData.is_job_group && (
             <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
@@ -1178,11 +1186,36 @@ function JobDetailsContent({
       <div>
         <div className="text-gray-600 font-medium text-base">Status</div>
         <div className="text-base mt-1">
-          <PluginSlot
-            name="jobs.detail.status.badge"
-            context={jobData}
-            fallback={<StatusBadge status={computedStatus} />}
-          />
+          {(() => {
+            const isBatchRunning = jobData.status === 'RUNNING' &&
+              jobData.batch_total_batches != null;
+            if (isBatchRunning) {
+              const completed = jobData.batch_completed_batches || 0;
+              const total = jobData.batch_total_batches;
+              const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+              const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+              return (
+                <div className="flex items-center gap-3">
+                  <div className="w-32 bg-gray-200 rounded-full h-2.5">
+                    <div
+                      className={`${barColor} h-2.5 rounded-full transition-all`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="text-sm text-gray-600">
+                    {completed}/{total} batches ({pct}%)
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <PluginSlot
+                name="jobs.detail.status.badge"
+                context={jobData}
+                fallback={<StatusBadge status={computedStatus} />}
+              />
+            );
+          })()}
         </div>
       </div>
       <div>
@@ -1310,6 +1343,45 @@ function JobDetailsContent({
           {renderPoolLink(jobData.pool, jobData.pool_hash, poolsData)}
         </div>
       </div>
+
+      {/* Batch Progress section - only for batch jobs */}
+      {jobData.batch_total_batches != null && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">Batch Progress</div>
+          <div className="text-base mt-1">
+            {(() => {
+              const completed = jobData.batch_completed_batches || 0;
+              const total = jobData.batch_total_batches;
+              const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+              const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+              const failed = total - completed;
+              const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED',
+                'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE',
+                'FAILED_CONTROLLER'].includes(jobData.status);
+              return (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-40 bg-gray-200 rounded-full h-2.5">
+                      <div
+                        className={`${barColor} h-2.5 rounded-full transition-all`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="text-sm text-gray-600">
+                      {completed}/{total} ({pct}%)
+                    </span>
+                  </div>
+                  {isTerminal && failed > 0 && completed < total && (
+                    <div className="text-xs text-red-600">
+                      {total - completed} batches incomplete
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* External Links section - full width row */}
       <div className="col-span-2">
