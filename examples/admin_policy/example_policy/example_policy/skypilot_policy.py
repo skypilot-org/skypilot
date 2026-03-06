@@ -94,7 +94,7 @@ class UseSpotForGpuPolicy(sky.AdminPolicy):
             else:
                 new_resources.append(r)
 
-        task.set_resources(type(task.resources)(new_resources))
+        task.set_resources(new_resources)
 
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
@@ -567,13 +567,12 @@ class SlurmPartitionRoutingPolicy(sky.AdminPolicy):
         for r in task.resources:
             # Only apply to Slurm resources that don't already have a
             # partition (zone) specified by the user.
-            if (r.cloud is not None and str(r.cloud) == 'Slurm' and
-                    r.zone is None):
+            if isinstance(r.cloud, sky.clouds.Slurm) and r.zone is None:
                 new_resources.append(r.copy(zone=cls._get_partition(r)))
             else:
                 new_resources.append(r)
 
-        task.set_resources(type(task.resources)(new_resources))
+        task.set_resources(new_resources)
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
 
