@@ -1,47 +1,46 @@
-# SkyPilot Skill — Agent Installation Instructions
+# Installing SkyPilot Skill
 
-You are an AI agent. Follow these instructions to install the SkyPilot skill.
+## Prerequisites
 
-## Step 1: Detect Your Agent Platform
+- Git
 
-Determine which agent platform you are running as. Use the first match:
-
-- **Claude Code**: You have access to the `claude` CLI or you are running inside Claude Code.
-- **Other**: Any other agent with file-write access.
-
-## Step 2: Install the Skill
-
-### Claude Code
-
-Run the following command:
-
-```bash
-claude plugin marketplace add skypilot-org/skypilot#skill-doc && claude plugin install skypilot-skills@skypilot
-```
-
-**Restart Claude Code** to load the skill.
-
-### Other Agents
+## Installation
 
 1. **Clone the repository:**
 
    ```bash
-   mkdir -p ~/.agent
+   mkdir -p ~/.agents
    git clone https://github.com/skypilot-org/skypilot.git --branch skill-doc ~/.agent/.skypilot
    ```
 
 2. **Create the skills symlink:**
 
    ```bash
-   mkdir -p ~/.agent/.skills
-   ln -s ~/.agent/.skypilot/agent/skills ~/.agent/.skills/skypilot
+   mkdir -p ~/.agents/.skills
+   ln -s ~/.agents/.skypilot/agent/skills ~/.agents/.skills/skypilot
    ```
 
 **Restart the agent** to load the skill.
 
-## Step 3: Tell the User
+## Verify
 
-After successful installation, print the following message to the user:
+```bash
+ls -la ~/.agents/skills/skypilot
+```
+
+You should see a symlink pointing to the skypilot skills directory.
+
+## Updating
+
+```bash
+cd ~/.agents/.skypilot && git pull
+```
+
+Skills update instantly through the symlink.
+
+## Next step
+
+After successful installation, you can hint the user:
 
 ---
 
