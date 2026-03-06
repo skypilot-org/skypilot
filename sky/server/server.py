@@ -653,7 +653,11 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
     #   inline styles (needed for MUI/Emotion dynamic style injection)
     # - font-src 'self': Only allow same-origin fonts
-    # - connect-src 'self': Only allow same-origin fetch/XHR/WebSocket
+    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
+    #   needed by the /token page's legacy auth callback flow (the page's
+    #   JavaScript POSTs the auth token to a local HTTP server started by
+    #   the CLI on localhost)
     # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
     # - img-src 'self' data:: Allow same-origin images and data URIs
     # - object-src 'none': Block all plugin content (Flash, Java, etc.)
@@ -664,7 +668,8 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                    'script-src \'self\' \'unsafe-inline\'; '
                    'style-src \'self\' \'unsafe-inline\'; '
                    'font-src \'self\'; '
-                   'connect-src \'self\'; '
+                   'connect-src \'self\' http://localhost:* '
+                   'http://127.0.0.1:*; '
                    'frame-src \'self\'; '
                    'img-src \'self\' data:; '
                    'object-src \'none\'; '
