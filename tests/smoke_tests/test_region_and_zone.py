@@ -274,8 +274,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Guard the azure check with `command -v az` so that it is skipped
     # (rather than failing with exit code 127) when azure-cli failed to
     # install — e.g. on older Docker images like Ubuntu 18.04.
-    azure_blob_command = (f'command -v az > /dev/null 2>&1 && '
-                          f'{azure_blob_command_raw}')
+    azure_blob_command = (f'{{ command -v az > /dev/null 2>&1 && '
+                          f'{azure_blob_command_raw}; }}')
     # TODO(zpoint): this is a temporary fix. We should make it more robust.
     # If azure is used, the azure blob storage checking assumes the bucket is
     # created in the centralus region when getting the storage account. We
