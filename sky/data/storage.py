@@ -28,6 +28,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import tigris
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -101,6 +102,11 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     if coreweave_is_enabled:
         enabled_clouds.append(coreweave.NAME)
 
+    # Similarly, handle Tigris storage credentials
+    tigris_is_enabled, _ = tigris.check_storage_credentials()
+    if tigris_is_enabled:
+        enabled_clouds.append(tigris.NAME)
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -135,6 +141,7 @@ class StoreType(enum.Enum):
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
     COREWEAVE = 'COREWEAVE'
+    TIGRIS = 'TIGRIS'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -162,7 +169,9 @@ class StoreType(enum.Enum):
         """Get S3-compatible store type by URL prefix."""
         for store_type, store_class in _S3_COMPATIBLE_STORES.items():
             config = store_class.get_config()
-            if source.startswith(config.url_prefix):
+            # Skip stores with no url_prefix (they use another store's scheme)
+            if config.url_prefix is not None and source.startswith(
+                    config.url_prefix):
                 return StoreType(store_type)
         return None
 
@@ -226,7 +235,8 @@ class StoreType(enum.Enum):
     def store_prefix(self) -> str:
         config = self._get_s3_compatible_config(self.value)
         if config:
-            return config.url_prefix
+            # For stores with no url_prefix, fall back to s3://
+            return config.url_prefix if config.url_prefix else 's3://'
 
         if self == StoreType.GCS:
             return 'gs://'
@@ -1023,7 +1033,8 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
+                    'tigris'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -1048,7 +1059,7 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, cw://. '
+                        f'r2://, cos://, oci://, nebius://, cw://, tigris://. '
                         f'Got: {source}')
         return source, is_local_source
 
@@ -1073,6 +1084,7 @@ class Storage(object):
                     'oci',
                     'nebius',
                     'cw',
+                    'tigris',
             ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
@@ -1579,7 +1591,9 @@ class S3CompatibleConfig:
     """Configuration for S3-compatible storage providers."""
     # Provider identification
     store_type: str  # Store type identifier (e.g., "S3", "R2", "MINIO")
-    url_prefix: str  # URL prefix (e.g., "s3://", "r2://", "minio://")
+    # URL prefix (e.g., "s3://", "r2://"). None for providers that share
+    # another provider's URL scheme (e.g., Tigris uses s3:// with store: tigris)
+    url_prefix: Optional[str]
 
     # Client creation
     client_factory: Callable[[Optional[str]], Any]
@@ -1748,7 +1762,8 @@ class S3CompatibleStore(AbstractStore):
         # Get prefixes from all registered S3-compatible stores
         for store_class in _S3_COMPATIBLE_STORES.values():
             config = store_class.get_config()
-            prefixes.add(config.url_prefix)
+            if config.url_prefix is not None:
+                prefixes.add(config.url_prefix)
 
         # Add hardcoded prefixes for non-S3-compatible stores
         prefixes.update({
@@ -1762,7 +1777,8 @@ class S3CompatibleStore(AbstractStore):
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
-            if self.source.startswith(self.config.url_prefix):
+            url_prefix = self.config.url_prefix or 's3://'
+            if self.source.startswith(url_prefix):
                 bucket_name, _ = self.config.split_path(self.source)
                 assert self.name == bucket_name, (
                     f'{self.config.store_type} Bucket is specified as path, '
@@ -1926,8 +1942,9 @@ class S3CompatibleStore(AbstractStore):
 
     def _is_same_provider_source(self) -> bool:
         """Check if source is from the same provider."""
-        return isinstance(self.source, str) and self.source.startswith(
-            self.config.url_prefix)
+        url_prefix = self.config.url_prefix or 's3://'
+        return isinstance(self.source,
+                          str) and self.source.startswith(url_prefix)
 
     def _needs_cross_provider_transfer(self) -> bool:
         """Check if source needs cross-provider transfer."""
@@ -2101,7 +2118,7 @@ class S3CompatibleStore(AbstractStore):
         else:
             source_message = source_path_list[0]
 
-        provider_prefix = self.config.url_prefix
+        provider_prefix = self.config.url_prefix or 's3://'
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
         sync_path = (f'{source_message} -> '
@@ -2153,8 +2170,8 @@ class S3CompatibleStore(AbstractStore):
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
                         f' To debug, consider running `{command}`.') from e
 
-        if isinstance(self.source, str) and self.source.startswith(
-                self.config.url_prefix):
+        url_prefix = self.config.url_prefix or 's3://'
+        if isinstance(self.source, str) and self.source.startswith(url_prefix):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     'Attempted to use a non-existent bucket as a source: '
@@ -4924,3 +4941,45 @@ class CoreWeaveStore(S3CompatibleStore):
         data_utils.verify_coreweave_bucket(bucket_name, retry=36)
 
         return result
+
+
+@register_s3_compatible_store
+class TigrisStore(S3CompatibleStore):
+    """TigrisStore inherits from S3CompatibleStore and represents the backend
+    for Tigris Object Storage buckets.
+
+    Tigris uses tigris:// URLs (e.g., tigris://my-bucket/path). Users can also
+    specify `store: tigris` in their YAML to explicitly select Tigris storage.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for Tigris Object Storage."""
+        return S3CompatibleConfig(
+            store_type='TIGRIS',
+            url_prefix='tigris://',
+            client_factory=lambda region: data_utils.create_tigris_client(),
+            resource_factory=lambda name: tigris.resource('s3').Bucket(name),
+            split_path=data_utils.split_tigris_path,
+            verify_bucket=data_utils.verify_tigris_bucket,
+            aws_profile=tigris.TIGRIS_PROFILE_NAME,
+            get_endpoint_url=lambda: tigris.ENDPOINT_URL,
+            credentials_file=tigris.TIGRIS_CREDENTIALS_PATH,
+            config_file=tigris.TIGRIS_CONFIG_PATH,
+            cloud_name=tigris.NAME,
+            default_region=tigris.DEFAULT_REGION,
+            mount_cmd_factory=cls._get_tigris_mount_cmd,
+        )
+
+    @classmethod
+    def _get_tigris_mount_cmd(cls, bucket_name: str, mount_path: str,
+                              bucket_sub_path: Optional[str]) -> str:
+        """Factory method for Tigris mount command."""
+        return mounting_utils.get_tigris_mount_cmd(
+            tigris.TIGRIS_CREDENTIALS_PATH,
+            tigris.TIGRIS_PROFILE_NAME,
+            bucket_name,
+            tigris.ENDPOINT_URL,
+            mount_path,
+            bucket_sub_path,
+        )
