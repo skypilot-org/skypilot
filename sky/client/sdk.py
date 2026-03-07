@@ -193,7 +193,7 @@ def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
     workspace: Optional[str] = None
-) -> server_common.RequestId[Dict[str, List[str]]]:
+) -> server_common.RequestId[Dict[str, Dict[str, List[str]]]]:
     """Checks the credentials to enable clouds.
 
     Args:
@@ -206,7 +206,8 @@ def check(
         The request ID of the check request.
 
     Request Returns:
-        None
+        Dict mapping workspace name to a dict of cloud name to list of
+        enabled capability strings (e.g. 'compute', 'storage').
     """
     if infra_list is None:
         clouds = None

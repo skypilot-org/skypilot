@@ -409,3 +409,31 @@ def wait_for_option(pair: str):
             help=autostop_lib.AutostopWaitFor.cli_help_message(pair=pair))(func)
 
     return return_option_decorator
+
+
+# Output format choices for CLI commands
+OUTPUT_FORMAT_TABLE = 'table'
+OUTPUT_FORMAT_JSON = 'json'
+OUTPUT_FORMAT_CHOICES = [OUTPUT_FORMAT_TABLE, OUTPUT_FORMAT_JSON]
+
+
+def output_format_option(helptext: Optional[str] = None):
+    """A decorator for the --output/-o option.
+
+    This decorator adds an output format option to CLI commands.
+    Supported formats: table (default), json.
+    """
+    if helptext is None:
+        helptext = 'Output format. Choices: table, json. Default: table.'
+
+    def return_option_decorator(func):
+        return click.option('--output',
+                            '-o',
+                            'output_format',
+                            type=click.Choice(OUTPUT_FORMAT_CHOICES,
+                                              case_sensitive=False),
+                            default=OUTPUT_FORMAT_TABLE,
+                            required=False,
+                            help=helptext)(func)
+
+    return return_option_decorator
