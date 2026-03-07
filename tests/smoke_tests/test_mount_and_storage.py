@@ -458,6 +458,44 @@ def test_azure_storage_mounts_with_stop():
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.azure
+def test_azure_mount_options():
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    mount_options = ('--read-only '
+                     '--block-cache '
+                     '--disable-compression '
+                     '--block-cache-prefetch-on-open=true '
+                     '--block-cache-block-size=16 '
+                     '--block-cache-strong-consistency=false '
+                     '--block-cache-disk-size=512 '
+                     '--block-cache-disk-timeout=1 '
+                     '--block-cache-pool-size=512')
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_azure_mount_options.yaml.j2').read_text(
+            encoding='utf-8')
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name,
+                              mount_options=mount_options)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        test = smoke_tests_utils.Test(
+            'azure_mount_options',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('azure', name),
+                *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+                f'sky launch -y -c {name} --infra azure '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} {f.name}',
+                f'sky logs {name} 1 --status',
+            ],
+            f'sky down -y {name} && '
+            f'sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 @pytest.mark.no_dependency  # Storage tests required full dependency installed
 @pytest.mark.parametrize(

@@ -635,6 +635,9 @@ def get_storage_schema():
                     },
                 },
             },
+            'mount_options': {
+                'type': 'string',
+            },
             '_is_sky_managed': {
                 'type': 'boolean',
             },

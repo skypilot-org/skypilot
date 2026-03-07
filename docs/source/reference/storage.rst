@@ -395,3 +395,60 @@ Storage YAML reference
           other workers mounting the same Storage). With COPY mode, files are
           copied at VM initialization and any writes to the mount path will
           not be replicated on the bucket.
+
+        mount_options: str; default: None. Optional.
+          Custom options appended to the underlying mount command. Only valid
+          when mode is MOUNT. The options are passed directly to the mount
+          tool used by each provider:
+
+          - AWS S3: goofys (x86) or rclone (ARM64)
+          - GCS: gcsfuse
+          - Azure Blob: blobfuse2
+          - R2, Nebius, CoreWeave: goofys (x86) or rclone (ARM64)
+          - IBM COS, OCI: rclone
+
+          These options are **appended** after SkyPilot's default flags. If you
+          specify a flag that is already set by default, the behavior depends on
+          the underlying tool — most tools (goofys, gcsfuse, rclone) use the
+          last occurrence of a flag, effectively overriding the default.
+
+          Default flags set by SkyPilot for each tool:
+
+          - **goofys** (S3 on x86): ``-o allow_other --stat-cache-ttl 5s --type-cache-ttl 5s``
+          - **goofys** (R2, Nebius, CoreWeave on x86): ``-o allow_other --stat-cache-ttl 5s --type-cache-ttl 5s`` plus provider-specific flags like ``--endpoint``.
+          - **rclone** (S3 on ARM64): ``--daemon --allow-other --s3-env-auth=true``
+          - **rclone** (R2, Nebius, CoreWeave on ARM64): ``--daemon --allow-other`` plus provider-specific flags like ``--s3-endpoint``.
+          - **gcsfuse** (GCS):
+            ``--debug_fuse_errors -o allow_other --implicit-dirs
+            --stat-cache-capacity 4096 --stat-cache-ttl 5s
+            --type-cache-ttl 5s --rename-dir-limit 10000``
+          - **blobfuse2** (Azure):
+            ``--no-symlinks --tmp-path <cache_dir>
+            --container-name <name> -o allow_other -o default_permissions``
+          - **rclone** (IBM COS, OCI):
+            ``--daemon`` (COS); ``--daemon --allow-non-empty`` (OCI)
+
+          For Azure blobfuse2, if ``--tmp-path`` is included in mount_options
+          it overrides the default cache directory.
+
+          Examples:
+
+          .. code-block:: yaml
+
+            # Azure: custom blobfuse2 cache settings
+            /data:
+              source: az://my-container
+              mode: MOUNT
+              mount_options: '--file-cache-timeout-in-seconds=0 --cache-size-mb=4096'
+
+            # S3: custom goofys options
+            /models:
+              source: s3://my-bucket
+              mode: MOUNT
+              mount_options: '--stat-cache-ttl 60s --type-cache-ttl 60s'
+
+            # GCS: custom gcsfuse options
+            /datasets:
+              source: gs://my-bucket
+              mode: MOUNT
+              mount_options: '--max-conns-per-host 20'
