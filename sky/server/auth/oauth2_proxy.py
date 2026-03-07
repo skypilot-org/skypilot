@@ -165,6 +165,13 @@ class OAuth2ProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                     request.state.anonymous_user = True
                     return await call_next(request)
 
+                # Allow unauthenticated access to the logout endpoint.
+                # Logout must be reachable even with expired or invalid
+                # sessions so the frontend can cleanly clear state.
+                if request.url.path == '/api/v1/auth/logout':
+                    request.state.anonymous_user = True
+                    return await call_next(request)
+
                 # TODO(aylei): in unified authentication, the redirection
                 # or rejection should be done after all the authentication
                 # methods are performed.
