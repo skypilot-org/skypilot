@@ -161,6 +161,11 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
+    # Token ID for the API access token created for this job (if any).
+    # Used to clean up the token when the job completes.
+    sqlalchemy.Column('api_access_token_id',
+                      sqlalchemy.Text,
+                      server_default=None),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -1840,6 +1845,29 @@ async def get_pool_submit_info_async(
         if info is None:
             return None, None
         return info[0], info[1]
+
+
+def set_api_access_token_id(job_id: int, token_id: str) -> None:
+    """Store the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.update(job_info_table).where(
+                job_info_table.c.spot_job_id == job_id).values(
+                    api_access_token_id=token_id))
+        session.commit()
+
+
+def get_api_access_token_id(job_id: int) -> Optional[str]:
+    """Get the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(job_info_table.c.api_access_token_id).where(
+                job_info_table.c.spot_job_id == job_id)).fetchone()
+        if result is None:
+            return None
+        return result[0]
 
 
 async def scheduler_set_launching_async(job_id: int):
