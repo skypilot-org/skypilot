@@ -198,6 +198,12 @@ class EnabledCloudsBody(RequestBody):
     expand: bool = False
 
 
+class EnabledCloudsBatchBody(RequestBody):
+    """The request body for the batch enabled clouds endpoint."""
+    workspaces: List[str]
+    expand: bool = False
+
+
 class KubernetesLabelGpusBody(RequestBody):
     """The request body for the GPU labeling endpoint."""
     context: Optional[str] = None
