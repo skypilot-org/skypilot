@@ -819,3 +819,24 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
       bucket: s3://xxx
 
 The jobs controller will use a bit of overhead - it reserves an extra 2GB of memory for itself, which may reduce the amount of requests your API server can handle. To counteract, you can increase the amount of CPU and memory allocated to the API server: See :ref:`sky-api-server-resources-tuning`.
+
+.. _jobs-consolidation-mode-resource-calculation:
+
+Resource calculation in consolidation mode
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In consolidation mode, the maximum number of concurrent job controllers is determined by the available memory on the API server pod after reserving resources for the API server workers:
+
+1. **Total usable memory** is computed as the system memory minus a 2GB reservation for the controller overhead (doubled when pool services share the controller).
+2. **API server worker memory** is subtracted: the memory used by the API server's long and short request workers (based on their guaranteed and burstable parallelism settings).
+3. **Per-controller memory** is approximately 400MB (for the job worker process).
+4. **Max controllers** = ``available_memory / per_controller_memory``, capped at 64.
+
+For example, on a pod with 16GB RAM, after reserving ~4GB for controller overhead and ~6GB for API server workers, roughly 6GB remains. With 400MB per controller, this allows approximately 15 concurrent job controllers.
+
+In **non-consolidation mode** (dedicated controller VM), the calculation also accounts for the memory of the local API server workers that run on the controller. Each controller needs memory for both its own process and 8 concurrent launches, so fewer controllers fit within the same memory.
+
+To increase the number of concurrent jobs, either:
+
+- Increase the API server pod memory (consolidation mode).
+- Use a controller VM with more memory by configuring ``jobs.controller.resources`` in ``~/.sky/config.yaml`` (non-consolidation mode).

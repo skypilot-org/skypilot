@@ -997,3 +997,8 @@ class RecipePinBody(RequestBody):
     """The request body for toggling pin status."""
     recipe_name: str
     pinned: bool
+
+
+class RecipeLaunchBody(RequestBody):
+    """The request body for launching a recipe."""
+    recipe_name: str

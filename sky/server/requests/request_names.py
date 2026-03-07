@@ -85,6 +85,7 @@ class RequestName(str, enum.Enum):
     RECIPE_UPDATE = 'recipes.update'
     RECIPE_DELETE = 'recipes.delete'
     RECIPE_PIN = 'recipes.pin'
+    RECIPE_LAUNCH = 'recipes.launch'
     # Internal request daemons
     REQUEST_DAEMON_STATUS_REFRESH = 'status-refresh'
     REQUEST_DAEMON_VOLUME_REFRESH = 'volume-refresh'
