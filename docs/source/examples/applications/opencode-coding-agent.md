@@ -1,0 +1,1 @@
+../../generated-examples/opencode-coding-agent.md
