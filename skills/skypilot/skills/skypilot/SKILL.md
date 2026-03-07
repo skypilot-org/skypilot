@@ -1,6 +1,6 @@
 ---
 name: skypilot
-description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
+description: "Use when launching cloud VMs, Kubernetes pods, or Slurm jobs for GPU/TPU/CPU workloads, training or fine-tuning models on cloud GPUs, deploying inference servers (vllm, TGI, etc.) with autoscaling, running batch inference or processing on pools of warm workers, writing or debugging SkyPilot task YAML files, using spot/preemptible instances for cost savings, comparing GPU prices across clouds, managing compute across 25+ clouds, Kubernetes, Slurm, and on-prem clusters with failover between them, troubleshooting resource availability or SkyPilot errors, or optimizing cost and GPU availability."
 ---
 
 # SkyPilot Skill
@@ -13,6 +13,7 @@ SkyPilot is a unified framework to run AI workloads on any cloud, Slurm or Kuber
 - Manage compute resources on any cloud, Slurm, or Kubernetes cluster
 - Launch CPU/GPU/TPU (GB300, GB200, B200, H200, H100, etc.) on any cloud, Kubernetes or Slurm
 - Run training, fine-tuning, or batch inference jobs
+- Run batch processing on pools of warm, pre-provisioned workers (job pools)
 - Serve models with autoscaling and multi-cloud replicas (SkyServe)
 - Run long-running jobs with automatic lifecycle management and recovery (managed jobs)
 - Find the cheapest or most available GPU across clouds
@@ -22,7 +23,7 @@ SkyPilot is a unified framework to run AI workloads on any cloud, Slurm or Kuber
 
 ## Capabilities: When to Use What
 
-SkyPilot has three core abstractions. Use the right one for each stage of your workflow:
+SkyPilot has four core abstractions. Use the right one for each stage of your workflow:
 
 **1. SkyPilot Clusters** (`sky launch` / `sky exec`) — Interactive development and debugging
 - Use during initial development, debugging, and experimentation
@@ -37,7 +38,14 @@ SkyPilot has three core abstractions. Use the right one for each stage of your w
 - Works across clouds, Kubernetes, and Slurm (handles preemptions and quota)
 - Best for: training runs, fine-tuning, hyperparameter sweeps, batch inference
 
-**3. SkyServe** (`sky serve up`) — Production model serving
+**3. Job Pools** (`sky jobs pool apply` + `sky jobs launch -p POOL`) — Batch processing on warm workers
+- Pre-provision a pool of workers with setup already done, then submit jobs to the pool
+- Workers stay warm between jobs — no re-provisioning or re-setup overhead
+- Supports fixed-size pools or autoscaling (min/max workers with queue-based scaling)
+- Jobs are distributed across available workers in the pool
+- Best for: batch inference, data processing pipelines, repeated short jobs
+
+**4. SkyServe** (`sky serve up`) — Production model serving
 - Use when serving models at scale with autoscaling
 - Start with `sky launch` + open port to test your serving setup, then use `sky serve up` to scale
 - Provides load balancing, autoscaling, and multi-cloud replicas
@@ -85,6 +93,16 @@ This shows which clouds are configured. If the user's target cloud is not enable
 | `sky jobs queue` | Show all managed jobs and their status |
 | `sky jobs logs JOB_ID` | Stream logs from a managed job |
 | `sky jobs cancel JOB_ID` | Cancel a managed job |
+
+**Job Pools** — batch processing on pre-provisioned workers:
+
+| Command | Description |
+|---------|-------------|
+| `sky jobs pool apply -p NAME pool.yaml` | Create or update a pool of workers |
+| `sky jobs launch -p NAME job.yaml` | Submit a job to a pool |
+| `sky jobs pool status NAME` | Show pool and worker status |
+| `sky jobs pool logs NAME` | Stream pool logs |
+| `sky jobs pool down NAME` | Tear down a pool |
 
 **SkyServe** — model serving with autoscaling:
 
@@ -265,6 +283,76 @@ sky jobs cancel <job_id>
 
 **Checkpoint pattern**: Your training script should save checkpoints to persistent storage (cloud bucket or volume) and resume from the latest checkpoint on restart. SkyPilot handles the cluster recovery; your script handles the state recovery.
 
+## Job Pools
+
+Use job pools to pre-provision warm workers and submit jobs to them. Workers stay running with setup already done, so jobs start instantly without re-provisioning.
+
+**IMPORTANT:** The pool YAML must contain a top-level `pool:` section — this is what distinguishes it from a regular task YAML. Key constraints:
+- The `pool:` section is top-level (NOT nested under `resources:`)
+- You cannot combine `--workers` CLI flag with a YAML file
+- Do NOT use `num_workers:` as a top-level field (that's not valid — use `pool: workers:` instead)
+- The *job* YAML submitted with `sky jobs launch -p` is a regular task YAML (no `pool:` section needed)
+
+```yaml
+# pool.yaml — defines the pool (worker resources + pool config)
+resources:
+  cpus: 4
+  # Or use GPUs: accelerators: H100:1
+  # Pin to a specific cloud/infra if needed:
+  # infra: kubernetes
+  # infra: aws
+
+setup: |
+  pip install transformers datasets
+
+# The pool section is REQUIRED — it configures worker scaling
+pool:
+  workers: 3  # Fixed pool of 3 workers
+```
+
+```yaml
+# pool-autoscaling.yaml — pool with autoscaling
+resources:
+  accelerators: H100:1
+
+setup: |
+  pip install vllm
+
+pool:
+  min_workers: 1
+  max_workers: 10
+  queue_length_threshold: 5  # Scale up when 5+ jobs pending
+```
+
+```yaml
+# job.yaml — a regular task YAML (no pool: section needed)
+name: batch-inference
+
+run: |
+  echo "Processing partition ${SKYPILOT_JOB_RANK} of ${SKYPILOT_NUM_JOBS}"
+  python process.py --job-rank ${SKYPILOT_JOB_RANK} --num-jobs ${SKYPILOT_NUM_JOBS}
+```
+
+```bash
+# Create a pool with 3 workers
+sky jobs pool apply -p my-pool pool.yaml
+
+# Submit a single job to the pool
+sky jobs launch -p my-pool job.yaml
+
+# Submit multiple jobs (distributed across workers)
+sky jobs launch -p my-pool --num-jobs 10 job.yaml
+
+# Check pool status
+sky jobs pool status my-pool
+
+# Update worker count (without YAML — only for existing pools)
+sky jobs pool apply -p my-pool --workers 5
+
+# Tear down the pool
+sky jobs pool down my-pool
+```
+
 ## SkyServe: Model Serving
 
 ```yaml
@@ -321,6 +409,13 @@ sky serve down my-llm
    ```
 3. Monitor with `sky jobs queue`
 
+### Batch Processing with Job Pools
+1. Write pool YAML with `resources:`, `setup:`, and `pool:` sections
+2. `sky jobs pool apply -p my-pool pool.yaml` to create the pool
+3. `sky jobs launch -p my-pool --num-jobs 10 job.yaml` to submit jobs
+4. `sky jobs queue` to monitor jobs, `sky jobs pool status my-pool` for pool status
+5. `sky jobs pool down my-pool` when done
+
 ### Model Serving Deployment
 1. Write serve YAML with `service:` section
 2. `sky serve up serve.yaml -n my-service`
@@ -349,6 +444,10 @@ When using SkyPilot programmatically, follow this loop:
 | Not using `envs:` for configurable values | Hard to reuse or override from CLI | Use `envs:` in YAML + `--env KEY=VAL` for parameterization |
 | Running `sky launch` without `-c <name>` | Creates randomly-named cluster, hard to reference | Always name clusters with `-c` |
 | Using deprecated `cloud:`/`region:`/`zone:` fields | Deprecated in favor of `infra:` | Use `infra: aws/us-east-1` instead |
+| Creating pool YAML without `pool:` section | `sky jobs pool apply` requires a `pool:` section in the YAML | Always include `pool: workers: N` in pool YAMLs |
+| Using `--workers` flag together with a YAML file | CLI rejects combining `--workers` with `POOL_YAML` | Put `workers:` in the YAML's `pool:` section, or use `--workers` alone for existing pools |
+| Using `num_workers:` as a top-level YAML field | Not a valid field — error says "did you mean num_nodes?" | Use `pool: workers: N` instead (workers goes inside the `pool:` section) |
+| Nesting `pool:` under `resources:` | `pool:` is a top-level field, not a resource property | Put `pool:` at the same level as `resources:`, `setup:`, `run:` |
 
 ## Common Issues Quick Reference
 
