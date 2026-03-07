@@ -824,6 +824,53 @@ def test_pool_job_cancel_running(generic_cloud: str):
 
 
 @pytest.mark.no_remote_server  # see note 1 above
+def test_pool_job_cancelled_logs(generic_cloud: str):
+    """Test that logs are accessible after a pool job is cancelled."""
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
+
+    job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='echo "Pool job start counting"; '
+        'for i in $(seq 1 600); do echo "Pool job: $i"; sleep 1; done',
+    )
+    with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+        with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+            write_yaml(pool_yaml, pool_config)
+            write_yaml(job_yaml, job_config)
+
+            name = smoke_tests_utils.get_cluster_name()
+            pool_name = f'{name}-pool'
+            get_job_id_cmd = (f'sky jobs queue | grep {job_name} | head -1 | '
+                              f'awk \'{{print $1}}\'')
+
+            test = smoke_tests_utils.Test(
+                'test_pools_job_cancelled_logs',
+                [
+                    _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, pool_yaml=pool_yaml.name),
+                    _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                        pool_name=pool_name, job_yaml=job_yaml.name),
+                    wait_until_job_status(job_name, ['RUNNING'],
+                                          timeout=timeout),
+                    # Give time for log output to be flushed to disk.
+                    'sleep 10',
+                    cancel_job(job_name),
+                    wait_until_job_status(
+                        job_name, ['CANCELLED'], bad_statuses=[], timeout=60),
+                    # Verify logs are accessible after cancellation.
+                    f's=$(sky jobs logs $({get_job_id_cmd}) --no-follow); '
+                    f'echo "$s"; echo "$s" | grep "Pool job start counting"',
+                ],
+                timeout=20 * 60,
+                teardown=cancel_jobs_and_teardown_pool(pool_name, timeout=5),
+            )
+
+            smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_instant(generic_cloud: str):
     timeout = smoke_tests_utils.get_timeout(generic_cloud)
     pool_config = basic_pool_conf(num_workers=1, infra=generic_cloud)
