@@ -1530,3 +1530,81 @@ def test_kubernetes_end_to_end_make_deploy_variables(mock_check_deps,
     # Clean up
     del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
     importlib.reload(skypilot_config)
+
+
+class TestMemoryBasedGPUSelection:
+    """Tests for memory-based GPU selection via set_resources_override.
+
+    This covers the --gpus CLI path which goes through
+    Task.set_resources_override rather than Resources.from_yaml_config.
+    """
+
+    @staticmethod
+    def _is_raw_memory_spec(name: str) -> bool:
+        """Check if name is a raw memory spec like '40GB+', not a GPU name."""
+        import re
+        return bool(re.match(r'^\d+[GgMmTt][Bb]\+?$', name))
+
+    def test_memory_plus_format(self):
+        """Test '40GB+' expands to multiple GPUs with >= 40GB memory."""
+        import sky
+        task = sky.Task()
+        task.set_resources_override({'accelerators': '40GB+'})
+        assert len(task.resources) > 1
+        for r in task.resources:
+            assert r.accelerators is not None
+            acc_name = list(r.accelerators.keys())[0]
+            assert not self._is_raw_memory_spec(acc_name)
+
+    def test_memory_exact_with_count(self):
+        """Test '80GB:8' expands to GPUs with exactly 80GB, count 8."""
+        import sky
+        task = sky.Task()
+        task.set_resources_override({'accelerators': '80GB:8'})
+        assert len(task.resources) > 1
+        for r in task.resources:
+            acc_name, acc_count = list(r.accelerators.items())[0]
+            assert not self._is_raw_memory_spec(acc_name)
+            assert acc_count == 8
+
+    def test_manufacturer_prefix(self):
+        """Test 'NVIDIA:40GB+' expands to NVIDIA GPUs only."""
+        import sky
+        task = sky.Task()
+        task.set_resources_override({'accelerators': 'NVIDIA:40GB+'})
+        assert len(task.resources) > 1
+        for r in task.resources:
+            acc_name = list(r.accelerators.keys())[0]
+            assert not self._is_raw_memory_spec(acc_name)
+            # Should not include AMD GPUs
+            assert not acc_name.startswith('MI')
+
+    def test_manufacturer_memory_count(self):
+        """Test 'NVIDIA:80GB:8' expands correctly."""
+        import sky
+        task = sky.Task()
+        task.set_resources_override({'accelerators': 'NVIDIA:80GB:8'})
+        assert len(task.resources) > 1
+        for r in task.resources:
+            acc_name, acc_count = list(r.accelerators.items())[0]
+            assert not self._is_raw_memory_spec(acc_name)
+            assert acc_count == 8
+            assert not acc_name.startswith('MI')
+
+    def test_named_accelerator_unchanged(self):
+        """Test that regular 'V100:4' still works normally."""
+        import sky
+        task = sky.Task()
+        task.set_resources_override({'accelerators': 'V100:4'})
+        assert len(task.resources) == 1
+        r = list(task.resources)[0]
+        assert r.accelerators == {'V100': 4}
+
+    def test_named_accelerator_no_count(self):
+        """Test that regular 'V100' still works normally."""
+        import sky
+        task = sky.Task()
+        task.set_resources_override({'accelerators': 'V100'})
+        assert len(task.resources) == 1
+        r = list(task.resources)[0]
+        assert r.accelerators == {'V100': 1}
