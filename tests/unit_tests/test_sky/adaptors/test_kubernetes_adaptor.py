@@ -4,7 +4,6 @@ import concurrent.futures
 import gc
 import os
 import tempfile
-import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -89,8 +88,8 @@ def test_watch_cleanup(monkeypatch):
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 
     w = kubernetes.watch()
-    # Keep a handle to the underlying watch instance created by the API
-    # so we can assert its _api_client.close() was called.
+    # Keep a handle to the underlying watch object so we can assert its
+    # _api_client.close() was called on GC.
     underlying = w._client
     del w
     annotations.clear_request_level_cache()
