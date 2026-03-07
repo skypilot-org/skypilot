@@ -43,6 +43,7 @@ import {
   Download,
   ChevronDownIcon,
   ChevronRightIcon,
+  Trash2,
 } from 'lucide-react';
 import {
   handleJobAction,
@@ -54,6 +55,7 @@ import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 import { PrimaryBadge } from '@/components/elements/PrimaryBadge';
 import { UserDisplay } from '@/components/elements/UserDisplay';
 import { useMobile } from '@/hooks/useMobile';
+import { useDismissedItems } from '@/hooks/useDismissedItems';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
 import { PluginSlot } from '@/plugins/PluginSlot';
@@ -439,6 +441,15 @@ export function ManagedJobsTable({
     onConfirm: null,
   });
   const isMobile = useMobile();
+
+  // Dismissed items (soft-delete from dashboard view)
+  const {
+    dismissItem: dismissJob,
+    clearAllDismissed: clearDismissedJobs,
+    filterDismissed: filterDismissedJobs,
+    dismissedCount: dismissedJobCount,
+  } = useDismissedItems('sky-dismissed-jobs');
+
   // Guards multiple concurrent fetches: only latest response should commit
   const requestSeqRef = useRef(0);
 
@@ -888,9 +899,14 @@ export function ManagedJobsTable({
 
   // Sort the filtered data
   const sortedData = React.useMemo(() => {
-    if (!sortConfig.key) return filteredData;
+    let result = filteredData;
 
-    return [...filteredData].sort((a, b) => {
+    // Remove dismissed (soft-deleted) jobs from the display
+    result = filterDismissedJobs(result, (item) => String(item.id));
+
+    if (!sortConfig.key) return result;
+
+    return [...result].sort((a, b) => {
       if (a[sortConfig.key] < b[sortConfig.key]) {
         return sortConfig.direction === 'ascending' ? -1 : 1;
       }
@@ -899,7 +915,7 @@ export function ManagedJobsTable({
       }
       return 0;
     });
-  }, [filteredData, sortConfig]);
+  }, [filteredData, sortConfig, filterDismissedJobs]);
 
   // Pagination is performed server-side by unique jobs (not tasks)
   const startIndex = (currentPage - 1) * pageSize;
@@ -1518,14 +1534,39 @@ export function ManagedJobsTable({
           // For group parent, use jobId; otherwise use item.id
           const logJobId = renderMode === 'groupParent' ? jobId : item.id;
 
+          // Check if this job is in a finished state.
+          // For group parent rows, use the aggregated status so the trash
+          // icon is consistent with the status badge displayed to the user.
+          const effectiveStatus =
+            renderMode === 'groupParent' && ctx?.aggregates?.aggregatedStatus
+              ? ctx.aggregates.aggregatedStatus
+              : item.status;
+          const isFinished = statusGroups.finished.includes(effectiveStatus);
+
           return (
             <TableCell>
-              <Status2Actions
-                jobParent="/jobs"
-                jobId={logJobId}
-                managed={true}
-                workspace={item.workspace}
-              />
+              <div className="flex items-center space-x-2">
+                <Status2Actions
+                  jobParent="/jobs"
+                  jobId={logJobId}
+                  managed={true}
+                  workspace={item.workspace}
+                />
+                {isFinished && renderMode !== 'groupChild' && (
+                  <Tooltip
+                    content="Remove from dashboard"
+                    className="text-sm text-muted-foreground"
+                  >
+                    <button
+                      onClick={() => dismissJob(String(logJobId))}
+                      className="text-gray-400 hover:text-red-500 transition-colors"
+                      aria-label="Remove from dashboard"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
             </TableCell>
           );
         },
@@ -1539,6 +1580,7 @@ export function ManagedJobsTable({
       expandedRowId,
       poolsLoading,
       poolsData,
+      dismissJob,
     ]
   );
 
@@ -1960,7 +2002,18 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls - always show for visual separation */}
-      <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+      <div className="flex justify-between items-center py-2 px-4 text-sm text-gray-700">
+        <div>
+          {dismissedJobCount > 0 && (
+            <button
+              onClick={clearDismissedJobs}
+              className="text-gray-500 hover:text-blue-600 text-sm underline"
+            >
+              Show {dismissedJobCount} hidden
+              {dismissedJobCount === 1 ? ' job' : ' jobs'}
+            </button>
+          )}
+        </div>
         <div className="flex items-center space-x-4">
           <div className="flex items-center">
             <span className="mr-2">Jobs per page:</span>
