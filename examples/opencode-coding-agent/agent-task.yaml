@@ -1,0 +1,25 @@
+name: opencode-agent
+
+workdir: .
+
+resources:
+  cpus: 2+
+
+envs:
+  GITHUB_REPO: ""
+  AGENT_TASK: ""
+  BRANCH_NAME: ""               # Optional: branch is opencode/<BRANCH_NAME> (default: opencode/agent)
+  USE_BRANCH: ""                # Optional: check out opencode/<USE_BRANCH> instead of creating a new one
+  LLM_MODEL_ID: "anthropic/claude-sonnet-4-6"
+
+secrets:
+  GITHUB_TOKEN: null
+  ANTHROPIC_API_KEY: null
+
+setup: |
+  sudo curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+  sudo apt-get install -y nodejs
+  sudo npm install -g opencode-ai
+
+run: |
+  bash run_agent.sh
