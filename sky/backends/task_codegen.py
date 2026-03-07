@@ -66,6 +66,13 @@ class TaskCodeGen:
             from sky.skylet import job_lib
             from sky.utils import log_utils
             from sky.utils import subprocess_utils
+
+            # Load cluster plugins (e.g., notifications) if configured.
+            try:
+                from sky.server import plugins as _sky_plugins
+                _sky_plugins.load_plugins(_sky_plugins.ExtensionContext())
+            except Exception:
+                pass
             """))
 
     def _add_logging_functions(self) -> None:
