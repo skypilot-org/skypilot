@@ -346,6 +346,7 @@ def get_common_gpus() -> List[str]:
         'L4',
         'L40S',
         'RTX5090',
+        'RTX6000',
         'T4',
         'V100',
         'V100-32GB',
