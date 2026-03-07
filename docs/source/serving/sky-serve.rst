@@ -547,3 +547,55 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   These settings will not take effect if you have an existing controller (either
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all services to be terminated.
+
+.. _sky-serve-max-services-calculation:
+
+How the maximum number of services is calculated
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The maximum number of concurrent services is determined by the available memory on the controller. Each service monitoring process requires approximately 512MB of memory.
+
+**Non-consolidation mode** (dedicated controller VM):
+
+1. **Total usable memory** = system memory - 2GB (reserved for controller overhead).
+2. Each service additionally needs memory for its local API server workers (4 concurrent launches per service).
+3. **Max services** = ``usable_memory / (512MB + worker_memory_per_service)``.
+
+**Consolidation mode** (controller running on the API server pod):
+
+When consolidation mode is enabled (``serve.controller.consolidation_mode: true``), the controller shares the API server pod. The calculation changes:
+
+1. **Total usable memory** = pod memory - 2GB controller overhead - API server worker memory.
+2. Since the API server manages request scheduling, no additional worker memory is needed per service.
+3. **Max services** = ``usable_memory / 512MB``.
+
+The following table shows the approximate minimum memory required for different numbers of concurrent services (non-consolidation mode):
+
+.. list-table::
+   :header-rows: 1
+
+   * - Max Services
+     - Min Memory Required (GB)
+   * - 1
+     - 5
+   * - 2
+     - 7
+   * - 4
+     - 11
+   * - 8
+     - 19
+   * - 16
+     - 36
+   * - 32
+     - 70
+   * - 64
+     - 137
+
+.. note::
+
+   In consolidation mode, the API server workers scale with the available pod memory, so the practical maximum is approximately 8 concurrent services. Adding more pod memory has diminishing returns because the API server workers consume the extra memory.
+
+If you encounter the "Max number of services reached" error, you can increase the limit by:
+
+- **Non-consolidation mode**: Configuring a controller VM with more memory via ``serve.controller.resources`` above.
+- **Consolidation mode**: Increasing the API server pod memory (up to the practical limit of ~8 services).
