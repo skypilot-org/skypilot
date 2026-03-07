@@ -437,10 +437,20 @@ class Slurm(clouds.Cloud):
         # Optionally populate accelerator information.
         acc_count = s.accelerator_count if s.accelerator_count else 0
         acc_type = s.accelerator_type if s.accelerator_type else None
-        # Resolve the actual GPU type as it appears in the cluster's GRES.
-        # Slurm GRES types are case-sensitive.
+        # Resolve the canonical GPU name to the raw GRES type on the cluster.
+        # Slurm GRES types are case-sensitive and may differ from user-facing
+        # canonical names (e.g. 'H100' -> 'NVIDIA_H100_80GB_HBM3').
         if acc_type:
-            acc_type = slurm_utils.get_gres_gpu_type(cluster, acc_type)
+            try:
+                acc_type = slurm_utils.resolve_gres_gpu_type(
+                    cluster, acc_type, acc_count, partition)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to determine the exact GPU GRES type from '
+                    f'the Slurm cluster {cluster!r}. Falling back to '
+                    f'{acc_type!r}. This may cause issues if it is not '
+                    f'the exact GRES name. '
+                    f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
 
