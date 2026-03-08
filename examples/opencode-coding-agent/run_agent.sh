@@ -42,7 +42,7 @@ git add -A
 if ! git config user.name &>/dev/null || ! git config user.email &>/dev/null; then
   _GH_USER=$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" https://api.github.com/user)
   git config user.name "$(echo "$_GH_USER" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('name') or d['login'])")"
-  git config user.email "$(echo "$_GH_USER" | python3 -c "import sys,json; print(json.load(sys.stdin)['email'])")"
+  git config user.email "$(echo "$_GH_USER" | python3 -c "import sys, json; d = json.load(sys.stdin); print(d.get('email') or '{}+{}@users.noreply.github.com'.format(d['id'], d['login']))")"
 fi
 
 opencode run \
