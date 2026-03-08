@@ -15,7 +15,8 @@ rm -rf "$WORKSPACE"
 if [[ -n "${USE_BRANCH:-}" ]]; then
   BRANCH="opencode/${USE_BRANCH}"
   git clone --depth=1 --branch "$BRANCH" \
-    "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" "$WORKSPACE"
+    -c "http.https://github.com/.extraheader=Authorization: Basic $(echo -n "x-access-token:${GITHUB_TOKEN}" | base64)" \
+    "https://github.com/${GITHUB_REPO}.git" "$WORKSPACE"
   cd "$WORKSPACE"
 else
   BRANCH="opencode/${BRANCH_NAME:-agent}"
