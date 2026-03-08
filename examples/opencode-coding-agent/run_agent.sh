@@ -48,7 +48,7 @@ fi
 opencode run \
   "Create a single git commit for the already-staged changes with an informative commit message." \
   --model "$LLM_MODEL_ID"
-git push "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git" "$BRANCH"
+git push origin "$BRANCH"
 
 BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo "main")
 echo ""
