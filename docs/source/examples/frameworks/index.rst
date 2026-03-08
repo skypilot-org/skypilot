@@ -11,4 +11,5 @@ Frameworks
    marimo <marimo>
    MLFlow <https://nebius.com/blog/posts/orchestrating-llm-fine-tuning-k8s-skypilot-mlflow>
    MPI <mpi>
+   Ray Data <ray_data>
    Spyder IDE <spyder>
