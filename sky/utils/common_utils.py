@@ -14,6 +14,7 @@ import os
 import platform
 import random
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -448,7 +449,7 @@ def get_pretty_entrypoint_cmd() -> str:
     # Redact sensitive values from secrets arguments
     argv = _redact_secrets_values(argv)
 
-    return ' '.join(argv)
+    return shlex.join(argv)
 
 
 def read_last_n_lines(file_path: str,

@@ -125,6 +125,9 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
+    # Network endpoint information (extracted from cluster handle)
+    'internal_external_ips',
+    'internal_services',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -532,6 +535,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
+            cluster_name: Optional[str] = None
             if pool is None:
                 task_name = task['job_name']
                 cluster_name = generate_managed_job_cluster_name(
@@ -539,6 +543,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             else:
                 cluster_name, _ = (
                     managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is None:
+                continue
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
@@ -1189,19 +1195,21 @@ def stream_logs_by_id(
                     exceptions.JobExitCode.from_managed_job_status(
                         managed_job_status))
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
+        latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
 
         # If a task filter was specified, use the filtered task_id instead of
         # the latest task_id. This allows viewing logs for a specific task in
         # a JobGroup with parallel execution.
         if filtered_task_id is not None:
-            task_id = filtered_task_id
+            latest_task_id = filtered_task_id
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
-        assert managed_job_status is not None, (job_id, task_id,
+        assert managed_job_status is not None, (job_id, latest_task_id,
                                                 managed_job_status)
+        assert latest_task_id is not None, (job_id, latest_task_id)
+        task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
             handle = None
@@ -1238,13 +1246,15 @@ def stream_logs_by_id(
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
+                latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
                 if filtered_task_id is not None:
-                    task_id = filtered_task_id
-                assert managed_job_status is not None, (job_id, task_id,
+                    latest_task_id = filtered_task_id
+                assert managed_job_status is not None, (job_id, latest_task_id,
                                                         managed_job_status)
+                assert latest_task_id is not None, (job_id, latest_task_id)
+                task_id = latest_task_id
                 continue
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
@@ -1331,13 +1341,16 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
-                        task_id, managed_job_status = (
+                        latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
-                        if original_task_id != task_id:
+                        if original_task_id != latest_task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    assert managed_job_status is not None, (job_id, task_id,
+                    assert managed_job_status is not None, (job_id,
+                                                            latest_task_id,
                                                             managed_job_status)
+                    assert latest_task_id is not None, (job_id, latest_task_id)
+                    task_id = latest_task_id
                     continue
 
                 # The job can be cancelled by the user or the controller (when
@@ -1694,6 +1707,18 @@ def _populate_job_record_from_handle(
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+    # Network endpoint information
+    job['internal_external_ips'] = handle.stable_internal_external_ips
+    # Extract internal_svc entries if available
+    internal_services = None
+    if handle.cached_cluster_info is not None:
+        internal_services = {}
+        for instance_id, instance_infos in (
+                handle.cached_cluster_info.instances.items()):
+            for info in instance_infos:
+                if info.internal_svc is not None:
+                    internal_services[instance_id] = info.internal_svc
+    job['internal_services'] = internal_services
 
 
 def get_managed_job_queue(
@@ -1831,6 +1856,8 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
+                job['internal_services'] = None
+                job['internal_external_ips'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
 
@@ -2433,6 +2460,22 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Convert internal_external_ips from list of dicts to list of tuples
+    # MessageToDict converts IpPair messages to dicts like
+    # {"internal_ip": "...", "external_ip": "..."}, but ManagedJobRecord
+    # expects a list of (internal_ip, external_ip) tuples.
+    if 'internal_external_ips' in job_dict:
+        ip_pairs = job_dict['internal_external_ips']
+        if ip_pairs:
+            job_dict['internal_external_ips'] = [
+                (ip_pair.get('internal_ip', ''), ip_pair.get('external_ip', ''))
+                for ip_pair in ip_pairs
+            ]
+        else:
+            job_dict['internal_external_ips'] = None
+    # Convert empty internal_services dict to None for consistency
+    if 'internal_services' in job_dict and not job_dict['internal_services']:
+        job_dict['internal_services'] = None
     return job_dict
 
 

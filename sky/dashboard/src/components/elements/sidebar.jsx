@@ -21,7 +21,6 @@ import {
   UsersIcon,
   StarIcon,
   VolumeIcon,
-  KueueIcon,
   KeyIcon,
   ShieldIcon,
   PieChartIcon,
@@ -40,7 +39,6 @@ const ICON_MAP = {
   users: UsersIcon,
   volume: VolumeIcon,
   clock: Clock,
-  kueue: KueueIcon,
   filecode: FileCode,
   repeat: RepeatIcon,
   piechart: PieChartIcon,
@@ -726,21 +724,15 @@ export function TopBar() {
                         </>
                       );
                     })()}
-                    <div className="border-t border-gray-200 mx-1 my-1"></div>
-                    <Link
-                      href="/users"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
-                      onClick={() => setIsDropdownOpen(false)}
-                      prefetch={false}
-                    >
-                      See all users
-                    </Link>
                     <PluginSlot
                       name="user-menu"
                       wrapperClassName="contents"
                       context={{
                         closeDropdown: () => setIsDropdownOpen(false),
                       }}
+                      prefix={
+                        <div className="border-t border-gray-200 mx-1 my-1"></div>
+                      }
                     />
                   </div>
                 )}
