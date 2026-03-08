@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import tempfile
+import textwrap
 from typing import List, Optional
 
 import colorama
@@ -858,7 +859,7 @@ def deploy_single_cluster(cluster_name,
         get_selector_cmd = f"""
             {askpass_block}
             for i in $(seq 1 30); do
-                DCGM_DS=$(kubectl --kubeconfig ~/.kube/config get daemonset -n gpu-operator -o name 2>/dev/null | grep dcgm) && break
+                DCGM_DS=$(kubectl --kubeconfig ~/.kube/config get daemonset -n gpu-operator -o name 2>/dev/null | grep dcgm-exporter) && break
                 echo 'Waiting for dcgm-exporter DaemonSet...' >&2
                 sleep 10
             done
@@ -883,31 +884,7 @@ def deploy_single_cluster(cluster_name,
         else:
             # Step 2: Create the Service with the discovered selector
             logger.debug(f'Found selector: <{selector}>.')
-            create_svc_cmd = f"""
-                {askpass_block}
-                cat <<'DCGM_SVC' | kubectl --kubeconfig ~/.kube/config apply -f -
-apiVersion: v1
-kind: Service
-metadata:
-  name: dcgm-exporter
-  namespace: gpu-operator
-  labels:
-    app: dcgm-exporter
-  annotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "9400"
-    prometheus.io/path: "/metrics"
-spec:
-  selector:
-    {selector}
-  ports:
-  - name: metrics
-    port: 9400
-    targetPort: 9400
-    protocol: TCP
-  type: ClusterIP
-DCGM_SVC
-            """
+            create_svc_cmd = _dcgm_exporter_service_cmd(askpass_block, selector)
             svc_result = deploy_utils.run_remote(
                 head_node,
                 create_svc_cmd,
@@ -944,6 +921,43 @@ DCGM_SVC
         success_message(f'Node Pool `{cluster_name}` deployed successfully.')
 
     return unsuccessful_workers
+
+
+def _dcgm_exporter_service_cmd(askpass_block: str, selector: str) -> str:
+    """Create a command to apply a dcgm-exporter Service with Prometheus annotations.
+
+    The GPU Operator deploys dcgm-exporter but does not add Prometheus
+    scrape annotations by default, so this Service is needed for
+    Prometheus to discover and scrape GPU metrics.
+    """
+    indented_selector = selector.replace('\n', '\n    ')
+    svc_yaml = textwrap.dedent(f"""\
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: dcgm-exporter
+          namespace: gpu-operator
+          labels:
+            app: dcgm-exporter
+          annotations:
+            prometheus.io/scrape: "true"
+            prometheus.io/port: "9400"
+            prometheus.io/path: "/metrics"
+        spec:
+          selector:
+            {indented_selector}
+          ports:
+          - name: metrics
+            port: 9400
+            targetPort: 9400
+            protocol: TCP
+          type: ClusterIP
+    """)
+    return f"""{askpass_block}
+cat <<'DCGM_SVC' | kubectl --kubeconfig ~/.kube/config apply -f -
+{svc_yaml}
+DCGM_SVC
+"""
 
 
 def create_askpass_script(password):
