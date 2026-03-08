@@ -1,0 +1,43 @@
+# Run with:
+# sky launch k8_launcher.yaml
+
+resources:
+  infra: k8s
+  accelerators: A100:2
+  use_spot: False
+
+file_mounts:
+  data_gen_script.py: ./data_gen_script.py
+
+volumes:
+  /outputs:
+    size: 1Gi
+
+setup: |
+  # Install CUDA
+  conda install -y cuda -c nvidia
+
+  # Create uv virtual environment
+  uv venv ~/ray_env --seed --python 3.10
+  source ~/ray_env/bin/activate
+
+  # Core dependencies
+  uv pip install -U "ray[llm]"
+  uv pip install huggingface_hub pydantic boto3 uvloop==0.21.0
+
+run: |
+  source ~/ray_env/bin/activate
+
+  # Cache optimization
+  export HF_HOME=~/hf_cache
+  export TRANSFORMERS_CACHE=~/hf_cache
+  export HF_DATASETS_CACHE=~/hf_cache
+
+  # Set multiprocessing method to spawn for Ray and vLLM - https://github.com/vllm-project/vllm/issues/8893#issuecomment-2761883026
+  export VLLM_WORKER_MULTIPROC_METHOD=spawn
+
+  echo "Starting Ray + vLLM synthetic QA generation..."
+
+  python data_gen_script.py
+
+  echo "Generation complete."
