@@ -27,19 +27,19 @@ _LAUNCH_POOL_AND_CHECK_SUCCESS = (
 _LAUNCH_JOB_AND_CHECK_SUCCESS = (
     's=$(sky jobs launch --pool {pool_name} {job_yaml} -d -y); '
     'echo "$s"; '
-    'echo; echo; echo "$s" | grep "Job submitted"; '
+    'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"; '
     'sleep 5')
 
 _LAUNCH_JOB_AND_CHECK_SUCCESS_WITH_NAME = (
     's=$(sky jobs launch --pool {pool_name} {job_yaml} -n {job_name} -d -y); '
     'echo "$s"; '
-    'echo; echo; echo "$s" | grep "Job submitted"; '
+    'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"; '
     'sleep 5')
 
 _LAUNCH_JOB_AND_CHECK_OUTPUT = (
     's=$(sky jobs launch --pool {pool_name} {job_yaml} -d -y); '
     'echo "$s"; '
-    'echo; echo; echo "$s" | grep "Job submitted"; echo "$s" | grep "{output}"; '
+    'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"; echo "$s" | grep "{output}"; '
     'sleep 5')
 
 _POOL_CHANGE_NUM_WORKERS_AND_CHECK_SUCCESS = (
@@ -1350,7 +1350,8 @@ def test_pools_heterogeneous_any_of(generic_cloud: str):
                     pool_name=pool_name, pool_yaml=one_config_yaml.name),
                 (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
                  'echo "$s"; '
-                 'echo; echo; echo "$s" | grep "Job submitted"'),
+                 'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"'
+                ),
                 wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
@@ -1427,7 +1428,7 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
                 f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
                 f'--name {job_name} -d -y); '
                 f'echo "$s"; '
-                f'echo; echo; echo "$s" | grep "Job submitted"',
+                f'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"',
                 wait_until_job_status(job_name, ['RUNNING'], timeout=timeout),
             ])
 
@@ -1437,7 +1438,7 @@ def test_pools_heterogeneous_resource_scheduling(generic_cloud: str):
             f's=$(sky jobs launch --pool {pool_name} {job_yaml.name} '
             f'--name {fifth_job_name} -d -y); '
             f'echo "$s"; '
-            f'echo; echo; echo "$s" | grep "Job submitted"',
+            f'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"',
             # Wait for it to be PENDING
             wait_until_job_status(fifth_job_name, ['PENDING'],
                                   bad_statuses=[],
