@@ -35,12 +35,18 @@ def _maybe_truncate_daemon_log() -> None:
     Daemon stdout/stderr are redirected to the log file via os.dup2 with
     O_APPEND. After ftruncate(0), the next write atomically seeks to
     end-of-file (position 0), so no sparse file is created.
+
+    The threshold is configurable via api_server.daemon_log_max_bytes in
+    ~/.sky/config.yaml, defaulting to DAEMON_LOG_MAX_BYTES.
     """
     try:
+        max_bytes = skypilot_config.get_nested(
+            ('api_server', 'daemon_log_max_bytes'),
+            server_constants.DAEMON_LOG_MAX_BYTES)
         sys.stdout.flush()
         sys.stderr.flush()
         fd = sys.stdout.fileno()
-        if os.fstat(fd).st_size < server_constants.DAEMON_LOG_MAX_BYTES:
+        if os.fstat(fd).st_size < max_bytes:
             return
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)
