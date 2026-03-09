@@ -9,13 +9,14 @@ This script:
 4. Writes the resulting QA dataset to disk.
 """
 
-if __name__ == "__main__": # https://docs.vllm.ai/en/latest/usage/troubleshooting/#python-multiprocessing
-    import ray
-    from pydantic import BaseModel
+if __name__ == "__main__":  # https://docs.vllm.ai/en/latest/usage/troubleshooting/#python-multiprocessing
     from typing import List
 
-    from ray.data.llm import build_processor, vLLMEngineProcessorConfig
     from huggingface_hub import HfFileSystem
+    from pydantic import BaseModel
+    import ray
+    from ray.data.llm import build_processor
+    from ray.data.llm import vLLMEngineProcessorConfig
 
     print("Imports Done")
 
@@ -23,14 +24,13 @@ if __name__ == "__main__": # https://docs.vllm.ai/en/latest/usage/troubleshootin
     # 1. Define structured output schema (MULTI QA FORMAT)
     # --------------------------------------------------------------------
 
+
     class QA(BaseModel):
         question: str
         answer: str
 
-
     class QAList(BaseModel):
         qas: List[QA]  # Model can generate as many as it wants
-
 
     json_schema = QAList.model_json_schema()
 
@@ -56,10 +56,8 @@ if __name__ == "__main__": # https://docs.vllm.ai/en/latest/usage/troubleshootin
     print(ds.schema())
 
     # Filter + limit to 1K examples for this demo (you can increase or remove the limit for more data)
-    ds = (
-        ds.filter(lambda row: row["text"] is not None and len(row["text"].strip()) > 200)
-        .limit(1_000)
-    )
+    ds = (ds.filter(lambda row: row["text"] is not None and len(row[
+        "text"].strip()) > 200).limit(1_000))
 
     # --------------------------------------------------------------------
     # 4. Configure vLLM engine
@@ -109,12 +107,10 @@ if __name__ == "__main__": # https://docs.vllm.ai/en/latest/usage/troubleshootin
             ),
         )
 
-
     def postprocess(row):
         return {
             "qa_json": row["generated_text"],
         }
-
 
     processor = build_processor(
         processor_config,
