@@ -8,6 +8,7 @@ import asyncio
 import collections
 from datetime import datetime
 import enum
+import json
 import os
 import pathlib
 import re
@@ -43,6 +44,7 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import infra_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -856,7 +858,6 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
         })
 
     # 2. Job info from DB (inline — small data)
-    import json  # pylint: disable=import-outside-toplevel
     try:
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         if tasks:
@@ -943,15 +944,13 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
                                     inline_data: List[Dict[str, str]],
                                     errors: List[Dict[str, str]]) -> None:
     """Collect cluster info and events for a managed job's cluster."""
-    import json  # pylint: disable=import-outside-toplevel
-
-    from sky.utils import debug_utils  # pylint: disable=import-outside-toplevel
     cluster_prefix = f'{job_prefix}/clusters/{cluster_name}'
 
     try:
         cluster_record = global_user_state.get_cluster_from_name(cluster_name)
         if cluster_record is not None:
-            cluster_info = debug_utils.serialize_cluster_record(cluster_record)
+            cluster_info = debug_dump_helpers.serialize_cluster_record(
+                cluster_record)
             inline_data.append({
                 'relative_path': f'{cluster_prefix}/cluster_info.json',
                 'content': json.dumps(cluster_info, indent=2, default=str),
@@ -959,7 +958,7 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
 
             cluster_hash = cluster_record.get('cluster_hash')
             if cluster_hash:
-                for event_data in debug_utils.get_cluster_events_data(
+                for event_data in debug_dump_helpers.get_cluster_events_data(
                         cluster_hash):
                     inline_data.append({
                         'relative_path':

@@ -10,6 +10,7 @@ import zipfile
 
 import pytest
 
+from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 
 
@@ -65,25 +66,25 @@ class TestEpochToHuman:
     def test_valid_epoch_returns_iso_format(self):
         """A valid epoch timestamp should return an ISO format string."""
         epoch = 1700000000.0  # 2023-11-14T22:13:20
-        result = debug_utils._epoch_to_human(epoch)
+        result = debug_dump_helpers.epoch_to_human(epoch)
         assert result is not None
         # Should be parseable as a datetime
         datetime.datetime.fromisoformat(result)
 
     def test_none_returns_none(self):
         """None input should return None."""
-        assert debug_utils._epoch_to_human(None) is None
+        assert debug_dump_helpers.epoch_to_human(None) is None
 
     def test_zero_returns_valid_date(self):
         """Epoch 0 should return a valid date (1970-01-01)."""
-        result = debug_utils._epoch_to_human(0)
+        result = debug_dump_helpers.epoch_to_human(0)
         assert result is not None
         dt = datetime.datetime.fromisoformat(result)
         assert dt.year == 1970
 
     def test_current_time(self):
         """Current time epoch should return a valid ISO date."""
-        result = debug_utils._epoch_to_human(time.time())
+        result = debug_dump_helpers.epoch_to_human(time.time())
         assert result is not None
         datetime.datetime.fromisoformat(result)
 
@@ -1151,7 +1152,7 @@ class TestDumpManagedJobQueueInfo:
 # ---------------------------------------------------------------------------
 class TestCollectControllerDebugData:
 
-    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
     def test_skips_when_controller_not_accessible(self, mock_accessible,
                                                   tmp_path):
         """Should skip gracefully if controller is not accessible."""
@@ -1163,8 +1164,8 @@ class TestCollectControllerDebugData:
         assert len(errors) == 1
         assert 'controller_access' in errors[0]['resource']
 
-    @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
-    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
     def test_manifest_and_rsync(self, mock_accessible, mock_backend_cls,
                                 tmp_path):
         """Should write inline data and rsync file paths from manifest."""
@@ -1218,8 +1219,8 @@ class TestCollectControllerDebugData:
         assert len(errors) == 1
         assert errors[0]['error'] == 'No events found'
 
-    @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
-    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
     def test_rsync_file_not_found_graceful(self, mock_accessible,
                                            mock_backend_cls, tmp_path):
         """Should handle RSYNC_FILE_NOT_FOUND gracefully."""
@@ -1255,8 +1256,8 @@ class TestCollectControllerDebugData:
         # Should NOT record an error for file-not-found
         assert not errors
 
-    @mock.patch('sky.backends.cloud_vm_ray_backend.CloudVmRayBackend')
-    @mock.patch('sky.backends.backend_utils.is_controller_accessible')
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
     def test_rsync_error_recorded(self, mock_accessible, mock_backend_cls,
                                   tmp_path):
         """Should record errors for non-file-not-found rsync failures."""

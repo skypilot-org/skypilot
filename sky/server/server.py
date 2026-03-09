@@ -92,6 +92,7 @@ from sky.utils import context
 from sky.utils import context_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import debug_utils
 from sky.utils import env_options
 from sky.utils import interactive_utils
 from sky.utils import perf_utils
@@ -2707,8 +2708,6 @@ async def download_debug_dump(
 
     The dump file is automatically deleted after the download completes.
     """
-    from sky.utils import debug_utils  # pylint: disable=import-outside-toplevel
-
     dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
     dump_path = dump_dir / dump_filename
 

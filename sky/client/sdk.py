@@ -16,6 +16,7 @@ import logging
 import os
 import platform
 import subprocess
+import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -52,6 +53,7 @@ from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -3058,9 +3060,9 @@ def slurm_node_info(
 
 def _build_client_info() -> Dict[str, Any]:
     """Build client-side info for debug dumps."""
-    import sky  # pylint: disable=import-outside-toplevel
-    # pylint: disable-next=import-outside-toplevel
-    from sky.utils import config_utils
+    # Cannot import sky at module level (sky.__init__ imports from this file).
+    # The sky module is always loaded by the time this function runs.
+    sky_mod = sys.modules['sky']
 
     # Sensitive config paths to redact, following the same pattern as
     # provision/common.py:ProvisionConfig.get_redacted_config().
@@ -3086,8 +3088,8 @@ def _build_client_info() -> Dict[str, Any]:
         pass  # Config may not be available
 
     return {
-        'skypilot_version': sky.__version__,
-        'skypilot_commit': getattr(sky, '__commit__', 'unknown'),
+        'skypilot_version': sky_mod.__version__,
+        'skypilot_commit': getattr(sky_mod, '__commit__', 'unknown'),
         'api_version': server_constants.API_VERSION,
         'python_version': platform.python_version(),
         'platform': platform.platform(),

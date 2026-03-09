@@ -16,6 +16,9 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky.backends import backend_utils
+from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
+from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import core as managed_jobs_core
 from sky.server import constants as server_constants
 from sky.server import daemons
@@ -23,6 +26,10 @@ from sky.server.requests import request_names
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants as skylet_constants
 from sky.utils import common
+from sky.utils import controller_utils
+from sky.utils import debug_dump_helpers
+from sky.utils import message_utils
+from sky.utils import subprocess_utils
 from sky.utils import tempstore
 
 logger = sky_logging.init_logger(__name__)
@@ -43,81 +50,6 @@ class DebugDumpContext(TypedDict):
     cluster_names: Set[str]
     managed_job_ids: Set[int]
     errors: List[Dict[str, str]]
-
-
-def _epoch_to_human(epoch: Optional[float]) -> Optional[str]:
-    """Convert epoch timestamp to human-readable ISO format."""
-    if epoch is None:
-        return None
-    try:
-        return datetime.datetime.fromtimestamp(epoch).isoformat()
-    except (OSError, ValueError, OverflowError):
-        return None
-
-
-def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
-    """Serialize a cluster DB record to a JSON-friendly dict.
-
-    Shared by the API server dump (_dump_cluster_info) and the controller
-    manifest (_collect_cluster_debug_manifest in jobs/utils.py).
-    """
-    handle = cluster_record.get('handle')
-    handle_info: Dict[str, Any] = {}
-    if handle:
-        handle_info = {
-            'cluster_name': getattr(handle, 'cluster_name', None),
-            'cluster_name_on_cloud': getattr(handle, 'cluster_name_on_cloud',
-                                             None),
-            'head_ip': getattr(handle, 'head_ip', None),
-            'launched_nodes': getattr(handle, 'launched_nodes', None),
-            'launched_resources': str(
-                getattr(handle, 'launched_resources', None)),
-        }
-
-    launched_at = cluster_record.get('launched_at')
-    status_updated_at = cluster_record.get('status_updated_at')
-    return {
-        'name': cluster_record.get('name'),
-        'cluster_hash': cluster_record.get('cluster_hash'),
-        'status': str(cluster_record.get('status')),
-        'launched_at': launched_at,
-        'launched_at_human': _epoch_to_human(launched_at),
-        'autostop': cluster_record.get('autostop'),
-        'to_down': cluster_record.get('to_down'),
-        'cluster_ever_up': cluster_record.get('cluster_ever_up'),
-        'status_updated_at': status_updated_at,
-        'status_updated_at_human': _epoch_to_human(status_updated_at),
-        'config_hash': cluster_record.get('config_hash'),
-        'workspace': cluster_record.get('workspace'),
-        'is_managed': cluster_record.get('is_managed'),
-        'user_hash': cluster_record.get('user_hash'),
-        'user_name': cluster_record.get('user_name'),
-        'handle': handle_info,
-    }
-
-
-def get_cluster_events_data(cluster_hash: str,) -> List[Dict[str, Any]]:
-    """Get cluster events for all event types.
-
-    Returns a list of (event_type_lower, events) pairs for non-empty event
-    types.  Shared by the API server dump and the controller manifest.
-    """
-    results: List[Dict[str, Any]] = []
-    for event_type in [
-            global_user_state.ClusterEventType.DEBUG,
-            global_user_state.ClusterEventType.STATUS_CHANGE,
-            global_user_state.ClusterEventType.TERMINAL,
-    ]:
-        events = global_user_state.get_cluster_events(cluster_name=None,
-                                                      cluster_hash=cluster_hash,
-                                                      event_type=event_type,
-                                                      include_timestamps=True)
-        if events:
-            results.append({
-                'event_type': event_type.value.lower(),
-                'events': events,
-            })
-    return results
 
 
 def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
@@ -404,8 +336,9 @@ def _dump_server_info(dump_dir: str,
             server_constants.ON_BOOT_CHECK_REQUEST_ID, fields=['created_at'])
         if boot_request is not None and boot_request.created_at is not None:
             server_info['server_start_time'] = boot_request.created_at
-            server_info['server_start_time_human'] = _epoch_to_human(
-                boot_request.created_at)
+            server_info[
+                'server_start_time_human'] = debug_dump_helpers.epoch_to_human(
+                    boot_request.created_at)
             server_info['server_uptime_seconds'] = round(
                 time.time() - boot_request.created_at, 2)
     except Exception as e:  # pylint: disable=broad-except
@@ -501,9 +434,11 @@ def _dump_request_id_info(
                     'name': request.name,
                     'status': request.status.value if request.status else None,
                     'created_at': request.created_at,
-                    'created_at_human': _epoch_to_human(request.created_at),
+                    'created_at_human': debug_dump_helpers.epoch_to_human(
+                        request.created_at),
                     'finished_at': request.finished_at,
-                    'finished_at_human': _epoch_to_human(request.finished_at),
+                    'finished_at_human': debug_dump_helpers.epoch_to_human(
+                        request.finished_at),
                     'cluster_name': request.cluster_name,
                     'user_id': request.user_id,
                     'status_msg': request.status_msg,
@@ -601,7 +536,8 @@ def _dump_cluster_info(cluster_names: Set[str],
             cluster_record = global_user_state.get_cluster_from_name(
                 cluster_name)
             if cluster_record is not None:
-                cluster_info = serialize_cluster_record(cluster_record)
+                cluster_info = debug_dump_helpers.serialize_cluster_record(
+                    cluster_record)
                 cluster_info_path = os.path.join(cluster_dir,
                                                  'cluster_info.json')
                 with open(cluster_info_path, 'w', encoding='utf-8') as f:
@@ -621,7 +557,8 @@ def _dump_cluster_info(cluster_names: Set[str],
             cluster_hash = (cluster_record.get('cluster_hash')
                             if cluster_record else None)
             if cluster_hash:
-                for event_data in get_cluster_events_data(cluster_hash):
+                for event_data in debug_dump_helpers.get_cluster_events_data(
+                        cluster_hash):
                     event_file = f'events_{event_data["event_type"]}.json'
                     event_path = os.path.join(cluster_dir, event_file)
                     with open(event_path, 'w', encoding='utf-8') as f:
@@ -650,7 +587,8 @@ def _dump_cluster_info(cluster_names: Set[str],
                 'name': r.name,
                 'status': r.status.value if r.status else None,
                 'created_at': r.created_at,
-                'created_at_human': _epoch_to_human(r.created_at),
+                'created_at_human': debug_dump_helpers.epoch_to_human(
+                    r.created_at),
             } for r in requests]
 
             assoc_path = os.path.join(cluster_dir, 'associated_requests.json')
@@ -748,16 +686,6 @@ def _collect_controller_debug_data(
     Works in both consolidation mode (LocalResourcesHandle → runs locally)
     and non-consolidation mode (remote controller via SSH).
     """
-    # Lazy imports to avoid circular dependencies
-    # pylint: disable=import-outside-toplevel
-    from sky.backends import backend_utils
-    from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
-    from sky.jobs import utils as managed_job_utils
-    from sky.utils import controller_utils
-    from sky.utils import message_utils
-    from sky.utils import subprocess_utils
-
-    # pylint: enable=import-outside-toplevel
     # Get controller handle
     try:
         handle = backend_utils.is_controller_accessible(
