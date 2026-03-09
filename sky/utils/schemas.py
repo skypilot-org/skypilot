@@ -1355,6 +1355,9 @@ def get_config_schema():
                         'task_logs_gc_retention_hours': {
                             'type': 'integer',
                         },
+                        'staging_files_gc_retention_hours': {
+                            'type': 'integer',
+                        },
                     },
                 },
                 'bucket': {

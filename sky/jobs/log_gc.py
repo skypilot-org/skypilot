@@ -14,6 +14,7 @@ from sky import skypilot_config
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import context
 
 logger = sky_logging.init_logger(__name__)
@@ -24,6 +25,7 @@ _JOB_CONTROLLER_GC_LOCK_PATH = os.path.expanduser(
 
 _DEFAULT_TASK_LOGS_GC_RETENTION_HOURS = 24 * 7
 _DEFAULT_CONTROLLER_LOGS_GC_RETENTION_HOURS = 24 * 7
+_DEFAULT_STAGING_FILES_GC_RETENTION_HOURS = 24  # 1 day
 
 _LEAST_FREQUENT_GC_INTERVAL_SECONDS = 3600
 _MOST_FREQUENT_GC_INTERVAL_SECONDS = 30
@@ -160,6 +162,86 @@ def _clean_task_logs_with_retention(retention_seconds: int,
     return complete
 
 
+def gc_staging_files():
+    """Garbage collect staging files for managed jobs.
+
+    In consolidation mode, file mounts are staged to ~/.sky/tmp/controller/
+    before being synced to job clusters. These directories are not automatically
+    cleaned up after job completion, causing disk space issues over time.
+
+    This GC cleans up staging directories based on their modification time.
+    """
+    while True:
+        skypilot_config.reload_config()
+        staging_files_retention = skypilot_config.get_nested(
+            ('jobs', 'controller', 'staging_files_gc_retention_hours'),
+            _DEFAULT_STAGING_FILES_GC_RETENTION_HOURS) * 3600
+        # Negative value disables the GC
+        if staging_files_retention >= 0:
+            logger.info('GC staging files: '
+                        f'retention {staging_files_retention} seconds')
+            try:
+                _clean_staging_files_with_retention(staging_files_retention)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error GC staging files: {e}', exc_info=True)
+        else:
+            logger.info('Staging files GC is disabled')
+
+        interval = _next_gc_interval(staging_files_retention)
+        logger.info(
+            f'Next staging files GC is scheduled after {interval} seconds')
+        time.sleep(interval)
+
+
+def _clean_staging_files_with_retention(retention_seconds: int):
+    """Clean staging files with retention.
+
+    Staging files are stored in ~/.sky/tmp/controller/{run_id}/ directories.
+    We clean up directories whose modification time is older than the retention
+    period.
+    """
+    staging_base_dir = pathlib.Path(
+        skylet_constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH).expanduser()
+
+    if not staging_base_dir.exists():
+        logger.debug(f'Staging directory {staging_base_dir} does not exist, '
+                     'nothing to clean')
+        return
+
+    current_time = time.time()
+    cleaned_count = 0
+    total_size_freed = 0
+
+    # Iterate through all run_id directories
+    for run_id_dir in staging_base_dir.iterdir():
+        if not run_id_dir.is_dir():
+            continue
+
+        try:
+            # Use modification time of the directory
+            mtime = run_id_dir.stat().st_mtime
+            age_seconds = current_time - mtime
+
+            if age_seconds > retention_seconds:
+                # Calculate size before removal for logging
+                dir_size = sum(f.stat().st_size
+                               for f in run_id_dir.rglob('*')
+                               if f.is_file())
+                shutil.rmtree(run_id_dir, ignore_errors=True)
+                cleaned_count += 1
+                total_size_freed += dir_size
+                logger.debug(f'Cleaned staging directory: {run_id_dir}')
+        except (OSError, IOError) as e:
+            # Directory might have been removed by another process
+            logger.debug(f'Error processing {run_id_dir}: {e}')
+            continue
+
+    if cleaned_count > 0:
+        size_mb = total_size_freed / (1024 * 1024)
+        logger.info(f'Cleaned {cleaned_count} staging directories, '
+                    f'freed {size_mb:.2f} MB')
+
+
 @context.contextual
 def run_log_gc():
     """Run the log garbage collector."""
@@ -175,6 +257,7 @@ def run_log_gc():
     tasks.append(
         threading.Thread(target=gc_controller_logs_for_job, daemon=True))
     tasks.append(threading.Thread(target=gc_task_logs_for_job, daemon=True))
+    tasks.append(threading.Thread(target=gc_staging_files, daemon=True))
     for task in tasks:
         task.start()
     for task in tasks:

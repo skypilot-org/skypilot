@@ -519,6 +519,7 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+    ('jobs', 'controller', 'staging_files_gc_retention_hours'),
     # Slurm cluster configs (workdir, tmpdir, etc.) are admin-managed
     # server-side settings and should not be overridden by clients.
     ('slurm', 'cluster_configs'),
