@@ -20,7 +20,7 @@ _FORMAT = ('%(levelname).1s %(asctime)s.%(msecs)03d PID=%(process)d '
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
-_DEBUG_LOG_DIR = os.path.expanduser(
+DEBUG_LOG_DIR = os.path.expanduser(
     os.path.join(constants.SKY_LOGS_DIRECTORY, 'request_debug'))
 
 DEBUG = logging.DEBUG
@@ -274,8 +274,8 @@ def add_debug_log_handler(request_id: str):
         yield
         return
 
-    os.makedirs(_DEBUG_LOG_DIR, exist_ok=True)
-    log_path = os.path.join(_DEBUG_LOG_DIR, f'{request_id}.log')
+    os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+    log_path = os.path.join(DEBUG_LOG_DIR, f'{request_id}.log')
     try:
         debug_log_handler = logging.FileHandler(log_path)
         debug_log_handler.setFormatter(FORMATTER)

@@ -7568,7 +7568,6 @@ def debug_dump(
     output: Optional[str],
     async_call: bool,
 ):
-    # pylint: disable=line-too-long
     """Create a debug dump for troubleshooting.
 
     Creates a zip file containing logs, state, and configuration
@@ -7601,7 +7600,6 @@ def debug_dump(
     # Save to a specific file
     $ sky debug-dump -c my-cluster -o my-dump.zip
     """
-    # pylint: enable=line-too-long
     if not request_ids and not cluster_names and not job_ids and recent is None:
         raise click.UsageError(
             'At least one of --request-ids, --cluster-names, --job-ids, '

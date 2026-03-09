@@ -12,7 +12,7 @@ def test_add_debug_log_handler_writes_log(tmp_path: Path, monkeypatch):
     monkeypatch.setenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING, 'true')
     # Redirect debug log directory to a temp path
     debug_dir = tmp_path / 'request_debug'
-    monkeypatch.setattr(sky_logging, '_DEBUG_LOG_DIR', str(debug_dir))
+    monkeypatch.setattr(sky_logging, 'DEBUG_LOG_DIR', str(debug_dir))
     # Also redirect general SKY_LOGS_DIRECTORY to tmp
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'sky_logs'))
@@ -39,7 +39,7 @@ def test_add_debug_log_handler_noop_when_disabled(tmp_path: Path, monkeypatch):
     monkeypatch.delenv(constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING,
                        raising=False)
     debug_dir = tmp_path / 'request_debug'
-    monkeypatch.setattr(sky_logging, '_DEBUG_LOG_DIR', str(debug_dir))
+    monkeypatch.setattr(sky_logging, 'DEBUG_LOG_DIR', str(debug_dir))
     # Also redirect general SKY_LOGS_DIRECTORY to tmp
     monkeypatch.setattr(constants, 'SKY_LOGS_DIRECTORY',
                         str(tmp_path / 'sky_logs'))
