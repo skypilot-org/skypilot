@@ -100,7 +100,7 @@ pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,
   <img src="docs/source/_static/intro.gif" alt="SkyPilot">
 </p>
 
-Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, CoreWeave, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, Crusoe, CoreWeave, Nebius, Lambda Cloud, RunPod, Fluidstack,
 Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect, Shadeform.
 <p align="center">
   <picture>

@@ -14,8 +14,8 @@ class TestServiceAccountDatabaseOperations:
     @pytest.fixture
     def mock_engine(self):
         """Mock SQLAlchemy engine."""
-        with mock.patch.object(global_user_state,
-                               '_SQLALCHEMY_ENGINE') as mock_engine:
+        with mock.patch.object(global_user_state._db_manager,
+                               '_engine') as mock_engine:
             mock_engine.dialect.name = 'sqlite'
             yield mock_engine
 

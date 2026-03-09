@@ -280,6 +280,50 @@ class TestCgroupFunctions:
             assert common_utils.get_mem_size_gb() == 2.0
 
 
+class TestGetPrettyEntrypointCmd:
+    """Test entrypoint command formatting with shlex.join.
+
+    Entrypoint commands are displayed in the dashboard for copy-pasting.
+    shlex.join() ensures args with shell metacharacters are properly quoted.
+    """
+
+    @pytest.mark.parametrize(
+        'argv, expected',
+        [
+            # Basic sky command: basename is extracted
+            (['/usr/bin/sky', 'launch', 'app.yaml'], 'sky launch app.yaml'),
+            # Semicolons are quoted
+            ([
+                '/usr/bin/sky', 'jobs', 'launch', '-n', 'test',
+                'nvidia-smi; sleep 1000'
+            ], "sky jobs launch -n test 'nvidia-smi; sleep 1000'"),
+            # Pipes are quoted
+            (['/usr/bin/sky', 'exec', 'cluster', 'cat file | grep pattern'
+             ], "sky exec cluster 'cat file | grep pattern'"),
+            # Ampersands are quoted
+            (['/usr/bin/sky', 'exec', 'cluster', 'cmd1 && cmd2'
+             ], "sky exec cluster 'cmd1 && cmd2'"),
+            # Spaces are quoted
+            (['/usr/bin/sky', 'launch', '--name', 'my cluster name'
+             ], "sky launch --name 'my cluster name'"),
+            # Redirection chars are quoted
+            (['/usr/bin/sky', 'exec', 'cluster', 'echo hello > output.txt'
+             ], "sky exec cluster 'echo hello > output.txt'"),
+            # Non-sky basename is preserved as-is
+            (['examples/app.py', '--flag', 'value'
+             ], 'examples/app.py --flag value'),
+            # Secrets are redacted; <redacted> contains
+            # < and > so it gets quoted
+            ([
+                '/usr/bin/sky', 'launch', '--secret', 'HF_TOKEN=secret123',
+                'app.yaml'
+            ], "sky launch --secret 'HF_TOKEN=<redacted>' app.yaml"),
+        ])
+    def test_entrypoint_quoting(self, argv, expected):
+        with mock.patch('sys.argv', argv):
+            assert common_utils.get_pretty_entrypoint_cmd() == expected
+
+
 class TestRedactSecretsValues:
     """Test secret value redaction in command lines."""
 

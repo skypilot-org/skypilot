@@ -908,3 +908,35 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: SKYPILOT_INGRESS_BASIC_AUTH_ENABLED
+
+  - it: should mount slurm config when slurmCredentials.config is provided
+    set:
+      slurmCredentials.config: |
+        Host mycluster
+            HostName login.mycluster.myorg.com
+            User myuser
+            IdentityFile ~/.ssh/id_rsa
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: slurm-config
+            mountPath: /root/.slurm
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: slurm-config
+            secret:
+              secretName: RELEASE-NAME-slurm-config
+
+  - it: should not mount slurm config when slurmCredentials.config is null
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: slurm-config
+            mountPath: /root/.slurm
+      - notContains:
+          path: spec.template.spec.volumes
+          content:
+            name: slurm-config

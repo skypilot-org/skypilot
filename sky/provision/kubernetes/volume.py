@@ -516,6 +516,55 @@ def _populate_config_from_pvc(config: models.VolumeConfig,
         config.size = pvc_size
 
 
+def _find_pvc_by_name_or_label(context: Optional[str], namespace: str,
+                               volume_name: str) -> Optional[Any]:
+    """Find PVC by name or skypilot-name label.
+
+    This function searches for a PVC in two ways:
+    1. First, by exact PVC name matching volume_name (backward compatibility)
+    2. Then, by skypilot-name label matching volume_name
+
+    Args:
+        context: Kubernetes context
+        namespace: Kubernetes namespace
+        volume_name: User-specified volume name (config.name)
+
+    Returns:
+        PVC object if found, None otherwise
+    """
+    # Try by exact PVC name first (backward compatibility for user-created PVCs)
+    try:
+        pvc = kubernetes.core_api(
+            context).read_namespaced_persistent_volume_claim(
+                name=volume_name,
+                namespace=namespace,
+                _request_timeout=kubernetes.API_TIMEOUT)
+        return pvc
+    except kubernetes.api_exception() as e:
+        if e.status != 404:
+            raise
+
+    # Try by skypilot-name label (for PVCs created by SkyPilot with UUID suffix)
+    try:
+        pvcs = kubernetes.core_api(
+            context).list_namespaced_persistent_volume_claim(
+                namespace=namespace,
+                label_selector=f'skypilot-name={volume_name}',
+                _request_timeout=kubernetes.API_TIMEOUT)
+        if pvcs.items:
+            if len(pvcs.items) > 1:
+                pvc_names = [p.metadata.name for p in pvcs.items]
+                raise ValueError(
+                    f'Multiple PVCs found with label skypilot-name='
+                    f'{volume_name}: {pvc_names}. Please delete the duplicate'
+                    f' PVCs or specify the exact PVC name.')
+            return pvcs.items[0]
+    except kubernetes.api_exception() as e:
+        logger.debug(f'Failed to list PVCs by label: {e}')
+
+    return None
+
+
 def create_persistent_volume_claim(
     namespace: str,
     context: Optional[str],
@@ -524,6 +573,29 @@ def create_persistent_volume_claim(
 ) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
     pvc_name = pvc_spec['metadata']['name']
+    use_existing = config is not None and config.config.get('use_existing')
+
+    # When use_existing, search by both name and label
+    if use_existing:
+        assert config is not None  # Guaranteed by use_existing check above
+        volume_name = config.name  # User-specified name
+        try:
+            pvc = _find_pvc_by_name_or_label(context, namespace, volume_name)
+        except kubernetes.api_exception() as e:
+            raise ValueError(f'Failed to search for PVC with name or label '
+                             f'skypilot-name={volume_name}: {e}') from e
+        if pvc is not None:
+            # Update config.name_on_cloud to the actual PVC name
+            config.name_on_cloud = pvc.metadata.name
+            _populate_config_from_pvc(config, pvc)
+            logger.debug(f'Found existing PVC {pvc.metadata.name} for volume '
+                         f'{volume_name}')
+            return
+        raise ValueError(
+            f'PVC with name or label skypilot-name={volume_name} does not '
+            f'exist while use_existing is True.')
+
+    # Try to read PVC by name_on_cloud (for non-use_existing case)
     try:
         pvc = kubernetes.core_api(
             context).read_namespaced_persistent_volume_claim(
@@ -537,10 +609,8 @@ def create_persistent_volume_claim(
     except kubernetes.api_exception() as e:
         if e.status != 404:  # Not found
             raise
-    use_existing = config is not None and config.config.get('use_existing')
-    if use_existing:
-        raise ValueError(
-            f'PVC {pvc_name} does not exist while use_existing is True.')
+
+    # Create new PVC
     pvc = kubernetes.core_api(
         context).create_namespaced_persistent_volume_claim(
             namespace=namespace,

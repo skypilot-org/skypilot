@@ -3,7 +3,7 @@ import copy
 import logging
 import math
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from sky.adaptors import kubernetes
 from sky.provision import common
@@ -239,6 +239,53 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
         return kubernetes_utils.parse_cpu_or_gpu_resource(resource_quantity)
 
 
+def _create_or_patch_resource(
+    log_prefix: str,
+    resource_field: str,
+    name: str,
+    create_fn: Callable[[], Any],
+    list_fn: Callable[[], Any],
+    patch_fn: Optional[Callable[[], None]],
+    needs_update_fn: Optional[Callable[[Any], bool]],
+) -> None:
+    """Creates a K8s resource with upsert semantics and 409 race handling.
+
+    If the resource doesn't exist, tries to create it. On 409 (concurrent
+    creation), re-reads and falls through to compare/patch. If the resource
+    exists (found initially or after 409), compares and patches if needed.
+    """
+    items = list_fn().items
+    existing = items[0] if items else None
+
+    if existing is None:
+        logger.info(f'{log_prefix}: '
+                    f'{not_found_msg(resource_field, name)}')
+        try:
+            create_fn()
+        except kubernetes.api_exception() as e:
+            if e.status != 409:
+                raise
+            # Concurrently created by another process; re-read
+            # and fall through to compare/patch below.
+            existing = list_fn().items[0]
+        else:
+            logger.info(f'{log_prefix}: '
+                        f'{created_msg(resource_field, name)}')
+            return
+
+    # Resource exists (found initially or re-read after 409).
+    # Compare and patch if needed.
+    if needs_update_fn is None or not needs_update_fn(existing):
+        logger.info(f'{log_prefix}: '
+                    f'{using_existing_msg(resource_field, name)}')
+        return
+    logger.info(f'{log_prefix}: '
+                f'{updating_existing_msg(resource_field, name)}')
+    assert patch_fn is not None, ('patch_fn must be provided when '
+                                  'needs_update_fn is provided')
+    patch_fn()
+
+
 def _configure_autoscaler_service_account(
         namespace: str, context: Optional[str],
         provider_config: Dict[str, Any]) -> None:
@@ -257,23 +304,20 @@ def _configure_autoscaler_service_account(
 
     name = account['metadata']['name']
     field_selector = f'metadata.name={name}'
-    accounts = (kubernetes.core_api(context).list_namespaced_service_account(
-        namespace, field_selector=field_selector).items)
-    if accounts:
-        assert len(accounts) == 1
-        # Nothing to check for equality and patch here,
-        # since the service_account.metadata.name is the only important
-        # attribute, which is already filtered for above.
-        logger.info(f'{log_prefix}: '
-                    f'{using_existing_msg(resource_field, name)}')
-        return
 
-    logger.info(f'{log_prefix}: '
-                f'{not_found_msg(resource_field, name)}')
-    kubernetes.core_api(context).create_namespaced_service_account(
-        namespace, account)
-    logger.info(f'{log_prefix}: '
-                f'{created_msg(resource_field, name)}')
+    _create_or_patch_resource(
+        log_prefix=log_prefix,
+        resource_field=resource_field,
+        name=name,
+        create_fn=lambda: kubernetes.core_api(
+            context).create_namespaced_service_account(namespace, account),
+        list_fn=lambda: kubernetes.core_api(context).
+        list_namespaced_service_account(namespace,
+                                        field_selector=field_selector),
+        # Nothing to compare/patch for service accounts.
+        patch_fn=None,
+        needs_update_fn=None,
+    )
 
 
 def _configure_autoscaler_role(namespace: str, context: Optional[str],
@@ -300,27 +344,20 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
 
     name = resource['metadata']['name']
     field_selector = f'metadata.name={name}'
-    roles = (kubernetes.auth_api(context).list_namespaced_role(
-        namespace, field_selector=field_selector).items)
-    if roles:
-        assert len(roles) == 1
-        existing_role = roles[0]
-        # Convert to k8s object to compare
-        new_role = kubernetes_utils.dict_to_k8s_object(resource, 'V1Role')
-        if new_role.rules == existing_role.rules:
-            logger.info(f'{log_prefix}: '
-                        f'{using_existing_msg(resource_field, name)}')
-            return
-        logger.info(f'{log_prefix}: '
-                    f'{updating_existing_msg(resource_field, name)}')
-        kubernetes.auth_api(context).patch_namespaced_role(
-            name, namespace, resource)
-        return
+    new_role = kubernetes_utils.dict_to_k8s_object(resource, 'V1Role')
 
-    logger.info(f'{log_prefix}: '
-                f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role(namespace, resource)
-    logger.info(f'{log_prefix}: {created_msg(resource_field, name)}')
+    _create_or_patch_resource(
+        log_prefix=log_prefix,
+        resource_field=resource_field,
+        name=name,
+        create_fn=lambda: kubernetes.auth_api(context).create_namespaced_role(
+            namespace, resource),
+        list_fn=lambda: kubernetes.auth_api(context).list_namespaced_role(
+            namespace, field_selector=field_selector),
+        patch_fn=lambda: kubernetes.auth_api(context).patch_namespaced_role(
+            name, namespace, resource),
+        needs_update_fn=lambda existing: new_role.rules != existing.rules,
+    )
 
 
 def _configure_autoscaler_role_binding(
@@ -364,31 +401,24 @@ def _configure_autoscaler_role_binding(
     # Override name if provided
     resource['metadata']['name'] = override_name or resource['metadata']['name']
     name = resource['metadata']['name']
-
     field_selector = f'metadata.name={name}'
-    role_bindings = (kubernetes.auth_api(context).list_namespaced_role_binding(
-        rb_namespace, field_selector=field_selector).items)
-    if role_bindings:
-        assert len(role_bindings) == 1
-        existing_binding = role_bindings[0]
-        new_rb = kubernetes_utils.dict_to_k8s_object(resource, 'V1RoleBinding')
-        if (new_rb.role_ref == existing_binding.role_ref and
-                new_rb.subjects == existing_binding.subjects):
-            logger.info(f'{log_prefix}: '
-                        f'{using_existing_msg(resource_field, name)}')
-            return
-        logger.info(f'{log_prefix}: '
-                    f'{updating_existing_msg(resource_field, name)}')
-        kubernetes.auth_api(context).patch_namespaced_role_binding(
-            name, rb_namespace, resource)
-        return
+    new_rb = kubernetes_utils.dict_to_k8s_object(resource, 'V1RoleBinding')
 
-    logger.info(f'{log_prefix}: '
-                f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_namespaced_role_binding(
-        rb_namespace, resource)
-    logger.info(f'{log_prefix}: '
-                f'{created_msg(resource_field, name)}')
+    _create_or_patch_resource(
+        log_prefix=log_prefix,
+        resource_field=resource_field,
+        name=name,
+        create_fn=lambda: kubernetes.auth_api(
+            context).create_namespaced_role_binding(rb_namespace, resource),
+        list_fn=lambda: kubernetes.auth_api(
+            context).list_namespaced_role_binding(
+                rb_namespace, field_selector=field_selector),
+        patch_fn=lambda: kubernetes.auth_api(context).
+        patch_namespaced_role_binding(name, rb_namespace, resource),
+        needs_update_fn=lambda existing:
+        (new_rb.role_ref != existing.role_ref or new_rb.subjects != existing.
+         subjects),
+    )
 
 
 def _configure_autoscaler_cluster_role(namespace, context,
@@ -408,25 +438,20 @@ def _configure_autoscaler_cluster_role(namespace, context,
 
     name = resource['metadata']['name']
     field_selector = f'metadata.name={name}'
-    cluster_roles = (kubernetes.auth_api(context).list_cluster_role(
-        field_selector=field_selector).items)
-    if cluster_roles:
-        assert len(cluster_roles) == 1
-        existing_cr = cluster_roles[0]
-        new_cr = kubernetes_utils.dict_to_k8s_object(resource, 'V1ClusterRole')
-        if new_cr.rules == existing_cr.rules:
-            logger.info(f'{log_prefix}: '
-                        f'{using_existing_msg(resource_field, name)}')
-            return
-        logger.info(f'{log_prefix}: '
-                    f'{updating_existing_msg(resource_field, name)}')
-        kubernetes.auth_api(context).patch_cluster_role(name, resource)
-        return
+    new_cr = kubernetes_utils.dict_to_k8s_object(resource, 'V1ClusterRole')
 
-    logger.info(f'{log_prefix}: '
-                f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_cluster_role(resource)
-    logger.info(f'{log_prefix}: {created_msg(resource_field, name)}')
+    _create_or_patch_resource(
+        log_prefix=log_prefix,
+        resource_field=resource_field,
+        name=name,
+        create_fn=lambda: kubernetes.auth_api(context).create_cluster_role(
+            resource),
+        list_fn=lambda: kubernetes.auth_api(context).list_cluster_role(
+            field_selector=field_selector),
+        patch_fn=lambda: kubernetes.auth_api(context).patch_cluster_role(
+            name, resource),
+        needs_update_fn=lambda existing: new_cr.rules != existing.rules,
+    )
 
 
 def _configure_autoscaler_cluster_role_binding(
@@ -453,28 +478,23 @@ def _configure_autoscaler_cluster_role_binding(
 
     name = resource['metadata']['name']
     field_selector = f'metadata.name={name}'
-    cr_bindings = (kubernetes.auth_api(context).list_cluster_role_binding(
-        field_selector=field_selector).items)
-    if cr_bindings:
-        assert len(cr_bindings) == 1
-        existing_binding = cr_bindings[0]
-        new_binding = kubernetes_utils.dict_to_k8s_object(
-            resource, 'V1ClusterRoleBinding')
-        if (new_binding.role_ref == existing_binding.role_ref and
-                new_binding.subjects == existing_binding.subjects):
-            logger.info(f'{log_prefix}: '
-                        f'{using_existing_msg(resource_field, name)}')
-            return
-        logger.info(f'{log_prefix}: '
-                    f'{updating_existing_msg(resource_field, name)}')
-        kubernetes.auth_api(context).patch_cluster_role_binding(name, resource)
-        return
+    new_binding = kubernetes_utils.dict_to_k8s_object(resource,
+                                                      'V1ClusterRoleBinding')
 
-    logger.info(f'{log_prefix}: '
-                f'{not_found_msg(resource_field, name)}')
-    kubernetes.auth_api(context).create_cluster_role_binding(resource)
-    logger.info(f'{log_prefix}: '
-                f'{created_msg(resource_field, name)}')
+    _create_or_patch_resource(
+        log_prefix=log_prefix,
+        resource_field=resource_field,
+        name=name,
+        create_fn=lambda: kubernetes.auth_api(
+            context).create_cluster_role_binding(resource),
+        list_fn=lambda: kubernetes.auth_api(context).list_cluster_role_binding(
+            field_selector=field_selector),
+        patch_fn=lambda: kubernetes.auth_api(
+            context).patch_cluster_role_binding(name, resource),
+        needs_update_fn=lambda existing:
+        (new_binding.role_ref != existing.role_ref or new_binding.subjects !=
+         existing.subjects),
+    )
 
 
 def _configure_skypilot_system_namespace(
