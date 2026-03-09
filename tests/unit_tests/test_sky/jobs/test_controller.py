@@ -4,6 +4,8 @@ Tests cover controller recovery during rolling upgrades for:
 - Normal jobs (single task): Recovery based on task status
 - Pipeline jobs (sequential multi-task): Recovery with task skip logic
 - JobGroups (parallel tasks): Recovery with independent task states
+
+Tests also cover file mount cleanup in task_cleanup().
 """
 import asyncio
 from typing import Dict, List, Optional, Tuple
@@ -697,3 +699,76 @@ class TestJobGroupRecovery:
 
         # Task 1 FAILED, so overall should be False
         assert all_succeeded is False
+
+
+class TestTaskCleanup:
+    """Tests for file mount cleanup in ControllerManager._cleanup().
+
+    The cleanup code in task_cleanup() deletes local file mounts after a
+    managed job completes. This includes two-hop file mounts under
+    ~/.sky/tmp/controller/{run_id}/. Cloud URL file mounts are skipped.
+
+    Previously, cleanup was incorrectly skipped in consolidation mode,
+    causing ~/.sky/tmp/controller/ to grow unbounded.
+    """
+
+    @pytest.fixture
+    def cleanup_patches(self):
+        """Patch all _cleanup() dependencies except file mount cleanup.
+
+        task_cleanup() does three things:
+        1. Cluster termination (mocked)
+        2. Storage teardown (mocked)
+        3. File mount cleanup (tested)
+        """
+        patches = {
+            'ha_recovery': patch(
+                'sky.jobs.state.remove_ha_recovery_script_async',
+                new_callable=AsyncMock),
+            'terminate': patch('sky.jobs.utils.terminate_cluster'),
+            'gen_name': patch(
+                'sky.jobs.utils.generate_managed_job_cluster_name',
+                return_value='test-cluster'),
+            'status': patch('sky.core.status', return_value=[]),
+            'backend': patch('sky.backends.cloud_vm_ray_backend.'
+                             'CloudVmRayBackend'),
+        }
+        mocks = {}
+        for name, p in patches.items():
+            mocks[name] = p.start()
+        yield mocks
+        for p in patches.values():
+            p.stop()
+
+    def _make_task(self, file_mounts=None):
+        task = MagicMock()
+        task.name = 'test-task'
+        task.file_mounts = file_mounts
+        task.storage_mounts = {}
+        return task
+
+    @pytest.mark.asyncio
+    async def test_local_dir_mounts_cleaned_up(self, tmp_path, cleanup_patches):
+        """Local directory file mounts should be deleted."""
+        # Simulate two-hop mount dirs: ~/.sky/tmp/controller/{run_id}/{N}
+        mount_0 = tmp_path / 'run_id' / '0'
+        mount_0.mkdir(parents=True)
+        (mount_0 / 'data.txt').write_text('test data')
+        mount_1 = tmp_path / 'run_id' / '1'
+        mount_1.mkdir(parents=True)
+        (mount_1 / 'config.yaml').write_text('key: value')
+
+        task = self._make_task(file_mounts={
+            '/data': str(mount_0),
+            '/config': str(mount_1),
+        })
+        dag = MagicMock()
+        dag.tasks = [task]
+
+        from sky.jobs.controller import ControllerManager
+        manager = ControllerManager('test-uuid')
+        with patch('sky.jobs.controller._get_dag', return_value=dag):
+            await manager._cleanup(job_id=1)
+
+        assert not mount_0.exists(), 'mount_0 should be cleaned up'
+        assert not mount_1.exists(), 'mount_1 should be cleaned up'

@@ -2707,3 +2707,55 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_remote_server
+def test_manage_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
+    """Test that file mount temp files are cleaned up in consolidation mode."""
+    if not smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Only applicable in consolidation mode.')
+
+    name = smoke_tests_utils.get_cluster_name()
+    controller_tmp = '~/.sky/tmp/controller'
+
+    # Create a minimal yaml with a local file mount to trigger two-hop.
+    task_yaml = textwrap.dedent("""\
+        file_mounts:
+          /tmp/test-mount: ./setup.py
+
+        run: |
+          ls /tmp/test-mount
+          echo done
+        """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(task_yaml)
+        f.flush()
+
+        test = smoke_tests_utils.Test(
+            'managed_jobs_two_hop_cleanup',
+            [
+                # Record pre-existing entries so parallel tests don't
+                # cause false positives.
+                f'ls {controller_tmp} 2>/dev/null | sort > /tmp/_pre_entries'
+                ' || true',
+                f'sky jobs launch -n {name} --cloud {generic_cloud} '
+                f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--config jobs.force_disable_cloud_bucket=true '
+                f'{f.name} -y',
+                smoke_tests_utils.
+                get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=name,
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=300),
+                # Verify no new entries remain in the controller tmp dir.
+                f'ls {controller_tmp} 2>/dev/null | sort > /tmp/_post_entries'
+                ' || true',
+                'diff /tmp/_pre_entries /tmp/_post_entries',
+            ],
+            f'sky jobs cancel -y -n {name} || true; '
+            f'rm -f /tmp/_pre_entries /tmp/_post_entries',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+            timeout=10 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
