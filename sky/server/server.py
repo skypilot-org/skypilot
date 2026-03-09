@@ -653,7 +653,11 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
     #   inline styles (needed for MUI/Emotion dynamic style injection)
     # - font-src 'self': Only allow same-origin fonts
-    # - connect-src 'self': Only allow same-origin fetch/XHR/WebSocket
+    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
+    #   needed by the /token page's legacy auth callback flow (the page's
+    #   JavaScript POSTs the auth token to a local HTTP server started by
+    #   the CLI on localhost)
     # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
     # - img-src 'self' data:: Allow same-origin images and data URIs
     # - object-src 'none': Block all plugin content (Flash, Java, etc.)
@@ -664,7 +668,8 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
                    'script-src \'self\' \'unsafe-inline\'; '
                    'style-src \'self\' \'unsafe-inline\'; '
                    'font-src \'self\'; '
-                   'connect-src \'self\'; '
+                   'connect-src \'self\' http://localhost:* '
+                   'http://127.0.0.1:*; '
                    'frame-src \'self\'; '
                    'img-src \'self\' data:; '
                    'object-src \'none\'; '
@@ -2270,14 +2275,27 @@ async def _get_cluster_and_validate(
 ) -> 'backends.CloudVmRayResourceHandle':
     """Fetch cluster status and validate it's UP and correct cloud type."""
     # Run core.status in another thread to avoid blocking the event loop.
+    # Use summary_response=True to skip expensive DB columns (owner, metadata,
+    # last_creation_yaml) and cluster event queries that are unnecessary for
+    # simple cluster validation. This keeps per-call overhead low enough to
+    # handle 20+ concurrent WebSocket SSH connections without timeout.
     # TODO(aylei): core.status() will be called with server user, which has
     # permission to all workspaces, this will break workspace isolation.
     # It is ok for now, as users with limited access will not get the ssh config
     # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
+            thread_pool_executor,
+            core.status,
+            cluster_name,
+            all_users=True,
+            summary_response=True)
+
+    if not cluster_records:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Cluster {cluster_name} not found')
     cluster_record = cluster_records[0]
+
     if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
                                         status_lib.ClusterStatus.UP,
                                         status_lib.ClusterStatus.AUTOSTOPPING):

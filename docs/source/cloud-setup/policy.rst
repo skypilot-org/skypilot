@@ -17,6 +17,7 @@ Example usage:
 - :ref:`use-local-gcp-credentials-policy`
 - :ref:`add-volumes-policy`
 - :ref:`reject-old-clients-policy`
+- :ref:`slurm-partition-routing-policy`
 
 Overview
 --------
@@ -570,3 +571,19 @@ This policy demonstrates how to use client version information to enforce minimu
 .. literalinclude:: ../../../examples/admin_policy/reject_old_clients.yaml
     :language: yaml
     :caption: `Config YAML for using RejectOldClientsPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/reject_old_clients.yaml>`_
+
+.. _slurm-partition-routing-policy:
+
+Route Slurm jobs to partitions based on resources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This policy automatically routes Slurm jobs to the appropriate partition based on the requested resources. GPU tasks go to the ``gpu`` partition, high-memory CPU tasks go to the ``highmem`` partition, and all other tasks go to the ``cpu`` partition. If the user has already specified a partition (zone), the policy respects their choice.
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: SlurmPartitionRoutingPolicy
+    :caption: `SlurmPartitionRoutingPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/slurm_partition_routing.yaml
+    :language: yaml
+    :caption: `Config YAML for using SlurmPartitionRoutingPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/slurm_partition_routing.yaml>`_

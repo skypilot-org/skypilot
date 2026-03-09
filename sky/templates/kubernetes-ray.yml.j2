@@ -1150,7 +1150,11 @@ available_node_types:
               # Set +x to stop printing the commands and their arguments as they are executed.
               set +x
 
-              trap : TERM INT; log_tail || sleep infinity & wait
+              # SIGTERM keep-alive: trap ignores TERM/INT so wait is not interrupted;
+              # log_tail streams task logs; sleep loop keeps the pod alive until killed.
+              trap : TERM INT
+              log_tail &
+              while true; do sleep infinity & wait $!; done
 
           ports:
           - containerPort: 22  # Used for SSH
