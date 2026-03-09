@@ -1250,15 +1250,8 @@ def wait_service_registration(service_name: str, job_id: int,
                         in log_content):
                     with ux_utils.print_exception_no_traceback():
                         raise RuntimeError(
-                            'Max number of services reached. '
-                            'To spin up more services, please '
-                            'tear down some existing services. '
-                            'Check `sky serve status` for current '
-                            'service count, and see https://docs.'
-                            'skypilot.co/en/latest/serving/'
-                            'sky-serve.html#customizing-skyserve-'
-                            'controller-resources for how to '
-                            'increase the limit.')
+                            controller_utils.get_max_services_error_message(
+                                pool))
         elapsed = time.time() - start_time
         if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
             # Print the controller log to help user debug.
