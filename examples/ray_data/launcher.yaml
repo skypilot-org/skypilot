@@ -37,7 +37,7 @@ run: |
   export TRANSFORMERS_CACHE=~/hf_cache
   export HF_DATASETS_CACHE=~/hf_cache
 
-  # Set multiprocessing method to spawn for Ray and vLLM - https://github.com/vllm-project/vllm/issues/8893#issuecomment-2761883026
+  # Set multiprocessing method to spawn for vLLM - https://github.com/vllm-project/vllm/issues/8893#issuecomment-2761883026
   export VLLM_WORKER_MULTIPROC_METHOD=spawn
 
   echo "Starting Ray + vLLM synthetic QA generation..."

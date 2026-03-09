@@ -2,7 +2,7 @@
 Synthetic multi-QA generation from WikiText using Ray Data + vLLM.
 
 This script:
-1. Loads 10K examples from the Salesforce/wikitext dataset.
+1. Loads 1K examples from the Salesforce/wikitext dataset.
 2. For each text chunk, generates multiple synthetic
    Question + Answer pairs in structured JSON.
 3. Uses vLLM via Ray Data's LLM processor for high throughput.
