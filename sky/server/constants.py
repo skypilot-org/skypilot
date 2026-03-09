@@ -98,6 +98,10 @@ OAUTH2_PROXY_ENABLED_ENV_VAR = 'SKYPILOT_AUTH_OAUTH2_PROXY_ENABLED'
 WEBSOCKETS_MAX_HEADER_LINE_LENGTH = '65536'
 WEBSOCKETS_MAX_NUM_HEADERS = '256'
 
+# Maximum size of a daemon log file before truncation (bytes).
+# Daemon logs are truncated in place (no backup) to bound disk usage.
+DAEMON_LOG_MAX_BYTES = 100 * 1024 * 1024  # 100 MB
+
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).
 SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes

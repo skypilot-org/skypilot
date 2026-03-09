@@ -2,6 +2,7 @@
 import atexit
 import dataclasses
 import os
+import sys
 import time
 import typing
 from typing import Callable
@@ -26,6 +27,27 @@ else:
     pathlib = adaptors_common.LazyImport('pathlib')
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _maybe_truncate_daemon_log() -> None:
+    """Truncate the daemon log file if it exceeds the size threshold.
+
+    Daemon stdout/stderr are redirected to the log file via os.dup2 with
+    O_APPEND. After ftruncate(0), the next write atomically seeks to
+    end-of-file (position 0), so no sparse file is created.
+    """
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = sys.stdout.fileno()
+        if os.fstat(fd).st_size < server_constants.DAEMON_LOG_MAX_BYTES:
+            return
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+    except Exception:  # pylint: disable=broad-except
+        # Never crash the daemon on truncation failure.
+        pass
+
 
 # Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
 # Each executor process imports this module during executor_initializer(),
@@ -107,6 +129,7 @@ class InternalRequestDaemon:
                 # kill all children processes related to this request.
                 subprocess_utils.kill_children_processes()
                 common_utils.release_memory()
+                _maybe_truncate_daemon_log()
 
 
 def refresh_cluster_status_event():
