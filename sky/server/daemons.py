@@ -43,6 +43,8 @@ def _maybe_truncate_daemon_log() -> None:
         max_bytes = skypilot_config.get_nested(
             ('api_server', 'daemon_log_max_bytes'),
             server_constants.DAEMON_LOG_MAX_BYTES)
+        if max_bytes <= 0:
+            return
         sys.stdout.flush()
         sys.stderr.flush()
         fd = sys.stdout.fileno()
