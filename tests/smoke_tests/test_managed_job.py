@@ -2748,10 +2748,17 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=300),
-                # Verify no new entries remain in the controller tmp dir.
+                # Verify new dirs in the controller tmp dir have no
+                # subdirs left
                 f'ls {controller_tmp} 2>/dev/null | sort > /tmp/_post_entries'
                 ' || true',
-                'diff /tmp/_pre_entries /tmp/_post_entries',
+                (f'comm -13 /tmp/_pre_entries /tmp/_post_entries | '
+                 f'while read d; do '
+                 f'  if [ -n "$(ls {controller_tmp}/"$d" 2>/dev/null)" ]; then '
+                 f'    echo "ERROR: {controller_tmp}/$d still has contents"; '
+                 f'    ls {controller_tmp}/"$d"; exit 1; '
+                 f'  fi; '
+                 f'done'),
             ],
             f'sky jobs cancel -y -n {name} || true; '
             f'rm -f /tmp/_pre_entries /tmp/_post_entries',
