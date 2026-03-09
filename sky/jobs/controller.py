@@ -1767,16 +1767,26 @@ class ControllerManager:
             # file mounts.
             for file_mount in (task.file_mounts or {}).values():
                 try:
-                    # For consolidation mode, there is no two-hop file mounts
-                    # and the file path here represents the real user data.
-                    # We skip the cleanup for consolidation mode.
-                    if (not data_utils.is_cloud_store_url(file_mount) and
-                            not managed_job_utils.is_consolidation_mode()):
-                        path = os.path.expanduser(file_mount)
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                        else:
-                            os.remove(path)
+                    # Skip if we are using cloud storage as the source.
+                    if data_utils.is_cloud_store_url(file_mount):
+                        continue
+                    # Otherwise, we always cleanup local files since they are
+                    # no longer needed after task cleanup, the file can be:
+                    # - Two hop file mounts rsynced from the API server: refer
+                    #   translate_local_file_mounts_to_two_hop for more details.
+                    # - API server file mount cache in consolidation mode:
+                    #   actually there is a dummy two hop that rsync the files
+                    #   from ~/.sky/clients to ~/.sky/tmp/controller/{ID}
+                    #   on server, which isolates the file mounts between
+                    #   tasks. Here we assume the source is always isolated
+                    #   even if the dummy two hop is removed.
+                    # TODO(aylei): remove dummy two hop after we isolate the
+                    # file mount cache for tasks.
+                    path = os.path.expanduser(file_mount)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to clean up file mount {file_mount}: {e}')
