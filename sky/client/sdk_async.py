@@ -817,9 +817,51 @@ async def api_info() -> responses.APIHealthResponse:
 
 @usage_lib.entrypoint
 @annotations.client_api
+async def api_start(
+    *,
+    deploy: bool = False,
+    host: str = '127.0.0.1',
+    foreground: bool = False,
+    metrics: bool = False,
+    metrics_port: Optional[int] = None,
+    enable_basic_auth: bool = False,
+) -> None:
+    """Async version of api_start() that starts the API server."""
+    return await asyncio.to_thread(sdk.api_start,
+                                   deploy=deploy,
+                                   host=host,
+                                   foreground=foreground,
+                                   metrics=metrics,
+                                   metrics_port=metrics_port,
+                                   enable_basic_auth=enable_basic_auth)
+
+
+@usage_lib.entrypoint
+@annotations.client_api
 async def api_stop() -> None:
     """Async version of api_stop() that stops the API server."""
     return await asyncio.to_thread(sdk.api_stop)
+
+
+@usage_lib.entrypoint
+@annotations.client_api
+async def api_restart(
+    *,
+    deploy: bool = False,
+    host: str = '127.0.0.1',
+    foreground: bool = False,
+    metrics: bool = False,
+    metrics_port: Optional[int] = None,
+    enable_basic_auth: bool = False,
+) -> None:
+    """Async version of api_restart() that restarts the API server."""
+    return await asyncio.to_thread(sdk.api_restart,
+                                   deploy=deploy,
+                                   host=host,
+                                   foreground=foreground,
+                                   metrics=metrics,
+                                   metrics_port=metrics_port,
+                                   enable_basic_auth=enable_basic_auth)
 
 
 @usage_lib.entrypoint

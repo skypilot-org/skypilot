@@ -7202,6 +7202,50 @@ def api_stop():
     sdk.api_stop()
 
 
+@api.command('restart', cls=_DocumentedCodeCommand)
+@click.option('--deploy',
+              type=bool,
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('Deploy the SkyPilot API server. When set to True, '
+                    'SkyPilot API server will use all resources on the host '
+                    'machine assuming the machine is dedicated to SkyPilot API '
+                    'server; host will also be set to 0.0.0.0 to allow remote '
+                    'access.'))
+@click.option('--host',
+              default='127.0.0.1',
+              type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
+              required=False,
+              help=('The host to deploy the SkyPilot API server. To allow '
+                    'remote access, set this to 0.0.0.0'))
+@click.option('--foreground',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Run the SkyPilot API server in the foreground and output '
+              'its logs to stdout/stderr. Allowing external systems '
+              'to manage the process lifecycle and collect logs directly. '
+              'This is useful when the API server is managed by systems '
+              'like systemd and Kubernetes.')
+@click.option('--enable-basic-auth',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Enable basic authentication in the SkyPilot API server.')
+@usage_lib.entrypoint
+def api_restart(deploy: bool, host: str, foreground: bool,
+                enable_basic_auth: bool):
+    """Restarts the SkyPilot API server locally."""
+    sdk.api_restart(deploy=deploy,
+                    host=host,
+                    foreground=foreground,
+                    enable_basic_auth=enable_basic_auth)
+    api_server_url = server_common.get_server_url(host)
+    api_server_info = server_common.get_api_server_status(api_server_url)
+    server_common.check_and_print_upgrade_hint(api_server_info, api_server_url)
+
+
 @api.command('logs', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
 @click.argument('request_id',
