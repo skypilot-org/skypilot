@@ -1465,19 +1465,23 @@ def get_max_services_error_message(pool: bool) -> str:
            f'services are running.')
     msg += ' To spin up more services, please tear down some existing ones.'
 
+    docs_link = ('https://skypilot.readthedocs.io/en/latest/serving/'
+                 'sky-serve.html#sky-serve-max-services-calculation')
     if consolidation:
         msg += (f'\n\nThe {controller_type} controller is running in '
                 'consolidation mode, sharing memory with the API server. '
                 'The max number of concurrent services is calculated based '
                 'on the available memory after reserving resources for the '
                 'API server workers. To increase the limit, allocate more '
-                'memory to the API server pod.')
+                f'memory to the API server pod. For more information, see: '
+                f'{docs_link}')
     else:
         msg += (f'\n\nThe max number of concurrent services is calculated '
                 f'based on the controller VM memory. To increase the limit, '
                 f'use a controller with more memory by configuring '
                 f'`{controller_type}.controller.resources` in '
-                f'~/.sky/config.yaml.')
+                f'~/.sky/config.yaml. For more information, see: '
+                f'{docs_link}')
 
     return msg
 
