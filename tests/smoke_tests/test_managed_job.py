@@ -2711,7 +2711,7 @@ def test_managed_jobs_log_tail_cleanup(generic_cloud: str):
 
 @pytest.mark.managed_jobs
 @pytest.mark.no_remote_server
-def test_manage_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
+def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
     """Test that file mount temp files are cleaned up in consolidation mode."""
     if not smoke_tests_utils.server_side_is_consolidation_mode():
         pytest.skip('Only applicable in consolidation mode.')
