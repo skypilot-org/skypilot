@@ -108,9 +108,9 @@ hinted_for_server_install_version_mismatch = False
 _upgrade_hint_shown = False
 # Cached from the latest health check response. Used to determine whether
 # to include client user hash in usage reports and request env vars.
-_basic_auth_enabled: Optional[bool] = None
+basic_auth_enabled: bool = False
 # Cached client user hash (machine-local identity), computed once.
-_client_user_hash: Optional[str] = None
+client_user_hash: Optional[str] = None
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -456,23 +456,6 @@ def is_api_server_local(endpoint: Optional[str] = None):
     return server_url in AVAILABLE_LOCAL_API_SERVER_URLS
 
 
-def is_basic_auth_enabled() -> bool:
-    """Returns whether the connected API server has basic auth enabled.
-
-    Updated as a side effect of get_api_server_status().
-    """
-    return _basic_auth_enabled is True
-
-
-def client_user_hash() -> Optional[str]:
-    """Returns the cached client user hash (machine-local identity).
-
-    Only non-None when basic auth is enabled at the API server level.
-    Updated as a side effect of get_api_server_status().
-    """
-    return _client_user_hash
-
-
 def _handle_non_200_server_status(
         response: 'requests.Response') -> ApiServerInfo:
     if response.status_code == 401:
@@ -554,16 +537,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         version_on_disk = result.get('version_on_disk')
         commit = result.get('commit')
         user = result.get('user')
-        basic_auth_enabled = result.get('basic_auth_enabled')
         latest_version = result.get('latest_version')
-        # Cache basic_auth_enabled for use by is_basic_auth_enabled()
-        # and set client user hash on the client-side usage singleton.
-        global _basic_auth_enabled, _client_user_hash
-        _basic_auth_enabled = basic_auth_enabled
+        # Cache basic_auth_enabled and set client user hash on the
+        # client-side usage singleton.
+        global basic_auth_enabled, client_user_hash
+        basic_auth_enabled = bool(result.get('basic_auth_enabled'))
         if basic_auth_enabled:
-            if _client_user_hash is None:
-                _client_user_hash = common_utils.generate_user_hash()
-            usage_lib.messages.usage.client_user_hash = _client_user_hash
+            if client_user_hash is None:
+                client_user_hash = common_utils.generate_user_hash()
+            usage_lib.messages.usage.client_user_hash = client_user_hash
         server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                     api_version=api_version,
                                     version=version,

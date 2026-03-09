@@ -87,10 +87,8 @@ def request_body_env_vars() -> dict:
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     # Send client user hash for basic auth at API server case, so the server
     # can include it in its own usage report.
-    if common.is_basic_auth_enabled():
-        client_user_hash = common.client_user_hash()
-        assert client_user_hash is not None
-        env_vars[constants.CLIENT_USER_HASH_ENV_VAR] = client_user_hash
+    if common.basic_auth_enabled and common.client_user_hash is not None:
+        env_vars[constants.CLIENT_USER_HASH_ENV_VAR] = common.client_user_hash
     if not common.is_api_server_local():
         # Used in job controller, for local API server, keep the
         # SKYPILOT_CONFIG env var to use the config for the managed job.
