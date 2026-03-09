@@ -18,8 +18,7 @@ class TestDaemonLogTruncate:
     def test_truncates_when_exceeds_threshold(self, monkeypatch):
         """File is truncated to 0 when it exceeds the size threshold."""
         threshold = 1024  # 1 KB for testing
-        monkeypatch.setattr(server_constants, 'DAEMON_LOG_MAX_BYTES',
-                            threshold)
+        monkeypatch.setattr(server_constants, 'DAEMON_LOG_MAX_BYTES', threshold)
 
         saved_stdout_fd = os.dup(sys.stdout.fileno())
         saved_stderr_fd = os.dup(sys.stderr.fileno())
@@ -35,8 +34,7 @@ class TestDaemonLogTruncate:
                 data = b'x' * (threshold + 100)
                 os.write(sys.stdout.fileno(), data)
                 sys.stdout.flush()
-                assert os.fstat(
-                    sys.stdout.fileno()).st_size == threshold + 100
+                assert os.fstat(sys.stdout.fileno()).st_size == threshold + 100
 
                 # Truncation should happen.
                 daemons._maybe_truncate_daemon_log()
