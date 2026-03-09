@@ -24,10 +24,7 @@ For this demonstration, we will load 1,000 rows from the wikitext dataset and ge
 
 This example is inspired by Ray Data’s [Batch Inference with Structural Outputs (Guided Decoding)](https://docs.ray.io/en/latest/llm/examples/batch/vllm-with-structural-output.html) tutorial.
 
-
-In this example, either Kubernetes or GCP is randomly selected to provision two A100 machines for the task. You can modify the resources section to use the infrastructure provider of your choice.
-
-During the setup phase, the required NVIDIA packages and Ray Data dependencies are installed. In the run phase, a Python script is executed to generate the synthetic data and write the results to the attached storage volume.
+In this example, either Kubernetes or GCP is randomly selected to provision two A100 machines for the task. You can modify the resources section to use the infrastructure provider of your choice. During the setup phase, the required NVIDIA packages and Ray Data dependencies are installed. In the run phase, a Python script is executed to generate the synthetic data and write the results to the attached storage volume.
 
 To run the example simply run -
 
