@@ -244,7 +244,7 @@ class JobController:
                 task_envs['SKYPILOT_JOB_RANK'] = '0'
             task.update_envs(task_envs)
 
-    def _download_log_and_stream(
+    def download_log_and_stream(
         self,
         task_id: Optional[int],
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
@@ -701,7 +701,7 @@ class JobController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await asyncio.to_thread(self._download_log_and_stream,
+                        await asyncio.to_thread(self.download_log_and_stream,
                                                 task_id, handle,
                                                 job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -812,7 +812,7 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await asyncio.to_thread(self._download_log_and_stream,
+                    await asyncio.to_thread(self.download_log_and_stream,
                                             task_id, handle,
                                             job_id_on_pool_cluster)
 
@@ -1798,6 +1798,36 @@ class ControllerManager:
             # some data here.
             raise error
 
+    async def _download_log_from_cluster(
+            self,
+            controller: JobController,
+            job_id: int,
+            task_id: int,
+            cluster_name: str,
+            job_id_on_cluster: Optional[int] = None) -> None:
+        """Download logs for a single task from its cluster.
+
+        Looks up the cluster by name and downloads logs via the controller's
+        download_log_and_stream method. Skips gracefully if the cluster is
+        not found.
+        """
+        clusters = await asyncio.to_thread(
+            backend_utils.get_clusters,
+            cluster_names=[cluster_name],
+            refresh=common.StatusRefreshMode.NONE,
+            all_users=True,
+            _include_is_managed=True)
+
+        if not clusters:
+            logger.info(f'Cluster {cluster_name} not found for job {job_id}, '
+                        f'task {task_id}. Skipping log download.')
+            return
+
+        assert len(clusters) == 1, (clusters, cluster_name)
+        handle = clusters[0].get('handle')
+        await asyncio.to_thread(controller.download_log_and_stream, task_id,
+                                handle, job_id_on_cluster)
+
     async def _download_logs_for_cancelled_job(self, controller: JobController,
                                                job_id: int, task_ids: List[int],
                                                dag: 'sky.Dag',
@@ -1806,7 +1836,7 @@ class ControllerManager:
 
         This ensures that logs remain accessible after job cancellation,
         using the same code path as successful/failed jobs by calling the
-        JobController's _download_log_and_stream method.
+        JobController's download_log_and_stream method.
 
         The download is best-effort - if a cluster is already down or
         unreachable, we skip gracefully. For job groups, multiple tasks
@@ -1836,24 +1866,9 @@ class ControllerManager:
                             'Skipping log download.')
                 return
 
-            clusters = await asyncio.to_thread(
-                backend_utils.get_clusters,
-                cluster_names=[cluster_name],
-                refresh=common.StatusRefreshMode.NONE,
-                all_users=True,
-                _include_is_managed=True)
-
-            if not clusters:
-                logger.info(
-                    f'Cluster {cluster_name} not found for job {job_id}. '
-                    'Skipping log download.')
-                return
-
-            assert len(clusters) == 1, (clusters, cluster_name)
-            handle = clusters[0].get('handle')
-            # pylint: disable-next=protected-access
-            await asyncio.to_thread(controller._download_log_and_stream,
-                                    task_ids[0], handle, job_id_on_pool_cluster)
+            await self._download_log_from_cluster(controller, job_id,
+                                                  task_ids[0], cluster_name,
+                                                  job_id_on_pool_cluster)
             return
 
         # Non-pool path: download logs for each active task.
@@ -1864,26 +1879,8 @@ class ControllerManager:
                 cluster_name = (
                     managed_job_utils.generate_managed_job_cluster_name(
                         task.name, job_id))
-
-                clusters = await asyncio.to_thread(
-                    backend_utils.get_clusters,
-                    cluster_names=[cluster_name],
-                    refresh=common.StatusRefreshMode.NONE,
-                    all_users=True,
-                    _include_is_managed=True)
-
-                if not clusters:
-                    logger.info(
-                        f'Cluster {cluster_name} not found for job {job_id}, '
-                        f'task {task_id}. Skipping log download.')
-                    continue
-
-                assert len(clusters) == 1, (clusters, cluster_name)
-                handle = clusters[0].get('handle')
-
-                # pylint: disable-next=protected-access
-                await asyncio.to_thread(controller._download_log_and_stream,
-                                        task_id, handle, None)
+                await self._download_log_from_cluster(controller, job_id,
+                                                      task_id, cluster_name)
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(
                     f'Failed to download logs for job {job_id}, '
