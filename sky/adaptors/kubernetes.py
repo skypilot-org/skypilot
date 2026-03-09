@@ -242,7 +242,13 @@ def _mark_client_refreshed() -> None:
 
 
 def _clear_kubernetes_client_caches() -> None:
-    """Clear API client caches so the next call rebuilds from kubeconfig."""
+    """Clear API client caches so the next call rebuilds from kubeconfig.
+
+    TODO(dev): This clears all request-level caches, not just the Kubernetes
+    client caches. Consider maintaining a separate registry of k8s-specific
+    cached functions (similar to _FUNCTIONS_NEED_RELOAD_CACHE in
+    annotations.py) so we only evict k8s clients on kubeconfig refresh.
+    """
     annotations.clear_request_level_cache()
 
 
@@ -261,6 +267,28 @@ class RetryableClientWrapper:
         self._getter_args = getter_args
         self._getter_kwargs = getter_kwargs
 
+    def _close_client(self, client: Any) -> None:
+        """Close the underlying ApiClient to release external resources."""
+        try:
+            real_client = None
+            if isinstance(client, kubernetes.client.ApiClient):
+                real_client = client
+            elif isinstance(client, kubernetes.watch.Watch):
+                real_client = getattr(client, '_api_client', None)
+            else:
+                # Typed clients (CoreV1Api etc.) are codegen'd and all have
+                # an 'api_client' attribute pointing to the real ApiClient.
+                real_client = getattr(client, 'api_client', None)
+            if real_client is not None:
+                real_client.close()
+            else:
+                # logger may already be cleaned up during __del__ at shutdown
+                if logger is not None:
+                    logger.debug(f'No client found for {client}')
+        except Exception as e:  # pylint: disable=broad-except
+            if logger is not None:
+                logger.debug(f'Error closing Kubernetes client: {e}')
+
     def __getattr__(self, name: str) -> Any:
         attr = getattr(self._client, name)
         if not callable(attr):
@@ -271,35 +299,23 @@ class RetryableClientWrapper:
                 logger.debug(
                     'Refreshing Kubernetes client from kubeconfig due to '
                     'interval expiry.')
+                # Clear caches for ALL client types (core_api, networking_api,
+                # etc.) so they are all lazily recreated from the updated
+                # kubeconfig on next use, rather than mixing old and new
+                # clients across different API groups.
                 _clear_kubernetes_client_caches()
+                old_client = self._client
                 self._client = self._getter(*self._getter_args,
                                             **self._getter_kwargs)
                 _mark_client_refreshed()
+                self._close_client(old_client)
             method = getattr(self._client, name)
             return method(*args, **kwargs)
 
         return with_refresh
 
     def __del__(self):
-        try:
-            real_client = None
-            if isinstance(self._client, kubernetes.client.ApiClient):
-                real_client = self._client
-            elif isinstance(self._client, kubernetes.watch.Watch):
-                real_client = getattr(self._client, '_api_client', None)
-            else:
-                # Typed clients (CoreV1Api etc.) are codegen'd and all have
-                # an 'api_client' attribute pointing to the real ApiClient.
-                real_client = getattr(self._client, 'api_client', None)
-            if real_client is not None:
-                real_client.close()
-            else:
-                # logger may already be cleaned up during __del__ at shutdown
-                if logger is not None:
-                    logger.debug(f'No client found for {self._client}')
-        except Exception as e:  # pylint: disable=broad-except
-            if logger is not None:
-                logger.debug(f'Error closing Kubernetes client: {e}')
+        self._close_client(self._client)
 
 
 def _retryable_kubernetes_client(getter: Callable) -> Callable:
