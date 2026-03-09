@@ -207,7 +207,7 @@ class CachePreloader {
       if (force) {
         dashboardCache.invalidateFunction(getEnabledCloudsBatch);
       }
-      await dashboardCache.get(getEnabledCloudsBatch, [workspaceNames]);
+      await dashboardCache.get(getEnabledCloudsBatch, [workspaceNames, false]);
     } catch (error) {
       console.error('[CachePreloader] Error loading enabled clouds:', error);
     }
