@@ -168,6 +168,10 @@ spec:
             resourceFieldRef:
               containerName: skypilot-api
               resource: requests.memory
+        # Use jemalloc to avoid glibc malloc arena fragmentation that causes
+        # RSS growth in multi-threaded workloads (status refresh daemon, etc.)
+        - name: LD_PRELOAD
+          value: "libjemalloc.so.2"
         # Use tini as the init process
         command: ["tini", "--"]
         # Start API server in foreground (if supported) to:
