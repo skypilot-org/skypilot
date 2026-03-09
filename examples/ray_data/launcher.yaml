@@ -2,13 +2,13 @@
 # sky launch launcher.yaml
 
 resources:
-  ordered:
+  any_of:
     - infra: k8s
       accelerators: A100:2
       use_spot: False
     - infra: gcp
       accelerators: A100:2
-      use_spot: True
+      use_spot: False
 
 file_mounts:
   data_gen_script.py: ./data_gen_script.py

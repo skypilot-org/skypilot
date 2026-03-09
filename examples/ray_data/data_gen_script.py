@@ -1,5 +1,5 @@
 """
-Synthetic multi-QA generation from WikiText using Ray Data + vLLM.
+Synthetic multi-QA generation from WikiText using Ray Data.
 
 This script:
 1. Loads 1K examples from the Salesforce/wikitext dataset.
