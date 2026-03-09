@@ -52,6 +52,7 @@ import {
   getLaunchCommand,
 } from '@/data/constants/recipeTypes';
 import { TimestampWithTooltip } from '@/components/utils';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 // Parse recipe name from URL slug
 // Names are the unique identifiers for recipes (no UUID parsing needed)
@@ -456,6 +457,11 @@ export function RecipeDetail() {
         </div>
 
         <div className="flex items-center gap-4">
+          <PluginSlot
+            name="recipes.detail.actions"
+            context={{ recipe: template }}
+            wrapperClassName="contents"
+          />
           <button
             onClick={handleShare}
             className="text-sky-blue hover:text-sky-blue-bright flex items-center"
