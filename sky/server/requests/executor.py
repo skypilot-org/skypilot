@@ -500,10 +500,9 @@ def _request_execution_wrapper(request_id: str,
             # Skip debug logging for daemon requests since the daemon
             # requests has it is own log level config and we don't want to
             # duplicate the daemon logs.
-            debug_log_ctx = (
-                contextlib.nullcontext()
-                if user_id == constants.SKYPILOT_SYSTEM_USER_ID else
-                sky_logging.add_debug_log_handler(request_id))
+            debug_log_ctx = (contextlib.nullcontext()
+                             if user_id == constants.SKYPILOT_SYSTEM_USER_ID
+                             else sky_logging.add_debug_log_handler(request_id))
             with debug_log_ctx, \
                 override_request_env_and_config(
                     request_body, request_id, request_name), \
