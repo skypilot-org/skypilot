@@ -1350,7 +1350,8 @@ def test_pools_heterogeneous_any_of(generic_cloud: str):
                     pool_name=pool_name, pool_yaml=one_config_yaml.name),
                 (f's=$(sky jobs launch --pool {pool_name} {one_config_yaml.name} --name {job_name} -d -y); '
                  'echo "$s"; '
-                 'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"'),
+                 'echo; echo; echo "$s" | grep -E "Job submitted|Launching managed job"'
+                ),
                 wait_until_job_status(job_name, ['SUCCEEDED'], timeout=timeout),
             ],
             timeout=smoke_tests_utils.get_timeout(generic_cloud),
