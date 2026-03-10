@@ -729,18 +729,19 @@ def _collect_controller_debug_data(
 
     # Write inline data (small DB-derived JSON)
     dump_dir_resolved = pathlib.Path(dump_dir).resolve()
-    dump_dir_prefix = str(dump_dir_resolved) + os.sep
     for item in manifest.get('inline_data', []):
         relative_path = item.get('relative_path', '')
         target = (dump_dir_resolved / relative_path).resolve()
-        if not str(target).startswith(dump_dir_prefix):
+        try:
+            target.relative_to(dump_dir_resolved)
+        except ValueError as e:
             logger.error('Skipping unsafe relative_path in manifest: '
-                         f'{relative_path}')
+                         f'{relative_path} ({e})')
             if errors is not None:
                 errors.append({
                     'component': 'managed_jobs',
                     'resource': f'inline/{relative_path}',
-                    'error': f'Path traversal: {relative_path}',
+                    'error': f'Path traversal: {relative_path} ({e})',
                 })
             continue
         try:
@@ -761,14 +762,16 @@ def _collect_controller_debug_data(
                 remote_path = file_info['remote_path']
                 relative_path = file_info['relative_path']
                 target = (dump_dir_resolved / relative_path).resolve()
-                if not str(target).startswith(dump_dir_prefix):
+                try:
+                    target.relative_to(dump_dir_resolved)
+                except ValueError as e:
                     logger.error('Skipping unsafe relative_path in '
-                                 f'manifest: {relative_path}')
+                                 f'manifest: {relative_path} ({e})')
                     if errors is not None:
                         errors.append({
                             'component': 'managed_jobs',
                             'resource': f'rsync/{relative_path}',
-                            'error': f'Path traversal: {relative_path}',
+                            'error': f'Path traversal: {relative_path} ({e})',
                         })
                     return
                 local_path = str(target)
