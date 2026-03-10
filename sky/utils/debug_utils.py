@@ -91,7 +91,9 @@ def _get_requests_from_managed_jobs(
     job_user_hashes: Set[str] = set()
     try:
         jobs, _, _, _ = managed_jobs_core.queue_v2(
-            refresh=False, job_ids=list(debug_dump_context['managed_job_ids']))
+            refresh=False,
+            job_ids=list(debug_dump_context['managed_job_ids']),
+            all_users=True)
         for job in jobs:
             name = job.get('job_name')
             if name:
@@ -287,7 +289,8 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     # via gRPC/SSH, unlike direct DB access which only works in
     # consolidation mode).
     try:
-        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False)
+        jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
+                                                       all_users=True)
         for job in jobs:
             submitted_at = job.get('submitted_at') or 0
             end_at = job.get('end_at') or time.time()
@@ -630,7 +633,8 @@ def _dump_managed_job_queue_info(
 
         try:
             jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                       job_ids=[job_id])
+                                                       job_ids=[job_id],
+                                                       all_users=True)
             if jobs:
                 for task_idx, job in enumerate(jobs):
                     job_info = {
