@@ -1433,6 +1433,94 @@ def get_status_count_with_filters(
     return results
 
 
+def get_status_counts() -> Dict[str, int]:
+    """Get count of jobs grouped by ManagedJobStatus.
+
+    Returns the latest task status for each job, grouped by status.
+    The "latest" task follows the same logic as get_latest_task_id_status:
+    the first non-terminal task (by task_id asc), or the last task if all
+    tasks are terminal.
+
+    This is used by the Prometheus ManagedJobsCollector.
+    """
+    terminal_values = {s.value for s in ManagedJobStatus.terminal_statuses()}
+
+    # Fetch all (job_id, task_id, status) ordered by task_id asc.
+    query = sqlalchemy.select(
+        spot_table.c.spot_job_id,
+        spot_table.c.task_id,
+        spot_table.c.status,
+    ).order_by(spot_table.c.spot_job_id, spot_table.c.task_id.asc())
+
+    engine = _db_manager.get_engine()
+    results: Dict[str, int] = {}
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+
+    # Group by job_id and apply get_latest_task_id_status logic:
+    # first non-terminal task, else last task.
+    jobs: Dict[int, List[Tuple[int, str]]] = {}
+    for job_id, task_id, status in rows:
+        jobs.setdefault(job_id, []).append((task_id, str(status)))
+
+    for tasks in jobs.values():
+        # tasks is already sorted by task_id asc
+        latest_status = next(
+            (st for _, st in tasks if st not in terminal_values),
+            tasks[-1][1],
+        )
+        results[latest_status] = results.get(latest_status, 0) + 1
+    return results
+
+
+def get_schedule_state_counts() -> Dict[str, int]:
+    """Get count of jobs grouped by ManagedJobScheduleState.
+
+    This is used by the Prometheus ManagedJobsCollector.
+    """
+    query = sqlalchemy.select(
+        job_info_table.c.schedule_state,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).group_by(job_info_table.c.schedule_state)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    results: Dict[str, int] = {}
+    for state_value, count in rows:
+        results[str(state_value)] = int(count)
+    return results
+
+
+def get_active_job_recovery_counts() -> Dict[Tuple[int, int], int]:
+    """Get recovery_count per non-terminal task with recovery_count > 0.
+
+    Returns {(job_id, task_id): recovery_count} for all tasks whose status
+    is NOT terminal AND has recovery_count > 0.
+    This is used by the Prometheus ManagedJobsCollector, with labels
+    job_id and task_id so alerts can identify which specific task exceeded
+    the recovery limit.
+    """
+    terminal_values = [s.value for s in ManagedJobStatus.terminal_statuses()]
+
+    query = sqlalchemy.select(
+        spot_table.c.spot_job_id,
+        spot_table.c.task_id,
+        spot_table.c.recovery_count,
+    ).where(
+        spot_table.c.status.notin_(terminal_values),
+        spot_table.c.recovery_count > 0,
+    )
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    results: Dict[Tuple[int, int], int] = {}
+    for job_id, task_id, rc in rows:
+        results[(int(job_id), int(task_id))] = int(rc)
+    return results
+
+
 def get_managed_jobs_with_filters(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,

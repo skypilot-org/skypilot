@@ -2964,6 +2964,7 @@ if __name__ == '__main__':
     try:
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+            metrics.maybe_register_managed_jobs_collector()
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
             global_tasks.append(background.create_task(metrics_server.serve()))

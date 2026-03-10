@@ -182,6 +182,44 @@ SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
     'Total number of short-running request executors in the API server',
 )
 
+# --- Managed Jobs Metrics ---
+
+# Per-controller-process gauges (consolidation mode only).
+# These are updated in ControllerManager.monitor_loop().
+SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
+    'sky_managed_jobs_controller_starting_count',
+    'Number of jobs currently launching on this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
+    'sky_managed_jobs_controller_running_count',
+    'Number of running job tasks on this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS = prom.Gauge(
+    'sky_managed_jobs_controller_max_jobs',
+    'Computed max jobs for this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+# Static limit gauge, set in ControllerManager.monitor_loop() alongside
+# other per-controller metrics so it stays current if config hot-reload
+# is supported in the future.
+# Uses pid label + liveall so only controller processes that explicitly call
+# .labels(pid=...).set() produce a value, avoiding phantom 0.0 entries from
+# API server worker processes that merely import this module.
+SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER = prom.Gauge(
+    'sky_managed_jobs_limit_launches_per_worker',
+    'Max concurrent launches per worker',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
 
 @contextlib.contextmanager
 def time_it(name: str, group: str = 'default'):
