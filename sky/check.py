@@ -162,12 +162,11 @@ def check_capabilities(
                 try:
                     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
                 except ValueError:
-                    all_valid = ([*registry.CLOUD_REGISTRY.keys()] +
-                                 ['cloudflare', 'coreweave', 'vastdata'])
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'Cloud {cloud_name!r} is not a valid cloud '
-                            f'among {sorted(all_valid)}') from None
+                            f'among {sorted(c.lower() for c in get_all_clouds())}'
+                        ) from None
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
                 return repr(cloud_obj), cloud_obj
 
