@@ -2810,16 +2810,17 @@ async def download_debug_dump(
     dump_dir = pathlib.Path(debug_utils.DEBUG_DUMP_DIR).expanduser()
     dump_path = dump_dir / dump_filename
 
-    if not dump_path.exists():
-        raise fastapi.HTTPException(status_code=404,
-                                    detail='Debug dump not found')
-
-    # Security: ensure path is within expected directory
+    # Security: check path traversal before existence to avoid
+    # leaking whether arbitrary files exist on the filesystem.
     try:
         dump_path.resolve().relative_to(dump_dir.resolve())
     except ValueError as path_err:
         raise fastapi.HTTPException(status_code=403,
                                     detail='Invalid path') from path_err
+
+    if not dump_path.exists():
+        raise fastapi.HTTPException(status_code=404,
+                                    detail='Debug dump not found')
 
     # Delete the dump file after download completes
     return fastapi.responses.FileResponse(
