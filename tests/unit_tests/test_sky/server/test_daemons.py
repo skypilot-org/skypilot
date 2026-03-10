@@ -3,8 +3,20 @@ import os
 import sys
 import tempfile
 
-from sky.server import constants as server_constants
+from sky import skypilot_config
 from sky.server import daemons
+
+
+def _mock_get_nested(max_bytes):
+    """Return a patched get_nested that overrides daemon_log_max_bytes."""
+    original = skypilot_config.get_nested
+
+    def patched(keys, default=None):
+        if keys == ('api_server', 'daemon_log_max_bytes'):
+            return max_bytes
+        return original(keys, default)
+
+    return patched
 
 
 class TestDaemonLogRotation:
@@ -18,7 +30,8 @@ class TestDaemonLogRotation:
     def test_rotates_when_exceeds_threshold(self, monkeypatch):
         """Log is backed up to .log.1 and truncated when exceeding threshold."""
         threshold = 1024  # 1 KB for testing
-        monkeypatch.setattr(server_constants, 'DAEMON_LOG_MAX_BYTES', threshold)
+        monkeypatch.setattr(skypilot_config, 'get_nested',
+                            _mock_get_nested(threshold))
 
         saved_stdout_fd = os.dup(sys.stdout.fileno())
         saved_stderr_fd = os.dup(sys.stderr.fileno())
@@ -72,7 +85,8 @@ class TestDaemonLogRotation:
     def test_old_backup_replaced_on_next_rotation(self, monkeypatch):
         """Old .log.1 backup is replaced on subsequent rotation."""
         threshold = 1024
-        monkeypatch.setattr(server_constants, 'DAEMON_LOG_MAX_BYTES', threshold)
+        monkeypatch.setattr(skypilot_config, 'get_nested',
+                            _mock_get_nested(threshold))
 
         saved_stdout_fd = os.dup(sys.stdout.fileno())
         saved_stderr_fd = os.dup(sys.stderr.fileno())
@@ -117,7 +131,8 @@ class TestDaemonLogRotation:
     def test_no_rotation_when_under_threshold(self, monkeypatch):
         """No rotation or backup when log size is under threshold."""
         threshold = 1024
-        monkeypatch.setattr(server_constants, 'DAEMON_LOG_MAX_BYTES', threshold)
+        monkeypatch.setattr(skypilot_config, 'get_nested',
+                            _mock_get_nested(threshold))
 
         saved_stdout_fd = os.dup(sys.stdout.fileno())
         saved_stderr_fd = os.dup(sys.stderr.fileno())
@@ -153,7 +168,7 @@ class TestDaemonLogRotation:
 
     def test_rotation_disabled_when_max_bytes_zero(self, monkeypatch):
         """Rotation is disabled when max_bytes is set to 0."""
-        monkeypatch.setattr(server_constants, 'DAEMON_LOG_MAX_BYTES', 0)
+        monkeypatch.setattr(skypilot_config, 'get_nested', _mock_get_nested(0))
 
         saved_stdout_fd = os.dup(sys.stdout.fileno())
         saved_stderr_fd = os.dup(sys.stderr.fileno())

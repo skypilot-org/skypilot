@@ -9,6 +9,7 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
@@ -30,7 +31,7 @@ def isolated_database(tmp_path):
     # Patch the database path and log path constants
     with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
                     str(temp_db_path)):
-        with mock.patch('sky.server.requests.requests.REQUEST_LOG_PATH_PREFIX',
+        with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
             # Reset the global database variable to force re-initialization
             requests._DB = None
@@ -622,7 +623,7 @@ def test_get_legacy_log_path():
 
     # Verify it's different from the current path
     current_path_prefix = pathlib.Path(
-        requests.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
     assert legacy_path.parent != current_path_prefix
 
 
