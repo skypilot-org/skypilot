@@ -3141,7 +3141,7 @@ def create_debug_dump(
     )
     response = server_common.make_authenticated_request(
         'POST',
-        '/debug/dump-create',
+        '/debug/dump_create',
         json=json.loads(body.model_dump_json()),
     )
     return server_common.get_request_id(response)
@@ -3165,7 +3165,7 @@ def download_debug_dump(dump_filename: str,
     """
     response = server_common.make_authenticated_request(
         'GET',
-        f'/debug/dump-download/{dump_filename}',
+        f'/debug/dump_download/{dump_filename}',
         stream=True,
     )
 

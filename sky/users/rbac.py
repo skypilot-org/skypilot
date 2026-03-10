@@ -37,10 +37,10 @@ _DEFAULT_USER_BLOCKLIST = [{
     'path': '/users/export',
     'method': 'GET'
 }, {
-    'path': '/debug/dump-create',
+    'path': '/debug/dump_create',
     'method': 'POST'
 }, {
-    'path': '/debug/dump-download/:filename',
+    'path': '/debug/dump_download/:filename',
     'method': 'GET'
 }]
 

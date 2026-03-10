@@ -2784,7 +2784,7 @@ async def all_contexts(request: fastapi.Request) -> None:
     )
 
 
-@app.post('/debug/dump-create')
+@app.post('/debug/dump_create')
 async def create_debug_dump(
         request: fastapi.Request,
         create_debug_dump_body: payloads.CreateDebugDumpBody) -> None:
@@ -2800,7 +2800,7 @@ async def create_debug_dump(
     )
 
 
-@app.get('/debug/dump-download/{dump_filename}')
+@app.get('/debug/dump_download/{dump_filename}')
 async def download_debug_dump(
         dump_filename: str) -> fastapi.responses.FileResponse:
     """Download a debug dump file.
