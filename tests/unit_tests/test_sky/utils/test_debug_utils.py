@@ -1382,6 +1382,11 @@ class TestManifestPathTraversal:
         assert os.path.exists(os.path.join(str(tmp_path), 'safe', 'path.json'))
         assert not os.path.exists(
             os.path.join(str(tmp_path), '..', '..', '..', 'etc', 'evil'))
+        # Both traversal attempts should be recorded as errors
+        traversal_errors = [
+            e for e in errors if 'Path traversal' in e.get('error', '')
+        ]
+        assert len(traversal_errors) == 2
 
     @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
     @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
@@ -1413,6 +1418,11 @@ class TestManifestPathTraversal:
 
         # rsync should NOT be called for traversal path
         mock_runner.rsync.assert_not_called()
+        # Traversal should be recorded as an error
+        traversal_errors = [
+            e for e in errors if 'Path traversal' in e.get('error', '')
+        ]
+        assert len(traversal_errors) == 1
 
 
 # ---------------------------------------------------------------------------

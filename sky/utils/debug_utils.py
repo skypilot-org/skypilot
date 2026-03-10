@@ -728,18 +728,24 @@ def _collect_controller_debug_data(
         return
 
     # Write inline data (small DB-derived JSON)
+    dump_dir_resolved = pathlib.Path(dump_dir).resolve()
+    dump_dir_prefix = str(dump_dir_resolved) + os.sep
     for item in manifest.get('inline_data', []):
         relative_path = item.get('relative_path', '')
-        if (os.path.isabs(relative_path) or
-                '..' in relative_path.split(os.sep)):
-            logger.warning('Skipping unsafe relative_path in manifest: '
-                           f'{relative_path}')
+        target = (dump_dir_resolved / relative_path).resolve()
+        if not str(target).startswith(dump_dir_prefix):
+            logger.error('Skipping unsafe relative_path in manifest: '
+                         f'{relative_path}')
+            if errors is not None:
+                errors.append({
+                    'component': 'managed_jobs',
+                    'resource': f'inline/{relative_path}',
+                    'error': f'Path traversal: {relative_path}',
+                })
             continue
         try:
-            file_path = os.path.join(dump_dir, relative_path)
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(item['content'])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(item['content'], encoding='utf-8')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to write inline data '
                            f'{relative_path}: {e}')
@@ -754,12 +760,18 @@ def _collect_controller_debug_data(
             def _rsync_file(file_info):
                 remote_path = file_info['remote_path']
                 relative_path = file_info['relative_path']
-                if (os.path.isabs(relative_path) or
-                        '..' in relative_path.split(os.sep)):
-                    logger.warning('Skipping unsafe relative_path in '
-                                   f'manifest: {relative_path}')
+                target = (dump_dir_resolved / relative_path).resolve()
+                if not str(target).startswith(dump_dir_prefix):
+                    logger.error('Skipping unsafe relative_path in '
+                                 f'manifest: {relative_path}')
+                    if errors is not None:
+                        errors.append({
+                            'component': 'managed_jobs',
+                            'resource': f'rsync/{relative_path}',
+                            'error': f'Path traversal: {relative_path}',
+                        })
                     return
-                local_path = os.path.join(dump_dir, relative_path)
+                local_path = str(target)
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 try:
                     runner.rsync(
