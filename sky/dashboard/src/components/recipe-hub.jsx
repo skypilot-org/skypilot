@@ -68,7 +68,9 @@ import {
   RecipeType,
   ALL_RECIPE_TYPES,
   getRecipeTypeInfo,
+  getVisibleRecipeTypes,
 } from '@/data/constants/recipeTypes';
+import { usePluginRoutes } from '@/plugins/PluginProvider';
 
 // Define filter options for the YAML filter dropdown
 const RECIPE_PROPERTY_OPTIONS = [
@@ -867,6 +869,15 @@ resources:
   infra: aws
   accelerators: A100:1
 `;
+    case RecipeType.DEVSPACE:
+      return `name: my-devspace
+resources:
+  cpus: 4
+  memory: 8
+
+setup: |
+  pip install torch numpy
+`;
     default:
       return `name: my-${recipeType}
 resources:
@@ -886,6 +897,7 @@ function CreateRecipeModal({
   onSubmit,
   initialData,
   isAuthenticated,
+  visibleRecipeTypes,
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -997,7 +1009,7 @@ function CreateRecipeModal({
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {ALL_RECIPE_TYPES.map((type) => {
+                  {(visibleRecipeTypes || ALL_RECIPE_TYPES).map((type) => {
                     const info = getRecipeTypeInfo(type);
                     const TypeIcon = info.icon;
                     return (
@@ -1094,6 +1106,7 @@ function CreateRecipeModal({
 // Main Hub component
 export function RecipeHub() {
   const router = useRouter();
+  const pluginRoutes = usePluginRoutes();
 
   // Data state
   const [allRecipes, setAllRecipes] = useState([]);
@@ -1322,6 +1335,7 @@ export function RecipeHub() {
         onSubmit={handleCreate}
         initialData={initialCreateData}
         isAuthenticated={isAuthenticated}
+        visibleRecipeTypes={getVisibleRecipeTypes(pluginRoutes)}
       />
     </div>
   );

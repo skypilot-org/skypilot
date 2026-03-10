@@ -8,6 +8,7 @@ class RecipeType(enum.Enum):
     JOB = 'job'
     POOL = 'pool'
     VOLUME = 'volume'
+    DEVSPACE = 'devspace'
 
     @classmethod
     def from_str(cls, value: str) -> 'RecipeType':

@@ -10,6 +10,7 @@ import {
   DatabaseIcon,
   LayersIcon,
   FileCode,
+  MonitorIcon,
 } from 'lucide-react';
 
 export const RecipeType = Object.freeze({
@@ -17,6 +18,7 @@ export const RecipeType = Object.freeze({
   JOB: 'job',
   POOL: 'pool',
   VOLUME: 'volume',
+  DEVSPACE: 'devspace',
 });
 
 /**
@@ -31,6 +33,20 @@ export const ALL_RECIPE_TYPES = Object.freeze(Object.values(RecipeType));
  */
 export function isValidRecipeType(value) {
   return ALL_RECIPE_TYPES.includes(value);
+}
+
+/**
+ * Get the list of recipe types visible in the UI.
+ * Devspace type is only shown when the devspaces plugin is active.
+ * @param {Array} pluginRoutes - Array of registered plugin routes
+ * @returns {Array<string>} List of visible recipe type values
+ */
+export function getVisibleRecipeTypes(pluginRoutes = []) {
+  const hasDevspaces = pluginRoutes.some((route) => route.id === 'devspaces');
+  return ALL_RECIPE_TYPES.filter((type) => {
+    if (type === RecipeType.DEVSPACE) return hasDevspaces;
+    return true;
+  });
 }
 
 /**
@@ -97,6 +113,14 @@ export function getRecipeTypeInfo(recipeType) {
         fullLabel: 'Job Pool',
       };
       break;
+    case RecipeType.DEVSPACE:
+      info = {
+        icon: MonitorIcon,
+        color: 'sky',
+        label: 'Devspace',
+        fullLabel: 'Devspace',
+      };
+      break;
     default:
       throw new Error(`Invalid recipe type: ${recipeType}`);
   }
@@ -107,9 +131,10 @@ export function getRecipeTypeInfo(recipeType) {
 
 /**
  * Generate the CLI launch command for a recipe.
+ * Returns null for devspace recipes (launched via UI).
  * @param {string} recipeType - The recipe type value
  * @param {string} recipeName - The recipe's unique name
- * @returns {string} The CLI command to launch this recipe
+ * @returns {string|null} The CLI command to launch this recipe, or null
  */
 export function getLaunchCommand(recipeType, recipeName) {
   switch (recipeType) {
@@ -121,6 +146,8 @@ export function getLaunchCommand(recipeType, recipeName) {
       return `sky volumes apply recipes:${recipeName}`;
     case RecipeType.POOL:
       return `sky jobs pool apply recipes:${recipeName}`;
+    case RecipeType.DEVSPACE:
+      return null;
     default:
       throw new Error(`Invalid recipe type: ${recipeType}`);
   }

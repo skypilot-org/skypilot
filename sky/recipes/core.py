@@ -14,6 +14,7 @@ from sky.recipes import db as recipes_db
 from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils import schemas
+from sky.utils.plugin_extensions import RecipeValidator
 
 logger = sky_logging.init_logger(__name__)
 
@@ -71,6 +72,11 @@ def _validate_skypilot_yaml(content: str, recipe_type: RecipeType) -> None:
         if not isinstance(config, dict):
             raise ValueError(
                 'YAML must be a dictionary/mapping at the top level')
+
+        # Check if a plugin provides validation for this recipe type
+        if RecipeValidator.has_validator(recipe_type.value):
+            RecipeValidator.validate(recipe_type.value, content)
+            return
 
         # Validate no local paths in recipes (workdir must be git, file_mounts
         # must be cloud storage)
