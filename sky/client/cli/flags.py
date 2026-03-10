@@ -292,6 +292,51 @@ EXTRA_RESOURCES_OPTIONS = [
 ]
 
 
+def _api_server_options():
+    """Returns API server options.
+
+    This is a function (not a module-level constant) to defer the import of
+    server_common, which is heavy and not needed for most CLI commands.
+    """
+    # pylint: disable=import-outside-toplevel
+    from sky.server import common as server_common
+    return [
+        click.option(
+            '--deploy',
+            type=bool,
+            is_flag=True,
+            default=False,
+            required=False,
+            help=('Deploy the SkyPilot API server. When set to True, '
+                  'SkyPilot API server will use all resources on the host '
+                  'machine assuming the machine is dedicated to SkyPilot '
+                  'API server; host will also be set to 0.0.0.0 to allow '
+                  'remote access.')),
+        click.option(
+            '--host',
+            default='127.0.0.1',
+            type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
+            required=False,
+            help=('The host to deploy the SkyPilot API server. To allow '
+                  'remote access, set this to 0.0.0.0')),
+        click.option('--foreground',
+                     is_flag=True,
+                     default=False,
+                     required=False,
+                     help='Run the SkyPilot API server in the foreground and '
+                     'output its logs to stdout/stderr. Allowing external '
+                     'systems to manage the process lifecycle and collect '
+                     'logs directly. This is useful when the API server is '
+                     'managed by systems like systemd and Kubernetes.'),
+        click.option('--enable-basic-auth',
+                     is_flag=True,
+                     default=False,
+                     required=False,
+                     help='Enable basic authentication in the SkyPilot API '
+                     'server.'),
+    ]
+
+
 def config_option(expose_value: bool):
     """A decorator for the --config option.
 

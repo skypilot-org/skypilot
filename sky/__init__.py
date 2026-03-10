@@ -91,8 +91,8 @@ from sky.catalog import list_accelerators
 from sky.client.sdk import api_cancel
 from sky.client.sdk import api_info
 from sky.client.sdk import api_login
-from sky.client.sdk import api_server_logs
 from sky.client.sdk import api_restart
+from sky.client.sdk import api_server_logs
 from sky.client.sdk import api_start
 from sky.client.sdk import api_status
 from sky.client.sdk import api_stop
