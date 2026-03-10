@@ -198,9 +198,19 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
         It is False when either of those are not set, which would hint with a
         string on unset credential.
     """
+
+    def _profile_exists(file_path: str, header: str) -> bool:
+        expanded = os.path.expanduser(file_path)
+        if not os.path.isfile(expanded):
+            return False
+        with open(expanded, 'r', encoding='utf-8') as f:
+            return any(header in line for line in f)
+
     hints = None
-    profile_in_cred = vastdata_profile_in_cred()
-    profile_in_config = vastdata_profile_in_config()
+    profile_in_cred = _profile_exists(VASTDATA_CREDENTIALS_PATH,
+                                      f'[{VASTDATA_PROFILE_NAME}]')
+    profile_in_config = _profile_exists(VASTDATA_CONFIG_PATH,
+                                        f'[profile {VASTDATA_PROFILE_NAME}]')
 
     if not profile_in_cred:
         hints = (f'[{VASTDATA_PROFILE_NAME}] profile is not set in '
@@ -227,32 +237,6 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
                       f'{VASTDATA_PROFILE_NAME}')
 
     return (False, hints) if hints else (True, hints)
-
-
-def vastdata_profile_in_config() -> bool:
-    """Checks if VastData profile is set in config"""
-    conf_path = os.path.expanduser(VASTDATA_CONFIG_PATH)
-    vastdata_profile_exists = False
-    if os.path.isfile(conf_path):
-        with open(conf_path, 'r', encoding='utf-8') as file:
-            for line in file:
-                if f'[profile {VASTDATA_PROFILE_NAME}]' in line:
-                    vastdata_profile_exists = True
-                    break
-    return vastdata_profile_exists
-
-
-def vastdata_profile_in_cred() -> bool:
-    """Checks if VastData profile is set in credentials"""
-    cred_path = os.path.expanduser(VASTDATA_CREDENTIALS_PATH)
-    vastdata_profile_exists = False
-    if os.path.isfile(cred_path):
-        with open(cred_path, 'r', encoding='utf-8') as file:
-            for line in file:
-                if f'[{VASTDATA_PROFILE_NAME}]' in line:
-                    vastdata_profile_exists = True
-                    break
-    return vastdata_profile_exists
 
 
 def get_credential_file_mounts() -> Dict[str, str]:
