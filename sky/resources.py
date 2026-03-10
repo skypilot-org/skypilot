@@ -43,6 +43,8 @@ RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
 
+_MEMORY_SPEC_PATTERN = re.compile(r'^[0-9]+[GgMmTt][Bb]\+?$')
+
 MEMORY_SIZE_UNITS = {
     'b': 1,
     'k': 2**10,
@@ -2129,15 +2131,15 @@ class Resources:
         if len(split) == 3:
             manufacturer, memory, count_str = split
             count = int(count_str)
-            assert re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', memory), \
+            assert _MEMORY_SPEC_PATTERN.match(memory), \
                 'If specifying a GPU manufacturer, you must also' \
                 'specify the memory size'
-        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+        elif len(split) == 2 and _MEMORY_SPEC_PATTERN.match(split[0]):
             memory = split[0]
             count = int(split[1])
-        elif len(split) == 2 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[1]):
+        elif len(split) == 2 and _MEMORY_SPEC_PATTERN.match(split[1]):
             manufacturer, memory = split
-        elif len(split) == 1 and re.match(r'^[0-9]+[GgMmTt][Bb]\+?$', split[0]):
+        elif len(split) == 1 and _MEMORY_SPEC_PATTERN.match(split[0]):
             memory = split[0]
         else:
             # it is just an accelerator name, not a memory size
