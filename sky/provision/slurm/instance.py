@@ -7,6 +7,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import colorama
+
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -36,6 +38,74 @@ def _sbatch_log_path(base_dir: str, job_id: str) -> str:
 POLL_INTERVAL_SECONDS = 2
 # Default KillWait is 30 seconds, so we add some buffer time here.
 _JOB_TERMINATION_TIMEOUT_SECONDS = 60
+
+# sbatch options that SkyPilot controls and must not be overridden by users.
+# These are either set dynamically based on the resource spec, or are required
+# for SkyPilot's job lifecycle management.
+_SBATCH_PROTECTED_OPTIONS = frozenset({
+    'job-name',
+    'output',
+    'error',
+    'nodes',
+    'time',
+    'wait-all-nodes',
+    'no-requeue',
+    'cpus-per-task',
+    'mem',
+    'gres',
+    'partition',
+})
+
+
+def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
+    """Build #SBATCH directive lines from user-supplied sbatch_options.
+
+    Args:
+        sbatch_options: Dict mapping sbatch option names to values.
+
+    Returns:
+        A string of #SBATCH directives, one per line. Protected options
+        managed by SkyPilot are skipped with a warning.
+    """
+    if not sbatch_options:
+        return ''
+
+    # Normalize: replace underscores with hyphens (sbatch uses hyphens).
+    normalized = {k.replace('_', '-'): v for k, v in sbatch_options.items()}
+
+    # Warn and skip protected options.
+    conflicting = set(normalized.keys()) & _SBATCH_PROTECTED_OPTIONS
+    if conflicting:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Ignoring protected sbatch options '
+            f'managed by SkyPilot: {sorted(conflicting)}. Remove them '
+            f'from slurm.sbatch_options in ~/.sky/config.yaml.'
+            f'{colorama.Style.RESET_ALL}')
+        for key in conflicting:
+            del normalized[key]
+
+    # Build directive lines.
+    lines = []
+    for key in sorted(normalized):
+        value = normalized[key]
+        if value is None or value is False:
+            continue
+        # Defense in depth: schema validation rejects newlines, but
+        # guard here too to prevent script injection.
+        str_value = str(value)
+        if '\n' in key or '\n' in str_value:
+            raise ValueError(
+                f'Newline characters are not allowed in sbatch options: '
+                f'{key!r}={str_value!r}')
+        if value is True:
+            lines.append(f'#SBATCH --{key}')
+        else:
+            lines.append(f'#SBATCH --{key}={value}')
+    if not lines:
+        return ''
+    # Prefix with newline so it slots in after other directives
+    # in the provision script f-string.
+    return '\n' + '\n'.join(lines)
 
 
 def _wait_for_job_nodes(
@@ -379,6 +449,10 @@ def _create_virtual_instance(
                     container_image = f'{maybe_domain}#{maybe_path}'
     container_name = slurm_utils.pyxis_container_name(cluster_name_on_cloud)
 
+    # Build custom sbatch directives from user config.
+    custom_sbatch_directives = _build_custom_sbatch_directives(
+        resources.get('sbatch_options', {}))
+
     # Build the sbatch script
     gpu_directive = ''
     if (accelerator_type is not None and accelerator_type.upper() != 'NONE' and
@@ -482,7 +556,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={int(resources["cpus"])}
 #SBATCH --mem={int(resources["memory"])}G
-{gpu_directive}
+{gpu_directive}{custom_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.
 cleanup() {{

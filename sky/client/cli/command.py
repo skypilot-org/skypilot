@@ -26,6 +26,8 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
+import io
+import json
 import os
 import pathlib
 import re
@@ -1861,12 +1863,20 @@ def _show_enabled_infra(
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_users_option('Show all clusters, including those not owned by the '
                         'current user.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
-           endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, show_pools: bool, clusters: List[str],
-           all_users: bool):
+def status(verbose: bool,
+           refresh: bool,
+           ip: bool,
+           endpoints: bool,
+           endpoint: Optional[int],
+           show_managed_jobs: bool,
+           show_services: bool,
+           show_pools: bool,
+           clusters: List[str],
+           all_users: bool,
+           output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -2053,6 +2063,15 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
         query_clusters, refresh_mode, all_users, verbose)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([
+                r.model_dump(mode='json', exclude={'handle', 'credentials'})
+                for r in cluster_records
+            ],
+                       indent=2))
+        return
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
@@ -2334,11 +2353,16 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
+@flags.output_format_option()
 @usage_lib.entrypoint
-def queue(clusters: List[str], skip_finished: bool, all_users: bool):
+def queue(clusters: List[str],
+          skip_finished: bool,
+          all_users: bool,
+          output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='cyan')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.secho('Fetching and parsing job queue...', fg='cyan')
     if not clusters:
         cluster_records = _get_cluster_records_and_set_ssh_config(
             None, all_users=all_users)
@@ -2347,6 +2371,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     logger.info(f'Fetching job queue for: {", ".join(clusters)}')
     job_tables = {}
+    job_records: Dict[str, list] = {}
 
     def _get_job_queue(cluster):
         try:
@@ -2362,9 +2387,19 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
                        f'  {common_utils.format_exception(e)}')
             return
-        job_tables[cluster] = table_utils.format_job_queue(job_table)
+        if output_format == flags.OUTPUT_FORMAT_JSON:
+            job_records[cluster] = [
+                r.model_dump(mode='json') for r in job_table
+            ]
+        else:
+            job_tables[cluster] = table_utils.format_job_queue(job_table)
 
     subprocess_utils.run_in_parallel(_get_job_queue, clusters)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(json.dumps(job_records, indent=2))
+        return
+
     user_str = 'all users' if all_users else 'current user'
     for cluster, job_table in job_tables.items():
         click.echo(f'\nJob queue of {user_str} on cluster {cluster}\n'
@@ -3650,11 +3685,13 @@ def _down_or_stop_clusters(
     '-w',
     type=str,
     help='The workspace to check. If None, all workspaces will be checked.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def check(infra_list: Tuple[str],
           verbose: bool,
-          workspace: Optional[str] = None):
+          workspace: Optional[str] = None,
+          output_format: str = 'table'):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3675,16 +3712,27 @@ def check(infra_list: Tuple[str],
       \b
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
+      \b
+      # Output in JSON format for scripting.
+      sky check -o json
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
     request_id = sdk.check(infra_list=infra_arg,
                            verbose=verbose,
                            workspace=workspace)
-    sdk.stream_and_get(request_id)
-    api_server_url = server_common.get_server_url()
-    click.echo()
-    click.echo(
-        click.style(f'Using SkyPilot API server: {api_server_url}', fg='green'))
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        # Suppress streamed output and print the result as JSON
+        null_stream = io.StringIO()
+        result = sdk.stream_and_get(request_id, output_stream=null_stream)
+        click.echo(json.dumps(result, indent=2))
+    else:
+        sdk.stream_and_get(request_id)
+        api_server_url = server_common.get_server_url()
+        click.echo()
+        click.echo(
+            click.style(f'Using SkyPilot API server: {api_server_url}',
+                        fg='green'))
 
 
 @cli.command()
@@ -3788,7 +3836,8 @@ def _show_gpus_impl(
         cloud: Optional[str],
         region: Optional[str],
         all_regions: bool,
-        verbose: bool = False):
+        verbose: bool = False,
+        output_format: str = 'table'):
     """Shared implementation for show_gpus and gpus_list commands."""
     cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
                                                                cloud,
@@ -3847,6 +3896,28 @@ def _show_gpus_impl(
                               (cloud_name is None or cloud_is_kubernetes))
     query_ssh_realtime_gpu = (ssh_is_enabled and
                               (cloud_name is None or cloud_is_ssh))
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        name, quantity = None, None
+        if accelerator_str is not None:
+            parts = accelerator_str.split(':')
+            name = parts[0]
+            if len(parts) == 2:
+                quantity = int(parts[1])
+        result = sdk.stream_and_get(
+            sdk.list_accelerators(gpus_only=True,
+                                  name_filter=name,
+                                  quantity_filter=quantity,
+                                  region_filter=region,
+                                  clouds=cloud_name,
+                                  case_sensitive=False,
+                                  all_regions=all_regions))
+        json_result = {
+            gpu: [item._asdict() for item in items
+                 ] for gpu, items in result.items()
+        }
+        click.echo(json.dumps(json_result, indent=2))
+        return
 
     def _list_to_str(lst):
 
@@ -4825,6 +4896,7 @@ def gpus_cli():
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
 @flags.verbose_option()
+@flags.output_format_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def gpus_list(
@@ -4834,7 +4906,8 @@ def gpus_list(
         cloud: Optional[str],
         region: Optional[str],
         all_regions: bool,
-        verbose: bool):
+        verbose: bool,
+        output_format: str = 'table'):
     """Show supported GPU/TPU/accelerators and their prices.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -4885,7 +4958,8 @@ def gpus_list(
                     cloud,
                     region,
                     all_regions,
-                    verbose=verbose)
+                    verbose=verbose,
+                    output_format=output_format)
 
 
 @gpus_cli.command('label', cls=_DocumentedCodeCommand)
@@ -5555,10 +5629,16 @@ def jobs_launch(
               help='Show only pending/running jobs\' information.')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool, limit: int):
+def jobs_queue(verbose: bool,
+               refresh: bool,
+               skip_finished: bool,
+               all_users: bool,
+               all: bool,
+               limit: int,
+               output_format: str = 'table'):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -5616,7 +5696,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
       sky jobs queue -l 10
 
     """
-    click.secho('Fetching managed job statuses...', fg='cyan')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         max_num_jobs_to_show = (limit if not all else None)
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
@@ -5649,6 +5730,17 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             (managed_jobs_request_id,
              queue_result_version) = managed_jobs_future.result()
             pool_status_request_id = pool_status_future.result()
+
+        if output_format == flags.OUTPUT_FORMAT_JSON:
+            result = sdk.stream_and_get(managed_jobs_request_id)
+            if queue_result_version.v2():
+                managed_jobs_, _, _, _ = result
+            else:
+                managed_jobs_ = result
+            click.echo(
+                json.dumps([r.model_dump(mode='json') for r in managed_jobs_],
+                           indent=2))
+            return
 
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
@@ -7325,10 +7417,15 @@ INT_OR_NONE = IntOrNone()
               required=False,
               help=('Filter request by cluster name.'))
 @flags.verbose_option('Show more details.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: Optional[int], cluster: Optional[str]):
+def api_status(request_id_prefixes: Optional[List[str]],
+               all_status: bool,
+               verbose: bool,
+               limit: Optional[int],
+               cluster: Optional[str],
+               output_format: str = 'table'):
     """List requests on SkyPilot API server."""
     if not request_id_prefixes:
         request_id_prefixes = None
@@ -7337,6 +7434,13 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
     request_list = sdk.api_status(request_id_prefixes, all_status, limit,
                                   fields, cluster)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([r.model_dump(mode='json') for r in request_list],
+                       indent=2))
+        return
+
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
@@ -7423,9 +7527,10 @@ def api_logout():
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
+@flags.output_format_option()
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
-def api_info():
+def api_info(output_format: str):
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
@@ -7434,6 +7539,27 @@ def api_info():
         user = api_server_user
     else:
         user = models.User.get_current_user()
+
+    # JSON output mode
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        output_data = {
+            'client': {
+                'version': sky.__version__,
+                'commit': sky.__commit__,
+            },
+            'server': {
+                'url': url,
+                'status': api_server_info.status.value,
+                'version': api_server_info.version,
+                'commit': api_server_info.commit,
+                'api_version': api_server_info.api_version,
+            },
+            'user': user.name,
+        }
+        click.echo(json.dumps(output_data, indent=2))
+        return
+
+    # Default table/text output
     # Print client version and commit.
     click.echo(f'SkyPilot client version: {sky.__version__}, '
                f'commit: {sky.__commit__}')
