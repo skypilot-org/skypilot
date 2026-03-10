@@ -1214,6 +1214,31 @@ Gets the workspaces.
 
 ## Other Functions
 
+### `sky.api_restart`
+
+```python
+sky.api_restart(*, deploy: bool = False, host: str = '127.0.0.1', foreground: bool = False, metrics: bool = False, metrics_port: Optional[int] = None, enable_basic_auth: bool = False) -> None
+```
+
+Restarts the API server by stopping and starting it.
+
+Equivalent to calling api_stop() followed by api_start() with the given
+arguments. See api_start() for argument descriptions.
+
+**Args:**
+    deploy: Whether to deploy the API server, i.e. fully utilize the
+        resources of the machine.
+    host: The host to deploy the API server. It will be set to 0.0.0.0
+        if deploy is True, to allow remote access.
+    foreground: Whether to run the API server in the foreground (run in
+        the current process).
+    metrics: Whether to export metrics of the API server.
+    metrics_port: The port to export metrics of the API server.
+    enable_basic_auth: Whether to enable basic authentication
+        in the API server.
+**Returns:**
+    None
+
 ### `sky.kubernetes_label_gpus`
 
 ```python
