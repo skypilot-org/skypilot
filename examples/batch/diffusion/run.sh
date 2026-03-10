@@ -19,6 +19,9 @@ echo "[2/3] Cleaning up previous output..."
 aws s3 rm "s3://${BUCKET}/generated_images/" --recursive 2>/dev/null && \
     echo "  Removed s3://${BUCKET}/generated_images/" || \
     echo "  No previous output to clean."
+aws s3 rm "s3://${BUCKET}/manifest.jsonl" 2>/dev/null && \
+    echo "  Removed s3://${BUCKET}/manifest.jsonl" || \
+    echo "  No previous manifest to clean."
 
 # ---- 3. Run the batch job -----------------------------------------------
 echo "[3/3] Running batch job..."

@@ -5,7 +5,7 @@ and distributing workloads across a pool of workers via managed jobs.
 """
 import logging
 import time
-from typing import Callable, Optional
+from typing import Callable, List, Optional, Union
 import uuid
 
 import tqdm
@@ -121,7 +121,7 @@ class Dataset:
             mapper_fn: Callable,
             pool_name: str,
             batch_size: int,
-            output: OutputFormat,
+            output: Union[OutputFormat, List[OutputFormat]],
             activate_env: Optional[str] = None) -> int:
         """Submit batch job as a managed job. Blocks until completion.
 
@@ -133,9 +133,12 @@ class Dataset:
                        decorated with @sky.batch.remote_function.
             pool_name: Name of the worker pool to use.
             batch_size: Number of items per batch sent to each worker.
-            output: An ``OutputFormat`` descriptor (e.g.
-                    ``JsonOutput('s3://bucket/out.jsonl')`` or
-                    ``ImageOutput('s3://bucket/images/', column='image')``).
+            output: An ``OutputFormat`` descriptor or a list of descriptors.
+                    Examples:
+                      - ``JsonOutput('s3://bucket/out.jsonl')``
+                      - ``[ImageOutput('s3://…/', column='image'),
+                         JsonOutput('s3://…/manifest.jsonl',
+                                    column=['name', 'prompt'])]``
             activate_env: Optional shell command to activate the Python
                           environment before running the mapper function.
                           Example: ``'source .venv/bin/activate'``
@@ -156,25 +159,33 @@ class Dataset:
         if batch_size <= 0:
             raise ValueError(f'batch_size must be positive, got: {batch_size}')
 
-        output_path = output.path
-        if not output_path:
-            raise ValueError('output path cannot be empty')
+        # Normalize to list internally.
+        outputs: List[OutputFormat] = (output if isinstance(output, list) else
+                                       [output])
 
-        # Check if output file already exists and confirm override
-        if utils.cloud_path_exists(output_path):
-            response = input(
-                f'\nOutput file {output_path} already exists.\n'
-                f'Do you want to overwrite it? [y/N]: ').strip().lower()
-            if response not in ('y', 'yes'):
-                raise RuntimeError(f'Output file {output_path} already exists. '
-                                   f'Operation cancelled by user.')
-            logger.info(f'Overwriting existing output file: {output_path}')
+        for fmt in outputs:
+            if not fmt.path:
+                raise ValueError('output path cannot be empty')
+
+        # Check if any output path already exists and confirm overwrite.
+        for fmt in outputs:
+            if utils.cloud_path_exists(fmt.path):
+                response = input(
+                    f'\nOutput file {fmt.path} already exists.\n'
+                    f'Do you want to overwrite it? [y/N]: ').strip().lower()
+                if response not in ('y', 'yes'):
+                    raise RuntimeError(
+                        f'Output file {fmt.path} already exists. '
+                        f'Operation cancelled by user.')
+                logger.info(f'Overwriting existing output file: {fmt.path}')
 
         # Short random suffix for unique task name.
         short_id = uuid.uuid4().hex[:4]
         task_name = f'sky-batch-{short_id}'
 
         serialized_fn = utils.serialize_function(mapper_fn)
+
+        output_format_dicts = [fmt.to_dict() for fmt in outputs]
 
         # The coordinator runs inline on the jobs controller (no
         # separate cluster).  Pass all config via task metadata.
@@ -183,13 +194,14 @@ class Dataset:
         task._metadata = {
             'batch_coordinator': True,
             'batch_dataset_path': self.path,
-            'batch_output_path': output_path,
+            # First output's path for backward compat / display.
+            'batch_output_path': outputs[0].path,
             'batch_size': batch_size,
             'batch_pool_name': pool_name,
             'batch_serialized_fn': serialized_fn,
             'batch_activate_env': activate_env or '',
             'batch_input_format': self.input_format.to_dict(),
-            'batch_output_format': output.to_dict(),
+            'batch_output_formats': output_format_dicts,
         }
 
         # Submit as regular managed job.  Pass pool_name so the job

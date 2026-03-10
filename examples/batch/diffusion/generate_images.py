@@ -88,6 +88,7 @@ def main():
 
     input_path = f's3://{bucket}/prompts.jsonl'
     output_path = f's3://{bucket}/generated_images/'
+    manifest_path = f's3://{bucket}/manifest.jsonl'
     pool_name = 'diffusion-pool'
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
@@ -98,19 +99,23 @@ def main():
     ensure_pool(pool_name, pool_yaml)
 
     # Process the dataset.
-    # ImageOutput tells the framework to save each result's 'image' column
-    # as a separate PNG file in the output directory.
+    # Multi-output: ImageOutput saves PIL Images as PNGs, JsonOutput saves
+    # selected metadata columns as a manifest JSONL.
     print(f'Generating images from {input_path}...')
     ds.map(
         generate_images,
         pool_name=pool_name,
         batch_size=3,
-        output=sky.batch.ImageOutput(output_path, column='image'),
+        output=[
+            sky.batch.ImageOutput(output_path, column='image'),
+            sky.batch.JsonOutput(manifest_path, column=['prompt']),
+        ],
         # Must match the venv created in pool.yaml setup.
         activate_env='source .venv/bin/activate',
     )
 
     print(f'\nDone! Images saved to {output_path}')
+    print(f'Manifest written to {manifest_path}')
     print(f'You can download them with:')
     print(f'  aws s3 cp {output_path} ./generated_images/ --recursive')
 

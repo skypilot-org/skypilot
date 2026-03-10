@@ -40,7 +40,7 @@ def double_text():
         results = []
         for item in batch:
             text = item.get('text', '')
-            results.append({'output': text * 2})
+            results.append({'text': text, 'output': text * 2})
 
         # Save results (order must match input batch order)
         sky.batch.save_results(results)

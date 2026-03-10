@@ -55,7 +55,7 @@ _current_batch_lock = threading.Lock()
 _output_path: Optional[str] = None
 _job_id: Optional[str] = None
 _dataset_format: Optional[Any] = None  # InputDatasetFormat instance
-_output_format: Optional[Any] = None  # OutputDatasetFormat instance
+_output_formats: List[Any] = []  # List of OutputFormat instances
 
 # ---------------------------------------------------------------------------
 # HTTP handler (localhost only)
@@ -200,24 +200,33 @@ def _resolve_input_format(dataset_path: str):
     raise ValueError(f'Unsupported dataset format: {dataset_path}')
 
 
-def _resolve_output_format(output_path: str):
-    """Resolve output format from env var or fall back to path-based detection.
+def _resolve_output_formats(output_path: str):
+    """Resolve output formats from env var or fall back to path-based detection.
 
-    Returns an OutputFormat instance.
+    Returns a list of OutputFormat instances.
     """
     import os as _os  # pylint: disable=import-outside-toplevel
 
-    env_val = _os.environ.get('SKY_BATCH_OUTPUT_FORMAT')
-    if env_val:
-        d = json.loads(env_val)
-        if d:  # Non-empty dict means typed format was provided.
-            from sky.batch.io_formats import (
-                OutputFormat)  # pylint: disable=import-outside-toplevel
-            return OutputFormat.from_dict(d)
+    from sky.batch.io_formats import (
+        OutputFormat)  # pylint: disable=import-outside-toplevel
 
-    # Backward compat fallback.
+    # New plural env var: JSON array of format dicts.
+    env_val = _os.environ.get('SKY_BATCH_OUTPUT_FORMATS')
+    if env_val:
+        dicts = json.loads(env_val)
+        if dicts:
+            return [OutputFormat.from_dict(d) for d in dicts]
+
+    # Backward compat: singular env var wraps to list.
+    env_val_singular = _os.environ.get('SKY_BATCH_OUTPUT_FORMAT')
+    if env_val_singular:
+        d = json.loads(env_val_singular)
+        if d:
+            return [OutputFormat.from_dict(d)]
+
+    # Backward compat fallback: infer from path.
     from sky.batch import utils as _utils
-    return _utils.get_output_format(output_path)
+    return [_utils.get_output_format(output_path)]
 
 
 # ---------------------------------------------------------------------------
@@ -237,11 +246,11 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
     from sky.batch import api
     from sky.batch import utils
 
-    global _output_path, _job_id, _dataset_format, _output_format
+    global _output_path, _job_id, _dataset_format, _output_formats
     _output_path = output_path
     _job_id = job_id
     _dataset_format = _resolve_input_format(dataset_path)
-    _output_format = _resolve_output_format(output_path)
+    _output_formats = _resolve_output_formats(output_path)
 
     # Start HTTP server.
     server = HTTPServer(('127.0.0.1', constants.WORKER_SERVICE_PORT),

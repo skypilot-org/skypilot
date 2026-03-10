@@ -16,7 +16,7 @@ import io
 import json
 import logging
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 from sky.batch import utils
 
@@ -71,7 +71,7 @@ class OutputFormat(ABC):
         """Reconstruct an OutputFormat from a dict."""
         fmt = d.get('format')
         if fmt == 'json':
-            return JsonOutput(d['path'])
+            return JsonOutput(d['path'], column=d.get('column'))
         elif fmt == 'image':
             return ImageOutput(d['path'], column=d.get('column', 'image'))
         raise ValueError(f'Unknown output format: {fmt}')
@@ -174,10 +174,20 @@ class JsonOutput(OutputFormat):
     Args:
         path: Cloud storage path for the output ``.jsonl`` file.
               Supported prefixes: ``s3://``, ``gs://``, ``r2://``.
+        column: Optional list of keys (or single key string) to include
+                from each result dict. When ``None`` (default), all fields
+                are written (backward compatible).
     """
 
-    def __init__(self, path: str):
+    def __init__(self,
+                 path: str,
+                 column: Optional[Union[str, List[str]]] = None):
         super().__init__(path)
+        # Normalize column to a list or None.
+        if isinstance(column, str):
+            self.column: Optional[List[str]] = [column]
+        else:
+            self.column = column
         self._validate()
 
     def _validate(self) -> None:
@@ -193,20 +203,37 @@ class JsonOutput(OutputFormat):
                 f'JsonOutput path must end with .jsonl: {self.path}')
 
     def to_dict(self) -> Dict[str, Any]:
-        return {'format': 'json', 'path': self.path}
+        d: Dict[str, Any] = {'format': 'json', 'path': self.path}
+        if self.column is not None:
+            d['column'] = self.column
+        return d
 
     # -- OutputDatasetFormat implementation ---------------------------------
+
+    def _filter_columns(self, results: List[Dict[str,
+                                                 Any]]) -> List[Dict[str, Any]]:
+        """Filter result dicts to only include specified columns."""
+        if self.column is None:
+            return results
+        return [{k: r[k] for k in self.column if k in r} for r in results]
 
     def upload_chunk(self, results: List[Dict[str, Any]], output_path: str,
                      batch_idx: int, start_idx: int, end_idx: int,
                      job_id: str) -> str:
         chunk_path = utils.get_chunk_path(output_path, start_idx, end_idx,
                                           job_id)
-        utils.save_jsonl_to_cloud(results, chunk_path)
+        filtered = self._filter_columns(results)
+        utils.save_jsonl_to_cloud(filtered, chunk_path)
         return chunk_path
 
     def merge_results(self, output_path: str, job_id: str) -> None:
         utils.concatenate_chunks_to_output(output_path, job_id)
+
+    def __repr__(self) -> str:
+        if self.column is not None:
+            return (f'JsonOutput(path={self.path!r}, '
+                    f'column={self.column!r})')
+        return f'JsonOutput(path={self.path!r})'
 
 
 class ImageOutput(OutputFormat):

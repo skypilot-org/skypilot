@@ -614,6 +614,7 @@ class JobController:
             is_resume=is_resume,
             input_format_dict=metadata.get('batch_input_format'),
             output_format_dict=metadata.get('batch_output_format'),
+            output_formats_dict=metadata.get('batch_output_formats'),
         )
 
         if not is_resume:
