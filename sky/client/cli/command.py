@@ -7730,6 +7730,8 @@ def debug_dump(
         raise click.UsageError(
             'At least one of --request-ids, --cluster-names, --job-ids, '
             'or --recent must be provided.')
+    if recent is not None and recent <= 0:
+        raise click.UsageError('--recent must be a positive number.')
 
     # Create the dump on the server
     request_id = sdk.create_debug_dump(
