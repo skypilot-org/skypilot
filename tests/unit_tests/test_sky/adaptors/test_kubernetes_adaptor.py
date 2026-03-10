@@ -189,10 +189,11 @@ def test_kubeconfig_refresh_interval_disabled_when_unset(monkeypatch):
     assert interval == 0.0
 
 
-def test_kubeconfig_refresh_interval_invalid_value_disables_refresh(monkeypatch):
+def test_kubeconfig_refresh_interval_invalid_value_disables_refresh(
+        monkeypatch):
     """Invalid env value disables refresh and returns 0."""
     monkeypatch.setenv(kubernetes.KUBECONFIG_REFRESH_INTERVAL_ENV_VAR,
-                      'not-a-number')
+                       'not-a-number')
     _clear_refresh_interval_cache()
 
     interval = kubernetes._get_kubeconfig_refresh_interval_seconds()  # pylint: disable=protected-access

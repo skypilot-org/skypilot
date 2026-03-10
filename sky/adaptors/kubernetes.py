@@ -254,9 +254,9 @@ def _mark_client_refreshed() -> None:
 def _clear_kubernetes_client_caches() -> None:
     """Clear API client caches so the next call rebuilds from kubeconfig.
 
-    TODO(ibrahimnd2000): This clears all request-level caches, not just the Kubernetes
-    client caches. Consider maintaining a separate registry of k8s-specific
-    cached functions (similar to _FUNCTIONS_NEED_RELOAD_CACHE in
+    TODO(ibrahimnd2000): This clears all request-level caches, not just the
+    Kubernetes client caches. Consider maintaining a separate registry of
+    k8s-specific cached functions (similar to _FUNCTIONS_NEED_RELOAD_CACHE in
     annotations.py) so we only evict k8s clients on kubeconfig refresh.
     """
     annotations.clear_request_level_cache()
