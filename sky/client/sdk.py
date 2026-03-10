@@ -3169,18 +3169,20 @@ def download_debug_dump(dump_filename: str,
         stream=True,
     )
 
-    if response.status_code != 200:
-        try:
-            detail = response.json().get('detail', 'Unknown error')
-        except (json.JSONDecodeError, ValueError):
-            detail = response.text or f'HTTP {response.status_code}'
-        raise exceptions.ClientError(f'Failed to download debug dump: {detail}')
+    with response:
+        if response.status_code != 200:
+            try:
+                detail = response.json().get('detail', 'Unknown error')
+            except (json.JSONDecodeError, ValueError):
+                detail = response.text or f'HTTP {response.status_code}'
+            raise exceptions.ClientError(
+                f'Failed to download debug dump: {detail}')
 
-    if local_path is None:
-        local_path = dump_filename
+        if local_path is None:
+            local_path = dump_filename
 
-    with open(local_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
 
     return local_path
