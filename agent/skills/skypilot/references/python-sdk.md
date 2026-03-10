@@ -1,5 +1,5 @@
 <!-- AUTO-GENERATED from sky/client/sdk.py -->
-<!-- Run: python skills/skypilot/scripts/generate_references.py -->
+<!-- Run: python agent/scripts/generate_references.py -->
 
 # SkyPilot Python SDK Reference
 
@@ -781,7 +781,7 @@ Downloads the logs of jobs.
 ### `sky.check`
 
 ```python
-sky.check(infra_list: Optional[Tuple[str, ...]], verbose: bool, workspace: Optional[str] = None) -> server_common.RequestId[Dict[str, List[str]]]
+sky.check(infra_list: Optional[Tuple[str, ...]], verbose: bool, workspace: Optional[str] = None) -> server_common.RequestId[Dict[str, Dict[str, List[str]]]]
 ```
 
 Checks the credentials to enable clouds.
@@ -796,7 +796,8 @@ Checks the credentials to enable clouds.
     The request ID of the check request.
 
 **Request Returns:**
-    None
+    Dict mapping workspace name to a dict of cloud name to list of
+    enabled capability strings (e.g. 'compute', 'storage').
 
 ### `sky.enabled_clouds`
 

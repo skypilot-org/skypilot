@@ -1,5 +1,5 @@
 <!-- AUTO-GENERATED from sky/client/cli/command.py -->
-<!-- Run: python skills/skypilot/scripts/generate_references.py -->
+<!-- Run: python agent/scripts/generate_references.py -->
 
 # SkyPilot CLI Reference
 
@@ -107,6 +107,7 @@ Show clusters.
 - `--show-pools`, `--no-show-pools` — Also show pools, if any.
 - `CLUSTERS` — text
 - `--all-users`, `-u` — Show all clusters, including those not owned by the current user.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ### `sky stop`
 
@@ -195,6 +196,7 @@ Show the job queue for cluster(s).
 - `--all-users`, `-u` — Show all users' information in full.
 - `--skip-finished`, `-s` — Show only pending/running jobs' information.
 - `CLUSTERS` — text
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ### `sky logs`
 
@@ -239,6 +241,7 @@ Check which clouds are available to use.
 - `INFRA_LIST` — text
 - `--verbose`, `-v` — Show the activated account for each cloud.
 - `--workspace`, `-w` — The workspace to check. If None, all workspaces will be checked.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## Dashboard
 
@@ -279,6 +282,7 @@ Show supported GPU/TPU/accelerators and their prices.
 - `--region` — The region to use. If not specified, shows accelerators from all regions.
 - `--all-regions` — Show pricing and instance details for a specified accelerator across all regions and clouds.
 - `--verbose`, `-v` — Show all information in full.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## Managed Jobs Commands
 
@@ -453,6 +457,7 @@ Show statuses of managed jobs.
 - `--skip-finished`, `-s` — Show only pending/running jobs' information.
 - `--all-users`, `-u` — Show jobs from all users.
 - `--all`, `-a` — Show all jobs.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ## SkyServe Commands
 
@@ -657,6 +662,7 @@ Shows the SkyPilot API server URL.
 
 **Options:**
 
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 - `--config` — Path to a config file or a single key-value pair. To add multiple key-value pairs add multiple flags (e.g. --config nested.key1=val1 --config nested.key2=val2).
 
 ### `sky api login`
@@ -710,6 +716,7 @@ List requests on SkyPilot API server.
 - `--limit`, `-l` (default: `50`) — Number of requests to show, default is 50, set to "none" or "all" to show all requests.
 - `--cluster`, `-c` — Filter request by cluster name.
 - `--verbose`, `-v` — Show more details.
+- `--output`, `-o` (default: `table`) — Output format. Choices: table, json. Default: table.
 
 ### `sky api stop`
 

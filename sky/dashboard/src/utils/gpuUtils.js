@@ -10,7 +10,7 @@
 /**
  * Canonical GPU model names, ordered so that more-specific names are checked
  * before less-specific ones (e.g. H100-80GB before H100).
- * Keep in sync with sky/provision/kubernetes/constants.py.
+ * Keep in sync with sky/utils/gpu_names.py.
  */
 export const CANONICAL_GPU_NAMES = [
   'GB300',
