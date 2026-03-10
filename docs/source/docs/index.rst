@@ -282,7 +282,7 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
-   Agent Skill <../getting-started/skill>
+   Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
 

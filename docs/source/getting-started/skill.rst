@@ -1,7 +1,7 @@
 .. _skill:
 
-Agent Skill
-==============
+Agent Skills
+============
 
 SkyPilot provides an official skill that teaches AI agents (Claude Code,
 Codex, etc.) how to use SkyPilot. With it installed, your agent can launch
