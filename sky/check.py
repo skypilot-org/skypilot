@@ -162,11 +162,10 @@ def check_capabilities(
                 try:
                     cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
                 except ValueError:
+                    all_clouds = sorted(c.lower() for c in get_all_clouds())
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Cloud {cloud_name!r} is not a valid cloud '
-                            f'among {sorted(c.lower() for c in get_all_clouds())}'
-                        ) from None
+                        raise ValueError(f'Cloud {cloud_name!r} is not a valid '
+                                         f'cloud among {all_clouds}') from None
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
                 return repr(cloud_obj), cloud_obj
 
@@ -285,20 +284,20 @@ def check_capabilities(
             # registry.CLOUD_REGISTRY, and should not be inserted into the DB
             # (otherwise `sky launch` and other code would error out when it's
             # trying to look it up in the registry).
-            _storage_only = ('Cloudflare', 'CoreWeave', 'VastData')
+            storage_only = ('Cloudflare', 'CoreWeave', 'VastData')
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
                 if capability in capabilities and not any(
-                    cloud.startswith(s) for s in _storage_only)
+                    cloud.startswith(s) for s in storage_only)
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
                 if capability in capabilities and not any(
-                    cloud.startswith(s) for s in _storage_only)
+                    cloud.startswith(s) for s in storage_only)
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not any(cloud.startswith(s) for s in _storage_only)
+                if not any(cloud.startswith(s) for s in storage_only)
             }
             previously_enabled_clouds_set = {
                 repr(cloud)

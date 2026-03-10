@@ -1562,7 +1562,7 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
 .. _vastdata-installation:
 
-VastData Object Storage
+VastData object storage
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 `VastData <https://vastdata.com/>`__ offers S3-compatible object storage. SkyPilot can download/upload data to VastData buckets and mount them as a local filesystem on clusters launched by SkyPilot. To set up VastData support:
