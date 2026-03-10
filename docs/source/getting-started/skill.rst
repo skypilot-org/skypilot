@@ -12,6 +12,16 @@ Installation
 
 .. tab-set::
 
+  .. tab-item:: Generic
+
+    Just tell your agent:
+
+    .. code-block:: bash
+
+      Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the skypilot skill
+
+    You may need to restart the agent to reload the skill after installation.
+
   .. tab-item:: Claude Code
 
     Install the SkyPilot skill as a Claude Code plugin:
@@ -29,15 +39,6 @@ Installation
 
       npx skills add skypilot-org/skypilot
 
-  .. tab-item:: Generic
-
-    Just tell your agent:
-
-    .. code-block:: bash
-
-      Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the skypilot skill
-
-    You may need to restart the agent to reload the skill after installation.
 
 .. tip::
 
