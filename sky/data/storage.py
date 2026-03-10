@@ -317,12 +317,12 @@ MOUNTABLE_STORAGE_MODES = [
 DEFAULT_STORAGE_MODE = StorageMode.MOUNT
 
 
-class FileMountPreset(enum.Enum):
-    """Pre-defined parameter presets for MOUNT_CACHED mode.
+class FileMountType(enum.Enum):
+    """Pre-defined parameter types for MOUNT_CACHED mode.
 
-    Each preset maps to a MountCachedConfig with tuned rclone parameters
+    Each type maps to a MountCachedConfig with tuned rclone parameters
     for a specific use-case. Users can override individual parameters
-    via config.mount_cached on top of a preset.
+    via config.mount_cached on top of a type.
     """
     # Read-only access to model weights/checkpoints.
     # Optimized for large sequential reads with 16 parallel chunk streams
@@ -334,16 +334,16 @@ class FileMountPreset(enum.Enum):
     MODEL_CHECKPOINT_RW = 'MODEL_CHECKPOINT_RW'
 
 
-# Mapping from preset enum to base MountCachedConfig field values.
-# These are the "defaults" that a preset provides; any explicit
+# Mapping from FileMountType enum to base MountCachedConfig field values.
+# These are the "defaults" that a type provides; any explicit
 # config.mount_cached fields in the YAML override them.
-_MOUNT_CACHED_PRESET_CONFIGS: Dict['FileMountPreset', Dict[str, Any]] = {
-    FileMountPreset.MODEL_CHECKPOINT_R: {
+_MOUNT_CACHED_PRESET_CONFIGS: Dict['FileMountType', Dict[str, Any]] = {
+    FileMountType.MODEL_CHECKPOINT_R: {
         'vfs_read_chunk_streams': 16,
         'vfs_read_chunk_size': '32M',
         'read_only': True,
     },
-    FileMountPreset.MODEL_CHECKPOINT_RW: {
+    FileMountType.MODEL_CHECKPOINT_RW: {
         'vfs_read_chunk_streams': 16,
         'vfs_read_chunk_size': '32M',
         'transfers': 8,
@@ -351,22 +351,22 @@ _MOUNT_CACHED_PRESET_CONFIGS: Dict['FileMountPreset', Dict[str, Any]] = {
 }
 
 
-def merge_preset_config(
-    preset: 'FileMountPreset',
+def merge_mount_cached_config(
+    file_mount_type: 'FileMountType',
     overrides: Optional['MountCachedConfig'] = None,
 ) -> 'MountCachedConfig':
-    """Resolve a preset into a MountCachedConfig, with optional overrides.
+    """Resolve a FileMountType into a MountCachedConfig, with optional overrides.
 
     Args:
-        preset: The preset to resolve.
+        file_mount_type: The file mount type to resolve.
         overrides: Optional MountCachedConfig whose non-None fields
-            take precedence over the preset defaults.
+            take precedence over the type defaults.
 
     Returns:
-        A MountCachedConfig with preset values, overridden by any
+        A MountCachedConfig with type values, overridden by any
         non-None fields from overrides.
     """
-    base = _MOUNT_CACHED_PRESET_CONFIGS[preset].copy()
+    base = _MOUNT_CACHED_PRESET_CONFIGS[file_mount_type].copy()
     if overrides is not None:
         for field in dataclasses.fields(overrides):
             value = getattr(overrides, field.name)
@@ -755,7 +755,7 @@ class Storage(object):
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None,
             mount_cached_config: Optional[MountCachedConfig] = None,
-            preset: Optional['FileMountPreset'] = None,
+            file_mount_type: Optional['FileMountType'] = None,
         ):
             self._version = self._VERSION
 
@@ -768,8 +768,8 @@ class Storage(object):
             self.sky_stores = {} if sky_stores is None else sky_stores
 
             self.mount_cached_config = mount_cached_config
-            self.preset = preset
-            if self.preset is not None or self.mount_cached_config is not None:
+            self.file_mount_type = file_mount_type
+            if self.file_mount_type is not None or self.mount_cached_config is not None:
                 assert self.mode == StorageMode.MOUNT_CACHED
 
         def __setstate__(self, state):
@@ -782,7 +782,7 @@ class Storage(object):
             if version < 0:
                 self.mount_cached_config = None
             if version < 1:
-                self.preset = None
+                self.file_mount_type = None
 
             self.__dict__.update(state)
 
@@ -815,7 +815,7 @@ class Storage(object):
         # pylint: disable=invalid-name
         _bucket_sub_path: Optional[str] = None,
         mount_cached_config: Optional[MountCachedConfig] = None,
-        preset: Optional[FileMountPreset] = None,
+        file_mount_type: Optional[FileMountType] = None,
     ) -> None:
         """Initializes a Storage object.
 
@@ -887,12 +887,13 @@ class Storage(object):
         self.force_delete = False
 
         self.mount_cached_config = mount_cached_config
-        self.preset = preset
+        self.file_mount_type = file_mount_type
 
-        if (self.preset is not None and self.mode != StorageMode.MOUNT_CACHED):
+        if (self.file_mount_type is not None and
+                self.mode != StorageMode.MOUNT_CACHED):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
-                    f'preset can only be specified when '
+                    f'type can only be specified when '
                     f'mode is {StorageMode.MOUNT_CACHED.value}. '
                     f'Got mode={self.mode.value}.')
         if (self.mount_cached_config is not None and
@@ -904,16 +905,16 @@ class Storage(object):
                     f'Got mode={self.mode.value}.')
 
     def resolve_mount_cached_config(self) -> Optional[MountCachedConfig]:
-        """Resolve preset + overrides into a final MountCachedConfig.
+        """Resolve file_mount_type + overrides into a final MountCachedConfig.
 
-        If a preset is set, merges preset defaults with any explicit
-        mount_cached_config overrides. If no preset, returns
+        If a file_mount_type is set, merges type defaults with any explicit
+        mount_cached_config overrides. If no file_mount_type, returns
         mount_cached_config as-is. Called at mount-command generation
-        time, not at parse time, so the preset name is preserved for
+        time, not at parse time, so the type name is preserved for
         YAML serialization.
         """
-        if self.preset is not None:
-            return merge_preset_config(self.preset, self.mount_cached_config)
+        if self.file_mount_type is not None:
+            return merge_mount_cached_config(self.file_mount_type, self.mount_cached_config)
         return self.mount_cached_config
 
     def construct(self):
@@ -987,7 +988,7 @@ class Storage(object):
                 self.sync_all_stores()
             # Update MOUNT_CACHED configuration to the new one.
             self.handle.mount_cached_config = self.mount_cached_config
-            self.handle.preset = self.preset
+            self.handle.file_mount_type = self.file_mount_type
         else:
             # Storage does not exist in global_user_state, create new stores
             # Sky optimizer either adds a storage object instance or selects
@@ -999,7 +1000,7 @@ class Storage(object):
                 source=self.source,
                 mode=self.mode,
                 mount_cached_config=self.mount_cached_config,
-                preset=self.preset)
+                file_mount_type=self.file_mount_type)
 
             for store_type in input_stores:
                 self.add_store(store_type)
@@ -1352,8 +1353,8 @@ class Storage(object):
         if metadata.mount_cached_config is not None:
             storage_obj.mount_cached_config = metadata.mount_cached_config
 
-        if metadata.preset is not None:
-            storage_obj.preset = metadata.preset
+        if metadata.file_mount_type is not None:
+            storage_obj.file_mount_type = metadata.file_mount_type
 
         return storage_obj
 
@@ -1566,7 +1567,7 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
-        preset_str = config.pop('preset', None)
+        type_str = config.pop('type', None)
         force_delete = config.pop('_force_delete', None)
         # pylint: disable=invalid-name
         _is_sky_managed = config.pop('_is_sky_managed', None)
@@ -1586,10 +1587,10 @@ class Storage(object):
 
         storage_config = config.pop('config', None)
 
-        # Parse preset enum if present
-        preset = None
-        if isinstance(preset_str, str):
-            preset = FileMountPreset(preset_str.upper())
+        # Parse file mount type enum if present
+        file_mount_type = None
+        if isinstance(type_str, str):
+            file_mount_type = FileMountType(type_str.upper())
 
         # Parse mount_cached config if present
         mount_cached_config = None
@@ -1614,7 +1615,7 @@ class Storage(object):
                           _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path,
                           mount_cached_config=mount_cached_config,
-                          preset=preset)
+                          file_mount_type=file_mount_type)
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
@@ -1646,8 +1647,8 @@ class Storage(object):
         add_if_not_none('_is_sky_managed', is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
-        if self.preset is not None:
-            config['preset'] = self.preset.value
+        if self.file_mount_type is not None:
+            config['type'] = self.file_mount_type.value
         if self.force_delete:
             config['_force_delete'] = True
         if self._bucket_sub_path is not None:

@@ -572,10 +572,10 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
-            'preset': {
+            'type': {
                 'type': 'string',
                 'case_insensitive_enum': [
-                    preset.value for preset in storage.FileMountPreset
+                    t.value for t in storage.FileMountType
                 ]
             },
             'config': {

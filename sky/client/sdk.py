@@ -472,7 +472,7 @@ def validate(
     # TODO (kyuds): remove these in v0.13.0
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
-    omit_mount_cached_presets = _omit(40)
+    omit_file_mount_type = _omit(40)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -492,10 +492,10 @@ def validate(
                 storage.mount_cached_config = None
             logger.debug('`mount_cached_config` is ignored because the server '
                          'does not support it yet.')
-        if omit_mount_cached_presets:
+        if omit_file_mount_type:
             for storage in task.storage_mounts.values():
-                storage.preset = None
-            logger.debug('`preset` is ignored because the server does not '
+                storage.file_mount_type = None
+            logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)

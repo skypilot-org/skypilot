@@ -322,81 +322,82 @@ class TestStorageFromYamlWithMountCachedConfig:
         assert storage_obj.mount_cached_config.transfers == 4
 
 
-class TestFileMountPreset:
-    """Tests for FileMountPreset and merge_preset_config."""
+class TestFileMountType:
+    """Tests for FileMountType and resolve_mount_cached_config."""
 
-    def test_model_checkpoint_r_preset_values(self):
+
+    def test_model_checkpoint_r_type_values(self):
         """MODEL_CHECKPOINT_R: read_only, chunk streams, chunk size."""
-        config = storage_lib.merge_preset_config(
-            storage_lib.FileMountPreset.MODEL_CHECKPOINT_R)
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_R)
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'
         assert config.read_only is True
         assert config.transfers is None
         assert config.buffer_size is None
 
-    def test_model_checkpoint_rw_preset_values(self):
+    def test_model_checkpoint_rw_type_values(self):
         """MODEL_CHECKPOINT_RW: chunk streams, chunk size, transfers."""
-        config = storage_lib.merge_preset_config(
-            storage_lib.FileMountPreset.MODEL_CHECKPOINT_RW)
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RW)
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'
         assert config.transfers == 8
         assert config.read_only is None
 
-    def test_preset_with_overrides(self):
-        """Explicit config.mount_cached fields override preset defaults."""
+    def test_type_with_overrides(self):
+        """Explicit config.mount_cached fields override type defaults."""
         overrides = storage_lib.MountCachedConfig(transfers=16)
-        config = storage_lib.merge_preset_config(
-            storage_lib.FileMountPreset.MODEL_CHECKPOINT_RW,
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RW,
             overrides=overrides)
         assert config.transfers == 16
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'
 
-    def test_preset_override_does_not_clear_preset_fields(self):
-        """Overriding one field shouldn't clear other preset fields."""
+    def test_type_override_does_not_clear_type_fields(self):
+        """Overriding one field shouldn't clear other type fields."""
         overrides = storage_lib.MountCachedConfig(buffer_size='128M')
-        config = storage_lib.merge_preset_config(
-            storage_lib.FileMountPreset.MODEL_CHECKPOINT_R, overrides=overrides)
+        config = storage_lib.merge_mount_cached_config(
+            storage_lib.FileMountType.MODEL_CHECKPOINT_R, overrides=overrides)
         assert config.buffer_size == '128M'
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'
         assert config.read_only is True
 
-    def test_preset_enum_case_insensitive(self):
-        """Preset enum constructable from uppercase string."""
-        assert (storage_lib.FileMountPreset('MODEL_CHECKPOINT_R') ==
-                storage_lib.FileMountPreset.MODEL_CHECKPOINT_R)
+    def test_type_enum_case_insensitive(self):
+        """FileMountType enum constructable from uppercase string."""
+        assert (storage_lib.FileMountType('MODEL_CHECKPOINT_R') ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_R)
 
 
-class TestStorageFromYamlWithPreset:
-    """Tests for Storage.from_yaml_config with preset field."""
+class TestStorageFromYamlWithFileMountType:
+    """Tests for Storage.from_yaml_config with type field."""
 
-    def test_preset_only(self):
+    def test_type_only(self):
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'MODEL_CHECKPOINT_R',
+            'type': 'MODEL_CHECKPOINT_R',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
-        assert (storage_obj.preset ==
-                storage_lib.FileMountPreset.MODEL_CHECKPOINT_R)
+        assert (storage_obj.file_mount_type ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_R)
         # No explicit overrides
         assert storage_obj.mount_cached_config is None
-        # Resolution produces the preset config
+        # Resolution produces the type config
         resolved = storage_obj.resolve_mount_cached_config()
         assert resolved.vfs_read_chunk_streams == 16
         assert resolved.vfs_read_chunk_size == '32M'
         assert resolved.read_only is True
 
-    def test_preset_with_config_override(self):
+    def test_type_with_config_override(self):
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'MODEL_CHECKPOINT_RW',
+            'type': 'MODEL_CHECKPOINT_RW',
             'config': {
                 'mount_cached': {
                     'transfers': 16,
@@ -404,52 +405,52 @@ class TestStorageFromYamlWithPreset:
             },
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
-        assert (storage_obj.preset ==
-                storage_lib.FileMountPreset.MODEL_CHECKPOINT_RW)
+        assert (storage_obj.file_mount_type ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RW)
         # Explicit override stored separately
         assert storage_obj.mount_cached_config.transfers == 16
-        # Resolution merges preset + override
+        # Resolution merges type + override
         resolved = storage_obj.resolve_mount_cached_config()
         assert resolved.transfers == 16
         assert resolved.vfs_read_chunk_streams == 16
 
-    def test_preset_case_insensitive(self):
+    def test_type_case_insensitive(self):
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'model_checkpoint_r',
+            'type': 'model_checkpoint_r',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
-        assert (storage_obj.preset ==
-                storage_lib.FileMountPreset.MODEL_CHECKPOINT_R)
+        assert (storage_obj.file_mount_type ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_R)
 
-    def test_preset_without_mount_cached_mode_fails(self):
+    def test_type_without_mount_cached_mode_fails(self):
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
-            'preset': 'MODEL_CHECKPOINT_R',
+            'type': 'MODEL_CHECKPOINT_R',
         }
         with pytest.raises(exceptions.StorageSpecError):
             storage_lib.Storage.from_yaml_config(yaml_config)
 
-    def test_invalid_preset_rejected_by_schema(self):
+    def test_invalid_type_rejected_by_schema(self):
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'INVALID_PRESET',
+            'type': 'INVALID_TYPE',
         }
         with pytest.raises(ValueError):
             storage_lib.Storage.from_yaml_config(yaml_config)
 
-    def test_preset_rw_to_rclone_flags(self):
-        """End-to-end: preset -> resolve -> rclone flags."""
+    def test_type_rw_to_rclone_flags(self):
+        """End-to-end: type -> resolve -> rclone flags."""
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'MODEL_CHECKPOINT_RW',
+            'type': 'MODEL_CHECKPOINT_RW',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         resolved = storage_obj.resolve_mount_cached_config()
@@ -459,27 +460,27 @@ class TestStorageFromYamlWithPreset:
         assert '--vfs-read-chunk-size 32M' in flags
         assert '--read-only' not in flags
 
-    def test_preset_round_trips_in_yaml(self):
-        """to_yaml_config() preserves the preset name."""
+    def test_type_round_trips_in_yaml(self):
+        """to_yaml_config() preserves the type name."""
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'MODEL_CHECKPOINT_R',
+            'type': 'MODEL_CHECKPOINT_R',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         serialized = storage_obj.to_yaml_config()
-        assert serialized['preset'] == 'MODEL_CHECKPOINT_R'
+        assert serialized['type'] == 'MODEL_CHECKPOINT_R'
         # No config.mount_cached since there are no overrides
         assert 'config' not in serialized
 
-    def test_preset_with_overrides_round_trips(self):
-        """to_yaml_config() preserves both preset and overrides."""
+    def test_type_with_overrides_round_trips(self):
+        """to_yaml_config() preserves both type and overrides."""
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'preset': 'MODEL_CHECKPOINT_RW',
+            'type': 'MODEL_CHECKPOINT_RW',
             'config': {
                 'mount_cached': {
                     'transfers': 16,
@@ -488,7 +489,7 @@ class TestStorageFromYamlWithPreset:
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         serialized = storage_obj.to_yaml_config()
-        assert serialized['preset'] == 'MODEL_CHECKPOINT_RW'
+        assert serialized['type'] == 'MODEL_CHECKPOINT_RW'
         assert serialized['config']['mount_cached'] == {'transfers': 16}
 
 
