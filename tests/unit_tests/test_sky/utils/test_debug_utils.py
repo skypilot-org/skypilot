@@ -1314,6 +1314,7 @@ class TestCollectControllerDebugData:
 # Tests for RequestTaskFilter.finished_after
 # ---------------------------------------------------------------------------
 class TestRequestTaskFilterFinishedAfter:
+    """Tests for RequestTaskFilter.finished_after SQL generation."""
 
     def test_finished_after_generates_sql_with_null_handling(self):
         """finished_after should generate SQL including NULL (in-progress)."""
@@ -1339,6 +1340,7 @@ class TestRequestTaskFilterFinishedAfter:
 # Tests for manifest path traversal validation
 # ---------------------------------------------------------------------------
 class TestManifestPathTraversal:
+    """Tests for manifest relative_path traversal validation."""
 
     @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
     @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
@@ -1377,8 +1379,7 @@ class TestManifestPathTraversal:
         debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
 
         # Only safe path should be written
-        assert os.path.exists(os.path.join(str(tmp_path), 'safe',
-                                           'path.json'))
+        assert os.path.exists(os.path.join(str(tmp_path), 'safe', 'path.json'))
         assert not os.path.exists(
             os.path.join(str(tmp_path), '..', '..', '..', 'etc', 'evil'))
 
@@ -1396,12 +1397,10 @@ class TestManifestPathTraversal:
 
         manifest = {
             'inline_data': [],
-            'file_paths': [
-                {
-                    'remote_path': '/some/file.log',
-                    'relative_path': '../../etc/evil.log',
-                },
-            ],
+            'file_paths': [{
+                'remote_path': '/some/file.log',
+                'relative_path': '../../etc/evil.log',
+            },],
             'errors': [],
         }
         mock_backend = mock.MagicMock()
@@ -1420,19 +1419,20 @@ class TestManifestPathTraversal:
 # Tests for _SENSITIVE_ENV_VARS redaction
 # ---------------------------------------------------------------------------
 class TestSensitiveEnvVarRedaction:
+    """Tests for sensitive environment variable redaction."""
 
     def test_sensitive_env_vars_redacted(self):
         """Sensitive env vars should have their values replaced with bool."""
         assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
         assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
 
-    @mock.patch('sky.utils.debug_utils.sky_check.check',
-                return_value={})
+    @mock.patch('sky.utils.debug_utils.sky_check.check', return_value={})
     @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
                 return_value=None)
-    def test_dump_server_info_redacts_sensitive(self, _mock_req, _mock_check,
+    def test_dump_server_info_redacts_sensitive(self, mock_req, mock_check,
                                                 tmp_path):
         """_dump_server_info should redact sensitive env var values."""
+        del mock_req, mock_check  # unused but required by mock.patch
         env_patch = {
             'SKYPILOT_DEBUG': '1',
             'SKYPILOT_DB_CONNECTION_URI': 'postgresql://secret@host/db',

@@ -7675,9 +7675,7 @@ def ssh_down(infra, async_call):
               type=float,
               default=None,
               help='Include resources active within the last N hours.')
-@click.option('--output',
-              default=None,
-              help='Output path for the dump file.')
+@click.option('--output', default=None, help='Output path for the dump file.')
 @click.option('--async',
               'async_call',
               is_flag=True,

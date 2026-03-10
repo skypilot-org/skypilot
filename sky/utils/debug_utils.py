@@ -298,7 +298,7 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     # consolidation mode).
     try:
         jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                       all_users=True)
+                                                   all_users=True)
         for job in jobs:
             submitted_at = job.get('submitted_at') or 0
             end_at = job.get('end_at') or time.time()
