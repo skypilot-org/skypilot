@@ -650,7 +650,7 @@ run: |
 Monitor all running jobs:
 
 ```bash
-sky jobs queue
+sky jobs queue -o json
 ```
 
 ### 3.4 Job Pools (Experimental)

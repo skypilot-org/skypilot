@@ -100,10 +100,10 @@ export KUBECONFIG=~/.kube/config:~/.kube/other-config
 
 ```bash
 # Check all clouds
-sky check
+sky check -o json
 
 # Check specific clouds
-sky check aws gcp kubernetes
+sky check aws gcp kubernetes -o json
 ```
 
 The output shows each cloud as `enabled` or `disabled` with a reason. Common reasons for disabled:
@@ -173,13 +173,13 @@ Azure Portal > Subscriptions > Usage + quotas > Request increase
 
 ```bash
 # Check GPU availability across clouds
-sky gpus list --all
+sky gpus list --all -o json
 
 # Check availability for a specific GPU on a cloud
-sky gpus list H100 --infra aws
+sky gpus list H100 --infra aws -o json
 
 # Check all regions for a GPU
-sky gpus list H100 --all-regions
+sky gpus list H100 --all-regions -o json
 ```
 
 Use `any_of` in your YAML to specify fallback options:
@@ -214,10 +214,10 @@ resources:
 
 ```bash
 # List valid instance types for a cloud
-sky gpus list --infra aws --all
+sky gpus list --infra aws --all -o json
 
 # Check a specific accelerator's available instance types
-sky gpus list A100 --infra gcp
+sky gpus list A100 --infra gcp -o json
 ```
 
 Ensure the instance type matches the region. Not all instance types are available in all regions.
@@ -266,7 +266,7 @@ If the cluster keeps getting stuck:
 sky logs mycluster
 
 # Refresh cluster status from the cloud provider
-sky status --refresh
+sky status --refresh -o json
 ```
 
 ### Permission denied during provisioning
@@ -714,7 +714,7 @@ file_mounts:
 
 ```bash
 # Check controller status
-sky status
+sky status -o json
 
 # View controller provisioning logs
 sky jobs logs --controller <job_id>
@@ -971,7 +971,10 @@ If you have conflicting Host entries, SkyPilot's entries use the cluster name as
 
 ```bash
 # Check server status
-sky api status
+sky api status -o json
+
+# Check server info
+sky api info -o json
 
 # Stop and restart
 sky api stop
@@ -996,7 +999,7 @@ sky api start
 
 ```bash
 # Check if the server is running
-sky api status
+sky api info -o json
 
 # Restart the server
 sky api stop
@@ -1031,11 +1034,11 @@ sky api logout
 **Symptom**: A CLI command hangs or a previous request is blocking.
 
 ```bash
+# List active requests
+sky api status -o json
+
 # Cancel a stale request by its ID
 sky api cancel <request_id>
-
-# List active requests
-sky api status
 ```
 
 ---
@@ -1066,6 +1069,10 @@ sky api status
 export SKYPILOT_DEBUG=1
 sky launch mycluster.yaml
 
+# Check cluster and job status
+sky status -o json
+sky jobs queue -o json
+
 # Check the full logs for a cluster
 sky logs mycluster
 
@@ -1078,5 +1085,5 @@ sky serve logs my-service 1
 sky serve logs --controller my-service
 
 # Refresh cluster status from cloud
-sky status --refresh
+sky status --refresh -o json
 ```
