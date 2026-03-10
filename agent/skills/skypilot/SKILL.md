@@ -45,19 +45,37 @@ SkyPilot has three core abstractions. Use the right one for each stage of your w
 
 ## Before You Start (Agent Bootstrap)
 
-Before running any SkyPilot command, verify the environment:
+Bootstrap to confirm SkyPilot is installed, connected to an API server, and has cloud credentials. Once confirmed, skip straight to the user's task.
 
-**Step 1: Check if SkyPilot is installed**
+**Step 1: Check installation and API server connectivity**
+
 ```bash
-sky --version
+sky api status -l 1
 ```
-If `sky` is not found, install it first:
+| Output contains | Meaning | Next action |
+|-----------------|---------|-------------|
+| A table with request data | Server is running and connected | **Bootstrap done.** Skip to user's task. |
+| `SkyPilot API server is not running.` | No server connected | Go to "Start or connect a server" below. |
+| `command not found: sky` | SkyPilot not installed | Go to "Install SkyPilot" below. |
+| Connection error or authentication error | Remote server unreachable or auth expired | Tell the user and suggest `sky api login -e <endpoint>` to reconnect. |
+
+**Install SkyPilot** (only if `sky` command not found):
 ```bash
 pip install "skypilot[aws,gcp,kubernetes]"  # Pick clouds the user needs
 ```
-Ask the user which clouds they need if unclear.
+Ask the user which clouds they need if unclear, then re-run `sky api status -l 1`.
 
-**Step 2: Check cloud credentials**
+**Start or connect a server** (only if "not running"):
+
+Ask the user:
+> Do you have an existing SkyPilot API server to connect to, or should I start one locally?
+
+- **Connect to existing server:** `sky api login -e <API_SERVER_URL>` — get the URL from the user.
+- **Start locally:** `sky api start`
+
+After either path, re-run `sky api status -l 1` to confirm the server is reachable.
+
+**Step 2: Check cloud credentials** (only for fresh setups — skip if the server was already running)
 ```bash
 sky check
 ```
