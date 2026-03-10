@@ -3098,8 +3098,9 @@ def _build_client_info() -> Dict[str, Any]:
         'platform': platform.platform(),
         'user_hash': common_utils.get_user_hash(),
         'environment': {
-            'SKYPILOT_DEBUG': os.environ.get('SKYPILOT_DEBUG', ''),
-            'SKYPILOT_DEV': os.environ.get('SKYPILOT_DEV', ''),
+            k: v
+            for k, v in sorted(os.environ.items())
+            if k.startswith(('SKYPILOT_', 'SKY_'))
         },
         'user_config': user_config,
         'merged_config': merged_config,

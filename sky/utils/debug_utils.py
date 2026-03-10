@@ -357,27 +357,13 @@ def _dump_server_info(dump_dir: str,
                 'error': str(e)
             })
 
-    # Add environment variables
-    server_info['environment'] = {
-        'SKYPILOT_DEBUG': os.environ.get('SKYPILOT_DEBUG', ''),
-        'SKYPILOT_DEV': os.environ.get('SKYPILOT_DEV', ''),
-        'SKYPILOT_DB_CONNECTION_URI': bool(
-            os.environ.get('SKYPILOT_DB_CONNECTION_URI')),
-        skylet_constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING: os.environ.get(
-            skylet_constants.ENV_VAR_ENABLE_REQUEST_DEBUG_LOGGING, ''),
-        server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR: os.environ.get(
-            server_constants.OAUTH2_PROXY_ENABLED_ENV_VAR, ''),
-        server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR: os.environ.get(
-            server_constants.OAUTH2_PROXY_BASE_URL_ENV_VAR, ''),
-        'SKYPILOT_API_SERVER_STORAGE_ENABLED': os.environ.get(
-            'SKYPILOT_API_SERVER_STORAGE_ENABLED', ''),
-        'SKYPILOT_ROLLING_UPDATE_ENABLED': os.environ.get(
-            'SKYPILOT_ROLLING_UPDATE_ENABLED', ''),
-        'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE': os.environ.get(
-            'SKYPILOT_DISABLE_BASIC_AUTH_MIDDLEWARE', ''),
-        'SKY_API_SERVER_METRICS_ENABLED': os.environ.get(
-            'SKY_API_SERVER_METRICS_ENABLED', ''),
+    # Add all SKYPILOT_*/SKY_* environment variables
+    env = {
+        k: v
+        for k, v in sorted(os.environ.items())
+        if k.startswith(('SKYPILOT_', 'SKY_'))
     }
+    server_info['environment'] = env
 
     # Add cloud status
     try:
