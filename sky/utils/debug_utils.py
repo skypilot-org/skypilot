@@ -732,14 +732,20 @@ def _collect_controller_debug_data(
 
     # Write inline data (small DB-derived JSON)
     for item in manifest.get('inline_data', []):
+        relative_path = item.get('relative_path', '')
+        if (os.path.isabs(relative_path) or
+                '..' in relative_path.split(os.sep)):
+            logger.warning('Skipping unsafe relative_path in manifest: '
+                           f'{relative_path}')
+            continue
         try:
-            file_path = os.path.join(dump_dir, item['relative_path'])
+            file_path = os.path.join(dump_dir, relative_path)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(item['content'])
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to write inline data '
-                           f'{item.get("relative_path")}: {e}')
+                           f'{relative_path}: {e}')
 
     # Phase 2: Rsync large log files from controller
     file_path_entries = manifest.get('file_paths', [])
@@ -751,6 +757,11 @@ def _collect_controller_debug_data(
             def _rsync_file(file_info):
                 remote_path = file_info['remote_path']
                 relative_path = file_info['relative_path']
+                if (os.path.isabs(relative_path) or
+                        '..' in relative_path.split(os.sep)):
+                    logger.warning('Skipping unsafe relative_path in '
+                                   f'manifest: {relative_path}')
+                    return
                 local_path = os.path.join(dump_dir, relative_path)
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
                 try:

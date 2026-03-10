@@ -1333,3 +1333,84 @@ class TestRequestTaskFilterFinishedAfter:
         assert '(finished_at >= ? OR finished_at IS NULL)' in query
         assert 2000.0 in params
         assert 1000.0 in params
+
+
+# ---------------------------------------------------------------------------
+# Tests for manifest path traversal validation
+# ---------------------------------------------------------------------------
+class TestManifestPathTraversal:
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_inline_data_traversal_skipped(self, mock_accessible,
+                                           mock_backend_cls, tmp_path):
+        """Inline data with path traversal should be skipped."""
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [
+                {
+                    'relative_path': '../../../etc/evil',
+                    'content': 'malicious',
+                },
+                {
+                    'relative_path': '/etc/passwd',
+                    'content': 'malicious',
+                },
+                {
+                    'relative_path': 'safe/path.json',
+                    'content': '{"ok": true}',
+                },
+            ],
+            'file_paths': [],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # Only safe path should be written
+        assert os.path.exists(os.path.join(str(tmp_path), 'safe',
+                                           'path.json'))
+        assert not os.path.exists(
+            os.path.join(str(tmp_path), '..', '..', '..', 'etc', 'evil'))
+
+    @mock.patch('sky.utils.debug_utils.CloudVmRayBackend')
+    @mock.patch('sky.utils.debug_utils.backend_utils.is_controller_accessible')
+    def test_rsync_traversal_skipped(self, mock_accessible, mock_backend_cls,
+                                     tmp_path):
+        """Rsync entries with path traversal should be skipped."""
+        from sky.utils import message_utils
+
+        mock_handle = mock.MagicMock()
+        mock_runner = mock.MagicMock()
+        mock_handle.get_command_runners.return_value = [mock_runner]
+        mock_accessible.return_value = mock_handle
+
+        manifest = {
+            'inline_data': [],
+            'file_paths': [
+                {
+                    'remote_path': '/some/file.log',
+                    'relative_path': '../../etc/evil.log',
+                },
+            ],
+            'errors': [],
+        }
+        mock_backend = mock.MagicMock()
+        mock_backend.run_on_head.return_value = (
+            0, message_utils.encode_payload(manifest), '')
+        mock_backend_cls.return_value = mock_backend
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._collect_controller_debug_data([1], str(tmp_path), errors)
+
+        # rsync should NOT be called for traversal path
+        mock_runner.rsync.assert_not_called()
