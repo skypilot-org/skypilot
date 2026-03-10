@@ -48,10 +48,6 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-# Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
-# performance issues in Kubernetes deployments where ~/sky_logs/ may be on
-# shared storage.
-REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 # Legacy path for backward compatibility - GC will clean up logs from both
 # the new and legacy paths to handle server upgrades gracefully.
 LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
@@ -148,7 +144,7 @@ class Request:
     @property
     def log_path(self) -> pathlib.Path:
         log_path_prefix = pathlib.Path(
-            REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+            server_constants.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
         log_path_prefix.mkdir(parents=True, exist_ok=True)
         log_path = (log_path_prefix / self.request_id).with_suffix('.log')
         return log_path
@@ -510,10 +506,10 @@ def reset_db_and_logs():
     """Create the database."""
     logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
-    logger.debug(
-        f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
-    )
-    shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
+    logger.debug('clearing local API server logs directory at '
+                 f'{server_constants.REQUEST_LOG_PATH_PREFIX}')
+    shutil.rmtree(pathlib.Path(
+        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     # Also clear legacy path for backward compatibility cleanup
     logger.debug('clearing legacy API server logs directory at '
@@ -547,7 +543,7 @@ def reset_db_and_logs():
 
 
 def request_lock_path(request_id: str) -> str:
-    lock_path = os.path.expanduser(REQUEST_LOG_PATH_PREFIX)
+    lock_path = os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX)
     os.makedirs(lock_path, exist_ok=True)
     return os.path.join(lock_path, f'.{request_id}.lock')
 

@@ -342,9 +342,9 @@ Example:
 ``api_server.daemon_log_max_bytes``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Maximum size (in bytes) of a daemon log file before it is truncated in place (optional).
+Maximum size (in bytes) of a daemon log file before it is rotated (optional).
 
-Daemon request logs (e.g., for the status refresh daemon) grow unbounded because daemon requests never finish and are not subject to request GC. When a daemon log exceeds this threshold, it is truncated to zero and new writes continue from the beginning of the file. No backup (``.log.1``) is kept.
+Daemon request logs (e.g., for the status refresh daemon) grow unbounded because daemon requests never finish and are not subject to request GC. When a daemon log exceeds this threshold, it is backed up to ``.log.1`` and then truncated. One backup is kept per daemon.
 
 Set to ``0`` to disable truncation.
 

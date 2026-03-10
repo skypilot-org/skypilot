@@ -2,6 +2,7 @@
 import atexit
 import dataclasses
 import os
+import shutil
 import sys
 import time
 import typing
@@ -29,12 +30,12 @@ else:
 logger = sky_logging.init_logger(__name__)
 
 
-def _maybe_truncate_daemon_log() -> None:
-    """Truncate the daemon log file if it exceeds the size threshold.
+def _rotate_daemon_log(log_path: str) -> None:
+    """Rotate the daemon log if it exceeds the size threshold.
 
-    Daemon stdout/stderr are redirected to the log file via os.dup2 with
-    O_APPEND. After ftruncate(0), the next write atomically seeks to
-    end-of-file (position 0), so no sparse file is created.
+    Uses the copytruncate pattern: copy current log to a backup file,
+    then truncate the original. This keeps one backup for external log
+    collectors and debugging.
 
     The threshold is configurable via api_server.daemon_log_max_bytes in
     ~/.sky/config.yaml, defaulting to DAEMON_LOG_MAX_BYTES.
@@ -50,10 +51,13 @@ def _maybe_truncate_daemon_log() -> None:
         fd = sys.stdout.fileno()
         if os.fstat(fd).st_size < max_bytes:
             return
+        # Copy current log to backup before truncating.
+        backup_path = log_path + '.1'
+        shutil.copy2(log_path, backup_path)
         os.ftruncate(fd, 0)
         os.lseek(fd, 0, os.SEEK_SET)
     except Exception:  # pylint: disable=broad-except
-        # Never crash the daemon on truncation failure.
+        # Never crash the daemon on rotation failure.
         pass
 
 
@@ -110,6 +114,10 @@ class InternalRequestDaemon:
         # sent multiple times.
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
+        log_path = os.path.join(
+            os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX),
+            self.id + '.log')
+
         level = self.refresh_log_level()
         while True:
             try:
@@ -137,7 +145,7 @@ class InternalRequestDaemon:
                 # kill all children processes related to this request.
                 subprocess_utils.kill_children_processes()
                 common_utils.release_memory()
-                _maybe_truncate_daemon_log()
+                _rotate_daemon_log(log_path)
 
 
 def refresh_cluster_status_event():
@@ -361,7 +369,9 @@ HIDDEN_REQUEST_NAMES = [
     request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
 ]
 
+_DAEMON_IDS = set(d.id for d in INTERNAL_REQUEST_DAEMONS)
+
 
 def is_daemon_request_id(request_id: str) -> bool:
     """Returns whether a specific request_id is an internal daemon."""
-    return any([d.id == request_id for d in INTERNAL_REQUEST_DAEMONS])
+    return request_id in _DAEMON_IDS
