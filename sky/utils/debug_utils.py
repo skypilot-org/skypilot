@@ -911,7 +911,7 @@ def create_debug_dump(
     )
 
     # Create persistent output directory
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     dump_base_dir = pathlib.Path(DEBUG_DUMP_DIR).expanduser()
     dump_base_dir.mkdir(parents=True, exist_ok=True)
     logger.debug(f'Debug dump output directory: {dump_base_dir}')
