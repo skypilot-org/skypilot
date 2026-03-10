@@ -3061,8 +3061,10 @@ def slurm_node_info(
 
 def _build_client_info() -> Dict[str, Any]:
     """Build client-side info for debug dumps."""
-    # Cannot import sky at module level (sky.__init__ imports from this file).
-    # The sky module is always loaded by the time this function runs.
+    # Cannot import sky at module level because sky/__init__.py imports
+    # from this file (sdk.py), creating a circular import at import time.
+    # By the time this function is called at runtime, sky is fully loaded,
+    # so sys.modules lookup is safe.
     sky_mod = sys.modules['sky']
 
     # Sensitive config paths to redact, following the same pattern as
