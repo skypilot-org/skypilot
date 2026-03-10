@@ -5,15 +5,9 @@ from json import load as json_load
 from json import loads
 import os
 import time
-import typing
 from typing import List, Optional, Tuple
 
-from sky.adaptors import common as adaptors_common
-
-if typing.TYPE_CHECKING:
-    import requests
-else:
-    requests = adaptors_common.LazyImport('requests')
+import requests
 
 
 @dataclasses.dataclass
@@ -144,7 +138,7 @@ _CLIENT_CREDENTIALS = 'client_credentials'
 _REFRESH_TOKEN = 'refresh_token'
 
 
-class APIException(Exception):
+class VerdaException(Exception):
     """This exception is raised if there was an error from verda's API.
 
     Could be an invalid input, token etc.
@@ -187,10 +181,10 @@ def handle_error(response: requests.Response) -> None:
         data = loads(response.text)
         code = data.get('code', 'Unknown')
         message = data.get('message', 'Internal error')
-        raise APIException(code, message)
+        raise VerdaException(code, message)
 
 
-class AuthenticationService:
+class _AuthenticationService:
     """A service for client authentication."""
 
     def __init__(self, client_id: str, client_secret: str,
@@ -304,7 +298,7 @@ class AuthenticationService:
         return time.time() >= self._expires_at
 
 
-class HTTPClient:
+class _HTTPClient:
     """An http client, a wrapper for the requests library.
 
     For each request, it adds the authentication header with an access token.
@@ -317,9 +311,9 @@ class HTTPClient:
         if not configured or not config:
             raise RuntimeError(f'Can\'t connect to Verda Cloud: {reason}')
         self._base_url = config.base_url
-        self._auth_service = AuthenticationService(config.client_id,
-                                                   config.client_secret,
-                                                   config.base_url)
+        self._auth_service = _AuthenticationService(config.client_id,
+                                                    config.client_secret,
+                                                    config.base_url)
         self._auth_service.authenticate()
 
     def post(self,
@@ -582,47 +576,47 @@ class VerdaClient:
     """A client for the Verda Cloud API."""
 
     def __init__(self) -> None:
-        self.http_client: Optional[HTTPClient] = None
+        self.http_client: Optional[_HTTPClient] = None
 
     def instances_get(self) -> List[Instance]:
         """Get all instances."""
         if self.http_client is None:
-            self.http_client = HTTPClient()
+            self.http_client = _HTTPClient()
         response = self.http_client.get('/instances').json()
         return [Instance(o) for o in response]
 
     def instance_get(self, instance_id: str) -> Instance:
         """Get instance."""
         if self.http_client is None:
-            self.http_client = HTTPClient()
+            self.http_client = _HTTPClient()
         response = self.http_client.get(f'/instances/{instance_id}').json()
         return Instance(response)
 
     def ssh_keys_get(self) -> List[SSHKey]:
         """Get all ssh keys."""
         if self.http_client is None:
-            self.http_client = HTTPClient()
+            self.http_client = _HTTPClient()
         response = self.http_client.get('/ssh-keys').json()
         return [SSHKey(o) for o in response]
 
     def ssh_keys_create(self, name: str, key: str) -> SSHKey:
         """Create a new ssh key."""
         if self.http_client is None:
-            self.http_client = HTTPClient()
+            self.http_client = _HTTPClient()
         payload = {'name': name, 'key': key}
         key_id = self.http_client.post('/ssh-keys', body=payload).text
         return SSHKey({'id': key_id, 'name': name, 'key': key})
 
     def instance_create(self, payload: dict) -> Instance:
         if self.http_client is None:
-            self.http_client = HTTPClient()
+            self.http_client = _HTTPClient()
         instance_id = self.http_client.post('/instances', body=payload).text
         instance = self.instance_get(instance_id)
         return instance
 
     def instance_action(self, instance_id: str, action: str) -> None:
         if self.http_client is None:
-            self.http_client = HTTPClient()
+            self.http_client = _HTTPClient()
         payload = {'id': [instance_id], 'action': action}
         self.http_client.put('/instances', body=payload)
         return None

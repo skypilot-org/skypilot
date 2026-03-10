@@ -10,6 +10,7 @@ from sky.adaptors.verda import InstanceStatus
 from sky.adaptors.verda import VerdaClient
 from sky.clouds.verda import VERDA_DEFAULT_IMAGE
 from sky.provision import common
+from sky.resources import DEFAULT_DISK_SIZE_GB
 from sky.utils import common_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
@@ -19,9 +20,6 @@ POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
 # Terminating instances can take several minutes, so we increase the timeout
 MAX_POLLS_FOR_UP_OR_TERMINATE = MAX_POLLS * 16
-
-# status filters
-# PROVISIONING, PENDING, ACTIVE, STOPPED, ERROR, DELETING, TERMINATED
 
 logger = sky_logging.init_logger(__name__)
 
@@ -134,7 +132,7 @@ def run_instances(
             # Format: instance_type__vcpus__memory[__SPOT]
             instance_type = config.node_config['InstanceType']
             disk_size = config.node_config.get(
-                'DiskSize', 50)  # Verda Cloud default disk size is 50GB
+                'DiskSize', DEFAULT_DISK_SIZE_GB)
             # Preemptible - fancy way to call it a spot instance
             is_spot = config.node_config.get('Preemptible', None)
 

@@ -83,13 +83,13 @@ setup_commands:
     systemctl stop unattended-upgrades || true;
     systemctl disable unattended-upgrades || true;
     sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    kill -9 `lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
-    pkill -9 apt-get;
-    pkill -9 dpkg;
+    LOCK_PID=$(lsof /var/lib/dpkg/lock-frontend 2>/dev/null | awk 'NR>1{print $2}' | tail -n 1); [ -n "$LOCK_PID" ] && kill -9 "$LOCK_PID" || true;
+    pkill -9 apt-get || true;
+    pkill -9 dpkg || true;
     dpkg --configure -a;
     which patch > /dev/null || apt install -y patch;
     [ -f /etc/fuse.conf ] && sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-    mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
+    mkdir -p ~/.ssh; touch ~/.ssh/config; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n  IdentityFile ~/.ssh/sky-cluster-key\n  IdentityFile ~/.ssh/id_rsa\n" >> ~/.ssh/config;
     {{ conda_installation_commands }}
     {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}

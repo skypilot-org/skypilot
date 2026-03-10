@@ -289,8 +289,8 @@ class TestVerdaClientInstanceCreation:
         }
 
         # Verify APIException is raised
-        from sky.adaptors.verda import APIException
-        with pytest.raises(APIException) as exc_info:
+        from sky.adaptors.verda import VerdaException
+        with pytest.raises(VerdaException) as exc_info:
             client.instance_create(payload)
 
         assert exc_info.value.code == 'INVALID_INPUT'
