@@ -1820,7 +1820,7 @@ def cluster_with_name_exists(cluster_name: str) -> bool:
 def get_clusters(
     *,  # keyword only separator
     exclude_managed_clusters: bool = False,
-    workspaces_filter: Optional[Dict[str, Any]] = None,
+    workspaces_filter: Optional[Set[str]] = None,
     user_hashes_filter: Optional[Set[str]] = None,
     cluster_names: Optional[List[str]] = None,
     summary_response: bool = False,
@@ -1830,8 +1830,8 @@ def get_clusters(
     Args:
         exclude_managed_clusters: If True, exclude clusters that have
             is_managed field set to True.
-        workspaces_filter: If specified, only include clusters
-            that has workspace field set to one of the values.
+        workspaces_filter: If specified, only include clusters whose
+            workspace is in this set. Use workspace names.
         user_hashes_filter: If specified, only include clusters
             that has user_hash field set to one of the values.
         cluster_names: If specified, only include clusters

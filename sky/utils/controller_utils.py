@@ -27,6 +27,7 @@ from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.server import config as server_config
+from sky.server import constants as server_constants
 from sky.server import plugin_utils
 from sky.server import plugins
 from sky.setup_files import dependencies
@@ -302,8 +303,10 @@ def _get_cloud_dependencies_installation_commands(
     python_packages.add('flask')
 
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
-                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
+    # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
+    # the outer && chain, preventing operator precedence issues.
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
+                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }}')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
@@ -352,14 +355,15 @@ def _get_cloud_dependencies_installation_commands(
                     '(gcloud components install gke-gcloud-auth-plugin --quiet &>/dev/null))')  # pylint: disable=line-too-long
         elif isinstance(cloud, clouds.Nebius):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            # Wrap in braces to isolate the || from the outer && chain.
             commands.append(
                 f'echo -en "\\r{step_prefix}Nebius{empty_str}" && '
-                'curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
+                '{ curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh '  # pylint: disable=line-too-long
                 '| sudo NEBIUS_INSTALL_FOLDER=/usr/local/bin bash &> /dev/null && '
                 'nebius profile create --profile sky '
                 '--endpoint api.nebius.cloud '
                 '--service-account-file $HOME/.nebius/credentials.json '
-                '&> /dev/null || echo "Unable to create Nebius profile."')
+                '&> /dev/null || echo "Unable to create Nebius profile."; }')
         elif (isinstance(cloud, clouds.Kubernetes) and
               not k8s_dependencies_installed):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
@@ -400,9 +404,11 @@ def _get_cloud_dependencies_installation_commands(
                 cloud_python_dependencies = []
         elif isinstance(cloud, clouds.Vast):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-            commands.append(f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
-                            'pip list | grep vastai_sdk > /dev/null 2>&1 || '
-                            'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1')
+            # Wrap in braces to isolate the || from the outer && chain.
+            commands.append(
+                f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
+                '{ pip list | grep vastai_sdk > /dev/null 2>&1 || '
+                'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1; }')
 
         python_packages.update(cloud_python_dependencies)
 
@@ -1306,6 +1312,14 @@ MAX_CONTROLLERS = 512 // LAUNCHES_PER_WORKER
 # hardcoded max limit.
 MAX_TOTAL_RUNNING_JOBS = 2000
 
+# In consolidation mode, cap the fraction of available memory (after
+# controller reservation) that server workers can consume. The remainder is
+# reserved for service/job controllers so that both workers and services
+# scale with system memory. Without this cap, short workers grow linearly
+# with memory and consume nearly all of it, leaving a roughly fixed number
+# of services regardless of system memory size.
+_CONSOLIDATION_WORKER_MEMORY_FRACTION = 0.7
+
 
 def compute_memory_reserved_for_controllers(
         reserve_for_controllers: bool, reserve_extra_for_pool: bool) -> float:
@@ -1324,8 +1338,20 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
                        controller_reserved)
     if not consolidation_mode:
         return total_memory_mb
+    # Cap the memory available for server workers so that both workers and
+    # services scale with system memory. Without this cap, short workers
+    # grow linearly with memory, consuming nearly all of it and leaving a
+    # roughly fixed amount for services regardless of system memory size.
+    # In low-memory scenarios (total_memory_mb <= MIN_AVAIL_MB), skip the
+    # service reservation so workers get all available memory; otherwise
+    # guarantee workers at least MIN_AVAIL_MB and cap them at the fraction.
+    min_avail_mb = (server_constants.MIN_AVAIL_MEM_GB_CONSOLIDATION_MODE * 1024)
+    service_reserved = min(
+        total_memory_mb * (1 - _CONSOLIDATION_WORKER_MEMORY_FRACTION),
+        max(0, total_memory_mb - min_avail_mb))
+    worker_reserved = controller_reserved + service_reserved
     config = server_config.compute_server_config(
-        deploy=True, quiet=True, reserved_memory_mb=controller_reserved)
+        deploy=True, quiet=True, reserved_memory_mb=worker_reserved)
     used = 0.0
     used += ((config.long_worker_config.garanteed_parallelism +
               config.long_worker_config.burstable_parallelism) *

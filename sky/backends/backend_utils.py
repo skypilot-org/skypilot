@@ -3265,7 +3265,7 @@ class CloudFilter(enum.Enum):
 def _get_glob_clusters(
         clusters: List[str],
         silent: bool = False,
-        workspaces_filter: Optional[Dict[str, Any]] = None) -> List[str]:
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
@@ -3402,7 +3402,7 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    accessible_workspaces = workspaces_core.get_workspaces()
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names()
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]

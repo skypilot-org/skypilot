@@ -27,6 +27,11 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
+# Each executor process imports this module during executor_initializer(),
+# so this captures the user's original env setting.
+_user_disabled_usage_collection = env_options.Options.DISABLE_LOGGING.get()
+
 
 def _default_should_skip():
     return False
@@ -262,11 +267,12 @@ def server_heartbeat_event():
     # pylint: disable=import-outside-toplevel
     from sky.usage import usage_lib
 
-    if not usage_lib.ServerHeartbeatMessage.has_providers():
-        # No plugins registered providers — nothing to send.
-        # Check inside event_fn (not should_skip) because providers are
-        # registered in executor processes via plugin install(), not in
-        # the main process where should_skip runs.
+    # Skip if no plugins registered providers (check inside event_fn, not
+    # should_skip, because providers register in executor processes via
+    # plugin install(), not in the main process where should_skip runs),
+    # or if the user explicitly disabled usage collection.
+    if (not usage_lib.ServerHeartbeatMessage.has_providers() or
+            _user_disabled_usage_collection):
         time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
         return
 

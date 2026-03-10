@@ -371,6 +371,11 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# The name for the environment variable that stores the client user hash.
+# This captures the machine-local identity of the actual client user, used to
+# aggregate usage across multiple API servers when basic auth is enabled.
+CLIENT_USER_HASH_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}CLIENT_USER_HASH'
+
 # SSH configuration to allow more concurrent sessions and connections.
 # Default MaxSessions is 10.
 # Default MaxStartups is 10:30:60, meaning:
@@ -487,6 +492,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
+    ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),

@@ -1187,6 +1187,30 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_SBATCH_OPTIONS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'oneOf': [
+            {
+                'type': 'string',
+                # Disallow newlines to prevent script injection in
+                # #SBATCH directives.
+                'pattern': r'^[^\n]*$'
+            },
+            {
+                'type': 'number'
+            },
+            {
+                'type': 'boolean'
+            },
+            {
+                'type': 'null'
+            },
+        ]
+    },
+}
+
 _PRICING_SCHEMA = {
     'type': 'object',
     'required': [],
@@ -1603,6 +1627,7 @@ def get_config_schema():
                     'type': 'integer',
                 },
                 'pricing': _PRICING_SCHEMA,
+                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1619,6 +1644,7 @@ def get_config_schema():
                                 'type': 'string',
                             },
                             'pricing': _PRICING_SCHEMA,
+                            'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -1629,6 +1655,7 @@ def get_config_schema():
                                     'additionalProperties': False,
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
+                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
                                     },
                                 },
                             },
@@ -1645,7 +1672,8 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {},
-                    # Properties are either 'default' or a region name.
+                    # Properties are either 'default' or a region
+                    # name.
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
@@ -2098,7 +2126,7 @@ def get_config_schema():
     }
 
     for cloud, config in cloud_configs.items():
-        if cloud == 'aws':
+        if cloud in ('aws', 'azure'):
             config['properties'].update(
                 {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
