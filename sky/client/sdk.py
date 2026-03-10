@@ -3167,7 +3167,10 @@ def download_debug_dump(dump_filename: str,
     )
 
     if response.status_code != 200:
-        detail = response.json().get('detail', 'Unknown error')
+        try:
+            detail = response.json().get('detail', 'Unknown error')
+        except (json.JSONDecodeError, ValueError):
+            detail = response.text or f'HTTP {response.status_code}'
         raise exceptions.ClientError(f'Failed to download debug dump: {detail}')
 
     if local_path is None:
