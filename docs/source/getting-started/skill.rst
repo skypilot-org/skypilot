@@ -1,6 +1,6 @@
 .. _skill:
 
-SkyPilot Skill
+Agent Skill
 ==============
 
 SkyPilot provides an official skill that teaches AI agents (Claude Code,
