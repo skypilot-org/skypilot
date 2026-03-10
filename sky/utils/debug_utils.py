@@ -37,6 +37,14 @@ logger = sky_logging.init_logger(__name__)
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
+# Env var names whose values should be redacted (show bool presence only)
+_SENSITIVE_ENV_VARS = {
+    'SKYPILOT_DB_CONNECTION_URI',
+    'SKYPILOT_INITIAL_BASIC_AUTH',
+    'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
+    'SKYPILOT_DOCKER_PASSWORD',
+}
+
 # System daemon request IDs to always include in debug dumps.
 # Built from INTERNAL_REQUEST_DAEMONS (background refresh daemons) plus the
 # on-boot check request.
@@ -360,12 +368,11 @@ def _dump_server_info(dump_dir: str,
                 'error': str(e)
             })
 
-    # Add all SKYPILOT_*/SKY_* environment variables
-    env = {
-        k: v
-        for k, v in sorted(os.environ.items())
-        if k.startswith(('SKYPILOT_', 'SKY_'))
-    }
+    # Add all SKYPILOT_*/SKY_* environment variables, redacting sensitive ones
+    env = {}
+    for k, v in sorted(os.environ.items()):
+        if k.startswith(('SKYPILOT_', 'SKY_')):
+            env[k] = bool(v) if k in _SENSITIVE_ENV_VARS else v
     server_info['environment'] = env
 
     # Add cloud status

@@ -1414,3 +1414,38 @@ class TestManifestPathTraversal:
 
         # rsync should NOT be called for traversal path
         mock_runner.rsync.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests for _SENSITIVE_ENV_VARS redaction
+# ---------------------------------------------------------------------------
+class TestSensitiveEnvVarRedaction:
+
+    def test_sensitive_env_vars_redacted(self):
+        """Sensitive env vars should have their values replaced with bool."""
+        assert 'SKYPILOT_DB_CONNECTION_URI' in debug_utils._SENSITIVE_ENV_VARS
+        assert 'SKYPILOT_INITIAL_BASIC_AUTH' in debug_utils._SENSITIVE_ENV_VARS
+
+    @mock.patch('sky.utils.debug_utils.sky_check.check',
+                return_value={})
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request',
+                return_value=None)
+    def test_dump_server_info_redacts_sensitive(self, _mock_req, _mock_check,
+                                                tmp_path):
+        """_dump_server_info should redact sensitive env var values."""
+        env_patch = {
+            'SKYPILOT_DEBUG': '1',
+            'SKYPILOT_DB_CONNECTION_URI': 'postgresql://secret@host/db',
+            'SKY_NORMAL_VAR': 'visible',
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            debug_utils._dump_server_info(str(tmp_path))
+
+        with open(os.path.join(str(tmp_path), 'server_info.json')) as f:
+            info = json.load(f)
+
+        env = info['environment']
+        assert env['SKYPILOT_DEBUG'] == '1'
+        assert env['SKY_NORMAL_VAR'] == 'visible'
+        # Sensitive var should be redacted to bool
+        assert env['SKYPILOT_DB_CONNECTION_URI'] is True
