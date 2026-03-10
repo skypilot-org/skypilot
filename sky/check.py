@@ -389,30 +389,18 @@ def check(
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     workspace: Optional[str] = None,
-) -> Dict[str, List[str]]:
-    enabled_clouds_by_workspace: Dict[str,
-                                      List[str]] = collections.defaultdict(list)
+) -> Dict[str, Dict[str, List[str]]]:
     capabilities_result = check_capabilities(quiet, verbose, clouds,
                                              sky_cloud.ALL_CAPABILITIES,
                                              workspace)
-    for ws_name, enabled_clouds_with_capabilities in capabilities_result.items(
-    ):
-        # For each workspace, get a list of cloud names that have any
-        # capabilities enabled.
-        # The inner dict enabled_clouds_with_capabilities maps cloud_name to
-        # List[CloudCapability].
-        # If the list of capabilities is non-empty, the cloud is considered
-        # enabled.
-        # We are interested in the keys (cloud names) of this dict if their
-        # value (list of capabilities) is not empty.
-        # However, check_capabilities already ensures that only clouds with
-        # *some* enabled capabilities (from the ones being checked, i.e.
-        # ALL_CAPABILITIES here) are included in its return value.
-        # So, the keys of enabled_clouds_with_capabilities are the enabled cloud
-        # names for that workspace.
-        enabled_clouds_by_workspace[ws_name] = list(
-            enabled_clouds_with_capabilities.keys())
-    return enabled_clouds_by_workspace
+    # Convert CloudCapability enums to strings for JSON serialization.
+    result: Dict[str, Dict[str, List[str]]] = {}
+    for ws_name, clouds_with_caps in capabilities_result.items():
+        result[ws_name] = {
+            cloud: [cap.value for cap in caps
+                   ] for cloud, caps in clouds_with_caps.items()
+        }
+    return result
 
 
 def get_cached_enabled_clouds_or_refresh(

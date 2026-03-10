@@ -48,6 +48,9 @@ RUN echo "Building for user: $USERNAME"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Feature Flags
+ENV ENABLE_SERVICE_ACCOUNTS=true
+
 # Install dependencies
 RUN apt update -y && \
     apt install -y \
