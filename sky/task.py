@@ -1184,16 +1184,14 @@ class Task:
 
     def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
         """Sets the override parameters for the resources."""
-        # Handle memory-based accelerator strings (e.g., '40GB+',
-        # 'NVIDIA:40GB+', '80GB:8') that need to be expanded into
-        # concrete accelerator names before being set on Resources.
+        # Memory-based accelerator strings (e.g., '40GB+', 'NVIDIA:40GB+',
+        # '80GB:8') need to be expanded into concrete accelerator names
+        # before being set on Resources.
         accelerators = override_params.get('accelerators')
         if isinstance(accelerators, str):
-            parsed = (
-                resources_lib.Resources._parse_accelerators_from_str(  # pylint: disable=protected-access
-                    accelerators))
+            parsed = resources_lib.Resources.parse_accelerators_from_str(
+                accelerators)
             if any(not user_specified for _, user_specified in parsed):
-                # Memory-based spec: expand into multiple resources.
                 new_resources_list = []
                 for res in list(self.resources):
                     for accel_str, user_specified in parsed:
@@ -1207,8 +1205,7 @@ class Task:
 
         new_resources_list = []
         for res in list(self.resources):
-            new_resources = res.copy(**override_params)
-            new_resources_list.append(new_resources)
+            new_resources_list.append(res.copy(**override_params))
 
         self.set_resources(type(self.resources)(new_resources_list))
         return self

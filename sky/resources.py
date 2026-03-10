@@ -2108,7 +2108,7 @@ class Resources:
                 del config[alias]
 
     @classmethod
-    def _parse_accelerators_from_str(
+    def parse_accelerators_from_str(
             cls, accelerators: str) -> List[Tuple[str, bool]]:
         """Parse accelerators string into a list of possible accelerators.
 
@@ -2232,7 +2232,7 @@ class Resources:
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
             if isinstance(accelerators, str):
-                accelerators_list = cls._parse_accelerators_from_str(
+                accelerators_list = cls.parse_accelerators_from_str(
                     accelerators)
             elif isinstance(accelerators, dict):
                 accelerator_names = [
@@ -2241,13 +2241,13 @@ class Resources:
                 ]
                 accelerators_list = []
                 for accel_name in accelerator_names:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    parsed_accels = cls.parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
             elif isinstance(accelerators, list) or isinstance(
                     accelerators, set):
                 accelerators_list = []
                 for accel_name in accelerators:
-                    parsed_accels = cls._parse_accelerators_from_str(accel_name)
+                    parsed_accels = cls.parse_accelerators_from_str(accel_name)
                     accelerators_list.extend(parsed_accels)
             else:
                 assert False, ('Invalid accelerators type:'
