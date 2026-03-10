@@ -3,14 +3,15 @@
 .. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
-.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-F66A0A?style=flat
-   :alt: Early Access
-
 Installation
 ============
 
 Install SkyPilot
 ----------------
+
+.. tip::
+
+   To use SkyPilot with AI agent (Claude Code, Codex, etc.), install :ref:`SkyPilot Skill <skill>` to give your agent full SkyPilot expertise.
 
 SkyPilot supports installation with ``uv`` or ``pip``.
 
@@ -370,12 +371,12 @@ See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. _slurm-installation:
 
-Slurm |early-access-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Slurm
+~~~~~
 
 .. note::
 
-    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    Slurm support is under active development. We'd love to hear from you —
     please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.

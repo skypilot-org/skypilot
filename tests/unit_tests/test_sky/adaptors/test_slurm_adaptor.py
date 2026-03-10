@@ -137,6 +137,68 @@ class TestCheckJobHasNodes:
             assert client.check_job_has_nodes('12345') is False
 
 
+class TestGetJobState:
+    """Test SlurmClient.get_job_state()."""
+
+    def test_get_job_state_with_only_job_state_flag(self):
+        """Test that get_job_state uses --only-job-state when supported."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, 'RUNNING\n', '')
+            result = client.get_job_state('12345')
+            mock_run.assert_called_once_with(
+                'squeue -h --only-job-state --jobs 12345 -o "%T"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+            assert result == 'RUNNING'
+
+    def test_get_job_state_falls_back_on_old_slurm(self):
+        """Test fallback when --only-job-state is not supported (Slurm < 21.08)."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.side_effect = [
+                (1, '', "squeue: unrecognized option '--only-job-state'"),
+                (0, 'PENDING\n', ''),
+            ]
+            result = client.get_job_state('12345')
+            assert mock_run.call_count == 2
+            mock_run.assert_called_with(
+                'squeue -h --jobs 12345 -o "%T"',
+                require_outputs=True,
+                separate_stderr=True,
+                stream_logs=False,
+            )
+            assert result == 'PENDING'
+
+    def test_get_job_state_returns_none_for_empty_output(self):
+        """Test returns None when job is not found."""
+        client = slurm.SlurmClient(
+            ssh_host='localhost',
+            ssh_port=22,
+            ssh_user='root',
+            ssh_key=None,
+        )
+
+        with mock.patch.object(client._runner, 'run') as mock_run:
+            mock_run.return_value = (0, '', '')
+            result = client.get_job_state('99999')
+            assert result is None
+
+
 class TestGetJobsStateByName:
     """Test SlurmClient.get_jobs_state_by_name()."""
 

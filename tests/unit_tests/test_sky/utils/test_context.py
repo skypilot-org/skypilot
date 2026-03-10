@@ -4,6 +4,7 @@ import asyncio
 import os
 import pathlib
 import tempfile
+import threading
 from unittest import mock
 
 import pytest
@@ -270,6 +271,96 @@ async def test_async_cancellation():
     ctx.cancel()
     await asyncio.wait_for(task, timeout=1.0)
     assert cancel_called
+
+
+def test_contextual_environ_iter_snapshot_safety():
+    """Test that ContextualEnviron iteration uses snapshots, not live views.
+
+    This test directly verifies that the iterator is resilient to
+    concurrent mutation of env_overrides, without relying on GIL timing.
+    """
+    base_environ = {f'BASE_{i}': f'val_{i}' for i in range(5)}
+    env = context.ContextualEnviron(base_environ)
+
+    ctx = context.SkyPilotContext()
+    context._CONTEXT.set(ctx)
+
+    # Populate enough overrides so the generator has items to yield
+    for i in range(10):
+        ctx.env_overrides[f'CTX_{i}'] = f'val_{i}'
+
+    # Get the iterator (generator from iter_from_context)
+    it = iter(env)
+
+    # Advance it once so the generator is now paused inside
+    # "for key, value in ctx.env_overrides.items()" after yielding
+    first_key = next(it)
+    assert first_key.startswith('CTX_')
+
+    # Mutate env_overrides while the generator is suspended.
+    # This simulates what happens when another thread (sharing the
+    # same SkyPilotContext) writes to os.environ[key] = value.
+    ctx.env_overrides['INJECTED_KEY'] = 'injected_val'
+
+    # Resuming the generator must NOT raise RuntimeError.
+    # With a live dict_items view this fails; with a snapshot it succeeds.
+    remaining_keys = list(it)
+    assert isinstance(remaining_keys, list)
+
+
+def test_contextual_environ_copy_snapshot_safety():
+    """Test that ContextualEnviron.copy() uses a snapshot of env_overrides.
+
+    Same root cause as test_contextual_environ_iter_snapshot_safety but
+    exercises the copy() code path which also iterates env_overrides.
+    """
+
+    base_environ = {f'BASE_{i}': f'val_{i}' for i in range(5)}
+    env = context.ContextualEnviron(base_environ)
+
+    shared_ctx = context.SkyPilotContext()
+    for i in range(50):
+        shared_ctx.env_overrides[f'CTX_{i}'] = f'val_{i}'
+
+    errors = []
+    stop = threading.Event()
+
+    def writer():
+        context._CONTEXT.set(shared_ctx)
+        counter = 0
+        while not stop.is_set():
+            env[f'DYN_{counter % 30}'] = str(counter)
+            counter += 1
+
+    def copier():
+        context._CONTEXT.set(shared_ctx)
+        counter = 0
+        while not stop.is_set():
+            try:
+                env.copy()
+                counter += 1
+            except RuntimeError as e:
+                if 'dictionary changed size during iteration' in str(e):
+                    errors.append(str(e))
+                    stop.set()
+                    return
+
+    import sys
+    old_interval = sys.getswitchinterval()
+    sys.setswitchinterval(0.000001)
+    try:
+        threads = [threading.Thread(target=writer) for _ in range(3)]
+        threads += [threading.Thread(target=copier) for _ in range(3)]
+        for t in threads:
+            t.start()
+        stop.wait(timeout=3)
+        stop.set()
+        for t in threads:
+            t.join(timeout=3)
+        assert not errors, (
+            f'ContextualEnviron.copy() is not thread-safe: {errors[0]}')
+    finally:
+        sys.setswitchinterval(old_interval)
 
 
 def test_contextual_decorator():

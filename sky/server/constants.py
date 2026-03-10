@@ -100,3 +100,7 @@ WEBSOCKETS_MAX_NUM_HEADERS = '256'
 
 # Request ID for the on-boot sky check request.
 ON_BOOT_CHECK_REQUEST_ID = 'skypilot-server-on-boot-check'
+
+# Interval for the server-side heartbeat daemon that sends plugin metrics
+# to Loki (e.g., GPU inventory from billing plugin).
+SERVER_HEARTBEAT_INTERVAL_SECONDS = 600  # 10 minutes

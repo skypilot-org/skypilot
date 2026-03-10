@@ -20,8 +20,7 @@ _FORMAT = ('%(levelname).1s %(asctime)s.%(msecs)03d PID=%(process)d '
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
-DEBUG_LOG_DIR = os.path.expanduser(
-    os.path.join(constants.SKY_LOGS_DIRECTORY, 'request_debug'))
+DEBUG_LOG_DIR = os.path.expanduser('~/.sky/api_server/request_debug_logs')
 
 DEBUG = logging.DEBUG
 INFO = logging.INFO

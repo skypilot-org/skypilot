@@ -640,6 +640,60 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     # Shutdown: Add any cleanup code here if needed
 
 
+class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add security headers to all HTTP responses.
+
+    Adds Content-Security-Policy and other security headers to mitigate
+    XSS, clickjacking, and content-type sniffing attacks.
+
+    Reference: OWASP A02:2025 - Security Misconfiguration (CWE-1021).
+    """
+
+    # Content-Security-Policy directives:
+    # - default-src 'self': Only allow resources from the same origin
+    # - script-src 'self' 'unsafe-inline': Allow same-origin scripts and
+    #   inline scripts (needed for Next.js __NEXT_DATA__)
+    # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
+    #   inline styles (needed for MUI/Emotion dynamic style injection)
+    # - font-src 'self': Only allow same-origin fonts
+    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
+    #   needed by the /token page's legacy auth callback flow (the page's
+    #   JavaScript POSTs the auth token to a local HTTP server started by
+    #   the CLI on localhost)
+    # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
+    # - img-src 'self' data:: Allow same-origin images and data URIs
+    # - object-src 'none': Block all plugin content (Flash, Java, etc.)
+    # - base-uri 'self': Restrict <base> element to same origin
+    # - form-action 'self': Restrict form submissions to same origin
+    # - frame-ancestors 'self': Prevent clickjacking via framing
+    _CSP_POLICY = ('default-src \'self\'; '
+                   'script-src \'self\' \'unsafe-inline\'; '
+                   'style-src \'self\' \'unsafe-inline\'; '
+                   'font-src \'self\'; '
+                   'connect-src \'self\' http://localhost:* '
+                   'http://127.0.0.1:*; '
+                   'frame-src \'self\'; '
+                   'img-src \'self\' data:; '
+                   'object-src \'none\'; '
+                   'base-uri \'self\'; '
+                   'form-action \'self\'; '
+                   'frame-ancestors \'self\'')
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        response = await call_next(request)
+        response.headers['Content-Security-Policy'] = self._CSP_POLICY
+        # X-Frame-Options for legacy browsers that don't support CSP
+        # frame-ancestors directive.
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = (
+            'strict-origin-when-cross-origin')
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=()')
+        return response
+
+
 # Add a new middleware class to handle /internal/dashboard prefix
 class InternalDashboardPrefixMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
@@ -780,6 +834,9 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+# SecurityHeadersMiddleware is the outermost middleware to ensure security
+# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.
@@ -975,6 +1032,30 @@ async def enabled_clouds(request: fastapi.Request,
         request_body=payloads.EnabledCloudsBody(workspace=workspace,
                                                 expand=expand),
         func=core.enabled_clouds,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.get('/enabled_clouds/batch')
+async def enabled_clouds_batch(request: fastapi.Request,
+                               workspaces: str = '',
+                               expand: bool = False) -> None:
+    """Gets enabled clouds for multiple workspaces in a single request."""
+    workspace_list = [w.strip() for w in workspaces.split(',') if w.strip()]
+    # API-layer authorization: filter out workspaces the caller cannot access
+    # before the request reaches the core function (defense-in-depth).
+    auth_user = request.state.auth_user
+    if auth_user is not None and workspace_list:
+        workspace_list = list(
+            permission.permission_service.get_accessible_workspace_names(
+                auth_user.id, set(workspace_list)))
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
+        request_body=payloads.EnabledCloudsBatchBody(workspaces=workspace_list,
+                                                     expand=expand),
+        func=core.enabled_clouds_batch,
         schedule_type=requests_lib.ScheduleType.SHORT,
         auth_user=request.state.auth_user,
     )
@@ -2088,6 +2169,10 @@ async def api_status(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
                 cluster_names=[cluster_name] if cluster_name else None,
+                exclude_request_names=[
+                    server_constants.REQUEST_NAME_PREFIX + d.value
+                    for d in daemons.HIDDEN_REQUEST_NAMES
+                ],
                 limit=limit,
                 fields=fields,
                 sort=True,
@@ -2217,14 +2302,27 @@ async def _get_cluster_and_validate(
 ) -> 'backends.CloudVmRayResourceHandle':
     """Fetch cluster status and validate it's UP and correct cloud type."""
     # Run core.status in another thread to avoid blocking the event loop.
+    # Use summary_response=True to skip expensive DB columns (owner, metadata,
+    # last_creation_yaml) and cluster event queries that are unnecessary for
+    # simple cluster validation. This keeps per-call overhead low enough to
+    # handle 20+ concurrent WebSocket SSH connections without timeout.
     # TODO(aylei): core.status() will be called with server user, which has
     # permission to all workspaces, this will break workspace isolation.
     # It is ok for now, as users with limited access will not get the ssh config
     # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
+            thread_pool_executor,
+            core.status,
+            cluster_name,
+            all_users=True,
+            summary_response=True)
+
+    if not cluster_records:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Cluster {cluster_name} not found')
     cluster_record = cluster_records[0]
+
     if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
                                         status_lib.ClusterStatus.UP,
                                         status_lib.ClusterStatus.AUTOSTOPPING):

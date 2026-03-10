@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import {
   getWorkspaces,
-  getEnabledClouds,
+  getEnabledCloudsBatch,
   deleteWorkspace,
 } from '@/data/connectors/workspaces';
 import {
@@ -477,29 +477,15 @@ export function Workspaces() {
         setRawWorkspacesData(fetchedWorkspacesConfig);
         const configuredWorkspaceNames = Object.keys(fetchedWorkspacesConfig);
 
-        // Fetch enabledClouds for all workspaces in parallel
-        const enabledCloudsPromises = configuredWorkspaceNames.map(
-          async (wsName) => {
-            try {
-              const enabledClouds = await dashboardCache.get(getEnabledClouds, [
-                wsName,
-              ]);
-              return { wsName, enabledClouds };
-            } catch (error) {
-              console.error(
-                `Error fetching enabled clouds for ${wsName}:`,
-                error
-              );
-              return { wsName, enabledClouds: [] };
-            }
-          }
-        );
-
-        const enabledCloudsResults = await Promise.all(enabledCloudsPromises);
-        const enabledCloudsMap = {};
-        enabledCloudsResults.forEach(({ wsName, enabledClouds }) => {
-          enabledCloudsMap[wsName] = enabledClouds;
-        });
+        // Fetch enabledClouds for all workspaces in a single batch request
+        let enabledCloudsMap = {};
+        try {
+          enabledCloudsMap = await dashboardCache.get(getEnabledCloudsBatch, [
+            configuredWorkspaceNames,
+          ]);
+        } catch (error) {
+          console.error('Error fetching enabled clouds batch:', error);
+        }
 
         // Initialize workspace details with zeros - UI will show spinners for counts
         const initialWorkspaceDetails = configuredWorkspaceNames
@@ -582,7 +568,7 @@ export function Workspaces() {
 
     // Invalidate cache to ensure fresh data is fetched
     dashboardCache.invalidate(getWorkspaces);
-    dashboardCache.invalidateFunction(getEnabledClouds); // This function has arguments
+    dashboardCache.invalidateFunction(getEnabledCloudsBatch);
 
     // Invalidate cluster and job caches
     dashboardCache.invalidate(getClusters);

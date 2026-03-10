@@ -1209,6 +1209,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
@@ -1234,6 +1235,12 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             futs.append(
                 asyncio.create_task(
                     anyio.Path(legacy_log_path).unlink(missing_ok=True)))
+            # Delete debug log if it exists
+            debug_log_path = (debug_log_dir /
+                              req.request_id).with_suffix('.log')
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(debug_log_path).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])

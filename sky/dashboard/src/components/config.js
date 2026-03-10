@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/router';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
@@ -17,7 +16,6 @@ import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
 
 export function Config() {
-  const router = useRouter();
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -134,10 +132,6 @@ export function Config() {
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleCancel = () => {
-    router.push('/workspaces');
   };
 
   const handleReset = () => {
@@ -304,9 +298,6 @@ export function Config() {
           </div>
 
           <div className="flex justify-end space-x-3 pt-3">
-            <Button variant="outline" onClick={handleCancel} disabled={saving}>
-              Cancel
-            </Button>
             <Button
               onClick={handleSave}
               disabled={loading || saving}

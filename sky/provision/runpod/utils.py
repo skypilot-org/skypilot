@@ -194,6 +194,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
         info['status'] = instance['desiredStatus']
         info['name'] = instance['name']
+        info['vcpu_count'] = instance.get('vcpuCount')
         info['port2endpoint'] = {}
 
         # Sometimes when the cluster is in the process of being created,

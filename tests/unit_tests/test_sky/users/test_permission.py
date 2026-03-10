@@ -53,7 +53,7 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
-    @mock.patch('sky.users.permission.casbin.Enforcer')
+    @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_permission_service_initialization(self, mock_init_db,
                                                mock_enforcer_class,
@@ -472,7 +472,7 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
-    @mock.patch('sky.users.permission.casbin.Enforcer')
+    @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.users.permission.db_utils.add_all_tables_to_db_sqlalchemy')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_full_initialize_true(self, mock_init_db,
@@ -508,7 +508,7 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
-    @mock.patch('sky.users.permission.casbin.Enforcer')
+    @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_full_initialize_false(self, mock_init_db,
                                                    mock_enforcer_class,
@@ -543,7 +543,7 @@ class TestPermissionService:
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
-    @mock.patch('sky.users.permission.casbin.Enforcer')
+    @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.global_user_state.initialize_and_get_db')
     def test_lazy_initialize_singleton_behavior(self, mock_init_db,
                                                 mock_enforcer_class,
@@ -1141,7 +1141,7 @@ class TestPermissionServiceMultiProcess:
     @mock.patch(
         'sky.users.permission.PermissionService._maybe_initialize_basic_auth_user'
     )
-    @mock.patch('sky.users.permission.casbin.Enforcer')
+    @mock.patch('sky.users.permission.casbin.SyncedEnforcer')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')
     @mock.patch('sky.users.permission.db_utils.add_all_tables_to_db_sqlalchemy')
     @mock.patch('sky.global_user_state.initialize_and_get_db')

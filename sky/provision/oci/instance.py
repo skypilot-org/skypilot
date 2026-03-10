@@ -353,6 +353,7 @@ def get_cluster_info(
                 internal_ip=inst['internal_ip'],
                 external_ip=inst['external_ip'],
                 tags=inst['tags'],
+                node_name=inst['id'],
             )
         ]
 
