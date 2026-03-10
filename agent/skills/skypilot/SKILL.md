@@ -77,11 +77,13 @@ After either path, re-run `sky api status -l 1` to confirm the server is reachab
 
 **Step 2: Check cloud credentials** (only for fresh setups — skip if the server was already running)
 ```bash
-sky check
+sky check -o json
 ```
-This shows which clouds are configured. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
+This shows which clouds are enabled or disabled. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
 
 ## Essential Commands
+
+Use `-o json` with status/query commands to get structured JSON output instead of tables.
 
 **Clusters** — interactive development and debugging:
 
@@ -89,18 +91,18 @@ This shows which clouds are configured. If the user's target cloud is not enable
 |---------|-------------|
 | `sky launch -c NAME task.yaml` | Launch a cluster or run a task |
 | `sky exec NAME task.yaml` | Run task on existing cluster (skips provisioning) |
-| `sky status` | Show all clusters |
+| `sky status -o json` | Show all clusters |
 | `sky logs NAME` | Stream job logs from a cluster |
 | `sky stop NAME` / `sky start NAME` | Stop/restart to save costs (preserves disk) |
 | `sky down NAME` | Tear down a cluster completely |
-| `sky gpus list` | List available GPU types across clouds |
+| `sky gpus list -o json` | List available GPU types across clouds |
 
 **Managed Jobs** — long-running unattended workloads:
 
 | Command | Description |
 |---------|-------------|
 | `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle + recovery) |
-| `sky jobs queue` | Show all managed jobs and their status |
+| `sky jobs queue -o json` | Show all managed jobs and their status |
 | `sky jobs logs JOB_ID` | Stream logs from a managed job |
 | `sky jobs cancel JOB_ID` | Cancel a managed job |
 
@@ -272,7 +274,7 @@ run: |
 sky jobs launch managed-job.yaml
 
 # Check status
-sky jobs queue
+sky jobs queue -o json
 
 # Stream logs
 sky jobs logs <job_id>
@@ -337,7 +339,7 @@ sky serve down my-llm
      sky jobs launch sweep.yaml --env LR=$lr --name sweep-lr-$lr
    done
    ```
-3. Monitor with `sky jobs queue`
+3. Monitor with `sky jobs queue -o json`
 
 ### Model Serving Deployment
 1. Write serve YAML with `service:` section
@@ -351,7 +353,7 @@ When using SkyPilot programmatically, follow this loop:
 
 1. **Validate**: `sky launch --dryrun task.yaml` (check resource availability/cost)
 2. **Launch**: `sky launch -c mycluster task.yaml`
-3. **Monitor**: `sky status` and `sky queue mycluster`
+3. **Monitor**: `sky status -o json` and `sky queue mycluster -o json`
 4. **Debug**: `sky logs mycluster` (stream logs) or `ssh mycluster` (interactive)
 5. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
 6. **Cleanup**: `sky down mycluster`
@@ -366,6 +368,7 @@ When using SkyPilot programmatically, follow this loop:
 | Hardcoding `infra: aws` without user asking | Limits availability and increases cost | Only set `infra:` when user explicitly requests a cloud |
 | Not using `envs:` for configurable values | Hard to reuse or override from CLI | Use `envs:` in YAML + `--env KEY=VAL` for parameterization |
 | Running `sky launch` without `-c <name>` | Creates randomly-named cluster, hard to reference | Always name clusters with `-c` |
+| Parsing table output from status commands | Table formatting is for humans, fragile to parse | Use `-o json` for structured output |
 | Using deprecated `cloud:`/`region:`/`zone:` fields | Deprecated in favor of `infra:` | Use `infra: aws/us-east-1` instead |
 
 ## Common Issues Quick Reference
@@ -379,7 +382,7 @@ When using SkyPilot programmatically, follow this loop:
 | Preemption/quota | Use `sky jobs launch` for automatic recovery and lifecycle management |
 | Port not accessible | Ensure `ports:` is set in resources and security groups allow traffic |
 | File sync slow | Use cloud bucket mounts instead of `workdir` for large datasets |
-| Credentials error | Run `sky check` and follow instructions per cloud |
+| Credentials error | Run `sky check -o json` and inspect which clouds are disabled |
 
 ## References
 
