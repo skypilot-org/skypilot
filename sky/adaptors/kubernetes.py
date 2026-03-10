@@ -208,10 +208,6 @@ def list_kube_config_contexts():
     return kubernetes.config.list_kube_config_contexts(_get_config_file())
 
 
-_kubeconfig_refresh_lock = threading.Lock()
-_last_kubeconfig_refresh_time: float = 0.0
-
-
 @functools.lru_cache(maxsize=None)
 def _get_kubeconfig_refresh_interval_seconds() -> float:
     """Parse refresh interval from env; 0 means disabled.
@@ -233,41 +229,13 @@ def _get_kubeconfig_refresh_interval_seconds() -> float:
         return 0.0
 
 
-def _should_refresh_client_by_interval() -> bool:
-    """True if the fixed refresh interval has elapsed since last refresh."""
-    interval = _get_kubeconfig_refresh_interval_seconds()
-    if interval <= 0:
-        return False
-    # Reading _last_kubeconfig_refresh_time without the lock is intentional:
-    # CPython's GIL makes float reads atomic, so this is a safe optimistic
-    # check. The lock is acquired only when a refresh appears needed, and the
-    # condition is rechecked inside (double-checked locking).
-    return (time.time() - _last_kubeconfig_refresh_time) >= interval
-
-
-def _mark_client_refreshed() -> None:
-    """Record that the client was just refreshed (interval-based refresh)."""
-    global _last_kubeconfig_refresh_time
-    _last_kubeconfig_refresh_time = time.time()
-
-
-def _clear_kubernetes_client_caches() -> None:
-    """Clear API client caches so the next call rebuilds from kubeconfig.
-
-    TODO(ibrahimnd2000): This clears all request-level caches, not just the
-    Kubernetes client caches. Consider maintaining a separate registry of
-    k8s-specific cached functions (similar to _FUNCTIONS_NEED_RELOAD_CACHE in
-    annotations.py) so we only evict k8s clients on kubeconfig refresh.
-    """
-    annotations.clear_request_level_cache()
-
-
 class RetryableClientWrapper:
     """Wrap a kubernetes client for interval-based refresh and resource cleanup.
 
-    Refreshes the client from kubeconfig when the configured interval elapses,
-    and closes the underlying ApiClient on GC to release external resources
-    (e.g. semaphores) that lru_cache.cache_clear() would otherwise leak.
+    Each wrapper tracks its own last-refresh time and refreshes only its
+    underlying client when the configured interval has elapsed, without
+    invalidating other wrappers or global caches. Closes the underlying
+    ApiClient on GC to release external resources (e.g. semaphores).
     """
 
     def __init__(self, client: Any, getter: Callable, getter_args: tuple,
@@ -276,6 +244,15 @@ class RetryableClientWrapper:
         self._getter = getter
         self._getter_args = getter_args
         self._getter_kwargs = getter_kwargs
+        self._last_refresh_time = time.time()
+        self._refresh_lock = threading.Lock()
+
+    def _should_refresh(self) -> bool:
+        """True if this wrapper's refresh interval has elapsed."""
+        interval = _get_kubeconfig_refresh_interval_seconds()
+        if interval <= 0:
+            return False
+        return (time.time() - self._last_refresh_time) >= interval
 
     def _close_client(self, client: Any) -> None:
         """Close the underlying ApiClient to release external resources."""
@@ -305,24 +282,16 @@ class RetryableClientWrapper:
             return attr
 
         def with_refresh(*args, **kwargs):
-            if _should_refresh_client_by_interval():
-                with _kubeconfig_refresh_lock:
-                    # Re-check after acquiring the lock: another thread may
-                    # have already rebuilt the client while we were waiting.
-                    if _should_refresh_client_by_interval():
+            if self._should_refresh():
+                with self._refresh_lock:
+                    if self._should_refresh():
                         logger.debug(
                             'Refreshing Kubernetes client from kubeconfig '
                             'due to interval expiry.')
-                        # Clear caches for ALL client types (core_api,
-                        # networking_api, etc.) so they are all lazily
-                        # recreated from the updated kubeconfig on next use,
-                        # rather than mixing old and new clients across
-                        # different API groups.
-                        _clear_kubernetes_client_caches()
                         old_client = self._client
                         self._client = self._getter(*self._getter_args,
                                                     **self._getter_kwargs)
-                        _mark_client_refreshed()
+                        self._last_refresh_time = time.time()
                         self._close_client(old_client)
             method = getattr(self._client, name)
             return method(*args, **kwargs)
@@ -349,7 +318,6 @@ def _retryable_kubernetes_client(getter: Callable) -> Callable:
     @functools.wraps(getter)
     def wrapper(*args: Any, **kwargs: Any) -> RetryableClientWrapper:
         client = getter(*args, **kwargs)
-        _mark_client_refreshed()
         return RetryableClientWrapper(client, getter, args, kwargs)
 
     return wrapper
