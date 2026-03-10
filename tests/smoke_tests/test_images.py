@@ -440,7 +440,7 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
@@ -448,6 +448,7 @@ def test_image_no_conda():
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,  # GPU stop/start cycle can be slow
     )
     smoke_tests_utils.run_one_test(test)
 

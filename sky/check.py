@@ -94,7 +94,7 @@ def check_capabilities(
     all_workspaces_results: Dict[str,
                                  Dict[str,
                                       List[sky_cloud.CloudCapability]]] = {}
-    available_workspaces = list(core.get_workspaces().keys())
+    available_workspaces = list(core.get_accessible_workspace_names())
     hide_workspace_str = (available_workspaces == [
         constants.SKYPILOT_DEFAULT_WORKSPACE
     ])

@@ -40,6 +40,12 @@ provider:
   cache_stopped_nodes: True
   # subscription id of the azure user
   subscription_id: {{azure_subscription_id}}
+  # Remote identity for Azure managed identity
+  remote_identity: "{{remote_identity}}"
+  use_internal_ips: {{use_internal_ips}}
+{%- if vpc_name is not none %}
+  vpc_name: {{vpc_name}}
+{%- endif %}
   # Disable launch config check for worker nodes as it can cause resource
   # leakage.
   # Reference: https://github.com/ray-project/ray/blob/cd1ba65e239360c8a7b130f991ed414eccc063ce/python/ray/autoscaler/_private/autoscaler.py#L1115
@@ -51,6 +57,9 @@ provider:
 auth:
     ssh_user: azureuser
     ssh_private_key: {{ssh_private_key}}
+{%- if ssh_proxy_command is not none %}
+    ssh_proxy_command: {{ssh_proxy_command}}
+{%- endif %}
 
 available_node_types:
     ray.head.default:
@@ -58,6 +67,9 @@ available_node_types:
       node_config:
         tags:
           skypilot-user: {{ user }}
+          {%- for label_key, label_value in labels.items() %}
+          {{ label_key }}: {{ label_value|tojson }}
+          {%- endfor %}
         azure_arm_parameters:
             adminUsername: skypilot:ssh_user
             publicKey: |
