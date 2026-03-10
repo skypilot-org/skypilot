@@ -40,6 +40,8 @@ provider:
   cache_stopped_nodes: True
   # subscription id of the azure user
   subscription_id: {{azure_subscription_id}}
+  # Remote identity for Azure managed identity
+  remote_identity: "{{remote_identity}}"
   use_internal_ips: {{use_internal_ips}}
 {%- if vpc_name is not none %}
   vpc_name: {{vpc_name}}

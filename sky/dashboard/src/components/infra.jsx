@@ -41,11 +41,7 @@ import {
   getSlurmInfrastructure,
 } from '@/data/connectors/infra';
 import { CLOUDS_LIST } from '@/data/connectors/constants';
-import {
-  runSkyCheck,
-  getWorkspaces,
-  getEnabledClouds,
-} from '@/data/connectors/workspaces';
+import { runSkyCheck, getWorkspaces } from '@/data/connectors/workspaces';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { apiClient } from '@/data/connectors/client';

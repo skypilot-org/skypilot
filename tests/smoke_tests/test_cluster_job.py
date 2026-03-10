@@ -1108,6 +1108,38 @@ def test_task_labels_gcp():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Remote identity on Azure ----------
+@pytest.mark.azure
+def test_azure_remote_identity():
+    """Test Azure remote_identity with SERVICE_ACCOUNT and LOCAL_CREDENTIALS.
+
+    Verifies that:
+    1. With SERVICE_ACCOUNT, Azure credentials are not uploaded and the
+       VM has a managed identity.
+    2. With LOCAL_CREDENTIALS, Azure credentials are uploaded.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'azure_remote_identity',
+        [
+            # Test SERVICE_ACCOUNT: credentials should NOT be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_service_account.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky down -y {name}',
+            # Test LOCAL_CREDENTIALS: credentials should be uploaded
+            f'sky launch -y -c {name} --cloud azure '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            'tests/test_yamls/test_azure_remote_identity_local_creds.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Custom VNet on Azure ----------
 @pytest.mark.azure
 def test_azure_vpc_name():
@@ -2207,7 +2239,11 @@ def test_kubernetes_container_status_unknown_status_refresh():
     test = smoke_tests_utils.Test(
         'kubernetes_container_status_unknown_status_refresh',
         [
-            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
+            # First, launch the cluster with an idle task so provisioning
+            # completes fully (ray, skylet started) before pods get evicted.
+            f'sky launch -y -c {name} --infra kubernetes --num-nodes 8 -- "echo cluster ready"',
+            # Now trigger eviction via exec --detach-run on the running cluster.
+            f'sky exec {name} --detach-run tests/test_yamls/test_k8s_ephemeral_storage_eviction.yaml',
             # Poll sky status --refresh, fail fast if error found.
             # Before the fix this logged: "Failed to query ... [TypeError]..."
             (f'for i in $(seq 1 20); do '
@@ -2824,6 +2860,51 @@ def test_kubernetes_recovery():
         f'sky down -y {name} && {service_cleanup_check} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_kubernetes_sigterm_keepalive():
+    """Test that worker pods survive SIGTERM (node drain) via keep-alive fix."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+    worker1 = f'{name_on_cloud}-worker1'
+    verify_two_pods_running = (
+        f'count=$(kubectl get pod -l ray-cluster-name={name_on_cloud} '
+        '--no-headers 2>/dev/null | grep -c Running || echo 0); '
+        'if [ "$count" -ne 2 ]; then echo "Expected 2 Running pods, got $count"; exit 1; fi; '
+        'echo "Both pods Running"')
+    verify_worker_running = (
+        f'status=$(kubectl get pod {worker1} -o jsonpath="{{.status.phase}}"); '
+        'echo "Worker pod status: $status"; '
+        'if [ "$status" != "Running" ]; then echo "ERROR: expected Running, got $status"; exit 1; fi'
+    )
+    test = smoke_tests_utils.Test(
+        'kubernetes_sigterm_keepalive',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+            (f'sky launch -y -c {name} --infra kubernetes --cpus 0.1+ '
+             f'--num-nodes 2 -- "echo ready"'),
+            f'sky logs {name} --status 1',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                verify_two_pods_running,
+            ),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'kubectl exec {worker1} -- kill -TERM -1',
+            ),
+            'sleep 5',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                verify_worker_running,
+            ),
+            f'sky down -y {name}',
+        ],
+        f'sky down -y {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=15 * 60,
     )
     smoke_tests_utils.run_one_test(test)
 
