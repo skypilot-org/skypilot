@@ -325,7 +325,6 @@ class TestStorageFromYamlWithMountCachedConfig:
 class TestFileMountType:
     """Tests for FileMountType and resolve_mount_cached_config."""
 
-
     def test_model_checkpoint_r_type_values(self):
         """MODEL_CHECKPOINT_R: read_only, chunk streams, chunk size."""
         config = storage_lib.merge_mount_cached_config(
@@ -349,8 +348,7 @@ class TestFileMountType:
         """Explicit config.mount_cached fields override type defaults."""
         overrides = storage_lib.MountCachedConfig(transfers=16)
         config = storage_lib.merge_mount_cached_config(
-            storage_lib.FileMountType.MODEL_CHECKPOINT_RW,
-            overrides=overrides)
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RW, overrides=overrides)
         assert config.transfers == 16
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'

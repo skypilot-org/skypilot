@@ -355,7 +355,8 @@ def merge_mount_cached_config(
     file_mount_type: 'FileMountType',
     overrides: Optional['MountCachedConfig'] = None,
 ) -> 'MountCachedConfig':
-    """Resolve a FileMountType into a MountCachedConfig, with optional overrides.
+    """Resolve a FileMountType into a MountCachedConfig, with optional
+    overrides.
 
     Args:
         file_mount_type: The file mount type to resolve.
@@ -769,7 +770,7 @@ class Storage(object):
 
             self.mount_cached_config = mount_cached_config
             self.file_mount_type = file_mount_type
-            if self.file_mount_type is not None or self.mount_cached_config is not None:
+            if self.file_mount_type or self.mount_cached_config:
                 assert self.mode == StorageMode.MOUNT_CACHED
 
         def __setstate__(self, state):
@@ -914,7 +915,8 @@ class Storage(object):
         YAML serialization.
         """
         if self.file_mount_type is not None:
-            return merge_mount_cached_config(self.file_mount_type, self.mount_cached_config)
+            return merge_mount_cached_config(self.file_mount_type,
+                                             self.mount_cached_config)
         return self.mount_cached_config
 
     def construct(self):
