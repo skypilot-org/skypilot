@@ -563,12 +563,9 @@ class TestPopulateRecentContext:
                                       mock_queue_v2):
         """Requests within the time window should be included.
         Cluster names are handled by _get_clusters_from_requests."""
-        now = time.time()
-        recent_request = _make_request(request_id='req-recent',
-                                       finished_at=now - 900)
-        old_request = _make_request(request_id='req-old',
-                                    finished_at=now - 90000)
-        mock_get_tasks.return_value = [recent_request, old_request]
+        # DB-side finished_after filter returns only recent requests
+        recent_request = _make_request(request_id='req-recent')
+        mock_get_tasks.return_value = [recent_request]
         mock_get_clusters.return_value = []
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
@@ -576,7 +573,26 @@ class TestPopulateRecentContext:
         debug_utils._populate_recent_context(ctx, hours=1.0)
 
         assert 'req-recent' in ctx['request_ids']
-        assert 'req-old' not in ctx['request_ids']
+
+    @mock.patch('sky.jobs.server.core.queue_v2')
+    @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_passes_finished_after_to_db(self, mock_get_tasks,
+                                         mock_get_clusters, mock_queue_v2):
+        """Should push time filtering to the DB via finished_after."""
+        mock_get_tasks.return_value = []
+        mock_get_clusters.return_value = []
+        mock_queue_v2.return_value = ([], 0, {}, 0)
+
+        ctx = _make_context()
+        debug_utils._populate_recent_context(ctx, hours=2.0)
+
+        call_args = mock_get_tasks.call_args
+        task_filter = call_args[0][0]
+        assert task_filter.finished_after is not None
+        # finished_after should be approximately now - 2*3600
+        expected_cutoff = time.time() - (2.0 * 3600)
+        assert abs(task_filter.finished_after - expected_cutoff) < 5
 
     @mock.patch('sky.jobs.server.core.queue_v2')
     @mock.patch('sky.utils.debug_utils.global_user_state.get_clusters')
@@ -640,7 +656,7 @@ class TestPopulateRecentContext:
     def test_still_running_requests_included(self, mock_get_tasks,
                                              mock_get_clusters, mock_queue_v2):
         """Requests without finished_at (still running) should be included
-        since their effective finish time (now) is within the window."""
+        because the DB filter uses (finished_at >= ? OR finished_at IS NULL)."""
         running_request = _make_request(request_id='req-running',
                                         finished_at=None)
         mock_get_tasks.return_value = [running_request]
@@ -650,7 +666,6 @@ class TestPopulateRecentContext:
         ctx = _make_context()
         debug_utils._populate_recent_context(ctx, hours=1.0)
 
-        # finished_at is None, so it defaults to time.time() which is >= cutoff
         assert 'req-running' in ctx['request_ids']
 
     @mock.patch('sky.jobs.server.core.queue_v2')
@@ -1293,3 +1308,28 @@ class TestCollectControllerDebugData:
         # Should record the rsync error
         assert len(errors) == 1
         assert 'rsync/' in errors[0]['resource']
+
+
+# ---------------------------------------------------------------------------
+# Tests for RequestTaskFilter.finished_after
+# ---------------------------------------------------------------------------
+class TestRequestTaskFilterFinishedAfter:
+
+    def test_finished_after_generates_sql_with_null_handling(self):
+        """finished_after should generate SQL including NULL (in-progress)."""
+        from sky.server.requests import requests as req_lib
+        f = req_lib.RequestTaskFilter(finished_after=1000.0)
+        query, params = f.build_query()
+        assert '(finished_at >= ? OR finished_at IS NULL)' in query
+        assert 1000.0 in params
+
+    def test_finished_after_and_before_combined(self):
+        """Both finished_after and finished_before should combine."""
+        from sky.server.requests import requests as req_lib
+        f = req_lib.RequestTaskFilter(finished_before=2000.0,
+                                      finished_after=1000.0)
+        query, params = f.build_query()
+        assert 'finished_at < ?' in query
+        assert '(finished_at >= ? OR finished_at IS NULL)' in query
+        assert 2000.0 in params
+        assert 1000.0 in params

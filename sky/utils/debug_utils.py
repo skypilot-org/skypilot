@@ -253,12 +253,10 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     # _get_clusters_from_requests during cross-linking)
     try:
         requests = requests_lib.get_request_tasks(
-            requests_lib.RequestTaskFilter(
-                fields=['request_id', 'finished_at']))
+            requests_lib.RequestTaskFilter(finished_after=cutoff_time,
+                                           fields=['request_id']))
         for request in requests:
-            finished_at = request.finished_at or time.time()
-            if finished_at >= cutoff_time:
-                debug_dump_context['request_ids'].add(request.request_id)
+            debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent requests: {e}')
         debug_dump_context['errors'].append({

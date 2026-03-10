@@ -913,6 +913,9 @@ class RequestTaskFilter:
             Mutually exclusive with exclude_request_names.
         finished_before: if provided, only include requests finished before this
             timestamp.
+        finished_after: if provided, only include requests finished at or after
+            this timestamp. Requests still in progress (finished_at IS NULL)
+            are always included.
         limit: the number of requests to show. If None, show all requests.
 
     Raises:
@@ -925,6 +928,7 @@ class RequestTaskFilter:
     exclude_request_names: Optional[List[str]] = None
     include_request_names: Optional[List[str]] = None
     finished_before: Optional[float] = None
+    finished_after: Optional[float] = None
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
     sort: bool = False
@@ -966,6 +970,9 @@ class RequestTaskFilter:
         if self.finished_before is not None:
             filters.append('finished_at < ?')
             filter_params.append(self.finished_before)
+        if self.finished_after is not None:
+            filters.append('(finished_at >= ? OR finished_at IS NULL)')
+            filter_params.append(self.finished_after)
         filter_str = ' AND '.join(filters)
         if filter_str:
             filter_str = f' WHERE {filter_str}'
