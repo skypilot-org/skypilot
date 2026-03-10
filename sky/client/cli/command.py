@@ -7672,7 +7672,6 @@ def ssh_down(infra, async_call):
               type=int,
               help='Managed job IDs to include in the dump.')
 @click.option('--recent',
-              '-R',
               type=float,
               default=None,
               help='Include resources active within the last N hours.')
