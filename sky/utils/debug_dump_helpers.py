@@ -69,11 +69,7 @@ def get_cluster_events_data(cluster_hash: str) -> List[Dict[str, Any]]:
     event types. Shared by the API server dump and the controller manifest.
     """
     results: List[Dict[str, Any]] = []
-    for event_type in [
-            global_user_state.ClusterEventType.DEBUG,
-            global_user_state.ClusterEventType.STATUS_CHANGE,
-            global_user_state.ClusterEventType.TERMINAL,
-    ]:
+    for event_type in list(global_user_state.ClusterEventType):
         events = global_user_state.get_cluster_events(cluster_name=None,
                                                       cluster_hash=cluster_hash,
                                                       event_type=event_type,
