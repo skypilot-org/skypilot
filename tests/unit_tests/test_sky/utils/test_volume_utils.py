@@ -243,6 +243,37 @@ class TestVolumeMount:
         assert volume_mount.volume_name == 'test-volume'
         assert volume_mount.volume_config == mock_volume_config
         assert volume_mount.is_ephemeral is False
+        assert volume_mount.sub_path is None
+        mock_get_volume.assert_called_once_with('test-volume')
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_volume_with_sub_path(self, mock_get_volume):
+        """Test resolve with a valid volume and sub_path."""
+        mock_volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='us-central1',
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': mock_volume_config,
+            'status': status_lib.VolumeStatus.READY,
+        }
+
+        volume_mount = volume.VolumeMount.resolve('/data',
+                                                  'test-volume',
+                                                  sub_path='subdir/path')
+
+        assert volume_mount.path == '/data'
+        assert volume_mount.volume_name == 'test-volume'
+        assert volume_mount.sub_path == 'subdir/path'
+        assert volume_mount.is_ephemeral is False
         mock_get_volume.assert_called_once_with('test-volume')
 
     @mock.patch('sky.global_user_state.get_volume_by_name')
@@ -289,6 +320,122 @@ class TestVolumeMount:
         assert 'test-volume' in str(exc_info.value)
         assert 'not ready' in str(exc_info.value)
         assert 'Error: Storage quota exceeded' in str(exc_info.value)
+
+    def test_to_yaml_config_with_sub_path(self):
+        """Test to_yaml_config includes sub_path when set."""
+        volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        vm = volume.VolumeMount('/data',
+                                'test-volume',
+                                volume_config,
+                                sub_path='my/sub')
+        yaml_config = vm.to_yaml_config()
+
+        assert yaml_config['sub_path'] == 'my/sub'
+        assert yaml_config['path'] == '/data'
+        assert yaml_config['volume_name'] == 'test-volume'
+
+    def test_to_yaml_config_without_sub_path(self):
+        """Test to_yaml_config omits sub_path when not set."""
+        volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        vm = volume.VolumeMount('/data', 'test-volume', volume_config)
+        yaml_config = vm.to_yaml_config()
+
+        assert 'sub_path' not in yaml_config
+
+    def test_from_yaml_config_with_sub_path(self):
+        """Test from_yaml_config deserializes sub_path."""
+        volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        config = {
+            'path': '/data',
+            'volume_name': 'test-volume',
+            'is_ephemeral': False,
+            'sub_path': 'models/v1',
+            'volume_config': volume_config.model_dump(),
+        }
+        vm = volume.VolumeMount.from_yaml_config(config)
+
+        assert vm.path == '/data'
+        assert vm.volume_name == 'test-volume'
+        assert vm.sub_path == 'models/v1'
+        assert vm.is_ephemeral is False
+
+    def test_from_yaml_config_without_sub_path(self):
+        """Test from_yaml_config works without sub_path."""
+        volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        config = {
+            'path': '/data',
+            'volume_name': 'test-volume',
+            'is_ephemeral': False,
+            'volume_config': volume_config.model_dump(),
+        }
+        vm = volume.VolumeMount.from_yaml_config(config)
+
+        assert vm.sub_path is None
+
+    def test_roundtrip_sub_path(self):
+        """Test sub_path survives to_yaml_config -> from_yaml_config."""
+        volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        original = volume.VolumeMount('/data',
+                                      'test-volume',
+                                      volume_config,
+                                      sub_path='a/b/c')
+        restored = volume.VolumeMount.from_yaml_config(
+            original.to_yaml_config())
+
+        assert restored.path == original.path
+        assert restored.volume_name == original.volume_name
+        assert restored.sub_path == original.sub_path
+        assert restored.is_ephemeral == original.is_ephemeral
 
     @mock.patch('sky.global_user_state.get_volume_by_name')
     def test_resolve_volume_status_none(self, mock_get_volume):

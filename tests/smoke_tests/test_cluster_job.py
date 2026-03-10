@@ -1417,6 +1417,9 @@ def test_volumes_on_kubernetes():
             # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
             f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
+            f'sky down -y {name}',
+            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the third job succeeded.
             f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',

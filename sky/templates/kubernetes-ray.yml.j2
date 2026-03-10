@@ -1198,6 +1198,9 @@ available_node_types:
           {% for volume_mount in volume_mounts %}
           - name: {{volume_mount.name}}
             mountPath: {{volume_mount.path}}
+            {% if volume_mount.sub_path %}
+            subPath: {{volume_mount.sub_path}}
+            {% endif %}
           {% endfor %}
           resources:
             requests:
