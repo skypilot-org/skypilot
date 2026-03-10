@@ -731,6 +731,14 @@ def _accelerator_name_matches(requested_acc: str,
     - Clusters were launched with fallback names (e.g., 'H200-SXM-80GB') but
       after upgrading, the same label now maps to canonical name (e.g., 'H200').
     - Users specify canonical names but the cluster uses fallback names.
+    - Memory variants like 'H100' and 'H100-80GB' should match for backward
+      compatibility.
+
+    However, to prevent false matches between different GPU variants (e.g.,
+    'H100' vs 'H100-MEGA'), if both the requested and viable names are canonical
+    GPU names AND they are not memory variants of each other, they must match
+    exactly. Memory variants are identified by having the same base name with
+    an optional memory suffix (e.g., '-80GB', '-40GB').
 
     Args:
         requested_acc: The accelerator type requested (e.g., from launched_resources).
@@ -740,12 +748,37 @@ def _accelerator_name_matches(requested_acc: str,
         True if the requested accelerator matches any viable name.
     """
     requested_lower = requested_acc.lower()
+    # Create a set of canonical names (lowercased) for fast lookup
+    canonical_names_lower = {name.lower()
+                              for name in kubernetes_constants.CANONICAL_GPU_NAMES}
+
     for viable in viable_names:
         viable_lower = viable.lower()
         if requested_lower == viable_lower:
             return True
+
+        # If both are canonical names, check if they are memory variants
+        if (requested_lower in canonical_names_lower and
+            viable_lower in canonical_names_lower):
+            # Check if one is a memory variant of the other
+            # Memory variants have pattern: base_name + '-' + memory_size
+            # e.g., 'H100' and 'H100-80GB', 'A100' and 'A100-80GB'
+            shorter, longer = ((requested_lower, viable_lower)
+                               if len(requested_lower) <= len(viable_lower)
+                               else (viable_lower, requested_lower))
+            if longer.startswith(shorter + '-'):
+                # Check if the suffix looks like a memory size (e.g., '80gb', '40gb')
+                suffix = longer[len(shorter) + 1:]  # Skip the '-'
+                # Memory suffixes are typically digits followed by 'gb'
+                # e.g., '80gb', '40gb', '141gb', '480gb'
+                if suffix.replace('gb', '').replace('g', '').isdigit():
+                    return True
+            # If not memory variants, require exact match (already checked above)
+            continue
+
         # Check prefix match with '-' separator for backward compatibility.
         # E.g., 'H200' matches 'H200-SXM-80GB' and vice versa.
+        # This only applies when at least one name is not canonical.
         shorter, longer = ((requested_lower, viable_lower)
                            if len(requested_lower) <= len(viable_lower) else
                            (viable_lower, requested_lower))
