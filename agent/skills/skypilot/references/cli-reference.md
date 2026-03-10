@@ -1,5 +1,5 @@
 <!-- AUTO-GENERATED from sky/client/cli/command.py -->
-<!-- Run: python skills/skypilot/scripts/generate_references.py -->
+<!-- Run: python agent/scripts/generate_references.py -->
 
 # SkyPilot CLI Reference
 
