@@ -1,0 +1,28 @@
+# Job configuration for running OpenCode agent tasks on a pool.
+# Each job clones a repo, runs the agent, and pushes a branch.
+#
+# Usage (requires a pool created with pool.yaml):
+#   sky jobs launch -p opencode-pool pool-job.yaml \
+#     --secret GITHUB_TOKEN --secret ANTHROPIC_API_KEY \
+#     --env GITHUB_REPO=owner/repo \
+#     --env AGENT_TASK="Fix the bug in main.py" \
+#     --env BRANCH_NAME=fix-bug
+
+name: opencode-agent
+
+resources:
+  cpus: 2+
+
+envs:
+  GITHUB_REPO: ""
+  AGENT_TASK: ""
+  BRANCH_NAME: ""
+  USE_BRANCH: ""
+  LLM_MODEL_ID: "anthropic/claude-sonnet-4-6"
+
+secrets:
+  GITHUB_TOKEN: null
+  ANTHROPIC_API_KEY: null
+
+run: |
+  bash run_agent.sh

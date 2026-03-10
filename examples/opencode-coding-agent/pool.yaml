@@ -1,0 +1,19 @@
+# Pool configuration for OpenCode coding agents.
+# Creates warm workers with Node.js and OpenCode pre-installed,
+# so jobs start instantly without setup overhead.
+#
+# Usage:
+#   sky jobs pool apply -p opencode-pool pool.yaml
+
+workdir: .
+
+resources:
+  cpus: 2+
+
+pool:
+  workers: 3
+
+setup: |
+  sudo curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+  sudo apt-get install -y nodejs
+  sudo npm install -g opencode-ai
