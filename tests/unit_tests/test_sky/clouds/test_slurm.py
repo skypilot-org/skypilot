@@ -56,7 +56,7 @@ class TestCheckInstanceFits:
             ([node_gpu_a10g], '64CPU--256GB--a10g:4', None, True, None),
             # GPU - type not available
             ([node_gpu_a10g
-             ], '64CPU--256GB--h100:4', None, False, 'No GPU nodes found'),
+             ], '64CPU--256GB--h100:4', None, False, 'No GPU nodes matching'),
             # Partition filtering with default partition (*) handling
             ([node_2cpu_8gb_cpus], '1CPU--4GB', 'dev', True, None),
             # Resource exists but in different partition
@@ -429,8 +429,8 @@ class TestSlurmProvisionTimeout:
                    return_value=mock_ssh_config), \
              patch('sky.clouds.slurm.slurm_utils.get_partitions',
                    return_value=['default', 'gpu', 'cpu']), \
-             patch('sky.clouds.slurm.slurm_utils.get_gres_gpu_type',
-                   side_effect=lambda cluster, t: t):
+             patch('sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
+                   side_effect=lambda cluster, t, count=1, partition=None: t):
             deploy_vars = cloud.make_deploy_resources_variables(
                 resources=mock_resources,
                 cluster_name=mock.MagicMock(),

@@ -1,0 +1,20 @@
+# JobGroup smoke test for cancelled job log download
+---
+name: {{name}}
+execution: parallel
+---
+name: job-a
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job A start counting"
+  for i in $(seq 1 600); do echo "Job A: $i"; sleep 1; done
+---
+name: job-b
+resources:
+  cpus: 2
+  infra: {{cloud}}
+run: |
+  echo "Job B start counting"
+  for i in $(seq 1 600); do echo "Job B: $i"; sleep 1; done

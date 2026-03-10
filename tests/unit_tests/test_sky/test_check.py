@@ -476,3 +476,112 @@ def test_enabled_capabilities_detection():
                     workspace=None,
                 )
                 assert 'AWS' not in capabilities_result['default']
+
+
+# ============ JSON Output Tests ============
+
+
+class TestCheckJsonOutput:
+    """Tests for `sky check -o json` output format."""
+
+    def test_cli_check_json_output_structure(self, monkeypatch):
+        """Test that -o json produces valid JSON with expected structure."""
+        import json
+
+        mock_result = {
+            'default': {
+                'AWS': ['compute', 'storage'],
+                'GCP': ['compute', 'storage'],
+            },
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert 'default' in parsed
+        assert parsed['default']['AWS'] == ['compute', 'storage']
+        assert parsed['default']['GCP'] == ['compute', 'storage']
+
+    def test_cli_check_json_output_multiple_workspaces(self, monkeypatch):
+        """Test that JSON output includes multiple workspaces."""
+        import json
+
+        mock_result = {
+            'default': {
+                'AWS': ['compute', 'storage'],
+                'GCP': ['compute', 'storage'],
+            },
+            'staging': {
+                'Kubernetes': ['compute'],
+            },
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed['default']['AWS'] == ['compute', 'storage']
+        assert parsed['staging']['Kubernetes'] == ['compute']
+
+    def test_cli_check_json_no_table_output(self, monkeypatch):
+        """Test that -o json suppresses table output."""
+        mock_result = {'default': {'AWS': ['compute', 'storage']}}
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        # Should not contain the API server line
+        assert 'Using SkyPilot API server' not in result.output
+
+    def test_cli_check_default_output_still_works(self, monkeypatch):
+        """Test that default output (no -o flag) still works as before."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, [])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+    def test_cli_check_table_output_explicit(self, monkeypatch):
+        """Test that -o table produces normal output."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'table'])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout

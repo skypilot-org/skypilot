@@ -46,6 +46,13 @@ class TestSecurityHeadersMiddleware:
         assert 'img-src \'self\' data:' in csp
         assert 'base-uri \'self\'' in csp
 
+    def test_csp_allows_localhost_connect(self):
+        """CSP connect-src must allow localhost for legacy auth callback."""
+        response = self.client.get('/test')
+        csp = response.headers['Content-Security-Policy']
+        assert 'http://localhost:*' in csp
+        assert 'http://127.0.0.1:*' in csp
+
     def test_x_frame_options_header(self):
         response = self.client.get('/test')
         assert response.headers['X-Frame-Options'] == 'SAMEORIGIN'
