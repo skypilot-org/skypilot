@@ -13,6 +13,8 @@ import tqdm
 import sky
 from sky.batch import remote
 from sky.batch import utils
+from sky.batch.formats.io_formats import InputFormat
+from sky.batch.formats.io_formats import OutputFormat
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
 
@@ -94,54 +96,32 @@ def _wait_for_managed_job_completion(managed_job_id: int) -> None:
 
 
 class Dataset:
-    """A dataset backed by a JSONL file in cloud storage.
+    """A dataset backed by a typed input format in cloud storage.
 
     This class provides an interface for batch processing of data stored
     in cloud storage. It supports distributing workloads across a pool
     of workers using the map() method.
 
     Attributes:
-        path: Cloud storage path to the JSONL file.
+        path: Cloud storage path to the dataset.
+        input_format: The typed input format descriptor.
     """
 
-    def __init__(self, path: str):
-        """Initialize a Dataset from a cloud storage path.
+    def __init__(self, input_format: InputFormat):
+        """Initialize a Dataset from a typed input format.
 
         Args:
-            path: Cloud storage path to the JSONL file.
-                  Supported formats: s3://, gs://, r2://
-
-        Raises:
-            ValueError: If the path format is invalid or unsupported.
+            input_format: An ``InputFormat`` descriptor (e.g.
+                          ``JsonInput('s3://bucket/data.jsonl')``).
         """
-        self.path = path
-        self._validate_path()
-
-    def _validate_path(self) -> None:
-        """Validate the cloud storage path format.
-
-        Raises:
-            ValueError: If the path format is invalid.
-        """
-        if not self.path:
-            raise ValueError('Dataset path cannot be empty')
-
-        supported_prefixes = ('s3://', 'gs://', 'r2://')
-        if not self.path.startswith(supported_prefixes):
-            raise ValueError(
-                f'Unsupported storage path: {self.path}. '
-                f'Supported prefixes: {", ".join(supported_prefixes)}')
-
-        if not self.path.endswith('.jsonl'):
-            raise ValueError(
-                f'Dataset must be a JSONL file (ending with .jsonl): '
-                f'{self.path}')
+        self.input_format = input_format
+        self.path = input_format.path
 
     def map(self,
             mapper_fn: Callable,
             pool_name: str,
             batch_size: int,
-            output_path: str,
+            output: OutputFormat,
             activate_env: Optional[str] = None) -> int:
         """Submit batch job as a managed job. Blocks until completion.
 
@@ -153,7 +133,9 @@ class Dataset:
                        decorated with @sky.batch.remote_function.
             pool_name: Name of the worker pool to use.
             batch_size: Number of items per batch sent to each worker.
-            output_path: Cloud storage path for output results.
+            output: An ``OutputFormat`` descriptor (e.g.
+                    ``JsonOutput('s3://bucket/out.jsonl')`` or
+                    ``ImageOutput('s3://bucket/images/', column='image')``).
             activate_env: Optional shell command to activate the Python
                           environment before running the mapper function.
                           Example: ``'source .venv/bin/activate'``
@@ -174,8 +156,9 @@ class Dataset:
         if batch_size <= 0:
             raise ValueError(f'batch_size must be positive, got: {batch_size}')
 
+        output_path = output.path
         if not output_path:
-            raise ValueError('output_path cannot be empty')
+            raise ValueError('output path cannot be empty')
 
         # Check if output file already exists and confirm override
         if utils.cloud_path_exists(output_path):
@@ -205,6 +188,8 @@ class Dataset:
             'batch_pool_name': pool_name,
             'batch_serialized_fn': serialized_fn,
             'batch_activate_env': activate_env or '',
+            'batch_input_format': self.input_format.to_dict(),
+            'batch_output_format': output.to_dict(),
         }
 
         # Submit as regular managed job.  Pass pool_name so the job
@@ -222,20 +207,17 @@ class Dataset:
         return managed_job_id
 
     def __repr__(self) -> str:
-        return f'Dataset(path={self.path!r})'
+        return f'Dataset(input_format={self.input_format!r})'
 
 
-def dataset(path: str) -> Dataset:
-    """Create a Dataset from a cloud storage path.
+def dataset(input_format: InputFormat) -> Dataset:
+    """Create a Dataset from a typed input format.
 
     This is the main entry point for creating datasets in Sky Batch.
 
     Args:
-        path: Cloud storage path to the JSONL file.
-              Supported formats:
-              - s3://bucket/path/file.jsonl (AWS S3)
-              - gs://bucket/path/file.jsonl (Google Cloud Storage)
-              - r2://bucket/path/file.jsonl (Cloudflare R2)
+        input_format: An ``InputFormat`` descriptor, e.g.:
+            - ``sky.JsonInput('s3://bucket/data.jsonl')``
 
     Returns:
         A Dataset instance.
@@ -243,7 +225,7 @@ def dataset(path: str) -> Dataset:
     Example:
         import sky
 
-        ds = sky.dataset("s3://my-bucket/prompts.jsonl")
+        ds = sky.dataset(sky.batch.JsonInput("s3://my-bucket/prompts.jsonl"))
 
         @sky.batch.remote_function
         def process():
@@ -253,6 +235,6 @@ def dataset(path: str) -> Dataset:
 
         pool_name = sky.jobs.pool_apply("pool.yaml")
         ds.map(process, pool_name=pool_name, batch_size=32,
-               output_path="s3://my-bucket/output.jsonl")
+               output=sky.batch.JsonOutput("s3://my-bucket/output.jsonl"))
     """
-    return Dataset(path)
+    return Dataset(input_format)

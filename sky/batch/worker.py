@@ -175,18 +175,49 @@ def signal_batch_done(error: Optional[str] = None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Dataset format helper
+# Format resolution helpers
 # ---------------------------------------------------------------------------
 
 
-def _get_dataset_format(dataset_path: str):
-    """Get dataset format handler (same logic as controller)."""
-    from sky.batch.formats.jsonl import JSONLDataset
+def _resolve_input_format(dataset_path: str):
+    """Resolve input format from env var or fall back to path-based detection.
 
+    Returns a DatasetFormat handler instance.
+    """
+    import os as _os  # pylint: disable=import-outside-toplevel
+
+    env_val = _os.environ.get('SKY_BATCH_INPUT_FORMAT')
+    if env_val:
+        from sky.batch.formats.io_formats import (
+            InputFormat)  # pylint: disable=import-outside-toplevel
+        return InputFormat.from_dict(json.loads(env_val)).get_handler()
+
+    # Backward compat fallback.
+    from sky.batch.formats.jsonl import (
+        JSONLDataset)  # pylint: disable=import-outside-toplevel
     if dataset_path.endswith('.jsonl'):
         return JSONLDataset()
-    else:
-        raise ValueError(f'Unsupported dataset format: {dataset_path}')
+    raise ValueError(f'Unsupported dataset format: {dataset_path}')
+
+
+def _resolve_output_format(output_path: str):
+    """Resolve output format from env var or fall back to path-based detection.
+
+    Returns a DatasetFormat handler instance.
+    """
+    import os as _os  # pylint: disable=import-outside-toplevel
+
+    env_val = _os.environ.get('SKY_BATCH_OUTPUT_FORMAT')
+    if env_val:
+        d = json.loads(env_val)
+        if d:  # Non-empty dict means typed format was provided.
+            from sky.batch.formats.io_formats import (
+                OutputFormat)  # pylint: disable=import-outside-toplevel
+            return OutputFormat.from_dict(d).get_handler()
+
+    # Backward compat fallback.
+    from sky.batch import utils as _utils
+    return _utils.get_output_format(output_path)
 
 
 # ---------------------------------------------------------------------------
@@ -209,8 +240,8 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
     global _output_path, _job_id, _dataset_format, _output_format
     _output_path = output_path
     _job_id = job_id
-    _dataset_format = _get_dataset_format(dataset_path)
-    _output_format = utils.get_output_format(output_path)
+    _dataset_format = _resolve_input_format(dataset_path)
+    _output_format = _resolve_output_format(output_path)
 
     # Start HTTP server.
     server = HTTPServer(('127.0.0.1', constants.WORKER_SERVICE_PORT),

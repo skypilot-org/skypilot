@@ -79,7 +79,7 @@ def main():
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
     # Create dataset from cloud storage
-    ds = sky.dataset(input_path)
+    ds = sky.dataset(sky.batch.JsonInput(input_path))
 
     # Ensure the pool exists (creates it if needed)
     ensure_pool(pool_name, pool_yaml)
@@ -91,8 +91,8 @@ def main():
     ds.map(
         double_text,
         pool_name=pool_name,
-        batch_size=2,  # Process 1 items per batch
-        output_path=output_path,
+        batch_size=2,  # Process 2 items per batch
+        output=sky.batch.JsonOutput(output_path),
     )
 
     print(f'Done! Results written to {output_path}')

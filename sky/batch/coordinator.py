@@ -55,7 +55,9 @@ class BatchCoordinator:
                  serialized_fn: str,
                  activate_env: str = '',
                  job_id: Optional[int] = None,
-                 is_resume: bool = False):
+                 is_resume: bool = False,
+                 input_format_dict: Optional[Dict[str, Any]] = None,
+                 output_format_dict: Optional[Dict[str, Any]] = None):
         self.dataset_path = dataset_path
         self.output_path = output_path
         self.batch_size = batch_size
@@ -63,6 +65,11 @@ class BatchCoordinator:
         self.serialized_fn = serialized_fn
         self.activate_env = activate_env
         self._is_resume = is_resume
+
+        # Reconstruct typed formats from dicts; fall back to path-based
+        # detection if not provided (backward compat).
+        self._input_format_dict = input_format_dict
+        self._output_format_dict = output_format_dict
 
         # Use explicit job_id if provided (inline on controller),
         # otherwise fall back to env var (backward compat).
@@ -105,7 +112,7 @@ class BatchCoordinator:
         """Main entry point.  Returns on success, raises on failure."""
         try:
             logger.info(f'managed_job_id={self._managed_job_id}')
-            self._output_format = utils.get_output_format(self.output_path)
+            self._resolve_formats()
 
             if self._is_resume:
                 self._resume_from_db()
@@ -159,12 +166,42 @@ class BatchCoordinator:
     # Dataset counting & splitting
     # ------------------------------------------------------------------
 
+    def _resolve_formats(self) -> None:
+        """Resolve typed input/output format handlers.
+
+        Uses typed format dicts if provided; falls back to path-based
+        detection for backward compatibility.
+        """
+        from sky.batch.formats.io_formats import (
+            InputFormat)  # pylint: disable=import-outside-toplevel
+        from sky.batch.formats.io_formats import (
+            OutputFormat)  # pylint: disable=import-outside-toplevel
+
+        if self._input_format_dict is not None:
+            self._input_format = InputFormat.from_dict(self._input_format_dict)
+        else:
+            # Backward compat: infer from path.
+            from sky.batch.formats.io_formats import (
+                JsonInput)  # pylint: disable=import-outside-toplevel
+            if self.dataset_path.endswith('.jsonl'):
+                self._input_format = JsonInput(self.dataset_path)
+            else:
+                raise ValueError(f'Unsupported dataset format: '
+                                 f'{self.dataset_path}. Supported: .jsonl')
+
+        if self._output_format_dict is not None:
+            output_fmt = OutputFormat.from_dict(self._output_format_dict)
+            self._output_format = output_fmt.get_handler()
+        else:
+            # Backward compat: infer from path.
+            self._output_format = utils.get_output_format(self.output_path)
+
     def _count_and_split(self) -> None:
         """Count dataset items and create batch index ranges."""
-        dataset_format = self._get_dataset_format()
+        input_handler = self._input_format.get_handler()
 
         logger.info(f'Counting items in {self.dataset_path}')
-        total_items = dataset_format.count_items(self.dataset_path)
+        total_items = input_handler.count_items(self.dataset_path)
         logger.info(f'Dataset contains {total_items} items')
 
         self.batches = []
@@ -177,17 +214,6 @@ class BatchCoordinator:
         logger.info(f'Created {len(self.batches)} batches '
                     f'(total_items: {total_items}, '
                     f'batch_size: {self.batch_size})')
-
-    def _get_dataset_format(self):
-        """Detect dataset format and return appropriate handler."""
-        from sky.batch.formats.jsonl import (
-            JSONLDataset)  # pylint: disable=import-outside-toplevel
-
-        if self.dataset_path.endswith('.jsonl'):
-            return JSONLDataset()
-        else:
-            raise ValueError(f'Unsupported dataset format: '
-                             f'{self.dataset_path}. Supported: .jsonl')
 
     # ------------------------------------------------------------------
     # DB persistence for HA recovery
@@ -332,10 +358,18 @@ class BatchCoordinator:
 
     def _generate_worker_startup_code(self) -> str:
         """Generate code to start the long-running worker service."""
+        import json as _json  # pylint: disable=import-outside-toplevel
+
         job_id = str(self._managed_job_id)
         activate = self.activate_env.strip()
         activate_line = f'{activate} &&' if activate else ''
         sky_runtime = skylet_constants.SKY_REMOTE_PYTHON_ENV
+
+        # Serialize typed format dicts as JSON env vars for workers.
+        input_format_json = _json.dumps(self._input_format.to_dict()).replace(
+            '\'', '\'\\\'\'')
+        output_format_json = _json.dumps(self._output_format_dict or
+                                         {}).replace('\'', '\'\\\'\'')
 
         return textwrap.dedent(f"""\
             set -e
@@ -343,6 +377,8 @@ class BatchCoordinator:
             export SKY_BATCH_OUTPUT_PATH='{self.output_path}'
             export SKY_BATCH_JOB_ID='{job_id}'
             export SKY_BATCH_DATASET_PATH='{self.dataset_path}'
+            export SKY_BATCH_INPUT_FORMAT='{input_format_json}'
+            export SKY_BATCH_OUTPUT_FORMAT='{output_format_json}'
 
             # Make sky.batch visible to the user's python.
             SKY_SITE=$({sky_runtime}/bin/python -c \\

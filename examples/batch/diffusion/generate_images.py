@@ -4,7 +4,7 @@ This example generates images from text prompts using Stable Diffusion,
 distributed across a pool of GPU workers.
 
 Input:  JSONL file with "prompt" fields
-Output: PNG images + manifest.jsonl in a cloud directory
+Output: PNG images in a cloud directory
 
 Usage (from project root):
     1. Prepare bucket and prompts:
@@ -18,10 +18,8 @@ Usage (from project root):
        $ aws s3 cp s3://$SKY_BATCH_BUCKET/generated_images/ ./generated_images/ --recursive
 """
 import os
-import tempfile
 
 import sky
-from sky.batch import utils
 from sky.serve import serve_utils
 
 
@@ -94,49 +92,27 @@ def main():
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
     # Create dataset from cloud storage
-    ds = sky.dataset(input_path)
+    ds = sky.dataset(sky.batch.JsonInput(input_path))
 
     # Ensure the pool exists (creates it if needed)
     ensure_pool(pool_name, pool_yaml)
 
     # Process the dataset.
-    # The trailing '/' in output_path tells the framework to use
-    # image directory output: each image is saved as a separate PNG,
-    # and a manifest.jsonl maps prompts to filenames.
+    # ImageOutput tells the framework to save each result's 'image' column
+    # as a separate PNG file in the output directory.
     print(f'Generating images from {input_path}...')
     ds.map(
         generate_images,
         pool_name=pool_name,
         batch_size=3,
-        output_path=output_path,
+        output=sky.batch.ImageOutput(output_path, column='image'),
         # Must match the venv created in pool.yaml setup.
         activate_env='source .venv/bin/activate',
     )
 
     print(f'\nDone! Images saved to {output_path}')
-    print(f'Manifest: {output_path}manifest.jsonl')
-
-    # Download images and display in terminal
-    print('\n' + '=' * 60)
-    print('RESULTS:')
-    print('=' * 60)
-    try:
-        manifest = utils.load_jsonl_from_cloud(f'{output_path}manifest.jsonl')
-
-        # Download images locally
-        tmpdir = tempfile.mkdtemp(prefix='sky_batch_diffusion_')
-        for i, entry in enumerate(manifest, 1):
-            image_url = f'{output_path}{entry["image"]}'
-            local_path = os.path.join(tmpdir, entry['image'])
-            utils.download_file_from_cloud(image_url, local_path)
-            print(f'  {i}. {entry["prompt"]}  ->  {local_path}')
-
-        print('=' * 60)
-        print(f'Total images: {len(manifest)}')
-        print(f'Downloaded to: {tmpdir}')
-    except Exception as e:
-        print(f'Error loading results: {e}')
-        print(f'You can manually check: {output_path}')
+    print(f'You can download them with:')
+    print(f'  aws s3 cp {output_path} ./generated_images/ --recursive')
 
 
 if __name__ == '__main__':

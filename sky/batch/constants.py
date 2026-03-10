@@ -33,6 +33,3 @@ INPUT_CHUNK_NAME_PATTERN = 'input_chunk_{start:08d}-{end:08d}.jsonl'
 
 # Temporary directory name for intermediate results
 TEMP_DIR_NAME = '.sky_batch_tmp'
-
-# Manifest filename for image directory output
-IMAGE_DIR_MANIFEST_FILENAME = 'manifest.jsonl'
