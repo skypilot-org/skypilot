@@ -2114,10 +2114,9 @@ class Resources:
 
         Returns:
             A list of possible accelerators. Each element is a tuple of
-            (accelerator_name, was_user_specified). was_user_specified is True
-            if the accelerator was directly named by the user (for example
-            "H100:2" would be True, but "80GB+" would be False since it doesn't
-            mention the name of the accelerator).
+            (accelerator_str, is_exact_name). is_exact_name is True if the
+            accelerator was directly named by the user (e.g., "H100:2"), and
+            False if it was expanded from a memory-based spec (e.g., "80GB+").
         """
         # sanity check
         assert isinstance(accelerators, str), accelerators
