@@ -44,6 +44,7 @@ from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
 from sky.adaptors import ibm
 from sky.adaptors import nebius
+from sky.adaptors import vastdata
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.skylet import constants
@@ -701,6 +702,38 @@ def test_nebius_storage_mounts(generic_cloud: str):
 #             timeout=30 * 60,  # 20 mins
 #         )
 #         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.vastdata
+def test_vastdata_storage_mounts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_vastdata_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --infra {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',
+            (f'AWS_SHARED_CREDENTIALS_FILE='
+             f'{vastdata.VASTDATA_CREDENTIALS_PATH} '
+             f'AWS_CONFIG_FILE={vastdata.VASTDATA_CONFIG_PATH} '
+             f'aws s3 ls s3://{storage_name}/hello.txt '
+             f'--profile={vastdata.VASTDATA_PROFILE_NAME}'),
+        ]
+
+        test = smoke_tests_utils.Test(
+            'vastdata_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.ibm
