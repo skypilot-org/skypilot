@@ -96,7 +96,7 @@ To get the latest features and fixes, use the nightly build or [install from sou
 pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,nebius,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,seeweb,shadeform]"
 ```
 
-You can also use SkyPilot directly from your agent (Claude Code, Codex, etc.) by installing the [SkyPilot Skill](https://docs.skypilot.co/en/latest/getting-started/skill.html), just tell your agent:
+To use SkyPilot directly with your agent (Claude Code, Codex, etc.), install the [SkyPilot Skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). Tell your agent:
 ```
 Fetch and follow https://github.com/skypilot-org/skypilot/blob/HEAD/agent/INSTALL.md to install the skypilot skill
 ```

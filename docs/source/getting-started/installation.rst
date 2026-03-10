@@ -134,9 +134,7 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 
 .. tip::
 
-   Using an AI agent (Claude Code, Codex, etc.)? After installing
-   SkyPilot, install the :ref:`SkyPilot Skill <skill>` to give your
-   agent full SkyPilot expertise.
+   To use SkyPilot with AI agent (Claude Code, Codex, etc.), install :ref:`SkyPilot Skill <skill>` to give your agent full SkyPilot expertise.
 
 Run locally or connect to a remote API server
 ---------------------------------------------
