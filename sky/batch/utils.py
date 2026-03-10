@@ -322,22 +322,24 @@ def get_output_format(output_path: str):
     """Detect the output format from the output path.
 
     Returns:
-        A DatasetFormat instance suitable for writing results.
+        An OutputFormat instance suitable for writing results.
 
     Rules:
         - Path ending with ``.jsonl`` → JSONL format (default).
         - Path ending with ``/`` → Image directory format.
     """
+    from sky.batch.io_formats import (
+        ImageOutput)  # pylint: disable=import-outside-toplevel
+    from sky.batch.io_formats import (
+        JsonOutput)  # pylint: disable=import-outside-toplevel
+
     if output_path.rstrip('/').endswith('.jsonl'):
-        from sky.batch.formats.jsonl import JSONLDataset
-        return JSONLDataset()
+        return JsonOutput(output_path)
     elif output_path.endswith('/'):
-        from sky.batch.formats.image_dir import ImageDirOutput
-        return ImageDirOutput()
+        return ImageOutput(output_path)
     else:
         # Default to JSONL for backward compatibility.
-        from sky.batch.formats.jsonl import JSONLDataset
-        return JSONLDataset()
+        return JsonOutput(output_path)
 
 
 def _load_jsonl_file(path: str) -> List[Dict[str, Any]]:

@@ -172,16 +172,16 @@ class BatchCoordinator:
         Uses typed format dicts if provided; falls back to path-based
         detection for backward compatibility.
         """
-        from sky.batch.formats.io_formats import (
+        from sky.batch.io_formats import (
             InputFormat)  # pylint: disable=import-outside-toplevel
-        from sky.batch.formats.io_formats import (
+        from sky.batch.io_formats import (
             OutputFormat)  # pylint: disable=import-outside-toplevel
 
         if self._input_format_dict is not None:
             self._input_format = InputFormat.from_dict(self._input_format_dict)
         else:
             # Backward compat: infer from path.
-            from sky.batch.formats.io_formats import (
+            from sky.batch.io_formats import (
                 JsonInput)  # pylint: disable=import-outside-toplevel
             if self.dataset_path.endswith('.jsonl'):
                 self._input_format = JsonInput(self.dataset_path)
@@ -190,18 +190,16 @@ class BatchCoordinator:
                                  f'{self.dataset_path}. Supported: .jsonl')
 
         if self._output_format_dict is not None:
-            output_fmt = OutputFormat.from_dict(self._output_format_dict)
-            self._output_format = output_fmt.get_handler()
+            self._output_format = OutputFormat.from_dict(
+                self._output_format_dict)
         else:
             # Backward compat: infer from path.
             self._output_format = utils.get_output_format(self.output_path)
 
     def _count_and_split(self) -> None:
         """Count dataset items and create batch index ranges."""
-        input_handler = self._input_format.get_handler()
-
         logger.info(f'Counting items in {self.dataset_path}')
-        total_items = input_handler.count_items(self.dataset_path)
+        total_items = self._input_format.count_items(self.dataset_path)
         logger.info(f'Dataset contains {total_items} items')
 
         self.batches = []

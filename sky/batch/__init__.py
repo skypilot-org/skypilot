@@ -33,11 +33,11 @@ from sky.batch.api import load
 from sky.batch.api import save_results
 from sky.batch.dataset import Dataset
 from sky.batch.dataset import dataset
-from sky.batch.formats.io_formats import ImageOutput
-from sky.batch.formats.io_formats import InputFormat
-from sky.batch.formats.io_formats import JsonInput
-from sky.batch.formats.io_formats import JsonOutput
-from sky.batch.formats.io_formats import OutputFormat
+from sky.batch.io_formats import ImageOutput
+from sky.batch.io_formats import InputFormat
+from sky.batch.io_formats import JsonInput
+from sky.batch.io_formats import JsonOutput
+from sky.batch.io_formats import OutputFormat
 from sky.batch.remote import remote_function
 
 __all__ = [

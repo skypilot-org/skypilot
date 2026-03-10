@@ -54,8 +54,8 @@ _current_batch_lock = threading.Lock()
 
 _output_path: Optional[str] = None
 _job_id: Optional[str] = None
-_dataset_format: Optional[Any] = None  # DatasetFormat instance (input)
-_output_format: Optional[Any] = None  # DatasetFormat instance (output)
+_dataset_format: Optional[Any] = None  # InputDatasetFormat instance
+_output_format: Optional[Any] = None  # OutputDatasetFormat instance
 
 # ---------------------------------------------------------------------------
 # HTTP handler (localhost only)
@@ -182,28 +182,28 @@ def signal_batch_done(error: Optional[str] = None) -> None:
 def _resolve_input_format(dataset_path: str):
     """Resolve input format from env var or fall back to path-based detection.
 
-    Returns a DatasetFormat handler instance.
+    Returns an InputFormat instance.
     """
     import os as _os  # pylint: disable=import-outside-toplevel
 
     env_val = _os.environ.get('SKY_BATCH_INPUT_FORMAT')
     if env_val:
-        from sky.batch.formats.io_formats import (
+        from sky.batch.io_formats import (
             InputFormat)  # pylint: disable=import-outside-toplevel
-        return InputFormat.from_dict(json.loads(env_val)).get_handler()
+        return InputFormat.from_dict(json.loads(env_val))
 
     # Backward compat fallback.
-    from sky.batch.formats.jsonl import (
-        JSONLDataset)  # pylint: disable=import-outside-toplevel
+    from sky.batch.io_formats import (
+        JsonInput)  # pylint: disable=import-outside-toplevel
     if dataset_path.endswith('.jsonl'):
-        return JSONLDataset()
+        return JsonInput(dataset_path)
     raise ValueError(f'Unsupported dataset format: {dataset_path}')
 
 
 def _resolve_output_format(output_path: str):
     """Resolve output format from env var or fall back to path-based detection.
 
-    Returns a DatasetFormat handler instance.
+    Returns an OutputFormat instance.
     """
     import os as _os  # pylint: disable=import-outside-toplevel
 
@@ -211,9 +211,9 @@ def _resolve_output_format(output_path: str):
     if env_val:
         d = json.loads(env_val)
         if d:  # Non-empty dict means typed format was provided.
-            from sky.batch.formats.io_formats import (
+            from sky.batch.io_formats import (
                 OutputFormat)  # pylint: disable=import-outside-toplevel
-            return OutputFormat.from_dict(d).get_handler()
+            return OutputFormat.from_dict(d)
 
     # Backward compat fallback.
     from sky.batch import utils as _utils

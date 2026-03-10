@@ -13,8 +13,8 @@ import tqdm
 import sky
 from sky.batch import remote
 from sky.batch import utils
-from sky.batch.formats.io_formats import InputFormat
-from sky.batch.formats.io_formats import OutputFormat
+from sky.batch.io_formats import InputFormat
+from sky.batch.io_formats import OutputFormat
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
 
