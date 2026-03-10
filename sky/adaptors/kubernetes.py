@@ -208,11 +208,17 @@ def list_kube_config_contexts():
     return kubernetes.config.list_kube_config_contexts(_get_config_file())
 
 
-_thread_local = threading.local()
+_kubeconfig_refresh_lock = threading.Lock()
+_last_kubeconfig_refresh_time: float = 0.0
 
 
+@functools.lru_cache(maxsize=None)
 def _get_kubeconfig_refresh_interval_seconds() -> float:
-    """Parse refresh interval from env; 0 means disabled."""
+    """Parse refresh interval from env; 0 means disabled.
+
+    Result is cached because this is called on every k8s API method invocation
+    and the env var is not expected to change at runtime.
+    """
     raw = os.environ.get(KUBECONFIG_REFRESH_INTERVAL_ENV_VAR, '').strip()
     if not raw:
         return 0.0
@@ -232,13 +238,17 @@ def _should_refresh_client_by_interval() -> bool:
     interval = _get_kubeconfig_refresh_interval_seconds()
     if interval <= 0:
         return False
-    last = getattr(_thread_local, 'last_kubeconfig_refresh_time', 0.0)
-    return (time.time() - last) >= interval
+    # Reading _last_kubeconfig_refresh_time without the lock is intentional:
+    # CPython's GIL makes float reads atomic, so this is a safe optimistic
+    # check. The lock is acquired only when a refresh appears needed, and the
+    # condition is rechecked inside (double-checked locking).
+    return (time.time() - _last_kubeconfig_refresh_time) >= interval
 
 
 def _mark_client_refreshed() -> None:
     """Record that the client was just refreshed (interval-based refresh)."""
-    _thread_local.last_kubeconfig_refresh_time = time.time()
+    global _last_kubeconfig_refresh_time
+    _last_kubeconfig_refresh_time = time.time()
 
 
 def _clear_kubernetes_client_caches() -> None:
@@ -296,22 +306,32 @@ class RetryableClientWrapper:
 
         def with_refresh(*args, **kwargs):
             if _should_refresh_client_by_interval():
-                logger.debug(
-                    'Refreshing Kubernetes client from kubeconfig due to '
-                    'interval expiry.')
-                # Clear caches for ALL client types (core_api, networking_api,
-                # etc.) so they are all lazily recreated from the updated
-                # kubeconfig on next use, rather than mixing old and new
-                # clients across different API groups.
-                _clear_kubernetes_client_caches()
-                old_client = self._client
-                self._client = self._getter(*self._getter_args,
-                                            **self._getter_kwargs)
-                _mark_client_refreshed()
-                self._close_client(old_client)
+                with _kubeconfig_refresh_lock:
+                    # Re-check after acquiring the lock: another thread may
+                    # have already rebuilt the client while we were waiting.
+                    if _should_refresh_client_by_interval():
+                        logger.debug(
+                            'Refreshing Kubernetes client from kubeconfig '
+                            'due to interval expiry.')
+                        # Clear caches for ALL client types (core_api,
+                        # networking_api, etc.) so they are all lazily
+                        # recreated from the updated kubeconfig on next use,
+                        # rather than mixing old and new clients across
+                        # different API groups.
+                        _clear_kubernetes_client_caches()
+                        old_client = self._client
+                        self._client = self._getter(*self._getter_args,
+                                                    **self._getter_kwargs)
+                        _mark_client_refreshed()
+                        self._close_client(old_client)
             method = getattr(self._client, name)
             return method(*args, **kwargs)
 
+        # Cache on the instance so repeated accesses to the same method name
+        # return the same closure without going through __getattr__ again.
+        # The closure always reads self._client at call time, so it stays
+        # correct after a client refresh.
+        self.__dict__[name] = with_refresh
         return with_refresh
 
     def __del__(self):
