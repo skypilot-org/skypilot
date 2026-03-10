@@ -719,6 +719,12 @@ class GFDLabelFormatter(GPULabelFormatter):
                                                  '').replace('RTX-', 'RTX')
 
 
+# Module-level constant for canonical GPU names (lowercased) to avoid
+# re-creating the set on every function call
+_CANONICAL_GPU_NAMES_LOWER = {name.lower()
+                               for name in kubernetes_constants.CANONICAL_GPU_NAMES}
+
+
 def _accelerator_name_matches(requested_acc: str,
                               viable_names: List[str]) -> bool:
     """Check if requested accelerator matches any viable name.
@@ -748,9 +754,6 @@ def _accelerator_name_matches(requested_acc: str,
         True if the requested accelerator matches any viable name.
     """
     requested_lower = requested_acc.lower()
-    # Create a set of canonical names (lowercased) for fast lookup
-    canonical_names_lower = {name.lower()
-                              for name in kubernetes_constants.CANONICAL_GPU_NAMES}
 
     for viable in viable_names:
         viable_lower = viable.lower()
@@ -758,8 +761,8 @@ def _accelerator_name_matches(requested_acc: str,
             return True
 
         # If both are canonical names, check if they are memory variants
-        if (requested_lower in canonical_names_lower and
-            viable_lower in canonical_names_lower):
+        if (requested_lower in _CANONICAL_GPU_NAMES_LOWER and
+            viable_lower in _CANONICAL_GPU_NAMES_LOWER):
             # Check if one is a memory variant of the other
             # Memory variants have pattern: base_name + '-' + memory_size
             # e.g., 'H100' and 'H100-80GB', 'A100' and 'A100-80GB'
@@ -769,9 +772,10 @@ def _accelerator_name_matches(requested_acc: str,
             if longer.startswith(shorter + '-'):
                 # Check if the suffix looks like a memory size (e.g., '80gb', '40gb')
                 suffix = longer[len(shorter) + 1:]  # Skip the '-'
-                # Memory suffixes are typically digits followed by 'gb'
-                # e.g., '80gb', '40gb', '141gb', '480gb'
-                if suffix.replace('gb', '').replace('g', '').isdigit():
+                # Memory suffixes are typically digits followed by 'gb' or 'g'
+                # e.g., '80gb', '40gb', '141gb', '480gb', '80g'
+                # Use regex to prevent false positives like 'g80' or '80ggb'
+                if re.match(r'^\d+(g|gb)?$', suffix):
                     return True
             # If not memory variants, require exact match (already checked above)
             continue
