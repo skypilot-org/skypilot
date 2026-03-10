@@ -744,7 +744,7 @@ class Storage(object):
         # If any fields changed, increment the version. For backwards
         # compatibility, modify the __setstate__ method to handle the old
         # version.
-        _VERSION = 0
+        _VERSION = 1
 
         def __init__(
             self,
@@ -755,6 +755,7 @@ class Storage(object):
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None,
             mount_cached_config: Optional[MountCachedConfig] = None,
+            preset: Optional['FileMountPreset'] = None,
         ):
             self._version = self._VERSION
 
@@ -767,7 +768,8 @@ class Storage(object):
             self.sky_stores = {} if sky_stores is None else sky_stores
 
             self.mount_cached_config = mount_cached_config
-            if self.mount_cached_config is not None:
+            self.preset = preset
+            if self.preset is not None or self.mount_cached_config is not None:
                 assert self.mode == StorageMode.MOUNT_CACHED
 
         def __setstate__(self, state):
@@ -779,6 +781,8 @@ class Storage(object):
                 version = -1
             if version < 0:
                 self.mount_cached_config = None
+            if version < 1:
+                self.preset = None
 
             self.__dict__.update(state)
 
@@ -983,6 +987,7 @@ class Storage(object):
                 self.sync_all_stores()
             # Update MOUNT_CACHED configuration to the new one.
             self.handle.mount_cached_config = self.mount_cached_config
+            self.handle.preset = self.preset
         else:
             # Storage does not exist in global_user_state, create new stores
             # Sky optimizer either adds a storage object instance or selects
@@ -993,7 +998,8 @@ class Storage(object):
                 storage_name=self.name,
                 source=self.source,
                 mode=self.mode,
-                mount_cached_config=self.mount_cached_config)
+                mount_cached_config=self.mount_cached_config,
+                preset=self.preset)
 
             for store_type in input_stores:
                 self.add_store(store_type)
@@ -1340,13 +1346,14 @@ class Storage(object):
                           sync_on_reconstruction=override_args.get(
                               'sync_on_reconstruction', True))
 
-        # For backward compatibility
-        if hasattr(metadata, 'mode'):
-            if metadata.mode:
-                storage_obj.mode = override_args.get('mode', metadata.mode)
+        if metadata.mode is not None:
+            storage_obj.mode = override_args.get('mode', metadata.mode)
 
         if metadata.mount_cached_config is not None:
             storage_obj.mount_cached_config = metadata.mount_cached_config
+
+        if metadata.preset is not None:
+            storage_obj.preset = metadata.preset
 
         return storage_obj
 
