@@ -1,5 +1,7 @@
 """Unit tests for sbatch_options support in Slurm provisioner."""
 
+import subprocess
+
 import jsonschema
 import pytest
 
@@ -106,12 +108,24 @@ class TestBuildCustomSbatchDirectives:
         '`whoami`',
         'foo > /tmp/out',
         'foo < /dev/null',
-        "foo' || echo pwned #",
+        'foo\' || echo pwned #',
     ])
     def test_shell_metacharacters_safe_in_comment(self, value):
-        """Shell metacharacters are safe because #SBATCH lines are comments."""
+        """Shell metacharacters are safe because #SBATCH lines are comments.
+
+        Verify by actually executing the directive as a bash script and
+        checking that only the sentinel value is produced (i.e. the
+        metacharacters in the comment were not executed).
+        """
         result = _build_custom_sbatch_directives({'comment': value})
         assert f'#SBATCH --comment={value}' in result
+        # Run the directive + a sentinel echo as a real bash script.
+        script = result.strip() + '\necho SAFE'
+        proc = subprocess.run(['bash', '-c', script],
+                              capture_output=True,
+                              text=True,
+                              check=False)
+        assert proc.stdout.strip() == 'SAFE'
 
     def test_non_protected_options_allowed(self):
         allowed_options = {

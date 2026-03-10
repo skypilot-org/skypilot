@@ -1632,7 +1632,7 @@ def get_config_schema():
                                     'additionalProperties': False,
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
-                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
                                     },
                                 },
                             },
@@ -1649,7 +1649,8 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {},
-                    # Properties are either 'default' or a region name.
+                    # Properties are either 'default' or a region
+                    # name.
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
