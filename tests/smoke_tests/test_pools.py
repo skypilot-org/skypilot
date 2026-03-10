@@ -923,6 +923,113 @@ def test_pool_job_cancel_recovery(generic_cloud: str):
             smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.aws
+@pytest.mark.no_remote_server  # see note 1 above
+def test_pool_down_purge_after_controller_terminated(generic_cloud: str):
+    """Smoke test for stuck pool deletion with --purge.
+
+    Reproduces the scenario where the jobs controller VM is terminated while
+    a pool has running jobs, leaving the pool in a stuck undeletable state.
+    Verifies that `sky jobs pool down --purge -y` can still force-delete it.
+
+    Steps:
+    1. Launch a pool with 1 worker on AWS
+    2. Launch a forever-running job
+    3. Terminate the jobs controller instance (sky-jobs-controller-*)
+    4. Force-delete the pool with `sky jobs pool down --purge -y`
+    5. Verify the pool is removed and job reaches a terminal state
+    """
+    region = 'us-east-2'
+    name = smoke_tests_utils.get_cluster_name()
+    pool_name = f'{name}-pool'
+    pool_name = common_utils.make_cluster_name_on_cloud(
+        pool_name, sky.AWS.max_cluster_name_length())
+    pool_config = basic_pool_conf(num_workers=1, infra=f'aws/{region}')
+
+    job_name = f'{smoke_tests_utils.get_cluster_name()}-job'
+    job_config = basic_job_conf(
+        job_name=job_name,
+        run_cmd='echo "Hello, world!"; sleep infinity',
+    )
+
+    # Find the jobs controller instance by wildcard tag. The controller
+    # cluster is named sky-jobs-controller-{hash} and tagged with
+    # ray-cluster-name.
+    get_controller_instance_id_cmd = (
+        '`aws ec2 describe-instances --region {region} '
+        '--filters '
+        'Name=tag:ray-cluster-name,Values=sky-jobs-controller-* '
+        'Name=instance-state-name,Values=running '
+        '--query Reservations[].Instances[].InstanceId '
+        '--output text`')
+
+    # Force the jobs controller to be in the same region so we can
+    # find and terminate its EC2 instance.
+    controller_config = {
+        'jobs': {
+            'controller': {
+                'resources': {
+                    'cpus': '4+',
+                    'cloud': 'aws',
+                    'region': region,
+                }
+            }
+        }
+    }
+
+    timeout = smoke_tests_utils.get_timeout(generic_cloud)
+    with smoke_tests_utils.override_sky_config(config_dict=controller_config):
+        with tempfile.NamedTemporaryFile(delete=True) as pool_yaml:
+            with tempfile.NamedTemporaryFile(delete=True) as job_yaml:
+                write_yaml(pool_yaml, pool_config)
+                write_yaml(job_yaml, job_config)
+                test = smoke_tests_utils.Test(
+                    'test_pool_down_purge_after_controller_terminated',
+                    [
+                        smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                            'aws', name, skip_remote_server_check=True),
+                        _LAUNCH_POOL_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name,
+                            pool_yaml=pool_yaml.name),
+                        wait_until_pool_ready(pool_name, timeout=timeout),
+                        _LAUNCH_JOB_AND_CHECK_SUCCESS.format(
+                            pool_name=pool_name,
+                            job_yaml=job_yaml.name),
+                        wait_until_job_status(job_name, ['RUNNING'],
+                                              timeout=timeout),
+                        # Terminate the jobs controller instance to
+                        # simulate an abrupt controller failure. This
+                        # leaves jobs stuck in non-terminal states.
+                        smoke_tests_utils.run_cloud_cmd_on_cluster(
+                            name,
+                            cmd=_TERMINATE_INSTANCE.format(
+                                region=region,
+                                get_instance_id_cmd=
+                                get_controller_instance_id_cmd.format(
+                                    region=region)),
+                            skip_remote_server_check=True),
+                        # Force-delete the pool with --purge. The
+                        # controller is dead so normal cancel/delete may
+                        # fail; --purge should force cleanup regardless.
+                        f'sky jobs pool down {pool_name} --purge -y',
+                        # Verify the pool is removed.
+                        check_pool_not_in_status(pool_name, timeout=120),
+                        # Verify the job reached a terminal state.
+                        wait_until_job_status(
+                            job_name,
+                            ['CANCELLED', 'FAILED', 'FAILED_CONTROLLER'],
+                            bad_statuses=[],
+                            timeout=60),
+                    ],
+                    timeout=smoke_tests_utils.get_timeout(generic_cloud),
+                    teardown=
+                    f'{cancel_jobs_and_teardown_pool(pool_name, timeout=10)} && '
+                    f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name, skip_remote_server_check=True)}',
+                )
+
+                smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_remote_server  # see note 1 above
 def test_pool_job_cancel_running_multiple(generic_cloud: str):
     num_jobs = 4
