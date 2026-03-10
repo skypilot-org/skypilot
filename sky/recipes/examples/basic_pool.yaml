@@ -1,0 +1,7 @@
+# Basic Job Pool Template
+resources:
+  cpus: 4+
+  memory: 16+
+
+pool:
+  workers: 4

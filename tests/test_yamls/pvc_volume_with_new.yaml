@@ -1,0 +1,40 @@
+name: min
+resources:
+  cpus: 0.1+
+volumes:
+  /mnt/data0: pvc0
+  /mnt/data1: existing0
+  /mnt/data2:
+    size: 1Gi
+    labels:
+      key: value
+  /mnt/data3: pvc1
+  /mnt/data4:
+    size: 1Gi
+setup: |
+  echo "running setup"
+
+run: |
+  set -e
+  echo "check volumes"
+  df -h /mnt/data2 || (echo "df failed for data2" && exit 1)
+  touch /mnt/data2/2.txt || (echo "touch failed for data2" && exit 1)
+  ls -lart /mnt/data2 || (echo "ls failed for data2" && exit 1)
+  df -h /mnt/data0 || (echo "df failed for data0" && exit 1)
+  touch /mnt/data0/0.txt || (echo "touch failed for data0" && exit 1)
+  ls -lart /mnt/data0 || (echo "ls failed for data0" && exit 1)
+  df -h /mnt/data1 || (echo "df failed for data1" && exit 1)
+  touch /mnt/data1/1.txt || (echo "touch failed for data1" && exit 1)
+  ls -lart /mnt/data1 || (echo "ls failed for data1" && exit 1)
+  # The following should fail since pvc1 won't be mounted
+  if df -h /mnt/data3 2>/dev/null; then
+    echo "ERROR: /mnt/data3 should not be mounted!" && exit 1
+  else
+    echo "Expected: /mnt/data3 is not mounted (as warned)"
+  fi
+  # The following should fail since /mnt/data4 won't be mounted
+  if df -h /mnt/data4 2>/dev/null; then
+    echo "ERROR: /mnt/data4 should not be mounted!" && exit 1
+  else
+    echo "Expected: /mnt/data4 is not mounted (as warned)"
+  fi

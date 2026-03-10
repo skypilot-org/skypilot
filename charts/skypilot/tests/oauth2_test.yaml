@@ -88,6 +88,32 @@ tests:
           path: spec.template.spec.containers[0].env[1].value
           value: "test-client-secret"
 
+  - it: should apply global extra envs to oauth2-proxy and redis
+    set:
+      global.extraEnvs:
+        - name: GLOBAL_ENV
+          value: global
+      auth.oauth.enabled: false
+      ingress.enabled: true
+      ingress.oauth2-proxy.enabled: true
+      ingress.oauth2-proxy.oidc-issuer-url: "https://example.okta.com/oauth2/default"
+      ingress.oauth2-proxy.client-id: "test-client-id"
+      ingress.oauth2-proxy.client-secret: "test-client-secret"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+        template: templates/oauth2-proxy-deployment.yaml
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GLOBAL_ENV
+            value: global
+        template: templates/oauth2-proxy-redis.yaml
+        documentIndex: 0
+
   - it: should configure oauth2-proxy with client credentials from secret (legacy)
     set:
       auth.oauth.enabled: false

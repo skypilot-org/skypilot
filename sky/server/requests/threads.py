@@ -1,5 +1,6 @@
 """Request execution threads management."""
 
+import asyncio
 import concurrent.futures
 import sys
 import threading
@@ -55,9 +56,12 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
         try:
             result = fn(*args, **kwargs)
             fut.set_result(result)
-        except Exception as e:  # pylint: disable=broad-except
+        except (Exception, asyncio.exceptions.CancelledError) as e:  # pylint: disable=broad-except
             logger.debug(f'Executor [{self.name}] error executing {fn}: {e}')
-            fut.set_exception(e)
+            if not fut.cancelled():
+                # Only set the exception if the future is not cancelled to avoid
+                # setting the exception twice leading to another exception.
+                fut.set_exception(e)
         finally:
             self.running.decrement()
             self._cleanup_thread(threading.current_thread())
@@ -80,7 +84,7 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             self.running.decrement()
         return count
 
-    def submit(self, fn: Callable[_P, _T], *args: _P.args,
+    def submit(self, fn: Callable[_P, _T], /, *args: _P.args,
                **kwargs: _P.kwargs) -> 'concurrent.futures.Future[_T]':
         with self._shutdown_lock:
             if self._shutdown:
@@ -106,7 +110,10 @@ class OnDemandThreadExecutor(concurrent.futures.Executor):
             assert thread.ident is not None, 'Thread should be started'
             return fut
 
-    def shutdown(self, wait=True):
+    def shutdown(self,
+                 wait: bool = True,
+                 *,
+                 cancel_futures: bool = False) -> None:
         with self._shutdown_lock:
             self._shutdown = True
         if not wait:

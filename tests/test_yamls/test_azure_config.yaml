@@ -1,0 +1,4 @@
+azure:
+  remote_identity:
+    - sky-serve-controller-*: controller-msi
+    - my-cluster-*: my-custom-msi

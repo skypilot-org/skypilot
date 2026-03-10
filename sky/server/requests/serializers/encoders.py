@@ -69,6 +69,11 @@ def encode_status(
             response_cluster['last_use'] = ''
         if 'status_updated_at' not in response_cluster:
             response_cluster['status_updated_at'] = 0
+        # Ensure labels is always included, defaulting to empty dict if None
+        # This is needed because exclude_none=True would exclude None labels
+        if 'labels' not in response_cluster or response_cluster.get(
+                'labels') is None:
+            response_cluster['labels'] = {}
         response_cluster['status'] = cluster['status'].value
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])
@@ -263,6 +268,23 @@ def encode_realtime_gpu_availability(
                 f'Expected RealtimeGpuAvailability, got {type(gpu)}')
             converted_gpu_list.append(list(gpu))
         encoded.append((context, converted_gpu_list))
+    return encoded
+
+
+@register_encoder('realtime_slurm_gpu_availability')
+def encode_realtime_slurm_gpu_availability(
+    return_value: List[Tuple[str, List[Any], Any]]
+) -> List[Tuple[str, List[List[Any]], Any]]:
+    # Convert RealtimeGpuAvailability namedtuples to lists
+    # for JSON serialization.
+    encoded = []
+    for context, gpu_list, error in return_value:
+        converted_gpu_list = []
+        for gpu in gpu_list:
+            assert isinstance(gpu, models.RealtimeGpuAvailability), (
+                f'Expected RealtimeGpuAvailability, got {type(gpu)}')
+            converted_gpu_list.append(list(gpu))
+        encoded.append((context, converted_gpu_list, error))
     return encoded
 
 

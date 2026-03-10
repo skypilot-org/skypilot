@@ -52,6 +52,21 @@ COMMON_OPTIONS = [
                  help=('Run the command asynchronously.'))
 ]
 
+GRACEFUL_OPTIONS = [
+    click.option(
+        '--graceful',
+        is_flag=True,
+        default=False,
+        help=('Wait for MOUNT_CACHED uploads to complete before '
+              'stopping/terminating. Will cancel current jobs first.')),
+    click.option('--graceful-timeout',
+                 type=int,
+                 default=None,
+                 help=('Timeout in seconds for `--graceful` flag. When not '
+                       'set, will wait for MOUNT_CACHED uploads until they are '
+                       'finished.')),
+]
+
 TASK_OPTIONS = [
     click.option(
         '--workdir',
@@ -155,7 +170,11 @@ TASK_OPTIONS = [
         node.
 
         If any values from ``--env-file`` conflict with values set by
-        ``--env``, the ``--env`` value will be preferred."""),
+        ``--env``, the ``--env`` value will be preferred.
+
+        Values from ``--env-file`` will also load to secrets with lower
+        preference compared to ``--secret`` or ``--secret-file``.
+        """),
     click.option(
         '--env',
         required=False,
@@ -177,6 +196,16 @@ TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     ),
     click.option(
+        '--secret-file',
+        required=False,
+        type=dotenv.dotenv_values,
+        help="""\
+        Path to a dotenv file with secret variables to set on the remote node.
+
+        If any values from ``--secret-file`` conflict with values set by
+        ``--secret``, the ``--secret`` value will be preferred.""",
+    ),
+    click.option(
         '--secret',
         required=False,
         type=_parse_secret_var,
@@ -192,7 +221,30 @@ TASK_OPTIONS = [
 
         2. ``--secret JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be
         the same value of ``$JWT_SECRET`` in the local environment.""",
-    )
+    ),
+    click.option(
+        '--local-disk',
+        default=None,
+        type=str,
+        required=False,
+        help="""\
+        Local (instance) storage requirement. Format: [mode:]size[+] or mode.
+        Mode is "nvme" (default) or "ssd". Size is total GB across all disks.
+        If only mode specified, size defaults to 100+. If only size specified,
+        mode defaults to nvme. Examples:
+
+        \b
+        1. ``--local-disk nvme:1000+``: NVMe SSD with at least 1TB total.
+
+        2. ``--local-disk ssd:500``: SSD with exactly 500GB total.
+
+        3. ``--local-disk nvme``: Any NVMe instance (at least 100GB).
+
+        4. ``--local-disk 1000+``: NVMe (default) with at least 1TB.
+
+        Note: Local storage is ephemeral and lost when the instance terminates.
+        """,
+    ),
 ]
 
 TASK_OPTIONS_WITH_NAME = [

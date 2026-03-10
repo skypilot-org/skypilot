@@ -206,7 +206,7 @@ def main():
         verify_clusters_page(driver, clusters_url, wait_time=20)
 
         # Wait a bit between page loads
-        time.sleep(2)
+        time.sleep(30)
 
         # Verify jobs page (10s timeout, matching sky jobs queue timeout)
         verify_jobs_page(driver, jobs_url, wait_time=10)

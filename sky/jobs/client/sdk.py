@@ -7,6 +7,7 @@ import click
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.schemas.api import responses
@@ -48,7 +49,7 @@ def launch(
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
-) -> server_common.RequestId[Tuple[Optional[int],
+) -> server_common.RequestId[Tuple[Optional[List[int]],
                                    Optional['backends.ResourceHandle']]]:
     """Launches a managed job.
 
@@ -65,7 +66,7 @@ def launch(
         The request ID of the launch request.
 
     Request Returns:
-        job_id (Optional[int]): Job ID for the managed job
+        job_ids (Optional[List[int]]]): Job IDs for the managed jobs
         controller_handle (Optional[ResourceHandle]): ResourceHandle of the
           controller
 
@@ -85,6 +86,9 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+    if name is not None:
+        dag.name = name
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
@@ -100,9 +104,13 @@ def launch(
                 pool_statuses = sdk.get(pool_status_request_id)
                 if not pool_statuses:
                     raise click.UsageError(f'Pool {pool!r} not found.')
-                resources = pool_statuses[0]['requested_resources_str']
-                click.secho(f'Use resources from pool {pool!r}: {resources}.',
-                            fg='green')
+                # Show the job's requested resources, not the pool worker
+                # resources
+                job_resources_str = backend_utils.get_task_resources_str(
+                    dag.tasks[0], is_managed_job=True)
+                click.secho(
+                    f'Use resources from pool {pool!r}: {job_resources_str}.',
+                    fg='green')
                 if num_jobs is not None:
                     job_identity = f'{num_jobs} managed jobs'
             prompt = f'Launching {job_identity} {dag.name!r}. Proceed?'
@@ -113,7 +121,7 @@ def launch(
                               show_default=True)
 
         dag = client_common.upload_mounts_to_api_server(dag)
-        dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
+        dag_str = dag_utils.dump_dag_to_yaml_str(dag)
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
@@ -138,6 +146,8 @@ def queue_v2(
     job_ids: Optional[List[int]] = None,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    sort_by: Optional[str] = None,
+    sort_order: Optional[str] = None,
 ) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
         str, int], int]]:
     """Gets statuses of managed jobs.
@@ -151,6 +161,8 @@ def queue_v2(
         job_ids: IDs of the managed jobs to show.
         limit: Number of jobs to show.
         fields: Fields to get for the managed jobs.
+        sort_by: Field to sort by (e.g., 'job_id', 'name', 'submitted_at').
+        sort_order: Sort direction ('asc' or 'desc').
 
     Returns:
         The request ID of the queue request.
@@ -175,6 +187,8 @@ def queue_v2(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
         total (int): Total number of jobs after filter,
@@ -186,6 +200,12 @@ def queue_v2(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    # Filter out fields not supported by older servers
+    remote_api_version = versions.get_remote_api_version()
+    if fields is not None and (remote_api_version is None or
+                               remote_api_version < 31):
+        fields = [f for f in fields if f != 'is_primary_in_job_group']
+
     body = payloads.JobsQueueV2Body(
         refresh=refresh,
         skip_finished=skip_finished,
@@ -193,6 +213,8 @@ def queue_v2(
         job_ids=job_ids,
         limit=limit,
         fields=fields,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
     path = '/jobs/queue/v2'
     response = server_common.make_authenticated_request(
@@ -252,6 +274,8 @@ def queue(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
 
@@ -282,6 +306,8 @@ def cancel(
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
     pool: Optional[str] = None,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -293,6 +319,10 @@ def cancel(
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
         pool: Pool name to cancel.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Returns:
         The request ID of the cancel request.
@@ -307,12 +337,20 @@ def cancel(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
+    if graceful and (remote_api_version is None or remote_api_version < 39):
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
+    if graceful and pool is not None:
+        logger.warning('Pools are not cleaned up after job cancel, so '
+                       '`--graceful` is ignored.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
         all=all,
         all_users=all_users,
         pool=pool,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST',
@@ -331,7 +369,8 @@ def tail_logs(name: Optional[str] = None,
               controller: bool = False,
               refresh: bool = False,
               tail: Optional[int] = None,
-              output_stream: Optional['io.TextIOBase'] = None) -> Optional[int]:
+              output_stream: Optional['io.TextIOBase'] = None,
+              task: Optional[Union[str, int]] = None) -> Optional[int]:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -346,6 +385,9 @@ def tail_logs(name: Optional[str] = None,
         tail: Number of lines to tail from the end of the log file.
         output_stream: The stream to write the logs to. If None, print to the
             console.
+        task: Task identifier to view logs for a specific task in a JobGroup.
+            If an int, it is treated as a task ID. If a str, it is treated as
+            a task name. If None, logs for all tasks are shown.
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
@@ -365,6 +407,7 @@ def tail_logs(name: Optional[str] = None,
         controller=controller,
         refresh=refresh,
         tail=tail,
+        task=task,
     )
     response = server_common.make_authenticated_request(
         'POST',

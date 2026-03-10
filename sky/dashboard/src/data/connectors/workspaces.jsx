@@ -542,6 +542,58 @@ async function pollForTaskCompletion(requestId, taskName) {
 }
 
 // Update workspace configuration
+export async function getEnabledCloudsBatch(
+  workspaceNames = [],
+  expand = false
+) {
+  try {
+    const params = new URLSearchParams();
+    if (workspaceNames.length > 0) {
+      params.append('workspaces', workspaceNames.join(','));
+    }
+    if (expand) {
+      params.append('expand', 'true');
+    }
+    const url = `/enabled_clouds/batch?${params.toString()}`;
+
+    const scheduleResponse = await apiClient.get(url);
+    if (!scheduleResponse.ok) {
+      throw new Error(
+        `Error scheduling getEnabledCloudsBatch: ${scheduleResponse.statusText} (status ${scheduleResponse.status})`
+      );
+    }
+
+    const requestId = scheduleResponse.headers.get('X-Skypilot-Request-ID');
+    if (!requestId) {
+      throw new Error('X-Skypilot-Request-ID header not found in response.');
+    }
+
+    const resultResponse = await apiClient.get(
+      `/api/get?request_id=${requestId}`
+    );
+    if (!resultResponse.ok) {
+      throw new Error(
+        `Error fetching enabled_clouds_batch result for request ID ${requestId}: ${resultResponse.statusText}`
+      );
+    }
+
+    const resultData = await resultResponse.json();
+    if (resultData.status === 'FAILED') {
+      throw new Error(
+        resultData.error || 'Unknown error during enabled_clouds_batch'
+      );
+    }
+
+    if (resultData.status === 'SUCCEEDED' && resultData.return_value) {
+      return JSON.parse(resultData.return_value);
+    }
+    return {};
+  } catch (error) {
+    console.error('Failed to fetch enabled_clouds_batch:', error.message);
+    throw error;
+  }
+}
+
 export async function updateWorkspace(workspaceName, config) {
   try {
     console.log(`Updating workspace ${workspaceName} with config:`, config);
@@ -688,6 +740,24 @@ export async function updateConfig(config) {
     return await pollForTaskCompletion(requestId, 'updateConfig');
   } catch (error) {
     console.error('Failed to update config:', error);
+    throw error;
+  }
+}
+
+// Run sky check to refresh cloud credentials
+// This is useful when refreshing the infra page to detect new clouds
+export async function runSkyCheck() {
+  try {
+    console.log('Running sky check to refresh cloud credentials');
+    const response = await apiClient.fetch('/check', {}, 'POST');
+    if (!response.ok) {
+      throw new Error(
+        `Sky check failed: ${response.statusText} (status ${response.status})`
+      );
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to run sky check:', error);
     throw error;
   }
 }

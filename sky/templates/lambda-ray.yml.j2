@@ -90,6 +90,7 @@ setup_commands:
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     rm ~/.local/bin/pip ~/.local/bin/pip3 ~/.local/bin/pip3.8 ~/.local/bin/pip3.10;
     {{ conda_installation_commands }}
+    {{ uv_installation_commands }}
     {{ ray_skypilot_installation_commands }}
     {{ copy_skypilot_templates_commands }}
     touch ~/.sudo_as_admin_successful;

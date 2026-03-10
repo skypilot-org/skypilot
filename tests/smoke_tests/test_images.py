@@ -440,7 +440,7 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --infra aws/us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
@@ -448,6 +448,7 @@ def test_image_no_conda():
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,  # GPU stop/start cycle can be slow
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -458,6 +459,7 @@ def test_image_no_conda():
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support autodown
 @pytest.mark.no_shadeform  # Shadeform does not support stopping instances
 @pytest.mark.no_seeweb  # Seeweb does not support autodown
+@pytest.mark.no_slurm  # Slurm does not support stopping instances yet
 def test_custom_default_conda_env(generic_cloud: str):
     timeout = 80
     if generic_cloud == 'azure':
@@ -612,6 +614,7 @@ def private_docker_registry_setup(request):
 @pytest.mark.no_azure
 @pytest.mark.no_kubernetes
 @pytest.mark.no_shadeform
+@pytest.mark.no_slurm  # Slurm does not support private docker registries yet
 @pytest.mark.parametrize(
     'private_docker_registry_setup,cloud_provider',
     [
@@ -678,6 +681,69 @@ def test_private_docker_registry(generic_cloud,
     smoke_tests_utils.run_one_test(test)
 
 
+def test_docker_nonroot_user(generic_cloud: str):
+    """Test Docker image with non-root default user and ENV HOME override.
+
+    Tests that SkyPilot correctly handles Docker images where:
+    1. The default USER is non-root
+    2. ENV HOME is explicitly set to the non-root user's home directory
+
+    SkyPilot should:
+    - Detect the container's default user (not root)
+    - Place SSH keys in the correct home directory
+    - SSH as the default user successfully
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'docker_nonroot_user',
+        [
+            f'sky launch -y -c {name} --infra {generic_cloud} --image-id docker:us-docker.pkg.dev/sky-dev-465/buildkite-test-images/test-nonroot-home:latest tests/test_yamls/minimal.yaml',
+            f'sky logs {name} 1 --status',
+            # Verify we're running as the non-root user
+            f'sky exec {name} "whoami | grep testuser"',
+            f'sky logs {name} 2 --status',
+            # Verify HOME is set correctly
+            f'sky exec {name} "echo \\$HOME | grep /home/testuser"',
+            f'sky logs {name} 3 --status',
+            # Test SSH works
+            f'ssh {name} -- "echo hello"',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_docker_image(generic_cloud: str):
+    """Test that docker images work on Nebius without permission denied errors.
+
+    Nebius GPU VMs use the ubuntu24.04-cuda12 image which has Docker
+    pre-installed, but the SSH user (ubuntu) is NOT in the docker group.
+    With the sudo fix, docker commands should succeed without triggering
+    the 'permission denied' retry path. (GH #8764)
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'nebius_docker_image',
+        [
+            f'sky launch -y -c {name} --infra nebius '
+            f'--image-id docker:ubuntu:22.04 '
+            f'--gpus L40S:1 '
+            f'"echo hello from docker && whoami"',
+            f'sky logs {name} 1 --status',
+            # Verify provision log does NOT contain permission denied errors.
+            # With the sudo fix, docker commands run as root and never hit
+            # the permission denied + retry path.
+            f's=$(sky logs --provision {name}) && '
+            f'echo "$s" | grep -q "initialize_docker" && '
+            f'! echo "$s" | grep -q "permission denied"',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_helm_deploy_gke(request):
     if not request.config.getoption('--helm-package'):
@@ -722,5 +788,6 @@ def test_helm_deploy_eks(request):
 def test_helm_deploy_okta():
     test = smoke_tests_utils.Test('helm_deploy_okta', [
         f'bash tests/kubernetes/scripts/helm_okta.sh',
-    ])
+    ],
+                                  timeout=30 * 60)
     smoke_tests_utils.run_one_test(test)

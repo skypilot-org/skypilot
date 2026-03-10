@@ -7,10 +7,14 @@ class RequestName(str, enum.Enum):
     # General requests
     CHECK = 'check'
     ENABLED_CLOUDS = 'enabled_clouds'
+    ENABLED_CLOUDS_BATCH = 'enabled_clouds_batch'
     REALTIME_KUBERNETES_GPU_AVAILABILITY = (
         'realtime_kubernetes_gpu_availability')
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
+    REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
+    SLURM_NODE_INFO = 'slurm_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
+    KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'
     LIST_ACCELERATORS = 'list_accelerators'
     LIST_ACCELERATOR_COUNTS = 'list_accelerator_counts'
     OPTIMIZE = 'optimize'
@@ -28,7 +32,9 @@ class RequestName(str, enum.Enum):
     CLUSTER_JOB_CANCEL = 'cancel'
     CLUSTER_JOB_LOGS = 'logs'
     CLUSTER_JOB_DOWNLOAD_LOGS = 'download_logs'
+    CLUSTER_AUTOSTOP_LOGS = 'autostop_logs'
     CLUSTER_COST_REPORT = 'cost_report'
+    CLUSTER_EVENTS = 'cluster_events'
     # Storage requests
     STORAGE_LS = 'storage_ls'
     STORAGE_DELETE = 'storage_delete'
@@ -50,6 +56,7 @@ class RequestName(str, enum.Enum):
     JOBS_POOL_STATUS = 'jobs.pool_status'
     JOBS_POOL_LOGS = 'jobs.pool_logs'
     JOBS_POOL_SYNC_DOWN_LOGS = 'jobs.pool_sync_down_logs'
+    JOBS_EVENTS = 'jobs.events'
     # Serve requests
     SERVE_UP = 'serve.up'
     SERVE_UPDATE = 'serve.update'
@@ -72,12 +79,20 @@ class RequestName(str, enum.Enum):
     # SSH node pools requests
     SSH_NODE_POOLS_UP = 'ssh_node_pools.up'
     SSH_NODE_POOLS_DOWN = 'ssh_node_pools.down'
+    # Recipes requests
+    RECIPE_LIST = 'recipes.list'
+    RECIPE_GET = 'recipes.get'
+    RECIPE_CREATE = 'recipes.create'
+    RECIPE_UPDATE = 'recipes.update'
+    RECIPE_DELETE = 'recipes.delete'
+    RECIPE_PIN = 'recipes.pin'
     # Internal request daemons
     REQUEST_DAEMON_STATUS_REFRESH = 'status-refresh'
     REQUEST_DAEMON_VOLUME_REFRESH = 'volume-refresh'
     REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH = 'managed-job-status-refresh'
     REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH = 'sky-serve-status-refresh'
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
+    REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
 
     def __repr__(self):
         return self.value

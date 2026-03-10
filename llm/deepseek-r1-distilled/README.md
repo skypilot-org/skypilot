@@ -6,13 +6,13 @@
 <img src="https://i.imgur.com/6umSuKw.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
 </p>
 
-On Jan 20, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters. 
+On Jan 20, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters.
 
 DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning behaviors. It outperforms **state-of-the-art proprietary models** such as OpenAI-o1-mini and becomes **the first time** an open LLM closely rivals like OpenAI-o1.
 
-This guide walks through how to run and host DeepSeek-R1 models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public Clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)). 
+This guide walks through how to run and host DeepSeek-R1 models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public Clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
 
-Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
+Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example.
 
 **New**: We added a new SkyPilot YAML for running [DeepSeek-R1 671B with SGLang](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1).
 
@@ -26,7 +26,7 @@ pip install 'skypilot-nightly[all]'
 
 Pick one of the following depending on what infra you want to run DeepSeek-R1 on:
 
-**If your local machine/cluster has GPU**: you can run SkyPilot [directly on existing machines](https://docs.skypilot.co/en/latest/reservations/existing-machines.html) with 
+**If your local machine/cluster has GPU**: you can run SkyPilot [directly on existing machines](https://docs.skypilot.co/en/latest/reservations/existing-machines.html) with
 
 ```bash
 sky local up
@@ -35,16 +35,16 @@ sky local up
 **If you want to use Clouds** (15+ clouds are supported):
 
 ```bash
-sky check 
+sky check
 ```
 See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html) for details.
 
 
 ## Step 1: Run it with SkyPilot
 
-Now it's time to run deepseek with SkyPilot. The instruction can be dependent on your existing hardware.  
+Now it's time to run deepseek with SkyPilot. The instruction can be dependent on your existing hardware.
 
-8B: 
+8B:
 ```
 sky launch deepseek-r1-vllm.yaml \
   -c deepseek \
@@ -52,7 +52,7 @@ sky launch deepseek-r1-vllm.yaml \
   --gpus L4:1
 ```
 
-70B: 
+70B:
 ```
 sky launch deepseek-r1-vllm.yaml \
   -c deepseek \
@@ -60,16 +60,16 @@ sky launch deepseek-r1-vllm.yaml \
   --gpus A100-80GB:2
 ```
 
-replace the command with the model and the GPU that you wish to use. You may run `sky show-gpus` to know what GPU that you have access to. As a reference, here is the model-GPU compatibility matrix:
+replace the command with the model and the GPU that you wish to use. You may run `sky gpus list` to know what GPU that you have access to. As a reference, here is the model-GPU compatibility matrix:
 
-| **GPU**         	| **DeepSeek-R1-Distill-Qwen-7B**  | **DeepSeek-R1-Distill-Llama-70B** 	| **DeepSeek-R1**  	| 
+| **GPU**         	| **DeepSeek-R1-Distill-Qwen-7B**  | **DeepSeek-R1-Distill-Llama-70B** 	| **DeepSeek-R1**  	|
 |-----------------	|------------------------------	|------------------------	|------------------------------	|
 | **L4:1**        	| ✅, with `--max-model-len 4096` 	| ❌                      	| ❌                            	|
 | **L4:8**        	| ✅                            	| ❌                      	| ❌                            	|
 | **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
 | **A100-80GB:12** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
 
-## Step 2: Get Results 
+## Step 2: Get Results
 Get a single endpoint that load-balances across replicas:
 
 ```
@@ -77,7 +77,7 @@ ENDPOINT=$(sky status --ip deepseek)
 ```
 
 Query the endpoint in a terminal:
-8B: 
+8B:
 ```
 curl http://$ENDPOINT:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -96,7 +96,7 @@ curl http://$ENDPOINT:8000/v1/chat/completions \
   }' | jq .
 ```
 
-70B: 
+70B:
 ```
 curl http://$ENDPOINT:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -113,15 +113,15 @@ curl http://$ENDPOINT:8000/v1/chat/completions \
       }
     ]
   }' | jq .
-```    
+```
 </details>
 
-You will get both the chain of thoughts within `<think>` tags and the final results. 
+You will get both the chain of thoughts within `<think>` tags and the final results.
 
 <details>
     <summary>Who are you? I'm DeepSeek-R1.</summary>
 
-Greetings! I'm DeepSeek-R1, an artificial intelligence assistant created by DeepSeek. I'm at your service and would be delighted to assist you with any inquiries or tasks you may have. 
+Greetings! I'm DeepSeek-R1, an artificial intelligence assistant created by DeepSeek. I'm at your service and would be delighted to assist you with any inquiries or tasks you may have.
 
 ```console
 {
@@ -249,12 +249,12 @@ Answer: There are 3 Rs in "strawberry."
   "prompt_logprobs": null
 }
 ```
-    
+
 </details>
 
 
-## Shutdown 
-To shutdown, run 
+## Shutdown
+To shutdown, run
 ```
 sky down deepseek
 ```

@@ -1,0 +1,84 @@
+# Multi-node serving with NVIDIA Dynamo and SGLang in disaggregation mode.
+#
+# Usage:
+#
+#  sky launch -c dynamo-multi nvidia-dynamo-multinode.sky.yaml
+#
+# This config uses 2 nodes with 8x H100 GPUs each for disaggregated serving.
+# Optionally override the model:
+#
+#  sky launch -c dynamo-multi nvidia-dynamo-multinode.sky.yaml --env MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct --env HF_TOKEN
+
+resources:
+  accelerators: {H100:8, H200:8}
+  ports: 8080
+  # Use the official NVIDIA Dynamo SGLang runtime image from NGC
+  image_id: docker:nvcr.io/nvidia/ai-dynamo/sglang-runtime:0.7.1
+
+num_nodes: 2
+
+envs:
+  MODEL_NAME: Qwen/Qwen3-8B
+  DIST_INIT_PORT: 29500
+  HF_TOKEN: "" # needed if a model is gated in HF Hub. Pass the value with `--env HF_TOKEN`
+
+run: |
+  HEAD_IP=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  TOTAL_GPUS=$((SKYPILOT_NUM_NODES * SKYPILOT_NUM_GPUS_PER_NODE))
+
+  # For disaggregation mode, we need dp-size > 1
+  # Setting TP to half of total GPUs and DP to 2 for proper distribution
+  TP_SIZE=$((TOTAL_GPUS / 2))
+  DP_SIZE=2
+
+  # Get the network interface for GLOO
+  export GLOO_SOCKET_IFNAME=$(ip -o -4 route show to default | awk '{print $5}')
+
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    # Head node: Start NATS and etcd services
+    echo "Starting NATS and etcd on head node..."
+    nats-server -js &
+    etcd --listen-client-urls http://0.0.0.0:2379 \
+         --advertise-client-urls http://${HEAD_IP}:2379 \
+         --data-dir /tmp/etcd &
+    sleep 3
+
+    # Start frontend with KV-aware routing enabled
+    python -m dynamo.frontend --router-mode kv --http-port 8080 &
+  else
+    # Worker nodes: Wait for head node services to be ready
+    echo "Waiting for head node services..."
+    sleep 5
+  fi
+
+  # Set connection endpoints for NATS and etcd (all nodes connect to head)
+  export NATS_SERVER=nats://${HEAD_IP}:4222
+  export ETCD_ENDPOINTS=http://${HEAD_IP}:2379
+
+  # All nodes run SGLang workers
+  python -m dynamo.sglang \
+    --model-path $MODEL_NAME \
+    --tp $TP_SIZE \
+    --dp-size $DP_SIZE \
+    --dist-init-addr $HEAD_IP:$DIST_INIT_PORT \
+    --nnodes ${SKYPILOT_NUM_NODES} \
+    --node-rank ${SKYPILOT_NODE_RANK} \
+    --host 0.0.0.0 \
+    --port 8081 \
+    --enable-dp-attention \
+    --trust-remote-code \
+    --mem-fraction-static 0.82 \
+    --disaggregation-transfer-backend nixl \
+    --disaggregation-bootstrap-port 30001 \
+    --page-size 16
+
+# Kubernetes-specific configuration
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+        - securityContext:
+            # Run as root to allow SkyPilot to install necessary packages
+            runAsUser: 0
+            runAsGroup: 0

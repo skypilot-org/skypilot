@@ -4,11 +4,16 @@ import os
 import random
 import shlex
 import textwrap
+import typing
 from typing import Optional
 
 from sky import exceptions
+from sky import skypilot_config
 from sky.skylet import constants
 from sky.utils import command_runner
+
+if typing.TYPE_CHECKING:
+    from sky.data import storage
 
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'
@@ -223,7 +228,10 @@ def get_gcs_mount_cmd(bucket_name: str,
     """Returns a command to mount a GCS bucket using gcsfuse."""
     bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
         if _bucket_sub_path else ''
-    mount_cmd = ('gcsfuse -o allow_other '
+    log_file = '$(mktemp -t gcsfuse.XXXX.log)'
+    mount_cmd = (f'gcsfuse --log-file {log_file} '
+                 '--debug_fuse_errors '
+                 '-o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
@@ -246,14 +254,19 @@ def get_az_mount_install_cmd() -> str:
         # Try to install fuse3 from default repos
         'sudo apt-get update && '
         'FUSE3_INSTALLED=0 && '
+        # Detect which libfuse3 package is available. Debian 13+ (trixie) uses
+        # libfuse3-4 instead of libfuse3-3 due to library soname bump.
+        'LIBFUSE3_PKG=$(apt-cache search --names-only "^libfuse3-[0-9]+$" '
+        '2>/dev/null | head -1 | cut -d" " -f1) && '
+        'LIBFUSE3_PKG="${LIBFUSE3_PKG:-libfuse3-3}" && '
         # On Kubernetes, if FUSERMOUNT_SHARED_DIR is set, it means
         # fusermount and fusermount3 is symlinked to fusermount-shim.
         # If we reinstall fuse3, it may overwrite the symlink, so
         # just install libfuse3, which is needed by blobfuse2.
         'if [ -n "${FUSERMOUNT_SHARED_DIR:-}" ]; then '
-        '  PACKAGES="libfuse3-3 libfuse3-dev"; '
+        '  PACKAGES="$LIBFUSE3_PKG libfuse3-dev"; '
         'else '
-        '  PACKAGES="fuse3 libfuse3-3 libfuse3-dev"; '
+        '  PACKAGES="fuse3 $LIBFUSE3_PKG libfuse3-dev"; '
         'fi && '
         'if sudo apt-get install -y '
         '-o Dpkg::Options::="--force-confdef" '
@@ -292,6 +305,19 @@ def get_az_mount_install_cmd() -> str:
         # Install blobfuse2 only if fuse3 is available
         'if [ "$FUSE3_INSTALLED" = "1" ]; then '
         '  echo "Installing blobfuse2 with libfuse3 support"; '
+        # Workaround for Debian 13+ where libfuse3 soname changed from 3 to 4.
+        # The blobfuse2 binary still links against libfuse3.so.3, so we create
+        # a symlink if needed.
+        '  LIBFUSE_SO=$(find /usr/lib -name "libfuse3.so.3.*" 2>/dev/null | '
+        'head -1) && '
+        '  if [ -n "$LIBFUSE_SO" ]; then '
+        '    LIBFUSE_DIR=$(dirname "$LIBFUSE_SO") && '
+        '    if [ ! -e "$LIBFUSE_DIR/libfuse3.so.3" ]; then '
+        '      echo "Creating libfuse3.so.3 symlink for compatibility"; '
+        '      sudo ln -s $(basename "$LIBFUSE_SO") '
+        '"$LIBFUSE_DIR/libfuse3.so.3"; '
+        '    fi; '
+        '  fi && '
         '  wget -nc https://github.com/Azure/azure-storage-fuse'
         f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}/'
         f'blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
@@ -451,8 +477,13 @@ def get_cos_mount_cmd(rclone_config: str,
     return mount_cmd
 
 
-def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
-                         bucket_name: str, mount_path: str) -> str:
+def get_mount_cached_cmd(
+        rclone_config: str,
+        rclone_profile_name: str,
+        bucket_name: str,
+        mount_path: str,
+        mount_cached_config: Optional['storage.MountCachedConfig'] = None
+) -> str:
     """Returns a command to mount a bucket using rclone with vfs cache."""
     # stores bucket profile in rclone config file at the remote nodes.
     configure_rclone_profile = (f'{FUSE3_INSTALL_CMD} && '
@@ -470,6 +501,22 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                  f'{hashed_mount_path}.log')
     create_log_cmd = (f'mkdir -p {constants.RCLONE_MOUNT_CACHED_LOG_DIR} && '
                       f'touch {log_file_path}')
+
+    if mount_cached_config is None:
+        # pylint: disable=import-outside-toplevel
+        from sky.data import storage
+
+        # initialize an empty one for SkyPilot defaults.
+        mount_cached_config = storage.MountCachedConfig()
+
+    # Check if sequential upload is enabled via config.
+    # Default is False (parallel uploads for better performance).
+    # TODO (kyuds): deprecated; remove v0.13.0
+    sequential_upload = skypilot_config.get_nested(
+        ('data', 'mount_cached', 'sequential_upload'), False)
+    if sequential_upload and mount_cached_config.transfers is None:
+        mount_cached_config.transfers = 1
+
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
@@ -488,20 +535,16 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # interval allows for faster detection of new or updated files on the
         # remote, but increases the frequency of metadata lookups.
         '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
-        # '--transfers 1' guarantees the files written at the local mount point
-        # to be uploaded to the backend storage in the order of creation.
         # '--vfs-cache-poll-interval' specifies the frequency of how often
         # rclone checks the local mount point for stale objects in cache.
-        # '--vfs-write-back' defines the time to write files on remote storage
-        # after last use of the file in local mountpoint.
-        '--transfers 1 --vfs-cache-poll-interval 10s --vfs-write-back 1s '
-        # Have rclone evict files if the cache size exceeds 10G.
-        # This is to prevent cache from growing too large and
-        # using up all the disk space. Note that files that opened
-        # by a process is not evicted from the cache.
-        '--vfs-cache-max-size 10G '
+        '--vfs-cache-poll-interval 10s '
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # Use a faster fingerprint algorithm to detect changes in files.
+        # Recommended by rclone documentation for buckets like s3.
+        '--vfs-fast-fingerprint '
+        # Other customizable rclone flags. Refer to `MountCachedConfig`.
+        f'{mount_cached_config.to_rclone_flags()} '
         # This command produces children processes, which need to be
         # detached from the current process's terminal. The command doesn't
         # produce any output, so we aren't dropping any logs.
@@ -646,8 +689,35 @@ def get_mounting_script(
                 else
                     echo "No goofys log file found in /tmp"
                 fi
+            elif [ "$MOUNT_BINARY" = "gcsfuse" ]; then
+                echo "Looking for gcsfuse log files..."
+                # Find gcsfuse log files in /tmp (created by mktemp -t gcsfuse.XXXX.log)
+                GCSFUSE_LOGS=$(ls -t /tmp/gcsfuse.*.log 2>/dev/null | head -1)
+                if [ -n "$GCSFUSE_LOGS" ]; then
+                    echo "=== GCSFuse log file contents ==="
+                    cat "$GCSFUSE_LOGS"
+                    echo "=== End of gcsfuse log file ==="
+                else
+                    echo "No gcsfuse log file found in /tmp"
+                fi
+            elif [ "$MOUNT_BINARY" = "rclone" ]; then
+                echo "Looking for rclone log files..."
+                # Find rclone log files in ~/.sky/rclone_log/ (for MOUNT_CACHED mode)
+                RCLONE_LOG_DIR={constants.RCLONE_MOUNT_CACHED_LOG_DIR}
+                if [ -d "$RCLONE_LOG_DIR" ]; then
+                    RCLONE_LOGS=$(ls -t "$RCLONE_LOG_DIR"/*.log 2>/dev/null | head -1)
+                    if [ -n "$RCLONE_LOGS" ]; then
+                        echo "=== Rclone log file contents ==="
+                        tail -50 "$RCLONE_LOGS"
+                        echo "=== End of rclone log file ==="
+                    else
+                        echo "No rclone log file found in $RCLONE_LOG_DIR"
+                    fi
+                else
+                    echo "Rclone log directory $RCLONE_LOG_DIR not found"
+                fi
             fi
-            # TODO(kevin): Print logs from rclone, etc too for observability.
+            # TODO(kevin): Print logs from blobfuse2, etc too for observability.
             exit $MOUNT_EXIT_CODE
         fi
         echo "Mounting done."

@@ -1,4 +1,5 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
+import asyncio
 import contextlib
 import functools
 import os
@@ -14,7 +15,6 @@ import prometheus_client as prom
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import context_utils
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -60,10 +60,21 @@ SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
 )
 
 # Total number of API server requests, grouped by path, method, and status.
+# TODO(kevinzwang): Panels that only need method/status grouping should migrate
+# to SKY_APISERVER_REQUESTS_BY_USER_TOTAL (aggregated across users). Remove
+# this metric after v0.14.0 if all consumers have migrated.
 SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     'sky_apiserver_requests_total',
     'Total number of API server requests',
     ['path', 'method', 'status'],
+)
+
+# Total number of API server requests per user.
+# This is a separate metric to avoid high cardinality in the primary metric.
+SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
+    'sky_apiserver_requests_by_user_total',
+    'Total number of API server requests per user',
+    ['user', 'method', 'status'],
 )
 
 # Time spent processing API server requests, grouped by path, method, and
@@ -238,8 +249,18 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     ]
 
     env = os.environ.copy()
-    if 'KUBECONFIG' not in env:
-        env['KUBECONFIG'] = os.path.expanduser('~/.kube/config')
+    # Use SkyPilot's kubeconfig discovery which respects KUBECONFIG env var
+    # (set by credential manager plugin) and falls back to ~/.kube/config.
+    # Always set explicitly so subprocess gets the resolved paths even if
+    # env var was modified after os.environ was last copied.
+    # Import lazily to avoid circular import (metrics -> provision -> clouds
+    # -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    kubeconfig_paths = kubernetes_utils.get_kubeconfig_paths()
+    env['KUBECONFIG'] = kubernetes_adaptors.ENV_KUBECONFIG_PATH_SEPARATOR.join(
+        kubeconfig_paths)
 
     port_forward_process = None
     port_forward_exit = False
@@ -356,7 +377,7 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     try:
         # Start port forward
-        port_forward_process, local_port = await context_utils.to_thread(
+        port_forward_process, local_port = await asyncio.to_thread(
             start_svc_port_forward, context, namespace, service, service_port)
 
         # Build endpoint URL
@@ -381,8 +402,7 @@ async def send_metrics_request_with_port_forward(
     finally:
         # Always clean up port forward
         if port_forward_process:
-            await context_utils.to_thread(stop_svc_port_forward,
-                                          port_forward_process)
+            await asyncio.to_thread(stop_svc_port_forward, port_forward_process)
 
 
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:

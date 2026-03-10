@@ -2,9 +2,11 @@ import os
 import pathlib
 from unittest import mock
 
+from sky import check as sky_check
 from sky import clouds
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.exceptions import ClusterNotUpError
 from sky.resources import Resources
 from sky.utils import common
 from sky.utils import common_utils
@@ -283,3 +285,105 @@ def test_get_clusters_launch_refresh(monkeypatch):
 
     assert len(
         backend_utils.get_clusters(refresh=common.StatusRefreshMode.FORCE)) == 2
+
+
+def test_kubeconfig_upload_with_kubernetes_exclusion():
+    """Tests kubeconfig upload behavior with Kubernetes/SSH cloud exclusion.
+
+    This is a regression test for a bug where kubeconfig was uploaded even when
+    `remote_identity: SERVICE_ACCOUNT` was set for a Kubernetes cluster. This
+    happened because `SSH` inherits from `Kubernetes` and was not being
+    explicitly excluded, causing it to upload the kubeconfig.
+    """
+    # Mock get_credential_file_mounts on Kubernetes to return kubeconfig.
+    # SSH inherits from Kubernetes, so it will also return kubeconfig.
+    kubeconfig_mounts = {'~/.kube/config': '~/.kube/config'}
+
+    with mock.patch.object(clouds.Kubernetes,
+                           'get_credential_file_mounts',
+                           return_value=kubeconfig_mounts):
+        # 1. Test the buggy behavior: only Kubernetes is excluded.
+        # SSH is not excluded, and since it inherits from Kubernetes, it will
+        # upload the kubeconfig via the (mocked) inherited method.
+        excluded_clouds_buggy = {clouds.Kubernetes()}
+
+        # Mock os.path functions for the credential collection loop
+        with mock.patch('os.path.exists', return_value=True), \
+             mock.patch('os.path.expanduser', side_effect=lambda x: x), \
+             mock.patch('os.path.realpath', side_effect=lambda x: x):
+            credentials_buggy = sky_check.get_cloud_credential_file_mounts(
+                excluded_clouds_buggy)
+
+        assert '~/.kube/config' in credentials_buggy, (
+            'Kubeconfig should be uploaded when only Kubernetes is excluded. '
+            'This demonstrates the buggy behavior that the fix in '
+            'write_cluster_config() is meant to prevent.')
+
+        # 2. Test the correct behavior: both Kubernetes and SSH are excluded.
+        # Kubeconfig should not be in the returned credentials.
+        excluded_clouds_fixed = {clouds.Kubernetes(), clouds.SSH()}
+
+        with mock.patch('os.path.exists', return_value=True), \
+             mock.patch('os.path.expanduser', side_effect=lambda x: x), \
+             mock.patch('os.path.realpath', side_effect=lambda x: x):
+            credentials_fixed = sky_check.get_cloud_credential_file_mounts(
+                excluded_clouds_fixed)
+
+        assert '~/.kube/config' not in credentials_fixed, (
+            'Kubeconfig should not be uploaded when both Kubernetes and SSH '
+            'are excluded.')
+
+
+@mock.patch('sky.backends.backend_utils.get_backend_from_handle')
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_check_cluster_available_accepts_autostopping(mock_refresh,
+                                                      mock_get_backend):
+    """Verify check_cluster_available accepts AUTOSTOPPING status."""
+    # Mock AUTOSTOPPING cluster
+    mock_handle = mock.MagicMock()
+    mock_refresh.return_value = (status_lib.ClusterStatus.AUTOSTOPPING,
+                                 mock_handle)
+    mock_get_backend.return_value = mock.MagicMock()
+
+    # Should not raise ClusterNotUpError for AUTOSTOPPING
+    result = backend_utils.check_cluster_available(
+        'test-cluster',
+        operation='test_operation',
+        check_cloud_vm_ray_backend=False)
+    assert result == mock_handle
+
+
+@mock.patch('sky.backends.backend_utils.get_backend_from_handle')
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_check_cluster_available_rejects_init(mock_refresh, mock_get_backend):
+    """Verify check_cluster_available rejects INIT status."""
+    mock_handle = mock.MagicMock()
+    mock_refresh.return_value = (status_lib.ClusterStatus.INIT, mock_handle)
+    mock_get_backend.return_value = mock.MagicMock()
+
+    # Should raise ClusterNotUpError for INIT
+    try:
+        backend_utils.check_cluster_available('test-cluster',
+                                              operation='test_operation',
+                                              check_cloud_vm_ray_backend=False)
+        assert False, 'Expected ClusterNotUpError to be raised'
+    except ClusterNotUpError:
+        pass
+
+
+@mock.patch('sky.backends.backend_utils.refresh_cluster_status_handle')
+def test_is_controller_accessible_accepts_autostopping(mock_refresh):
+    """Verify is_controller_accessible accepts AUTOSTOPPING status."""
+    from sky.utils import controller_utils
+
+    mock_handle = mock.MagicMock()
+    mock_handle.head_ip = '1.2.3.4'
+    mock_refresh.return_value = (status_lib.ClusterStatus.AUTOSTOPPING,
+                                 mock_handle)
+
+    # Should not raise for AUTOSTOPPING controller
+    result = backend_utils.is_controller_accessible(
+        controller_utils.Controllers.JOBS_CONTROLLER,
+        stopped_message='Test stopped',
+        exit_if_not_accessible=False)
+    assert result == mock_handle

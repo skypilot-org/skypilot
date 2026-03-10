@@ -72,7 +72,6 @@ EXTERNAL_LOCAL_ENV_VARS = [
 ]
 
 
-@annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
@@ -83,9 +82,13 @@ def request_body_env_vars() -> dict:
         if common.is_api_server_local() and env_var in EXTERNAL_LOCAL_ENV_VARS:
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
-    env_vars[constants.USER_ENV_VAR] = common_utils.get_current_user_name()
+    env_vars[constants.USER_ENV_VAR] = common_utils.get_local_user_name()
     env_vars[
         usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
+    # Send client user hash for basic auth at API server case, so the server
+    # can include it in its own usage report.
+    if common.basic_auth_enabled and common.client_user_hash is not None:
+        env_vars[constants.CLIENT_USER_HASH_ENV_VAR] = common.client_user_hash
     if not common.is_api_server_local():
         # Used in job controller, for local API server, keep the
         # SKYPILOT_CONFIG env var to use the config for the managed job.
@@ -199,6 +202,19 @@ class EnabledCloudsBody(RequestBody):
     expand: bool = False
 
 
+class EnabledCloudsBatchBody(RequestBody):
+    """The request body for the batch enabled clouds endpoint."""
+    workspaces: List[str]
+    expand: bool = False
+
+
+class KubernetesLabelGpusBody(RequestBody):
+    """The request body for the GPU labeling endpoint."""
+    context: Optional[str] = None
+    cleanup_only: bool = False
+    wait_for_completion: bool = True
+
+
 class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str
@@ -211,7 +227,7 @@ class DagRequestBody(RequestBody):
 
         kwargs = super().to_kwargs()
 
-        dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
+        dag = dag_utils.load_dag_from_yaml_str(self.dag)
         # We should not validate the dag here, as the file mounts are not
         # processed yet, but we need to validate the resources during the
         # optimization to make sure the resources are available.
@@ -315,6 +331,8 @@ class ExecBody(RequestBody):
 class StopOrDownBody(RequestBody):
     cluster_name: str
     purge: bool = False
+    graceful: bool = False
+    graceful_timeout: Optional[int] = None
 
 
 class StatusBody(RequestBody):
@@ -347,6 +365,8 @@ class AutostopBody(RequestBody):
     idle_minutes: int
     wait_for: Optional[autostop_lib.AutostopWaitFor] = None
     down: bool = False
+    hook: Optional[str] = None
+    hook_timeout: Optional[int] = None
 
 
 class QueueBody(RequestBody):
@@ -377,6 +397,13 @@ class ProvisionLogsBody(RequestBody):
     """Cluster node."""
     cluster_name: str
     worker: Optional[int] = None
+
+
+class AutostopLogsBody(RequestBody):
+    """Autostop logs request body."""
+    cluster_name: str
+    follow: bool = True
+    tail: int = 0
 
 
 class ClusterJobBody(RequestBody):
@@ -483,11 +510,12 @@ class VolumeApplyBody(RequestBody):
 class VolumeDeleteBody(RequestBody):
     """The request body for the volume delete endpoint."""
     names: List[str]
+    purge: bool = False
 
 
 class VolumeListBody(RequestBody):
     """The request body for the volume list endpoint."""
-    pass
+    refresh: bool = False
 
 
 class VolumeValidateBody(RequestBody):
@@ -556,6 +584,9 @@ class JobsQueueV2Body(RequestBody):
     # The fields to return in the response.
     # Refer to the fields in the `class ManagedJobRecord` in `response.py`
     fields: Optional[List[str]] = None
+    # Sorting parameters, added in ManagedJobsService v14.
+    sort_by: Optional[str] = None  # Field to sort by (e.g., 'job_id', 'name')
+    sort_order: Optional[str] = None  # 'asc' or 'desc'
 
 
 class JobsCancelBody(RequestBody):
@@ -565,6 +596,8 @@ class JobsCancelBody(RequestBody):
     all: bool = False
     all_users: bool = False
     pool: Optional[str] = None
+    graceful: bool = False
+    graceful_timeout: Optional[int] = None
 
 
 class JobsLogsBody(RequestBody):
@@ -575,6 +608,8 @@ class JobsLogsBody(RequestBody):
     controller: bool = False
     refresh: bool = False
     tail: Optional[int] = None
+    # Task identifier: int for task_id, str for task_name
+    task: Optional[Union[str, int]] = None
 
 
 class RequestCancelBody(RequestBody):
@@ -590,6 +625,7 @@ class RequestStatusBody(pydantic.BaseModel):
     all_status: bool = False
     limit: Optional[int] = None
     fields: Optional[List[str]] = None
+    cluster_name: Optional[str] = None
 
 
 class ServeUpBody(RequestBody):
@@ -671,6 +707,11 @@ class KubernetesNodeInfoRequestBody(RequestBody):
     context: Optional[str] = None
 
 
+class SlurmNodeInfoRequestBody(RequestBody):
+    """The request body for the slurm node info endpoint."""
+    slurm_cluster_name: Optional[str] = None
+
+
 class ListAcceleratorsBody(RequestBody):
     """The request body for the list accelerators endpoint."""
     gpus_only: bool = True
@@ -695,12 +736,6 @@ class ListAcceleratorCountsBody(RequestBody):
 class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True
-    ips: Optional[List[str]] = None
-    ssh_user: Optional[str] = None
-    ssh_key: Optional[str] = None
-    cleanup: bool = False
-    context_name: Optional[str] = None
-    password: Optional[str] = None
     name: Optional[str] = None
     port_start: Optional[int] = None
 
@@ -861,3 +896,114 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+
+
+class SlurmGpuAvailabilityRequestBody(RequestBody):
+    """Request body for getting Slurm real-time GPU availability."""
+    slurm_cluster_name: Optional[str] = None
+    name_filter: Optional[str] = None
+    quantity_filter: Optional[int] = None
+
+
+class ClusterEventsBody(RequestBody):
+    """The request body for the cluster events endpoint."""
+    cluster_name: Optional[str] = None
+    cluster_hash: Optional[str] = None
+    event_type: str  # 'STATUS_CHANGE' or 'DEBUG'
+    include_timestamps: bool = False
+    limit: Optional[
+        int] = None  # If specified, returns at most this many events
+
+
+class GetJobEventsBody(RequestBody):
+    """The request body for the get job task events endpoint."""
+    job_id: int
+    task_id: Optional[int] = None
+    limit: Optional[int] = 10  # Default to 10 most recent task events
+
+
+# =============================================================================
+# YAML Hub payloads
+# =============================================================================
+
+
+class RecipeListBody(RequestBody):
+    """The request body for listing recipes."""
+    pinned_only: bool = False
+    my_recipes_only: bool = False
+    recipe_type: Optional[
+        str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id from env_vars for filtering by user
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        return kwargs
+
+
+class RecipeGetBody(RequestBody):
+    """The request body for getting a single recipe."""
+    recipe_name: str
+
+
+class RecipeCreateBody(RequestBody):
+    """The request body for creating a new recipe."""
+    name: str
+    content: str
+    recipe_type: str  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
+    description: Optional[str] = None
+    owner_name: Optional[str] = None  # Override user_name for unauthenticated
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id and user_name from env_vars
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        # Use owner_name if provided (for unauthenticated users), else use env
+        # var.
+        if self.owner_name:
+            kwargs['user_name'] = self.owner_name
+        else:
+            kwargs['user_name'] = self.env_vars.get(constants.USER_ENV_VAR,
+                                                    'local')
+        # Remove owner_name from kwargs - it's only used to set user_name above
+        kwargs.pop('owner_name', None)
+        return kwargs
+
+
+class RecipeUpdateBody(RequestBody):
+    """The request body for updating an existing recipe."""
+    recipe_name: str
+    description: Optional[str] = None
+    content: Optional[str] = None
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id and user_name from env_vars
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        kwargs['user_name'] = self.env_vars.get(constants.USER_ENV_VAR, 'local')
+        return kwargs
+
+
+class RecipeDeleteBody(RequestBody):
+    """The request body for deleting a recipe."""
+    recipe_name: str
+
+    def to_kwargs(self) -> Dict[str, Any]:
+        kwargs = super().to_kwargs()
+        # Inject user_id from env_vars for ownership check
+        # Fallback to 'local' for unauthenticated local servers
+        kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
+                                              'local')
+        return kwargs
+
+
+class RecipePinBody(RequestBody):
+    """The request body for toggling pin status."""
+    recipe_name: str
+    pinned: bool

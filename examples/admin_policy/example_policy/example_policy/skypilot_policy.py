@@ -71,7 +71,7 @@ class DisablePublicIpPolicy(sky.AdminPolicy):
             cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
         config = user_request.skypilot_config
         config.set_nested(('aws', 'use_internal_ip'), True)
-        if config.get_nested(('aws', 'vpc_name'), None) is None:
+        if config.get_nested(('aws', 'vpc_names'), None) is None:
             # If no VPC name is specified, it is likely a mistake. We should
             # reject the request
             raise RuntimeError('VPC name should be set. Check organization '
@@ -94,7 +94,7 @@ class UseSpotForGpuPolicy(sky.AdminPolicy):
             else:
                 new_resources.append(r)
 
-        task.set_resources(type(task.resources)(new_resources))
+        task.set_resources(new_resources)
 
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
@@ -487,3 +487,106 @@ class GPUStaticQuotaPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(
             task=user_request.task,
             skypilot_config=user_request.skypilot_config)
+
+
+class RejectOldClientsPolicy(sky.AdminPolicy):
+    """Example policy: reject clients with an old API version.
+
+    This policy demonstrates how to use the client version information
+    to enforce minimum client versions. This is useful for ensuring all
+    users are running a compatible version of SkyPilot.
+
+    The policy checks the client's API version and rejects requests from
+    clients that are below the minimum required version.
+    """
+
+    # Minimum required API version. Clients with a lower version will be
+    # rejected. This should be updated when breaking changes are introduced
+    # that require all clients to upgrade.
+    MIN_REQUIRED_API_VERSION = 25
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Reject requests from clients with an old API version."""
+        # Version check is only applied at the server-side.
+        if not user_request.at_client_side:
+            # Check client API version
+            if user_request.client_api_version is not None:
+                if user_request.client_api_version < cls.MIN_REQUIRED_API_VERSION:
+                    raise RuntimeError(
+                        f'Client API version {user_request.client_api_version} '
+                        f'is below the minimum required version '
+                        f'{cls.MIN_REQUIRED_API_VERSION}. '
+                        f'Please upgrade your SkyPilot client. '
+                        f'Your client version: {user_request.client_version}')
+            else:
+                # client_api_version is None for very old clients that don't send
+                # version headers. You may choose to reject these clients as well.
+                raise RuntimeError(
+                    'Client version information is not available. '
+                    'Please upgrade your SkyPilot client to a recent version.')
+
+        return sky.MutatedUserRequest(
+            task=user_request.task,
+            skypilot_config=user_request.skypilot_config)
+
+
+class SlurmPartitionRoutingPolicy(sky.AdminPolicy):
+    """Example policy: route Slurm jobs to the appropriate partition
+    based on requested resources.
+
+    This policy automatically sets the Slurm partition (zone) for tasks
+    targeting Slurm clusters based on the type of resources requested:
+
+    - GPU tasks are routed to the 'gpu' partition.
+    - High-memory CPU tasks (>64GB) are routed to the 'highmem' partition.
+    - All other CPU tasks are routed to the 'cpu' partition.
+
+    The policy only applies to Slurm resources that do not already have a
+    partition (zone) specified by the user, so explicit user choices are
+    always respected.
+
+    Admins should customize the partition names, routing rules, and memory
+    threshold to match their Slurm cluster configuration.
+    """
+
+    # Partition routing rules - customize these for your cluster.
+    GPU_PARTITION = 'gpu'
+    HIGHMEM_PARTITION = 'highmem'
+    CPU_PARTITION = 'cpu'
+    # Memory threshold (in GB) for routing to the high-memory partition.
+    HIGHMEM_THRESHOLD_GB = 64
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Routes Slurm tasks to partitions based on resource type."""
+        task = user_request.task
+        new_resources = []
+        for r in task.resources:
+            # Only apply to Slurm resources that don't already have a
+            # partition (zone) specified by the user.
+            if isinstance(r.cloud, sky.clouds.Slurm) and r.zone is None:
+                new_resources.append(r.copy(zone=cls._get_partition(r)))
+            else:
+                new_resources.append(r)
+
+        task.set_resources(new_resources)
+        return sky.MutatedUserRequest(
+            task=task, skypilot_config=user_request.skypilot_config)
+
+    @classmethod
+    def _get_partition(cls, r: 'sky.Resources') -> str:
+        """Determines the target partition for a resource request."""
+        # GPU requests go to the GPU partition.
+        if r.accelerators:
+            return cls.GPU_PARTITION
+        # High-memory CPU requests go to the high-memory partition.
+        memory = r.memory
+        if memory is not None:
+            mem_val = float(str(memory).rstrip('+'))
+            if mem_val > cls.HIGHMEM_THRESHOLD_GB:
+                return cls.HIGHMEM_PARTITION
+        # Default: standard CPU partition.
+        return cls.CPU_PARTITION

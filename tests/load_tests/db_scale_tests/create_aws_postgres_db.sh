@@ -81,20 +81,22 @@ fi
 
 # Get VPC and subnets if instance doesn't exist - use EKS VPC if available, otherwise use default VPC
 if [ "$INSTANCE_EXISTS" = "false" ]; then
-if [ -n "$EKS_VPC_CONFIG" ]; then
-    echo "Using EKS VPC configuration from EKS_VPC_CONFIG..." >&2
+if [ -n "$EKS_VPC_CONFIG_PRIVATE" ]; then
+    echo "Using custom VPC configuration from EKS_VPC_CONFIG_PRIVATE..." >&2
+    # Convert literal \n to actual newlines for parsing
+    VPC_CONFIG_FOR_PARSING=$(printf '%b\n' "$EKS_VPC_CONFIG_PRIVATE")
     # Parse VPC ID from YAML format: "  id: vpc-xxx" (under vpc:)
     # Look for lines with "id:" that contain "vpc-" pattern
-    VPC_ID=$(echo "$EKS_VPC_CONFIG" | grep -E "^\s+id:\s+vpc-" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
+    VPC_ID=$(echo "$VPC_CONFIG_FOR_PARSING" | grep -E "^\s+id:\s+vpc-" | awk '{print $2}' | tr -d '"' | tr -d "'" | head -n1)
 
     if [ -z "$VPC_ID" ]; then
-        echo "WARNING: Could not parse VPC ID from EKS_VPC_CONFIG, falling back to default VPC" >&2
+        echo "WARNING: Could not parse VPC ID from EKS_VPC_CONFIG_PRIVATE, falling back to default VPC" >&2
         USE_EKS_VPC=false
     else
         # Parse subnet IDs from YAML format
         # Format: "        id: subnet-xxx" (nested under subnets/public/)
         # Look for lines with "id:" that contain "subnet-" pattern
-        SUBNET_IDS=$(echo "$EKS_VPC_CONFIG" | grep -E "^\s+id:\s+subnet-" | awk '{print $2}' | tr -d '"' | tr -d "'")
+        SUBNET_IDS=$(echo "$VPC_CONFIG_FOR_PARSING" | grep -E "^\s+id:\s+subnet-" | awk '{print $2}' | tr -d '"' | tr -d "'")
 
         # Convert to array
         SUBNET_ARRAY=($SUBNET_IDS)
@@ -126,6 +128,7 @@ if [ -n "$EKS_VPC_CONFIG" ]; then
     fi
 else
     USE_EKS_VPC=false
+    echo "Using default VPC configuration (EKS_VPC_CONFIG_PRIVATE not set)..." >&2
 fi
 
 if [ "$USE_EKS_VPC" != "true" ]; then

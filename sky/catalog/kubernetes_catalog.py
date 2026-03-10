@@ -18,8 +18,6 @@ from sky.catalog import common
 from sky.clouds import cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
 
-logger = sky_logging.init_logger(__name__)
-
 if typing.TYPE_CHECKING:
     import pandas as pd
 else:
@@ -32,7 +30,6 @@ _PULL_FREQUENCY_HOURS = 7
 # We keep pull_frequency_hours so we can remotely update the default image paths
 _image_df = common.read_catalog('kubernetes/images.csv',
                                 pull_frequency_hours=_PULL_FREQUENCY_HOURS)
-
 # TODO(romilb): Refactor implementation of common service catalog functions from
 #   clouds/kubernetes.py to kubernetes_catalog.py
 
@@ -204,6 +201,16 @@ def _list_accelerators(
     min_quantity_filter = quantity_filter if quantity_filter else 1
 
     for node in nodes:
+        # Check if node is ready
+        node_is_ready = node.is_ready()
+        node_is_cordoned = node.is_cordoned()
+        node_taints = node.get_taints(
+            exclude_cordon=True,
+            exclude_not_ready=True,
+            exclude_effects=['PreferNoSchedule'],
+            exclude_keys=kubernetes_utils.get_handled_taint_keys())
+        node_is_tainted = len(node_taints) > 0
+
         for key in keys:
             if key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
@@ -260,6 +267,16 @@ def _list_accelerators(
                         total_accelerators_capacity[
                             accelerator_name] += quantized_count
 
+                # Initialize the total_accelerators_available to make sure the
+                # key exists in the dictionary.
+                total_accelerators_available[accelerator_name] = (
+                    total_accelerators_available.get(accelerator_name, 0))
+
+                # Skip availability counting for not-ready, cordoned,
+                # or tainted nodes
+                if not node_is_ready or node_is_cordoned or node_is_tainted:
+                    continue
+
                 if error_on_get_allocated_gpu_qty_by_node:
                     # If we can't get the allocated GPU quantity by each node,
                     # we can't get the GPU usage.
@@ -268,10 +285,6 @@ def _list_accelerators(
 
                 allocated_qty = allocated_qty_by_node[node.metadata.name]
                 accelerators_available = accelerator_count - allocated_qty
-                # Initialize the total_accelerators_available to make sure the
-                # key exists in the dictionary.
-                total_accelerators_available[accelerator_name] = (
-                    total_accelerators_available.get(accelerator_name, 0))
 
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
@@ -284,10 +297,18 @@ def _list_accelerators(
                             total_accelerators_available.get(
                                 accelerator_name, 0) + quantized_availability)
 
-    result = []
+    pricing = _get_pricing(context)
 
-    # Generate dataframe for common.list_accelerators_impl
+    result = []
     for accelerator_name, accelerator_count in accelerators_qtys:
+        # CPU/memory cost excluded: instance type is unknown at listing time.
+        accel_price = common.get_hourly_cost_from_pricing(
+            pricing,
+            cpus=0,
+            memory=0,
+            accelerator_name=accelerator_name,
+            accelerator_count=int(accelerator_count),
+        )
         result.append(
             common.InstanceTypeInfo(cloud='Kubernetes',
                                     instance_type=None,
@@ -296,8 +317,8 @@ def _list_accelerators(
                                     cpu_count=None,
                                     device_memory=None,
                                     memory=None,
-                                    price=0.0,
-                                    spot_price=0.0,
+                                    price=accel_price,
+                                    spot_price=accel_price,
                                     region=context))
 
     df = pd.DataFrame(result,
@@ -307,13 +328,39 @@ def _list_accelerators(
                           'MemoryGiB', 'Price', 'SpotPrice', 'Region'
                       ])
     df['GpuInfo'] = True
-
-    # Use common.list_accelerators_impl to get InstanceTypeInfo objects used
-    # by sky show-gpus when cloud is not specified.
     qtys_map = common.list_accelerators_impl('Kubernetes', df, gpus_only,
                                              name_filter, region_filter,
                                              quantity_filter, case_sensitive)
     return qtys_map, total_accelerators_capacity, total_accelerators_available
+
+
+def _get_pricing(region: Optional[str]) -> Dict:
+    """Resolve the pricing dict for a Kubernetes context from config."""
+    paths: List[Tuple[str, ...]] = [('kubernetes', 'pricing')]
+    if region is not None:
+        paths.append(('kubernetes', 'context_configs', region, 'pricing'))
+    return common.resolve_pricing_config(*paths)
+
+
+def get_hourly_cost(instance_type: str,
+                    use_spot: bool,
+                    region: Optional[str] = None,
+                    zone: Optional[str] = None) -> float:
+    """Returns the hourly cost for a Kubernetes virtual instance type.
+
+    Pricing is read from the ``kubernetes.pricing`` section of
+    ``~/.sky/config.yaml``.
+    """
+    del use_spot, zone  # K8s has no spot/zone pricing.
+    instance = kubernetes_utils.KubernetesInstanceType.from_instance_type(
+        instance_type)
+    return common.get_hourly_cost_from_pricing(
+        _get_pricing(region),
+        cpus=instance.cpus,
+        memory=instance.memory,
+        accelerator_name=instance.accelerator_type,
+        accelerator_count=instance.accelerator_count,
+    )
 
 
 def validate_region_zone(

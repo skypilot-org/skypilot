@@ -1,0 +1,27 @@
+name: minimal
+
+resources:
+  use_spot: true
+  infra: gcp/us-central1/us-central1-a
+  accelerators: tpu-v5litepod-16:1
+  accelerator_args:
+    runtime_version: v2-alpha-tpuv5-lite
+    gcp_queued_resource: true
+
+setup: |
+  echo "running setup"
+  pip install tqdm
+  pip install jax[tpu]
+
+run: |
+  conda env list
+  python -u - << EOF
+  import time
+  import tqdm
+  import jax
+  print(jax.devices())
+
+  for i in tqdm.trange(240):
+    time.sleep(1)
+  
+  EOF

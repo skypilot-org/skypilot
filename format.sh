@@ -129,10 +129,7 @@ isort --profile black -l 88 -m 3 "sky/skylet/providers/ibm"
 # TODO(zhwu): When more of the codebase is typed properly, the mypy flags
 # should be set to do a more stringent check.
 echo 'SkyPilot mypy:'
-# Workaround for mypy 1.14.1 cache serialization bug that causes
-# "AssertionError: Internal error: unresolved placeholder type None"
-# Using --cache-dir=/dev/null disables cache writing to avoid the error
-mypy $(cat tests/mypy_files.txt) --cache-dir=/dev/null
+mypy $(cat tests/mypy_files.txt)
 
 # Run Pylint
 echo 'Sky Pylint:'
@@ -159,9 +156,9 @@ if ! npm -v || ! node -v; then
     # Don't fail the script if npm or node is not installed
     # because it's not required for all users
 else
-    npm --prefix sky/dashboard install
+    output=$(npm --prefix sky/dashboard install 2>&1) || { echo "$output"; exit 1; }
     npm --prefix sky/dashboard run lint
-    npm --prefix sky/dashboard run format
+    npm --prefix sky/dashboard run format -- --log-level warn
     echo "SkyPilot Dashboard linting and formatting: Done"
     echo
 fi

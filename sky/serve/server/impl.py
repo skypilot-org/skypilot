@@ -282,17 +282,22 @@ def up(
         if not serve_utils.is_consolidation_mode(pool):
             print(f'{colorama.Fore.YELLOW}Launching controller for '
                   f'{service_name!r}...{colorama.Style.RESET_ALL}')
-            with common.with_server_user():
-                with skypilot_config.local_active_workspace_ctx(
-                        constants.SKYPILOT_DEFAULT_WORKSPACE):
-                    controller_job_id, controller_handle = execution.launch(
-                        task=controller_task,
-                        cluster_name=controller_name,
-                        retry_until_up=True,
-                        _request_name=request_names.AdminPolicyRequestName.
-                        SERVE_LAUNCH_CONTROLLER,
-                        _disable_controller_check=True,
-                    )
+            with common.with_server_user(
+            ), skypilot_config.local_active_workspace_ctx(
+                    constants.SKYPILOT_DEFAULT_WORKSPACE
+            ), (
+                    # Serve controller is not placed in kueue, as the controller
+                    # pod is considered a "system" pod and is not subject to
+                    # queue limits or preemption.
+                    skypilot_config.remove_queue_name_from_config()):
+                controller_job_id, controller_handle = execution.launch(
+                    task=controller_task,
+                    cluster_name=controller_name,
+                    retry_until_up=True,
+                    _request_name=request_names.AdminPolicyRequestName.
+                    SERVE_LAUNCH_CONTROLLER,
+                    _disable_controller_check=True,
+                )
         else:
             controller_type = controller_utils.get_controller_for_pool(pool)
             controller_handle = backend_utils.is_controller_accessible(
@@ -413,19 +418,20 @@ def up(
                 f'{fore.CYAN}Pool name: '
                 f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
                 f'\n📋 Useful Commands'
-                f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t'
+                f'\n{ux_utils.INDENT_SYMBOL}To submit jobs to the pool:\t\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
                 f'<yaml_file>{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs:\t'
+                f'\n{ux_utils.INDENT_SYMBOL}To submit multiple jobs:\t\t'
                 f'{ux_utils.BOLD}sky jobs launch --pool {service_name} '
                 f'--num-jobs 10 <yaml_file>{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t'
+                f'\n{ux_utils.INDENT_SYMBOL}To check the pool status:\t\t'
                 f'{ux_utils.BOLD}sky jobs pool status {service_name}'
                 f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}To terminate the pool:\t'
+                f'\n{ux_utils.INDENT_SYMBOL}To terminate the pool:\t\t'
                 f'{ux_utils.BOLD}sky jobs pool down {service_name}'
                 f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_SYMBOL}To update the number of workers:\t'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}'
+                'To update the number of workers:\t'
                 f'{ux_utils.BOLD}sky jobs pool apply --pool {service_name} '
                 f'--workers 5{ux_utils.RESET_BOLD}'
                 '\n\n' + ux_utils.finishing_message('Successfully created pool '

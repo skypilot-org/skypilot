@@ -35,15 +35,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Configuration
-ACTIVE_CLUSTER_NAME="scale-test-active"
-TERMINATED_CLUSTER_NAME="scale-test-terminated"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INJECT_SCRIPT="${SCRIPT_DIR}/inject_production_scale_data.py"
 CREATE_DB_SCRIPT="${SCRIPT_DIR}/create_aws_postgres_db.sh"
 JOB_ID_FILE="/tmp/prod_test_job_id_$$"
 
-# RDS configuration (instance name related to test case)
-RDS_INSTANCE_ID="skypilot-large-production-test-db"
+# Generate a unique suffix to allow multiple concurrent test runs
+# Use short UUID (first 8 chars) for uniqueness while keeping name manageable
+# Fallbacks: uuidgen -> hash of timestamp -> plain timestamp
+UNIQUE_SUFFIX=$( (uuidgen 2>/dev/null || date +%s%N | (sha256sum 2>/dev/null || shasum -a 256) || date +%s) | cut -c1-8 | tr '[:upper:]' '[:lower:]' )
+
+# Cluster names with unique suffix to avoid conflicts
+ACTIVE_CLUSTER_NAME="scale-test-active-${UNIQUE_SUFFIX}"
+TERMINATED_CLUSTER_NAME="scale-test-term-${UNIQUE_SUFFIX}"
+
+# RDS configuration with unique suffix
+RDS_INSTANCE_ID="skypilot-prod-test-db-${UNIQUE_SUFFIX}"
 RDS_REGION="${AWS_REGION:-us-east-2}"
 DB_SUBNET_GROUP_NAME="skypilot-test-subnet-group-${RDS_INSTANCE_ID}"
 SKYPILOT_DB_CONNECTION_URI=""
@@ -289,7 +296,7 @@ echo "✓ sky jobs queue --all test passed (${duration}s)"
 
 # Step 8: Do a minimal sky launch to ensure API server is running
 echo "Step 8: Performing minimal sky launch to ensure API server is running..."
-MINIMAL_CLUSTER_NAME="scale-test-minimal-$$"
+MINIMAL_CLUSTER_NAME="scale-test-min-${UNIQUE_SUFFIX}"
 sky launch --infra k8s -c "$MINIMAL_CLUSTER_NAME" -y "echo 'minimal test cluster'"
 # Get logs and verify the echo content appears
 LOGS_OUTPUT=$(sky logs "$MINIMAL_CLUSTER_NAME" --no-follow 2>&1)
@@ -302,9 +309,30 @@ echo "✓ Minimal sky launch verified - found expected echo content in logs"
 # Clean up immediately
 sky down "$MINIMAL_CLUSTER_NAME" -y || true
 
-# Step 9: Verify dashboard pages in browser
-echo "Step 9: Verifying dashboard pages in browser..."
+# Step 9: Build dashboard before verification
+echo "Step 9: Building dashboard..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKYPILOT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+DASHBOARD_DIR="${SKYPILOT_ROOT}/sky/dashboard"
+
+if [ -d "$DASHBOARD_DIR" ]; then
+    if command -v npm &> /dev/null; then
+        echo "Installing dashboard dependencies..."
+        npm --prefix "$DASHBOARD_DIR" install
+        echo "Building dashboard..."
+        npm --prefix "$DASHBOARD_DIR" run build
+        echo "✓ Dashboard built successfully"
+    else
+        echo "ERROR: npm not found, cannot build dashboard. Please install Node.js and npm."
+        exit 1
+    fi
+else
+    echo "ERROR: Dashboard directory not found at $DASHBOARD_DIR"
+    exit 1
+fi
+
+# Step 10: Verify dashboard pages in browser
+echo "Step 10: Verifying dashboard pages in browser..."
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dashboard_browser.py"
 
 # Get API server endpoint
@@ -325,11 +353,10 @@ fi
 echo "Using API endpoint: $API_ENDPOINT"
 
 if [ -f "$VERIFY_SCRIPT" ]; then
-    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT" || {
-        echo "WARNING: Dashboard verification failed, but continuing..."
-    }
+    python3 "$VERIFY_SCRIPT" --endpoint "$API_ENDPOINT"
 else
-    echo "WARNING: Dashboard verification script not found at $VERIFY_SCRIPT, skipping browser verification"
+    echo "ERROR: Dashboard verification script not found at $VERIFY_SCRIPT"
+    exit 1
 fi
 
 echo ""

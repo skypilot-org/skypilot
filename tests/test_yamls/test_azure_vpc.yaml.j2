@@ -1,0 +1,11 @@
+config:
+  azure:
+    vpc_name: {{vpc_name}}
+
+resources:
+  cloud: azure
+  region: {{region}}
+
+run: |
+  echo "Testing custom VNet: {{vpc_name}}"
+  echo "SUCCESS: Cluster launched in custom VNet"

@@ -3,12 +3,12 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file (for :ref:`local API server <sky-api-server-local>`) or on your SkyPilot API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``.
 
 Configuration sources and overrides
 -----------------------------------
 
-SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
+SkyPilot allows you to set configuration globally in ``~/.sky/config.yaml`` (for :ref:`local API server <sky-api-server-local>`) or on the API server dashboard (for :ref:`remote API server <sky-api-server-remote>`) at ``http://<api-server-url>/dashboard/config``, in your project, or for specific jobs, providing flexibility in how you manage your configurations.
 
 For example, you can have a :ref:`user configuration<config-client-user-config>` to apply globally to all projects, a :ref:`project configuration<config-client-project-config>` storing default values for all jobs in a project, and :ref:`Task YAML overrides<config-client-cli-flag>` for specific jobs.
 
@@ -63,6 +63,7 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`provision <config-yaml-provision>`:
     :ref:`ssh_timeout <config-yaml-provision-ssh-timeout>`: 10
+    :ref:`install_conda <config-yaml-provision-install-conda>`: false
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
@@ -90,12 +91,19 @@ Below is the configuration syntax and some example values. See detailed explanat
       max_run_duration: 10m
     :ref:`post_provision_runcmd <config-yaml-kubernetes-post-provision-runcmd>`:
       - echo "hello world!"
+    :ref:`pricing <config-yaml-kubernetes-pricing>`:
+      cpu: 0.05        # $/vCPU/hr
+      memory: 0.01     # $/GB/hr
+      accelerators:
+        A100: 3.50     # $/accelerator/hr
     :ref:`context_configs <config-yaml-kubernetes-context-configs>`:
       context1:
         pod_config:
           metadata:
             labels:
               my-label: my-value
+        pricing:
+          cpu: 0.08
       context2:
         remote_identity: my-k8s-service-account
 
@@ -117,12 +125,32 @@ Below is the configuration syntax and some example values. See detailed explanat
       - node-pool-1
       - node-pool-2
 
+  :ref:`slurm <config-yaml-slurm>`:
+    :ref:`allowed_clusters <config-yaml-slurm-allowed-clusters>`:
+      - mycluster1
+      - mycluster2
+    :ref:`provision_timeout <config-yaml-slurm-provision-timeout>`: 120
+    :ref:`pricing <config-yaml-slurm-pricing>`:
+      cpu: 0.04        # $/vCPU/hr
+      memory: 0.01     # $/GB/hr
+      accelerators:
+        V100: 2.50     # $/accelerator/hr
+    :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
+      mycluster1:
+        workdir: /mnt/lustre/$USER
+        tmpdir: /local_scratch/sky
+        pricing:
+          cpu: 0.06
+
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
       map-migrated: my-value
       Owner: user-unique-name
-    :ref:`vpc_name <config-yaml-aws-vpc-name>`: skypilot-vpc
+    :ref:`vpc_names <config-yaml-aws-vpc-names>`:
+      - skypilot-vpc-1
+      - skypilot-vpc-2
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
+    :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`security_group_name <config-yaml-aws-security-group-name>`: my-security-group
     :ref:`disk_encrypted <config-yaml-aws-disk-encrypted>`: false
@@ -160,6 +188,10 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
+    :ref:`remote_identity <config-yaml-azure-remote-identity>`: LOCAL_CREDENTIALS
+    :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
+    :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
 
   :ref:`oci <config-yaml-oci>`:
     region_configs:
@@ -179,6 +211,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     region_configs:
       :ref:`eu-north1 <config-yaml-nebius>`:
         project_id: project-e00xxxxxxxxxxx
+        subnet_id: vpcsubnet-e00xxxxxxxxxxx
         fabric: fabric-3
         filesystems:
         - filesystem_id: computefilesystem-e00xwrry01ysvykbhf
@@ -192,6 +225,12 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`ssh_proxy_command <config-yaml-nebius-ssh-proxy-command>`: ssh -W %h:%p user@host
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
+
+  :ref:`vast <config-yaml-vast>`:
+    :ref:`datacenter_only <config-yaml-vast-datacenter-only>`: true
+    :ref:`create_instance_kwargs <config-yaml-vast-create-instance-kwargs>`:
+      template_hash: f0e124f0e98bfbc2ecb05dc713009ee7
+      env: "-e YOUR_CUSTOM=YOUR_VAL"
 
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
@@ -350,6 +389,24 @@ Example:
     force_disable_cloud_bucket: true
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-consolidation-mode:
+
+``jobs.controller.consolidation_mode``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      consolidation_mode: true
+      # any specified resources will be ignored
+
 .. _config-yaml-jobs-controller-resources:
 
 ``jobs.controller.resources``
@@ -586,6 +643,31 @@ determines how long to wait for the connection to be established.
 
 Default: ``10``.
 
+.. _config-yaml-provision-install-conda:
+
+``provision.install_conda``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Whether to install conda on the remote cluster (optional).
+
+Skypilot clusters come with conda preinstalled for convenience.
+When set to ``false``, SkyPilot will not install conda on the cluster.
+
+Default: ``true``.
+
+Example:
+
+.. code-block:: yaml
+
+  provision:
+    install_conda: false
+
+.. note::
+
+  Default SkyPilot images often come with conda preinstalled.
+  To fully avoid installing conda, use a custom Docker image that does not have conda preinstalled
+  along with ``install_conda: false``.
+
 .. _config-yaml-aws:
 
 ``aws``
@@ -628,16 +710,20 @@ Example:
       my-tag: my-value
 
 
-.. _config-yaml-aws-vpc-name:
 
-``aws.vpc_name``
-~~~~~~~~~~~~~~~~
+.. _config-yaml-aws-vpc-names:
 
-VPC to use in each region (optional).
+``aws.vpc_names``
+~~~~~~~~~~~~~~~~~
 
-If this is set, SkyPilot will only provision in regions that contain a VPC
-with this name (provisioner automatically looks for such regions).
-Regions without a VPC with this name will not be used to launch nodes.
+VPCs to use in each region (optional).
+
+If this is set, SkyPilot will attempt each VPC for failover in regions
+that contain the attempted VPCs (provisioner automatically looks for such
+regions). Regions without any matching VPCs will not be used to launch nodes.
+
+It is possible to set either a ``string`` (one VPC), or a ``list`` (multiple
+target VPCs).
 
 Default: ``null`` (use the default VPC in each region).
 
@@ -659,8 +745,18 @@ Private subnets are defined as those satisfying both of these properties:
   2. Subnets that are configured to not assign public IPs by default
      (the ``map_public_ip_on_launch`` attribute is ``false``).
 
-This flag is typically set together with ``vpc_name`` above and
-``ssh_proxy_command`` below.
+This flag is typically set together with ``vpc_names`` above and
+``ssh_proxy_command`` or ``use_ssm`` below.
+
+Default: ``false``.
+
+.. _config-yaml-aws-use-ssm:
+
+``aws.use_ssm``
+~~~~~~~~~~~~~~~~
+
+Use SSM to communicate with SkyPilot nodes. This flag is typically set together with ``vpc_names`` and
+``use_internal_ips`` above. This is useful for launching clusters in private VPCs without public IPs, refer to :ref:`aws-ssm` for more details.
 
 Default: ``false``.
 
@@ -673,7 +769,7 @@ SSH proxy command (optional).
 
 Useful for using a jump server to communicate with SkyPilot nodes hosted
 in private VPC/subnets without public IPs. Typically set together with
-``vpc_name`` and ``use_internal_ips`` above.
+``vpc_names`` and ``use_internal_ips`` above.
 
 If set, this is passed as the ``-o ProxyCommand`` option for any SSH
 connections (including rsync) used to communicate between the local client
@@ -1211,6 +1307,150 @@ Example:
     resource_group_vm: user-resource-group-name
     storage_account: user-storage-account-name
 
+.. _config-yaml-azure-remote-identity:
+
+``azure.remote_identity``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Identity to use for Azure instances (optional).
+
+Supported values:
+
+1. **LOCAL_CREDENTIALS**:
+   The user's local Azure credential files will be uploaded to instances created by SkyPilot.
+
+2. **SERVICE_ACCOUNT**:
+   SkyPilot will use the auto-created User-Assigned Managed Identity (MSI) on the VM.
+   Local Azure credentials will not be uploaded. Requires
+   ``Microsoft.Authorization/roleAssignments/write`` permission to create the MSI and
+   its role assignment.
+
+3. **NO_UPLOAD**:
+   Do not upload any Azure credentials. The VM will still have the auto-created MSI attached.
+   Requires ``Microsoft.Authorization/roleAssignments/write`` permission (same as
+   SERVICE_ACCOUNT).
+
+.. note::
+
+   ``SERVICE_ACCOUNT`` prevents uploading local Azure credentials to Azure instances only.
+   If you are using other clouds, local Azure credentials may still be uploaded to non-Azure
+   instances (e.g., a GCP instance that needs to access Azure resources).
+   ``NO_UPLOAD`` prevents uploading Azure credentials to any instance, regardless of the cloud.
+
+4. **Custom managed identity name or resource ID**:
+   Specify the name of an existing User-Assigned Managed Identity to use instead of the
+   auto-created one. If a simple name is provided, SkyPilot will look for the identity in
+   the same resource group and subscription. A full Azure resource ID can also be specified.
+   This option does **not** require ``Microsoft.Authorization/roleAssignments/write``
+   permission, since SkyPilot skips MSI and role assignment creation in the ARM template.
+
+   Like AWS, you can use cluster-name pattern matching:
+
+   .. code-block:: yaml
+
+     azure:
+       remote_identity:
+         - my-cluster-*: my-managed-identity-1
+         - sky-serve-controller-*: controller-identity
+         - "*": default-identity
+
+Default: ``LOCAL_CREDENTIALS``.
+
+.. code-block:: yaml
+
+  azure:
+    # Format 1: Use auto-created MSI
+    remote_identity: SERVICE_ACCOUNT
+
+    # Format 2: Specify a custom managed identity by name
+    remote_identity: my-managed-identity
+
+    # Format 3: Specify a full resource ID
+    remote_identity: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<name>
+
+.. _config-yaml-azure-labels:
+
+``azure.labels``
+~~~~~~~~~~~~~~~~
+
+Custom labels to apply as tags to Azure VM instances (optional). Labels are key-value
+pairs of strings. These are merged with SkyPilot's internal tags on each VM.
+
+Users should guarantee that these key-values are valid Azure tags, otherwise
+errors from the cloud provider will be surfaced.
+
+.. code-block:: yaml
+
+  azure:
+    labels:
+      team: ml-infra
+      environment: production
+
+.. _config-yaml-azure-vpc-name:
+
+``azure.vpc_name``
+~~~~~~~~~~~~~~~~~~
+
+Name of an existing Azure Virtual Network (VNet) to use for the cluster (optional).
+
+When specified, SkyPilot will use the existing VNet and its first subnet instead of
+creating new networking resources. If the subnet has an associated Network Security Group
+(NSG), it will be used; otherwise, SkyPilot will create its own NSG.
+
+This is useful for organizations that require instances to be launched in a pre-configured
+VNet with specific network policies.
+
+.. code-block:: yaml
+
+  azure:
+    vpc_name: my-existing-vnet
+
+.. _config-yaml-azure-use-internal-ips:
+
+``azure.use_internal_ips``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If true, SkyPilot will not create public IP addresses for Azure instances and only use
+private IPs (optional). Requires a network setup that allows SSH access to private IPs
+(e.g., a VPN or ``ssh_proxy_command``).
+
+This flag is typically set together with ``vpc_name`` above and
+``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. code-block:: yaml
+
+  azure:
+    use_internal_ips: true
+    ssh_proxy_command: ssh -W %h:%p bastion-host
+
+.. _config-yaml-azure-ssh-proxy-command:
+
+``azure.ssh_proxy_command``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSH proxy command (optional).
+
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+Format 1:
+  A string; the same proxy command is used for all regions.
+
+Format 2:
+  A dict mapping region name to a string proxy command per region.
+
+.. code-block:: yaml
+
+  azure:
+    # Format 1
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
+
+    # Format 2
+    ssh_proxy_command:
+      eastus: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.eastus.proxy
+      westus2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
+
 .. _config-yaml-kubernetes:
 
 ``kubernetes``
@@ -1229,6 +1469,7 @@ Can be one of:
 
 - ``loadbalancer``: Use LoadBalancer service to expose ports.
 - ``nodeport``: Use NodePort service to expose ports.
+- ``podip``: Use Pod IPs to expose ports. Cannot be accessed from outside the cluster.
 
 Default: ``loadbalancer``.
 
@@ -1295,7 +1536,10 @@ Can be one of:
 - ``gke``: Google Kubernetes Engine
 - ``karpenter``: Karpenter
 - ``coreweave``: `CoreWeave autoscaler <https://docs.coreweave.com/docs/products/cks/nodes/autoscaling>`_
+- ``nebius``: `Nebius autoscaler <https://docs.nebius.com/kubernetes/node-groups/autoscaling>`_
 - ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
+
+If you want to use the autoscaler, set :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>` to at least 600.
 
 .. _config-yaml-kubernetes-pod-config:
 
@@ -1324,6 +1568,7 @@ Example:
         myannotation: myvalue
     provision_timeout: 10
     autoscaler: gke
+    set_pod_resource_limits: true  # or a multiplier like 1.5
     pod_config:
       metadata:
         labels:
@@ -1431,6 +1676,117 @@ Example:
     post_provision_runcmd:
       - echo "hello world!"
 
+.. _config-yaml-kubernetes-set-pod-resource-limits:
+
+``kubernetes.set_pod_resource_limits``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Set pod CPU/memory limits relative to requests (optional).
+
+This is useful for Kubernetes clusters that require resource limits to be set
+(e.g., for LimitRange enforcement, resource quotas, or cluster policies).
+
+Can be one of:
+
+- ``false`` (default): Do not set CPU/memory limits (only requests are set).
+- ``true``: Set limits equal to requests (multiplier of 1).
+- A positive number: Set limits to requests multiplied by this value (e.g., ``1.5`` for 50% headroom).
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    # Set limits equal to requests
+    set_pod_resource_limits: true
+
+.. code-block:: yaml
+
+  kubernetes:
+    # Set limits to 1.5x requests (50% headroom)
+    set_pod_resource_limits: 1.5
+
+This can also be configured per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        set_pod_resource_limits: 2.0
+
+.. _config-yaml-kubernetes-pricing:
+
+``kubernetes.pricing``
+~~~~~~~~~~~~~~~~~~~~~~
+
+Hourly pricing rates for Kubernetes virtual instance types (optional).
+
+By default, Kubernetes instance types report a cost of ``$0.00`` because
+SkyPilot has no way to know the true cost of on-prem or self-managed clusters.
+Use this field to supply hourly rates so that ``sky launch``, ``sky status``,
+and ``sky gpus list`` display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
+
+Fields:
+
+``cpu``
+    Cost per vCPU per hour (e.g., ``0.05``).  Only used for CPU-only instances.
+
+``memory``
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
+
+``accelerators``
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``A100: 3.50``).  CPU and memory costs are included in this rate.
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+Default: not set (all costs report as $0.00).
+
+Example:
+
+.. code-block:: yaml
+
+  kubernetes:
+    pricing:
+      cpu: 0.05
+      memory: 0.01
+      accelerators:
+        A100: 3.50
+        H100: 5.00
+
+Pricing can also be set per-context using :ref:`context_configs <config-yaml-kubernetes-context-configs>`.
+Context-level pricing is deep-merged with the cloud-level default: only the
+keys you specify are overridden, and unmentioned accelerators are inherited.
+
+.. code-block:: yaml
+
+  kubernetes:
+    pricing:
+      cpu: 0.05
+      memory: 0.01
+      accelerators:
+        A100: 3.50
+        H100: 5.00
+    context_configs:
+      on-prem-cluster:
+        pricing:
+          # Overrides only the cpu rate; memory and accelerators are
+          # inherited from the cloud-level pricing above.
+          cpu: 0.08
+
 .. _config-yaml-kubernetes-context-configs:
 
 ``kubernetes.context_configs``
@@ -1472,6 +1828,174 @@ Advanced SSH node pool configuration (optional).
 List of allowed SSH node pools (optional).
 
 List of names that SkyPilot is allowed to use.
+
+.. _config-yaml-slurm:
+
+``slurm``
+~~~~~~~~~
+
+Advanced Slurm configuration (optional).
+
+.. _config-yaml-slurm-allowed-clusters:
+
+``slurm.allowed_clusters``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+List of allowed Slurm clusters (optional).
+
+List of cluster names that SkyPilot is allowed to use.
+
+If you want all available clusters to be allowed, set it to ``all`` like this:
+
+.. code-block:: yaml
+
+  slurm:
+    allowed_clusters: all
+
+.. _config-yaml-slurm-provision-timeout:
+
+``slurm.provision_timeout``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Timeout for Slurm job allocation (optional).
+
+Timeout in seconds for waiting on Slurm to allocate nodes for a launched job.
+If the timeout is reached, SkyPilot will fail over to other Slurm
+partitions or clusters.
+
+.. note::
+
+  If your Slurm cluster has long queueing delays, consider increasing
+  ``slurm.provision_timeout``. This helps avoid premature failover while Slurm
+  is still working to allocate resources.
+
+Default:
+
+- ``120`` seconds (2 minutes) when a partition is not specified
+- ``86400`` seconds (24 hours) when a specific partition is specified
+
+Set to a negative value (e.g., ``-1``) to wait indefinitely.
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    provision_timeout: 1200
+
+.. _config-yaml-slurm-pricing:
+
+``slurm.pricing``
+~~~~~~~~~~~~~~~~~
+
+Hourly pricing rates for Slurm virtual instance types (optional).
+
+By default, Slurm instance types report a cost of ``$0.00``. Use this field to
+supply hourly rates so that ``sky launch``, ``sky status``, and ``sky gpus list``
+display meaningful cost estimates.
+
+Pricing uses two mutually exclusive tiers:
+
+- **CPU-only instances** (no accelerator): cost is
+  ``cpus * cpu_rate + memory * mem_rate``.
+- **Accelerator instances**: cost is ``accel_count * accel_rate``.
+  The ``cpu`` and ``memory`` rates are ignored because accelerator pricing is
+  all-in per device.  If the accelerator is not listed in the config, the cost
+  is ``$0.00``.
+
+Fields:
+
+``cpu``
+    Cost per vCPU per hour (e.g., ``0.04``).  Only used for CPU-only instances.
+
+``memory``
+    Cost per GB of memory per hour (e.g., ``0.01``).  Only used for CPU-only
+    instances.
+
+``accelerators``
+    A mapping of accelerator name to **all-in** cost per accelerator per hour
+    (e.g., ``V100: 2.50``).  CPU and memory costs are included in this rate.
+
+All fields are optional; unset fields contribute ``$0.00`` to the total.
+
+Default: not set (all costs report as $0.00).
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    pricing:
+      cpu: 0.04
+      memory: 0.01
+      accelerators:
+        V100: 2.50
+        A100: 3.50
+
+Pricing can also be set per-cluster and per-partition using
+:ref:`cluster_configs <config-yaml-slurm-cluster-configs>`.
+
+.. _config-yaml-slurm-cluster-configs:
+
+``slurm.cluster_configs``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Per-cluster and per-partition configuration for Slurm (optional).
+
+Supported fields:
+
+- ``workdir``: Base directory on a **shared filesystem** for SkyPilot
+  cluster files (provision scripts, cluster home directories, sbatch logs, etc).
+  Defaults to ``$HOME``. Shell variables like ``$USER`` are expanded on the
+  login node. Use this when ``$HOME`` is not on a shared filesystem.
+
+- ``tmpdir``: Per-node temporary storage for the SkyPilot runtime.
+  Defaults to ``/tmp``.
+
+- ``pricing``: :ref:`Pricing <config-yaml-slurm-pricing>` overrides at both
+  the cluster and partition level. Pricing at each level is deep-merged with the
+  parent level: only the keys you specify are overridden, and unmentioned
+  accelerators are inherited. The merge order is::
+
+      cloud-level  <  cluster-level  <  partition-level
+
+Example:
+
+.. code-block:: yaml
+
+  slurm:
+    # Cloud-level defaults
+    pricing:
+      cpu: 0.04
+      memory: 0.01
+      accelerators:
+        V100: 2.50
+        A100: 3.50
+
+    cluster_configs:
+      mycluster1:
+        # Use a shared Lustre mount instead of $HOME.
+        workdir: /mnt/lustre/$USER
+        # Use a fast local scratch disk for runtime files.
+        tmpdir: /local_scratch/sky
+        # Override cpu rate for this cluster; memory and accelerators
+        # are inherited from the cloud-level pricing above.
+        pricing:
+          cpu: 0.06
+          accelerators:
+            A100: 4.00   # Override A100; V100 inherited
+
+      mycluster2:
+        workdir: /home/$USER
+        pricing:
+          cpu: 0.03
+        partition_configs:
+          gpu-partition:
+            # Override accelerator rate for this partition; other values
+            # are inherited from parent levels.
+            pricing:
+              accelerators:
+                H100: 5.00
 
 .. _config-yaml-oci:
 
@@ -1525,6 +2049,10 @@ Advanced Nebius configuration (optional).
     Identifier for the Nebius project (optional)
     Default: Uses first available project if not specified
 
+``subnet_id``
+    Identifier for the Nebius subnet (optional)
+    Default: Uses first available subnet if not specified
+
 ``fabric``
     GPU cluster configuration identifier (optional)
     Optional: GPU cluster disabled if not specified
@@ -1560,6 +2088,9 @@ Example:
                 # Project identifier for this region
                 # Optional: Uses first available project if not specified
                 project_id: project-e00......
+                # Subnet identifier for this region
+                # Optional: Uses first available subnet if not specified
+                subnet_id: vpcsubnet-e00......
                 # GPU cluster fabric identifier
                 # Optional: GPU cluster disabled if not specified
                 fabric: fabric-3
@@ -1657,6 +2188,128 @@ Example:
   nebius:
     domain: api.nebius.cloud:443
 
+.. _config-yaml-vast:
+
+``vast``
+~~~~~~~~
+
+Advanced Vast configuration (optional).
+
+.. _config-yaml-vast-datacenter-only:
+
+``vast.datacenter_only``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure SkyPilot to only consider offers on Vast verified datacenters (optional).
+Internally, this will query Vast with the ``datacenter=true`` and ``hosting_type>=1``
+parameters to filter for professional datacenter-hosted machines. Note some GPUs
+may only be available on non-datacenter offers. This config filters both the catalog
+(during resource planning) and the launch query (during provisioning). This config
+can be overridden per task via :ref:`config flag <config-client-cli-flag>`.
+
+Default: ``false``
+
+.. _config-yaml-vast-create-instance-kwargs:
+
+``vast.create_instance_kwargs``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Additional parameters to pass to the Vast API when creating instances (optional).
+
+This allows full access to Vast's instance creation options. User-provided
+parameters are passed through to the Vast API.
+
+.. dropdown:: Supported parameters
+
+    ``image``
+        Docker image to use for the instance. If not specified, SkyPilot uses the image from the task
+        configuration. When using a template, this is not required. (e.g vastai/base-image:@vastai-automatic-tag)
+
+    ``env``
+        Environment variables and port mappings (e.g., ``"-e KEY=value -p 8080:8080"``).
+
+    ``price`` / ``bid_price``
+        Bid price for the instance. For preemptible instances, if not specified,
+        SkyPilot uses the minimum bid price from the offer.
+
+    ``disk``
+        Disk size in GB. If not specified, SkyPilot uses the disk size from the
+        task configuration.
+
+    ``label``
+        Instance label. If not specified, SkyPilot uses the cluster name
+        (e.g., ``cluster-name-head`` or ``cluster-name-worker``).
+
+    ``extra``
+        Extra docker run arguments to pass to the container.
+
+    ``onstart_cmd``
+        Command to run on instance start. SkyPilot prepends its own initialization
+        commands to this.
+
+    ``onstart``
+        Path to a local script file to run on instance start. The file contents
+        are read and appended to ``onstart_cmd``.
+
+    ``login``
+        Docker registry login credentials (e.g., ``"-u user -p pass registry"``).
+        Required when using private Docker registries.
+
+    ``image_login``
+        Docker registry credentials if needed.
+        Required when using private Docker registries.
+
+    ``python_utf8``
+        Enable Python UTF-8 mode (boolean true | false).
+
+    ``lang_utf8``
+        Enable system UTF-8 locale (boolean true | false).
+
+    ``jupyter_lab``
+        Use JupyterLab instead of Jupyter Notebook (boolean true | false).
+
+    ``jupyter_dir``
+        Jupyter notebook directory path.
+
+    ``force``
+        Force instance creation even if warnings are present (boolean true | false).
+
+    ``cancel_unavail``
+        Cancel the request if the instance becomes unavailable (boolean true | false).
+
+    ``template_hash`` / ``template_hash_id``
+        Use a Vast template by its hash ID. When specified, ``image`` and ``disk``
+        are not required as they come from the template.
+
+    ``args``
+        Custom docker command arguments as a list of strings.
+
+    ``user``
+        Run the container as a specific user.
+
+    ``vm``
+        Whether this is a VM instance. (boolean true | false)
+
+Example:
+
+.. code-block:: yaml
+
+  vast:
+    datacenter_only: true
+    create_instance_kwargs:
+      python_utf8: true
+      lang_utf8: true
+      extra: "--shm-size=16g"
+      onstart_cmd: "echo 'Instance started'"
+
+Example using a Vast template:
+
+.. code-block:: yaml
+
+  vast:
+    create_instance_kwargs:
+      template_hash_id: "abc123def456"
+      price: 0.50
 
 .. _config-yaml-rbac:
 
@@ -1699,6 +2352,10 @@ even if ``db`` is specified.
   (available on nightly version 20250626 and later)
 
   ``db`` configuration can also be set using the ``SKYPILOT_DB_CONNECTION_URI`` environment variable.
+
+  This is optional. For larger deployments (for example, many nodes/clusters
+  and many pending jobs), consider configuring a PostgreSQL backend via
+  ``db`` or ``SKYPILOT_DB_CONNECTION_URI``.
 
 .. note::
 

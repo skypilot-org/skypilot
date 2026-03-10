@@ -13,7 +13,14 @@ setup: |
     cd pytorch-distributed-resnet
     # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
     uv pip install -r requirements.txt numpy==1.26.4 torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
-    mkdir -p data  && mkdir -p saved_models && cd data && \
+    mkdir -p data  && mkdir -p saved_models
+    # Check if working directory is on a shared filesystem (NFS, Lustre, etc.)
+    # If shared, only download on rank 0 to avoid race conditions
+    fstype=$(stat -fc%T .)
+    if [[ "$fstype" =~ ^(nfs|lustre|fuse\.lustre|cifs|smb)$ ]] && [ "${SKYPILOT_SETUP_NODE_RANK:-0}" -ne 0 ]; then
+        exit 0
+    fi
+    cd data && \
     wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
     tar -xvzf cifar-10-python.tar.gz
 

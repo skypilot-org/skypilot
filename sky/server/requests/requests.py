@@ -33,6 +33,7 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.server.requests.serializers import return_value_serializers
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -47,7 +48,13 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+# Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
+# performance issues in Kubernetes deployments where ~/sky_logs/ may be on
+# shared storage.
+REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
+# Legacy path for backward compatibility - GC will clean up logs from both
+# the new and legacy paths to handle server upgrades gracefully.
+LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
@@ -231,13 +238,16 @@ class Request:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
+            # Use version-aware serializer to handle backward compatibility
+            # for old clients that don't recognize new fields.
+            serializer = return_value_serializers.get_serializer(self.name)
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=self.status.value,
-                return_value=orjson.dumps(self.return_value).decode('utf-8'),
+                return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
                 created_at=self.created_at,
@@ -504,6 +514,11 @@ def reset_db_and_logs():
         f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
     )
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
+                  ignore_errors=True)
+    # Also clear legacy path for backward compatibility cleanup
+    logger.debug('clearing legacy API server logs directory at '
+                 f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
+    shutil.rmtree(pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     logger.debug('clearing local API server client directory at '
                  f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
@@ -869,11 +884,17 @@ async def create_if_not_exists_async(request: Request) -> bool:
         f'({request_columns}) VALUES '
         f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
     request_row = request.to_row()
-    # Execute the SQL statement without getting the request lock.
-    # The request lock is used to prevent racing with cancellation codepath,
-    # but a request cannot be cancelled before it is created.
-    row = await _DB.execute_get_returning_value_async(sql_statement,
-                                                      request_row)
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start creating request {request.request_id}')
+    try:
+        # Execute the SQL statement without getting the request lock.
+        # The request lock is used to prevent racing with cancellation codepath,
+        # but a request cannot be cancelled before it is created.
+        row = await _DB.execute_get_returning_value_async(
+            sql_statement, request_row)
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End creating request {request.request_id}')
     return True if row else False
 
 
@@ -1030,9 +1051,15 @@ _add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
     assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_update_request_sql, request.to_row())
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start adding or updating request {request.request_id}')
+    try:
+        with _DB.conn:
+            cursor = _DB.conn.cursor()
+            cursor.execute(_add_or_update_request_sql, request.to_row())
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End adding or updating request {request.request_id}')
 
 
 async def _add_or_update_request_no_lock_async(request: Request):
@@ -1121,8 +1148,46 @@ async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(request_id) for request_id in request_ids)
     assert _DB is not None
-    await _DB.execute_and_commit_async(
-        f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start deleting requests {request_ids}')
+    try:
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End deleting requests {request_ids}')
+
+
+# TODO Remove this function on or after v0.15.0
+def _get_legacy_log_path(request_id: str) -> pathlib.Path:
+    """Get the legacy log path for a request (for backward compatibility).
+
+    This is used during GC to clean up log files from the old location
+    (~/sky_logs/api_server/requests/) after server upgrades.
+    """
+    legacy_path_prefix = pathlib.Path(
+        LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+    return (legacy_path_prefix / request_id).with_suffix('.log')
+
+
+# TODO Remove this function on or after v0.15.0
+async def _cleanup_legacy_directory_if_empty():
+    """Remove legacy request log directory if empty.
+
+    This helps clean up the legacy directory once all old logs have been
+    garbage collected after a server upgrade.
+    """
+    legacy_path = pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser()
+    if not legacy_path.exists():
+        return
+    try:
+        # Check if directory is empty (no .log or .lock files)
+        if not any(legacy_path.iterdir()):
+            logger.info(f'Removing empty legacy log directory: {legacy_path}')
+            legacy_path.rmdir()
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail GC if cleanup fails
+        logger.debug(f'Failed to cleanup legacy directory: {e}')
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
@@ -1131,6 +1196,9 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
     from the database and cleans up their associated log files.
+
+    For backward compatibility, it also cleans up log files from the legacy
+    path (~/sky_logs/api_server/requests/) to handle server upgrades.
 
     Args:
         retention_seconds: Requests older than this many seconds will be
@@ -1141,6 +1209,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
@@ -1155,16 +1224,33 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
         for req in reqs:
             # req.log_path is derived from request_id,
             # so it's ok to just grab the request_id in the above query.
+            # Delete from current path
             futs.append(
                 asyncio.create_task(
                     anyio.Path(
                         req.log_path.absolute()).unlink(missing_ok=True)))
+            # Also delete from legacy path for backward compatibility
+            # TODO Remove this on or after v0.15.0
+            legacy_log_path = _get_legacy_log_path(req.request_id)
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(legacy_log_path).unlink(missing_ok=True)))
+            # Delete debug log if it exists
+            debug_log_path = (debug_log_dir /
+                              req.request_id).with_suffix('.log')
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(debug_log_path).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break
+
+    # Try to clean up the legacy directory if it's empty
+    # TODO Remove this on or after v0.15.0
+    await _cleanup_legacy_directory_if_empty()
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.

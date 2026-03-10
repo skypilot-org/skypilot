@@ -6,22 +6,14 @@ Elastic Fabric Adapter (EFA) is an AWS alternative to Nvidia infiniband that ena
 
 ### TL;DR: enable EFA with SkyPilot
 
-You can enable EFA on AWS HyperPod/EKS clusters with an simple additional setting in your SkyPilot YAML:
+You can enable EFA on AWS HyperPod/EKS clusters by simply adding ``network_tier: best`` to your resources specification:
 
 ```yaml
-config:
-  kubernetes:
-    pod_config:
-      spec:
-        containers:
-        - resources:
-            limits:
-              vpc.amazonaws.com/efa: 4
-            requests:
-              vpc.amazonaws.com/efa: 4
+resources:
+  infra: k8s
+  accelerators: A100:8
+  network_tier: best
 ```
-
-
 
 ### Enable EFA with HyperPod/EKS
 
@@ -40,42 +32,15 @@ hyperpod-i-0da69b9076c7ff6a4   ml.p4d.24xlarge   8     4
 ...
 ```
 
-### Access HyperPod and run distributed job with SkyPilot
-
-To access HyperPod and run distributed job with SkyPilot, see the SkyPilot [HyperPod example](https://github.com/skypilot-org/skypilot/blob/master/examples/hyperpod-eks).
-
-#### Adding EFA configurations in SkyPilot YAML
-
-To enable EFA in SkyPilot YAML, you can specify the following section in the SkyPilot YAML:
-
-```yaml
-config:
-  kubernetes:
-    pod_config:
-      spec:
-        containers:
-        - resources:
-            limits:
-              vpc.amazonaws.com/efa: 4
-            requests:
-              vpc.amazonaws.com/efa: 4
-```
-
-This section is important for EFA integration:
-
-- `config.kubernetes.pod_config`: Provides Kubernetes-specific pod configuration
-- `spec.containers[0].resources`: Defines resource requirements
-  - `limits.vpc.amazonaws.com/efa: 4`: Limits the Pod to use 4 EFA devices
-  - `requests.vpc.amazonaws.com/efa: 4`: Requests 4 EFA devices for the Pod
-
-
-The `vpc.amazonaws.com/efa` resource type is exposed by the AWS EFA device plugin in Kubernetes. 
+The `vpc.amazonaws.com/efa` resource is exposed by the AWS EFA device plugin in Kubernetes.
 To see how many EFA are available for each instance types that have EFA, see the [Network cards](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-eni.html#network-cards) list in the Amazon EC2 User Guide.
 
 Check the following table for the GPU and EFA count mapping for AWS instance types:
 
 | Instance Type | GPU Type | #EFA |
 |---------------|----------|------|
+| p6-b300.48xlarge | B300:8 | 16  |
+| p6-b200.48xlarge | B200:8 | 8   |
 | p4d.24xlarge  | A100:8   | 4    |
 | p4de.24xlarge | A100:8   | 4    |
 | p5.48xlarge   | H100:8   | 32   |
@@ -100,15 +65,13 @@ Check the following table for the GPU and EFA count mapping for AWS instance typ
 | g6e.16xlarge  | L40S:1   | 1    |
 | g6e.24xlarge  | L40S:4   | 2    |
 | g6e.48xlarge  | L40S:8   | 4    |
-
-
-Update the EFA number in the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the GPUs you use.
+| gr6.8xlarge   | L4:1     | 1    |
 
 ### Running NCCL test with EFA using SkyPilot
 
-Check the [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot cluster yaml configurations.
+See [`nccl_efa.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/nccl_efa.yaml) for the complete SkyPilot YAML configurations.
 
-The `image_id` provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
+The image [public.ecr.aws/hpc-cloud/nccl-tests:latest](https://github.com/aws-samples/awsome-distributed-training/blob/main/micro-benchmarks/nccl-tests/nccl-tests.Dockerfile) provides the environment setup for [NCCL](https://developer.nvidia.com/nccl) (NVIDIA Collective Communications Library) and EFA (Elastic Fabric Adapter).
 
 To run the NCCL test with EFA support:
 
@@ -123,10 +86,7 @@ SkyPilot will:
 4. Output performance metrics showing the benefits of EFA for distributed training
 
 > **NOTE:**
-> We can turn off EFA with `nccl_efa.yaml` by passing an env:
-> ```bash
-> sky launch -c efa --env USE_EFA=false nccl_efa.yaml
-> ```
+> We can turn off EFA with `nccl_efa.yaml` by commenting out `network_tier: best`.
 
 #### Benchmark results
 
@@ -176,9 +136,65 @@ The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`
 
 EFA provides much higher throughput than the traditional TCP transport. Enabling EFA could enhance the performance of inter-instance communication significantly, which could speedup distributed AI training and inference.
 
+## Using EFA on HyperPod Slurm
+
+EFA is available by default on HyperPod Slurm clusters with EFA-enabled instances (p4d, p5, etc.). No `network_tier` setting is needed — the compute nodes have direct access to the EFA devices.
+
+### Running NCCL test with EFA on Slurm
+
+See [`efa_slurm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_slurm.yaml) for the complete SkyPilot YAML configuration.
+
+To run the NCCL test with EFA support:
+
+```bash
+sky launch -c efa --infra slurm efa_slurm.yaml
+```
+
+### Benchmark results
+
+We compare the performance with and without EFA using NCCL test reports on the same HyperPod Slurm cluster (2x p4d.24xlarge, i.e. 2xA100:8).
+
+The non-EFA baseline was measured by removing the `aws-ofi-nccl` plugin from `LD_LIBRARY_PATH`, forcing NCCL to use its built-in Socket transport over the standard ENA interface (`ens33`).
+
+The `Speed-up` column is calculated by `busbw EFA (GB/s) / busbw Non-EFA (GB/s)`.
+
+| Message Size | busbw EFA (GB/s) | busbw Non-EFA (GB/s) | Speed-up |
+|--------------|-------------|-------------|---------------|
+| 8 B          | 0           | 0           | -             |
+| 16 B         | 0           | 0           | -             |
+| 32 B         | 0           | 0           | -             |
+| 64 B         | 0           | 0           | -             |
+| 128 B        | 0           | 0           | -             |
+| 256 B        | 0           | 0           | -             |
+| 512 B        | 0.00        | 0.01        | -             |
+| 1 KB         | 0.01        | 0.01        | 1 x           |
+| 2 KB         | 0.02        | 0.02        | 1 x           |
+| 4 KB         | 0.04        | 0.04        | 1 x           |
+| 8 KB         | 0.07        | 0.05        | 1.4 x         |
+| 16 KB        | 0.13        | 0.04        | 3.3 x         |
+| 32 KB        | 0.21        | 0.13        | 1.6 x         |
+| 64 KB        | 0.42        | 0.24        | 1.8 x         |
+| 128 KB       | 0.81        | 0.38        | 2.1 x         |
+| 256 KB       | 1.53        | 0.59        | 2.6 x         |
+| 512 KB       | 2.27        | 0.92        | 2.5 x         |
+| 1 MB         | 3.36        | 1.69        | 2.0 x         |
+| 2 MB         | 4.97        | 2.35        | 2.1 x         |
+| 4 MB         | 7.74        | 3.81        | 2.0 x         |
+| 8 MB         | 10.30       | 5.31        | 1.9 x         |
+| 16 MB        | 17.99       | 6.43        | 2.8 x         |
+| 32 MB        | 29.99       | 7.19        | 4.2 x         |
+| 64 MB        | 43.29       | 7.63        | 5.7 x         |
+| 128 MB       | 54.27       | 7.85        | 6.9 x         |
+| 256 MB       | 65.02       | 7.90        | 8.2 x         |
+| 512 MB       | 71.27       | 7.98        | 8.9 x         |
+| 1 GB         | 75.01       | 8.02        | 9.4 x         |
+| 2 GB         | 77.12       | 8.04        | 9.6 x         |
+
+EFA results match the HyperPod/EKS numbers above. Without EFA, NCCL Socket transport over ENA tops out at ~8 GB/s — making EFA **~9.6x faster** for large messages on p4d.24xlarge.
+
 ## Using EFA on AWS VM
 
-For the instance types listed in the GPU and EFA count mapping table in the [Adding EFA configurations in SkyPilot YAML](#adding-efa-configurations-in-skypilot-yaml) section, the EFA can be enabled by setting `resources.network_tier: best` in the task YAML.
+For the instance types listed in the GPU and EFA count mapping table in the [Enable EFA with HyperPod/EKS](#enable-efa-with-hyperpodeks) section, the EFA can be enabled by setting `resources.network_tier: best` in the task YAML.
 
 ```yaml
 resources:
@@ -191,7 +207,29 @@ To run the NCCL test with EFA support with AWS VM:
 sky launch -c efa efa_vm.yaml
 ```
 
-Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster yaml configurations.
+Check the [`efa_vm.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_vm.yaml) for the complete SkyPilot cluster YAML configurations. Behind the scenes, SkyPilot leverages the [AWS Deep Learning Base GPU AMI](https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-x86-base-gpu-ami-ubuntu-22-04.html), which includes the EFA drivers and modules pre-installed.
+
+For containerized workloads on AWS VMs, see the [`efa_container.yaml`](https://github.com/skypilot-org/skypilot/blob/master/examples/aws_efa/efa_container.yaml) configuration. This example uses the [public.ecr.aws/hpc-cloud/nccl-tests:latest](https://github.com/aws-samples/awsome-distributed-training/blob/main/micro-benchmarks/nccl-tests/nccl-tests.Dockerfile) image, which provides the EFA drivers and modules in a containerized environment.
+
+> **NOTE:** For VMs that support multiple EFA interfaces (e.g., `p4d.24xlarge` with 4 EFA interfaces), you must configure SkyPilot to use internal IPs to access all EFA interfaces.
+>
+> Add the following configuration to [SkyPilot config](https://docs.skypilot.co/en/latest/reference/config.html):
+>
+> **Option 1: Using AWS Systems Manager (SSM) Session Manager**
+> ```yaml
+> aws:
+>   use_internal_ips: true
+>   use_ssm: true
+> ```
+>
+> **Option 2: Using SSH proxy**
+> ```yaml
+> aws:
+>   use_internal_ips: true
+>   ssh_proxy_command: ssh -W %h:%p -i <ssh key path> -o StrictHostKeyChecking=no <user>@<jump server public ip>
+> ```
+>
+> For more details, refer to the [configuration documentation](https://docs.skypilot.co/en/latest/reference/config.html#aws-use-internal-ips).
 
 ### Benchmark results
 

@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from sky.clouds import ssh
-from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.utils import resources_utils
 
 
 class TestSSHExistingAllowedContexts(unittest.TestCase):
@@ -402,7 +402,9 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = ssh_cloud.make_deploy_resources_variables(
             resources=self.resources,
-            cluster_name=self.cluster_name,
+            cluster_name=resources_utils.ClusterName(
+                display_name=self.cluster_name,
+                name_on_cloud=self.cluster_name),
             region=self.region,
             zones=None,
             num_nodes=1,
@@ -500,7 +502,9 @@ class TestSSHMakeDeployResourcesVariables(unittest.TestCase):
         # Call make_deploy_resources_variables
         deploy_vars = ssh_cloud.make_deploy_resources_variables(
             resources=prod_resources,
-            cluster_name="test-prod-cluster",
+            cluster_name=resources_utils.ClusterName(
+                display_name="test-prod-cluster",
+                name_on_cloud="test-prod-cluster"),
             region=prod_region,
             zones=None,
             num_nodes=1,

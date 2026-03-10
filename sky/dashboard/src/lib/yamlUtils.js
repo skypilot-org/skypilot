@@ -64,7 +64,7 @@ export const getYamlPreview = (parsed) => {
     return parsed.substring(0, 50) + '...';
   }
   if (parsed && parsed.name) {
-    return `name: ${parsed.name}`;
+    return parsed.name;
   }
   if (parsed && parsed.resources) {
     return 'Task configuration';

@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import Link from 'next/link';
-import { TimestampWithTooltip } from '@/components/utils';
+import { TimestampWithTooltip, LastUpdatedTimestamp } from '@/components/utils';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import dashboardCache from '@/lib/cache';
 import cachePreloader from '@/lib/cache-preloader';
@@ -49,12 +49,22 @@ export function Volumes() {
   const [volumeToDelete, setVolumeToDelete] = useState(null);
   const [deleteError, setDeleteError] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [preloadingComplete, setPreloadingComplete] = useState(false);
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
 
   const handleRefresh = () => {
     dashboardCache.invalidate(getVolumes);
-    if (refreshDataRef.current) {
-      refreshDataRef.current();
-    }
+    // Reset preloading state so VolumesTable can fetch fresh data immediately
+    setPreloadingComplete(false);
+    // Trigger a new preload cycle
+    cachePreloader.preloadForPage('volumes', { force: true }).then(() => {
+      setPreloadingComplete(true);
+      setLastFetchedTime(new Date());
+      // Call refresh after preloading is complete
+      if (refreshDataRef.current) {
+        refreshDataRef.current();
+      }
+    });
   };
 
   const handleDeleteVolumeClick = (volume) => {
@@ -91,7 +101,19 @@ export function Volumes() {
   };
 
   useEffect(() => {
-    cachePreloader.preloadForPage('volumes');
+    const preloadData = async () => {
+      try {
+        // Await cache preloading for volumes page
+        await cachePreloader.preloadForPage('volumes');
+      } catch (error) {
+        console.error('Error preloading volumes data:', error);
+      } finally {
+        // Signal completion even on error so the table can load
+        setPreloadingComplete(true);
+        setLastFetchedTime(new Date());
+      }
+    };
+    preloadData();
   }, []);
 
   return (
@@ -105,12 +127,15 @@ export function Volumes() {
             Volumes
           </Link>
         </div>
-        <div className="flex items-center">
+        <div className="flex items-center gap-3">
           {loading && (
-            <div className="flex items-center mr-2">
+            <div className="flex items-center">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
+          )}
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp timestamp={lastFetchedTime} />
           )}
           <button
             onClick={handleRefresh}
@@ -129,6 +154,7 @@ export function Volumes() {
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
         onDeleteVolume={handleDeleteVolumeClick}
+        preloadingComplete={preloadingComplete}
       />
 
       {/* Delete Confirmation Dialog */}
@@ -176,6 +202,7 @@ function VolumesTable({
   setLoading,
   refreshDataRef,
   onDeleteVolume,
+  preloadingComplete,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -219,19 +246,26 @@ function VolumesTable({
     setData([]);
     let isCurrent = true;
 
-    fetchData();
+    // Only start fetching data after preloading is complete
+    if (preloadingComplete) {
+      fetchData();
 
-    const interval = setInterval(() => {
-      if (isCurrent && window.document.visibilityState === 'visible') {
-        fetchData();
-      }
-    }, refreshInterval);
+      const interval = setInterval(() => {
+        if (isCurrent && window.document.visibilityState === 'visible') {
+          fetchData();
+        }
+      }, refreshInterval);
+
+      return () => {
+        isCurrent = false;
+        clearInterval(interval);
+      };
+    }
 
     return () => {
       isCurrent = false;
-      clearInterval(interval);
     };
-  }, [refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData, preloadingComplete]);
 
   // Reset to first page when data changes
   useEffect(() => {
@@ -348,7 +382,7 @@ function VolumesTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading && isInitialLoad ? (
+              {loading || !preloadingComplete ? (
                 <TableRow>
                   <TableCell
                     colSpan={11}
@@ -366,7 +400,10 @@ function VolumesTable({
                     <TableCell className="font-medium">{volume.name}</TableCell>
                     <TableCell>{volume.infra || 'N/A'}</TableCell>
                     <TableCell>
-                      <StatusBadge status={volume.status} />
+                      <StatusBadge
+                        status={volume.status}
+                        statusTooltip={volume.error_message || volume.status}
+                      />
                     </TableCell>
                     <TableCell>{formatSize(volume.size)}</TableCell>
                     <TableCell>{volume.user_name || 'N/A'}</TableCell>
@@ -589,4 +626,5 @@ VolumesTable.propTypes = {
     current: PropTypes.func,
   }).isRequired,
   onDeleteVolume: PropTypes.func.isRequired,
+  preloadingComplete: PropTypes.bool.isRequired,
 };

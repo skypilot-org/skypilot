@@ -9,9 +9,10 @@ import re
 import subprocess
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
-                    Tuple, TypeVar, Union)
+from typing import (Any, Callable, Dict, Iterable, Iterator, List, Literal,
+                    Optional, Set, Tuple, TypeVar, Union)
 
+import colorama
 from typing_extensions import ParamSpec
 
 from sky import catalog
@@ -84,6 +85,7 @@ _EFA_INSTANCE_TYPE_PREFIXES = [
     'p5e.',
     'p5en.',
     'p6-b200.',
+    'p6-b300.',
 ]
 
 # Docker run options for EFA.
@@ -691,11 +693,13 @@ class AWS(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='aws')
@@ -716,6 +720,14 @@ class AWS(clouds.Cloud):
         instance_type: str,
     ) -> Optional[str]:
         return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
+
+    @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_local_disk_from_instance_type(instance_type,
+                                                         clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -757,6 +769,36 @@ class AWS(clouds.Cloud):
         else:
             max_efa_interfaces = 0
             enable_efa = False
+
+        use_internal_ips = skypilot_config.get_effective_region_config(
+            cloud='aws',
+            region=region_name,
+            keys=('use_internal_ips',),
+            default_value=False)
+        if max_efa_interfaces > 1 and not use_internal_ips:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}'
+                f'Instance type {resources.instance_type} supports up to '
+                f'{max_efa_interfaces} EFA interfaces, but '
+                '`use_internal_ips` is not enabled.\nLaunching with the '
+                'current configuration will use only 1 EFA interface.\n'
+                f'To use all {max_efa_interfaces} EFA interfaces, enable '
+                'internal IPs by adding one of the following '
+                'configurations to SkyPilot config:\n'
+                'Option 1 (with SSM):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    use_ssm: true\n'
+                'Option 2 (with SSH proxy):\n'
+                '  aws:\n'
+                '    use_internal_ips: true\n'
+                '    ssh_proxy_command: ssh -W %h:%p -i <ssh key path> '
+                '-o StrictHostKeyChecking=no <user>@<jump server public'
+                ' ip>\n'
+                'Refer to '
+                'https://docs.skypilot.co/en/latest/reference/config.html'
+                '#aws-use-internal-ips for more details.'
+                f'{colorama.Style.RESET_ALL}')
 
         docker_run_options = []
         if resources.extract_docker_image() is not None:
@@ -873,6 +915,7 @@ class AWS(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -890,6 +933,7 @@ class AWS(clouds.Cloud):
              use_spot=resources.use_spot,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='aws')
@@ -1005,8 +1049,10 @@ class AWS(clouds.Cloud):
             hints = 'AWS SSO is set.'
             if static_credential_exists:
                 hints += (
-                    ' To ensure multiple clouds work correctly, please use SkyPilot '
-                    'with static credentials (e.g., ~/.aws/credentials) by unsetting '
+                    ' To ensure S3 mounting and other features work correctly '
+                    'on Kubernetes and other clouds, '
+                    'please use SkyPilot with static AWS credentials '
+                    '(e.g., ~/.aws/credentials) by unsetting '
                     'the AWS_PROFILE environment variable.')
             else:
                 hints += single_cloud_hint
@@ -1080,6 +1126,31 @@ class AWS(clouds.Cloud):
             if _is_access_key_of_type(identity_type.value):
                 return identity_type
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
+
+    @classmethod
+    def should_use_env_auth_for_s3(cls) -> bool:
+        """Returns True if S3 should use environment-based auth.
+
+        When using non-static AWS credentials (SSO, IAM role, container role),
+        we should not embed credentials into rclone config. Instead, we should
+        use env_auth=true so that rclone uses the AWS SDK credential chain,
+        which properly handles temporary credentials and IAM roles.
+
+        Returns:
+            True if environment-based auth should be used, False for static
+            credentials that can be embedded.
+        """
+        identity_type = cls._current_identity_type()
+        if identity_type is None:
+            return False
+        # These credential types use temporary credentials that should not be
+        # embedded in config files. They rely on the AWS SDK credential chain.
+        non_static_types = {
+            AWSIdentityType.SSO,
+            AWSIdentityType.IAM_ROLE,
+            AWSIdentityType.CONTAINER_ROLE,
+        }
+        return identity_type in non_static_types
 
     @classmethod
     @aws_profile_aware_lru_cache(scope='request',
@@ -1596,3 +1667,18 @@ class AWS(clouds.Cloud):
         if not key_valid or not value_valid:
             return False, error_msg
         return True, None
+
+    @classmethod
+    def yield_cloud_specific_failover_overrides(cls,
+                                                region: Optional[str] = None
+                                               ) -> Iterable[Dict[str, Any]]:
+        vpc_names = skypilot_config.get_effective_region_config(
+            cloud='aws', region=region, keys=('vpc_names',), default_value=None)
+        if vpc_names:
+            if isinstance(vpc_names, str):
+                vpc_names = [vpc_names]
+            for vpc_name in vpc_names:
+                yield {'vpc_name': vpc_name}
+        else:
+            yield {}
+        return

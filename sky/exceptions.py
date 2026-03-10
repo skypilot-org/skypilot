@@ -208,12 +208,6 @@ class InconsistentHighAvailabilityError(Exception):
     pass
 
 
-class InconsistentConsolidationModeError(Exception):
-    """Raised when the consolidation mode property in the user config
-    is inconsistent with the actual cluster."""
-    pass
-
-
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
@@ -431,6 +425,16 @@ class InvalidClusterNameError(Exception):
     pass
 
 
+class InvalidRecipeNameError(Exception):
+    """Raised when the recipe name is invalid."""
+    pass
+
+
+class RecipeAlreadyExistsError(Exception):
+    """Raised when attempting to create a recipe with an existing name."""
+    pass
+
+
 class CloudUserIdentityError(Exception):
     """Raised when the cloud identity is invalid."""
     pass
@@ -634,6 +638,11 @@ class RequestAlreadyExistsError(Exception):
 
 class PermissionDeniedError(Exception):
     """Raised when a user does not have permission to access a resource."""
+    pass
+
+
+class VolumeNotReadyError(Exception):
+    """Raised when a volume is not ready."""
     pass
 
 

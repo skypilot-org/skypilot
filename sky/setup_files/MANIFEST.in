@@ -1,5 +1,5 @@
 include sky/backends/monkey_patches/*.py
-exclude sky/clouds/service_catalog/data_fetchers/analyze.py
+exclude sky/catalog/data_fetchers/analyze.py
 include sky/provision/kubernetes/manifests/*
 include sky/provision/azure/*
 include sky/setup_files/*
@@ -15,6 +15,7 @@ include sky/jobs/dashboard/templates/*
 include sky/jobs/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*
+include sky/ssh_node_pools/deploy/tunnel/*
 include sky/server/html/*
 recursive-include sky/dashboard/out *
 include sky/users/*.conf

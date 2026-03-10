@@ -68,9 +68,10 @@ def get_zone_shell_cmd() -> Optional[str]:
 def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[str] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None) -> Optional[str]:
-    del disk_tier  # Unused
+    del disk_tier, local_disk  # Unused
     return common.get_instance_type_for_cpus_mem_impl(_df, cpus, memory, region,
                                                       zone)
 
@@ -81,9 +82,11 @@ def get_instance_type_for_accelerator(
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
+    local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
+    del local_disk  # unused
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Hyperbolic Cloud does not support zones.')

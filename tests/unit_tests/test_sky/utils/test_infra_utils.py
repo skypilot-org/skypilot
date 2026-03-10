@@ -152,6 +152,9 @@ class TestInfraUtils(unittest.TestCase):
             # Test local and lambda clouds
             ('local', None, None, True, 'local'),
             ('lambda', 'region-name', None, True, 'lambda (region-name)'),
+            # Test Slurm shows cluster (region) not partition (zone)
+            ('slurm', 'gpu-cluster', 'dev', True, 'slurm (gpu-cluster)'),
+            ('slurm', 'sunk', 'all', True, 'slurm (sunk)'),
         ]
 
         for cloud, region, zone, truncate, expected in test_cases:

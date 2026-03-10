@@ -69,13 +69,24 @@ https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.
 {{- end -}}
 
 {{/*
+Compute full release name with optional fullnameOverride.
+*/}}
+{{- define "skypilot.fullname" -}}
+{{- if .Values.fullnameOverride -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "skypilot.serviceAccountName" -}}
 {{- if .Values.rbac.serviceAccountName -}}
 {{ .Values.rbac.serviceAccountName }}
 {{- else -}}
-{{ .Release.Name }}-api-sa
+{{ include "skypilot.fullname" . }}-api-sa
 {{- end -}}
 {{- end -}}
 
@@ -108,7 +119,7 @@ false
 {{- if .Values.apiService.initialBasicAuthSecret -}}
 {{ .Values.apiService.initialBasicAuthSecret }}
 {{- else if .Values.apiService.initialBasicAuthCredentials -}}
-{{ printf "%s-initial-basic-auth" .Release.Name }}
+{{ printf "%s-initial-basic-auth" (include "skypilot.fullname" .) }}
 {{- else -}}
 {{- /* Return empty string */ -}}
 {{ "" }}
@@ -121,7 +132,7 @@ false
 {{- end -}}
 
 {{- define "skypilot.oauth2ProxyURL" -}}
-http://{{ .Release.Name }}-oauth2-proxy:4180
+http://{{ include "skypilot.fullname" . }}-oauth2-proxy:4180
 {{- end -}}
 
 {{- define "skypilot.ingressBasicAuthEnabled" -}}
@@ -162,5 +173,20 @@ false
 
 {{- if and $authOAuthEnabled $ingressOAuthEnabled -}}
   {{- fail "Error\nauth.oauth.enabled cannot be used together with ingress OAuth2 proxy authentication (ingress.oauth2-proxy.enabled). These authentication methods are mutually exclusive. Please:\n1. Disable auth.oauth.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
+{{- end -}}
+{{- end -}}
+
+{{/* Validate the external proxy config */}}
+{{- define "skypilot.validateExternalProxyConfig" -}}
+{{- $externalProxyEnabled := .Values.auth.externalProxy.enabled -}}
+{{- $authOAuthEnabled := .Values.auth.oauth.enabled -}}
+{{- $ingressOAuthEnabled := include "skypilot.ingressOAuthEnabled" . | trim | eq "true" -}}
+
+{{- if and $externalProxyEnabled $authOAuthEnabled -}}
+  {{- fail "Error\nauth.externalProxy.enabled cannot be used together with auth.oauth.enabled. These authentication methods are mutually exclusive. Please:\n1. Disable auth.externalProxy.enabled, OR\n2. Set auth.oauth.enabled to false\nThen try again." -}}
+{{- end -}}
+
+{{- if and $externalProxyEnabled $ingressOAuthEnabled -}}
+  {{- fail "Error\nauth.externalProxy.enabled cannot be used together with ingress.oauth2-proxy.enabled. These authentication methods are mutually exclusive. Please:\n1. Disable auth.externalProxy.enabled, OR\n2. Set ingress.oauth2-proxy.enabled to false\nThen try again." -}}
 {{- end -}}
 {{- end -}}

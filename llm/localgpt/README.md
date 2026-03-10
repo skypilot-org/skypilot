@@ -19,10 +19,31 @@ Once you are done, we will use [SkyPilot YAML for localGPT](https://github.com/s
 
 
 ## Launching localGPT on your cloud with SkyPilot
-1. Use `launch_localgpt.py` to run localGPT on your cloud. SkyPilot will show the estimated cost and chosen cloud before provisioning. For reference, running on T4 instances on AWS would cost about $0.53 per hour. 
+1. Run localGPT on your cloud.
+
+---
+
+**Option 1: Run with CLI**
+
+Use `sky launch` to run localGPT on your cloud.
+
+```bash
+sky launch -c localgpt localgpt.yaml
+```
+
+Once you see `INFO:werkzeug:Press CTRL+C to quit`, you can safely Ctrl+C from the `sky launch` command.
+
+**Option 2: Run with SDK**
+
+Use `launch_localgpt.py` to run localGPT on your cloud.
+
 ```bash
 python3 launch_localgpt.py
 ```
+
+---
+
+SkyPilot will show the estimated cost and chosen cloud before provisioning. For reference, running on T4 instances on AWS would cost about $0.53 per hour. 
 
 2. Run `ssh -L 5111:localhost:5111 localgpt` in a new terminal window to forward the port 5111 to your local machine. Keep this terminal running.
 

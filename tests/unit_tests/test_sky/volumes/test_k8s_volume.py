@@ -294,7 +294,7 @@ class TestApplyVolume:
 
         assert result == config
         mock_k8s.storage_api.return_value.read_storage_class.assert_called_once_with(
-            name='standard')
+            name='standard', _request_timeout=mock_k8s.API_TIMEOUT)
         mock_create_pvc.assert_called_once()
 
     @patch('sky.provision.kubernetes.volume.create_persistent_volume_claim')
@@ -611,7 +611,8 @@ class TestGetAllVolumesUsedBy:
     def test_get_all_volumes_usedby_empty(self, mock_get_context, mock_get_map,
                                           mock_k8s):
         """Test with no volumes."""
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby([])
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
+            [])
 
         assert used_by_pods == {}
         assert used_by_clusters == {}
@@ -644,7 +645,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         assert 'my-context' in used_by_pods
@@ -683,7 +684,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Should have empty dict for the volume
@@ -722,7 +723,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Should have empty dict for the volume
@@ -758,7 +759,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Should not include the other-pvc
@@ -795,7 +796,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Pod should be recorded, but no cluster
@@ -834,7 +835,7 @@ class TestGetAllVolumesUsedBy:
             size=None,
         )
 
-        used_by_pods, used_by_clusters = k8s_volume.get_all_volumes_usedby(
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
             [config])
 
         # Pod should be recorded, but no cluster (cluster not in map)
@@ -844,6 +845,90 @@ class TestGetAllVolumesUsedBy:
         # No cluster should be added since it's not in the map
         assert len(
             used_by_clusters.get('my-context', {}).get('my-namespace', {})) == 0
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    def test_get_all_volumes_usedby_list_pods_exception(self, mock_get_context,
+                                                        mock_get_map, mock_k8s):
+        """Test when list_namespaced_pod raises an exception."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        mock_get_map.return_value = {}
+
+        # Make list_namespaced_pod raise an exception
+        api_exception = Exception("Failed to list pods")
+        mock_k8s.core_api.return_value.list_namespaced_pod.side_effect = api_exception
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+        )
+
+        used_by_pods, used_by_clusters, failed_volume_names = k8s_volume.get_all_volumes_usedby(
+            [config])
+
+        # The volume should be marked as failed
+        assert 'test-vol' in failed_volume_names
+        # The namespace should still be initialized in the dictionaries
+        assert 'my-context' in used_by_pods
+        assert 'my-namespace' in used_by_pods['my-context']
+        assert 'my-context' in used_by_clusters
+        assert 'my-namespace' in used_by_clusters['my-context']
+        # But the volume should not be in the used_by dictionaries
+        assert 'test-pvc' not in used_by_pods['my-context']['my-namespace']
+        assert 'test-pvc' not in used_by_clusters['my-context']['my-namespace']
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    def test_get_all_volumes_usedby_list_pods_exception_multiple_volumes(
+            self, mock_get_context, mock_get_map, mock_k8s):
+        """Test exception handling with multiple volumes in same namespace."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        mock_get_map.return_value = {}
+
+        # Make list_namespaced_pod raise an exception
+        api_exception = Exception("Failed to list pods")
+        mock_k8s.core_api.return_value.list_namespaced_pod.side_effect = api_exception
+
+        config1 = models.VolumeConfig(
+            _version=1,
+            name='test-vol-1',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc-1',
+            size=None,
+        )
+        config2 = models.VolumeConfig(
+            _version=1,
+            name='test-vol-2',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc-2',
+            size=None,
+        )
+
+        used_by_pods, used_by_clusters, failed_volume_names = k8s_volume.get_all_volumes_usedby(
+            [config1, config2])
+
+        # Both volumes should be marked as failed
+        assert 'test-vol-1' in failed_volume_names
+        assert 'test-vol-2' in failed_volume_names
+        assert len(failed_volume_names) == 2
 
 
 class TestMapAllVolumesUsedBy:
@@ -1110,14 +1195,13 @@ class TestCreatePersistentVolumeClaim:
         mock_k8s.core_api.return_value.create_namespaced_persistent_volume_claim.assert_not_called(
         )
 
+    @patch('sky.provision.kubernetes.volume._find_pvc_by_name_or_label')
     @patch('sky.provision.kubernetes.volume.kubernetes')
-    def test_create_pvc_not_exists_use_existing_true(self, mock_k8s):
+    def test_create_pvc_not_exists_use_existing_true(self, mock_k8s,
+                                                     mock_find_pvc):
         """Test when PVC doesn't exist but use_existing is True."""
-        # Create an actual exception instance with status attribute
-        api_exception = Exception("PVC not found")
-        api_exception.status = 404
-        mock_k8s.api_exception.return_value = Exception
-        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = api_exception
+        # Mock that PVC is not found by name or label
+        mock_find_pvc.return_value = None
 
         pvc_spec = {
             'metadata': {
@@ -1190,7 +1274,9 @@ class TestCreatePersistentVolumeClaim:
 
         # Should create PVC
         mock_k8s.core_api.return_value.create_namespaced_persistent_volume_claim.assert_called_once_with(
-            namespace='my-namespace', body=pvc_spec)
+            namespace='my-namespace',
+            body=pvc_spec,
+            _request_timeout=mock_k8s.API_TIMEOUT)
 
     @patch('sky.provision.kubernetes.volume.kubernetes')
     def test_create_pvc_api_error(self, mock_k8s):
@@ -1323,3 +1409,695 @@ class TestGetPVCSpec:
 
         with pytest.raises(AssertionError):
             k8s_volume._get_pvc_spec('my-namespace', config)
+
+
+class MockPV:
+    """Mock PersistentVolume object."""
+
+    def __init__(self,
+                 name: str,
+                 storage_class: str = 'standard',
+                 access_modes: List[str] = None,
+                 phase: str = 'Available'):
+        self.metadata = Mock()
+        self.metadata.name = name
+
+        self.spec = Mock()
+        self.spec.storage_class_name = storage_class
+        self.spec.access_modes = access_modes or ['ReadWriteOnce']
+
+        self.status = Mock()
+        self.status.phase = phase
+
+
+class TestRefreshVolumeConfig:
+    """Tests for refresh_volume_config function."""
+
+    @patch('sky.provision.kubernetes.volume.kubernetes.in_cluster_context_name')
+    def test_refresh_volume_config_region_none(self, mock_in_cluster_context):
+        """When region is None, it should be set from in-cluster context."""
+        mock_in_cluster_context.return_value = 'in-cluster-context'
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region=None,
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+
+        need_refresh, new_config = k8s_volume.refresh_volume_config(config)
+
+        assert need_refresh is True
+        assert new_config.region == 'in-cluster-context'
+        # The original object should also be updated in place
+        assert config.region == 'in-cluster-context'
+        mock_in_cluster_context.assert_called_once()
+
+    def test_refresh_volume_config_region_set(self):
+        """When region is already set, it should be kept and no refresh needed."""
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='existing-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+            config={},
+        )
+
+        need_refresh, new_config = k8s_volume.refresh_volume_config(config)
+
+        assert need_refresh is False
+        assert new_config.region == 'existing-context'
+        assert config.region == 'existing-context'
+
+
+class TestGetAllVolumesErrors:
+    """Tests for get_all_volumes_errors function."""
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_pvc_bound_no_error(self, mock_core_api, mock_get_context):
+        """Test that bound PVCs have no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a bound PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Bound'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        assert errors.get('test-vol') is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_generic_error(self, mock_storage_api, mock_core_api,
+                                       mock_get_context):
+        """Test that pending PVCs without access mode mismatch get generic error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'standard'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        # Mock storage class with Immediate binding mode
+        mock_storage_class = Mock()
+        mock_storage_class.volume_binding_mode = 'Immediate'
+        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'test-vol' in errors
+        assert errors['test-vol'] is not None
+        assert 'pending' in errors['test-vol'].lower()
+        assert 'kubectl describe pvc' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_pvc_pending_access_mode_mismatch(self, mock_core_api,
+                                              mock_get_context):
+        """Test detection of access mode mismatch."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC requesting ReadWriteOnce
+        mock_pvc = MockPVC('test-pvc',
+                           'my-namespace',
+                           access_modes=['ReadWriteOnce'])
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'standard'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # Available PV only supports ReadWriteMany
+        mock_pv = MockPV('test-pv',
+                         storage_class='standard',
+                         access_modes=['ReadWriteMany'],
+                         phase='Available')
+        mock_pv_list = Mock()
+        mock_pv_list.items = [mock_pv]
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'test-vol' in errors
+        assert 'access mode mismatch' in errors['test-vol'].lower()
+        assert 'ReadWriteOnce' in errors['test-vol']
+        assert 'ReadWriteMany' in errors['test-vol']
+        assert 'kubectl describe pvc' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_wait_for_first_consumer(self, mock_storage_api,
+                                                 mock_core_api,
+                                                 mock_get_context):
+        """Test that pending PVCs with WaitForFirstConsumer get no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'standard'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        # Mock storage class with WaitForFirstConsumer binding mode
+        mock_storage_class = Mock()
+        mock_storage_class.volume_binding_mode = 'WaitForFirstConsumer'
+        mock_storage_api.return_value.read_storage_class.return_value = mock_storage_class
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        # Should be None for WaitForFirstConsumer
+        assert errors.get('test-vol') is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_storage_class_read_failure(self, mock_storage_api,
+                                                    mock_core_api,
+                                                    mock_get_context):
+        """Test that pending PVCs with storage class read failure get no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = 'existent'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        # Mock storage class read failure
+        mock_storage_api.return_value.read_storage_class.side_effect = Exception(
+            'Storage class read failure')
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        # Should be None when storage class read fails
+        assert errors.get('test-vol') is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    @patch('sky.adaptors.kubernetes.storage_api')
+    def test_pvc_pending_storage_class_empty(self, mock_storage_api,
+                                             mock_core_api, mock_get_context):
+        """Test that pending PVCs with missing storage class get no error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a pending PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Pending'
+        mock_pvc.spec.storage_class_name = ''
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # No available PVs
+        mock_pv_list = Mock()
+        mock_pv_list.items = []
+        mock_core_api.return_value.list_persistent_volume.return_value = mock_pv_list
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        # Should be None when storage class read fails
+        assert errors.get('test-vol') is None
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_pvc_lost_error(self, mock_core_api, mock_get_context):
+        """Test that lost PVCs get appropriate error."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Create a lost PVC
+        mock_pvc = MockPVC('test-pvc', 'my-namespace')
+        mock_pvc.status.phase = 'Lost'
+
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        errors = k8s_volume.get_all_volumes_errors([config])
+
+        assert 'test-vol' in errors
+        assert 'Lost' in errors['test-vol']
+        assert 'kubectl describe pvc' in errors['test-vol']
+
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    @patch('sky.adaptors.kubernetes.core_api')
+    def test_pvc_list_exception(self, mock_core_api, mock_get_context):
+        """Test handling of exceptions when listing PVCs."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+
+        # Make list_namespaced_persistent_volume_claim raise an exception
+        mock_core_api.return_value.list_namespaced_persistent_volume_claim.side_effect = Exception(
+            'API error')
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size='10',
+            config={'namespace': 'my-namespace'},
+        )
+
+        # Should not raise, just return empty dict
+        errors = k8s_volume.get_all_volumes_errors([config])
+        assert errors == {}
+
+
+class TestFindPVCByNameOrLabel:
+    """Tests for _find_pvc_by_name_or_label function."""
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_find_by_exact_name(self, mock_k8s):
+        """Test finding PVC by exact name."""
+        mock_pvc = MockPVC('myvolume', 'my-namespace')
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.return_value = mock_pvc
+
+        result = k8s_volume._find_pvc_by_name_or_label('my-context',
+                                                       'my-namespace',
+                                                       'myvolume')
+
+        assert result is not None
+        assert result.metadata.name == 'myvolume'
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.assert_called_once(
+        )
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_find_by_label_when_name_not_found(self, mock_k8s):
+        """Test finding PVC by label when exact name doesn't exist."""
+        # Name lookup fails with 404
+        api_exception = Exception("PVC not found")
+        api_exception.status = 404
+        mock_k8s.api_exception.return_value = Exception
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = api_exception
+
+        # Label lookup succeeds
+        mock_pvc = MockPVC('myvolume-abc123', 'my-namespace')
+        mock_pvc.metadata.labels = {
+            'parent': 'skypilot',
+            'skypilot-name': 'myvolume'
+        }
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc]
+        mock_k8s.core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        result = k8s_volume._find_pvc_by_name_or_label('my-context',
+                                                       'my-namespace',
+                                                       'myvolume')
+
+        assert result is not None
+        assert result.metadata.name == 'myvolume-abc123'
+        mock_k8s.core_api.return_value.list_namespaced_persistent_volume_claim.assert_called_once_with(
+            namespace='my-namespace',
+            label_selector='skypilot-name=myvolume',
+            _request_timeout=mock_k8s.API_TIMEOUT)
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_find_not_found_by_name_or_label(self, mock_k8s):
+        """Test when PVC is not found by either name or label."""
+        # Name lookup fails with 404
+        api_exception = Exception("PVC not found")
+        api_exception.status = 404
+        mock_k8s.api_exception.return_value = Exception
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = api_exception
+
+        # Label lookup returns empty list
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = []
+        mock_k8s.core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        result = k8s_volume._find_pvc_by_name_or_label('my-context',
+                                                       'my-namespace',
+                                                       'myvolume')
+
+        assert result is None
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_find_multiple_pvcs_by_label_raises_error(self, mock_k8s):
+        """Test that when multiple PVCs match label, raises error."""
+
+        # Custom exception class so except clause doesn't catch ValueError
+        class MockApiException(Exception):
+            pass
+
+        # Name lookup fails with 404
+        api_exception = MockApiException("PVC not found")
+        api_exception.status = 404
+        mock_k8s.api_exception.return_value = MockApiException
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = api_exception
+
+        # Label lookup returns multiple PVCs
+        mock_pvc1 = MockPVC('myvolume-abc123', 'my-namespace')
+        mock_pvc1.metadata.labels = {
+            'parent': 'skypilot',
+            'skypilot-name': 'myvolume'
+        }
+        mock_pvc2 = MockPVC('myvolume-def456', 'my-namespace')
+        mock_pvc2.metadata.labels = {
+            'parent': 'skypilot',
+            'skypilot-name': 'myvolume'
+        }
+        mock_pvc_list = Mock()
+        mock_pvc_list.items = [mock_pvc1, mock_pvc2]
+        mock_k8s.core_api.return_value.list_namespaced_persistent_volume_claim.return_value = mock_pvc_list
+
+        # Should raise error for ambiguous PVCs
+        with pytest.raises(ValueError) as exc_info:
+            k8s_volume._find_pvc_by_name_or_label('my-context', 'my-namespace',
+                                                  'myvolume')
+
+        assert 'Multiple PVCs found' in str(exc_info.value)
+        assert 'myvolume-abc123' in str(exc_info.value)
+        assert 'myvolume-def456' in str(exc_info.value)
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_find_non_404_error_raises(self, mock_k8s):
+        """Test that non-404 errors are raised."""
+        # Name lookup fails with 500
+        api_exception = Exception("Server error")
+        api_exception.status = 500
+        mock_k8s.api_exception.return_value = Exception
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = api_exception
+
+        with pytest.raises(Exception):
+            k8s_volume._find_pvc_by_name_or_label('my-context', 'my-namespace',
+                                                  'myvolume')
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_label_lookup_api_error_returns_none(self, mock_k8s):
+        """Test that API error during label lookup is caught and returns None."""
+
+        # Custom exception class so except clause doesn't catch other exceptions
+        class MockApiException(Exception):
+            pass
+
+        # Name lookup fails with 404
+        name_api_exception = MockApiException("PVC not found")
+        name_api_exception.status = 404
+        mock_k8s.api_exception.return_value = MockApiException
+        mock_k8s.core_api.return_value.read_namespaced_persistent_volume_claim.side_effect = name_api_exception
+
+        # Label lookup fails with API error (e.g., 500)
+        label_api_exception = MockApiException("Server error")
+        label_api_exception.status = 500
+        mock_k8s.core_api.return_value.list_namespaced_persistent_volume_claim.side_effect = label_api_exception
+
+        # Should return None (not raise) because the exception is caught
+        result = k8s_volume._find_pvc_by_name_or_label('my-context',
+                                                       'my-namespace',
+                                                       'myvolume')
+
+        assert result is None
+
+
+class TestCreatePVCWithUseExisting:
+    """Tests for create_persistent_volume_claim with use_existing and label lookup."""
+
+    @patch('sky.provision.kubernetes.volume._find_pvc_by_name_or_label')
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_use_existing_finds_by_label(self, mock_k8s, mock_find_pvc):
+        """Test use_existing finds PVC by label and updates name_on_cloud."""
+        # Mock finding PVC by label
+        mock_pvc = MockPVC('myvolume-abc123', 'my-namespace', size='50Gi')
+        mock_pvc.metadata.labels = {
+            'parent': 'skypilot',
+            'skypilot-name': 'myvolume'
+        }
+        mock_find_pvc.return_value = mock_pvc
+
+        pvc_spec = {
+            'metadata': {
+                'name': 'myvolume',  # Initial name_on_cloud = name
+                'namespace': 'my-namespace'
+            },
+            'spec': {}
+        }
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='myvolume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='myvolume',  # Initially same as name
+            size=None,
+            config={'use_existing': True},
+        )
+
+        k8s_volume.create_persistent_volume_claim('my-namespace', 'my-context',
+                                                  pvc_spec, config)
+
+        # name_on_cloud should be updated to actual PVC name
+        assert config.name_on_cloud == 'myvolume-abc123'
+        # Should not try to create PVC
+        mock_k8s.core_api.return_value.create_namespaced_persistent_volume_claim.assert_not_called(
+        )
+        # Should call find with volume name
+        mock_find_pvc.assert_called_once_with('my-context', 'my-namespace',
+                                              'myvolume')
+
+    @patch('sky.provision.kubernetes.volume._find_pvc_by_name_or_label')
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_use_existing_not_found_raises_error(self, mock_k8s, mock_find_pvc):
+        """Test use_existing raises error when PVC not found."""
+        mock_find_pvc.return_value = None
+
+        pvc_spec = {
+            'metadata': {
+                'name': 'myvolume',
+                'namespace': 'my-namespace'
+            },
+            'spec': {}
+        }
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='myvolume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='myvolume',
+            size=None,
+            config={'use_existing': True},
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            k8s_volume.create_persistent_volume_claim('my-namespace',
+                                                      'my-context', pvc_spec,
+                                                      config)
+
+        assert 'does not exist' in str(exc_info.value)
+        assert 'use_existing' in str(exc_info.value)
+        assert 'skypilot-name=myvolume' in str(exc_info.value)
+
+    @patch('sky.provision.kubernetes.volume._find_pvc_by_name_or_label')
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_use_existing_populates_config(self, mock_k8s, mock_find_pvc):
+        """Test use_existing populates config from found PVC."""
+        mock_pvc = MockPVC('myvolume-abc123',
+                           'my-namespace',
+                           storage_class='fast-ssd',
+                           size='100Gi')
+        mock_find_pvc.return_value = mock_pvc
+
+        pvc_spec = {
+            'metadata': {
+                'name': 'myvolume',
+                'namespace': 'my-namespace'
+            },
+            'spec': {}
+        }
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='myvolume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='myvolume',
+            size=None,
+            config={'use_existing': True},
+        )
+
+        k8s_volume.create_persistent_volume_claim('my-namespace', 'my-context',
+                                                  pvc_spec, config)
+
+        # Config should be populated from PVC
+        assert config.name_on_cloud == 'myvolume-abc123'
+        assert config.size == '100'  # Converted from '100Gi'
+        assert config.config.get('storage_class_name') == 'fast-ssd'
+
+    @patch('sky.provision.kubernetes.volume._find_pvc_by_name_or_label')
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    def test_use_existing_api_error_raises_value_error(self, mock_k8s,
+                                                       mock_find_pvc):
+        """Test that API error from _find_pvc_by_name_or_label raises ValueError."""
+
+        # Custom exception class to simulate kubernetes.api_exception()
+        class MockApiException(Exception):
+            pass
+
+        mock_k8s.api_exception.return_value = MockApiException
+
+        # Make _find_pvc_by_name_or_label raise an API exception
+        api_error = MockApiException("Connection refused")
+        mock_find_pvc.side_effect = api_error
+
+        pvc_spec = {
+            'metadata': {
+                'name': 'myvolume',
+                'namespace': 'my-namespace'
+            },
+            'spec': {}
+        }
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='myvolume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='myvolume',
+            size=None,
+            config={'use_existing': True},
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            k8s_volume.create_persistent_volume_claim('my-namespace',
+                                                      'my-context', pvc_spec,
+                                                      config)
+
+        assert 'Failed to search for PVC' in str(exc_info.value)
+        assert 'skypilot-name=myvolume' in str(exc_info.value)

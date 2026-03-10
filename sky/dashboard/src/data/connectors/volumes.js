@@ -1,4 +1,5 @@
 import { apiClient } from '@/data/connectors/client';
+import { getErrorMessageFromResponse } from '@/data/utils';
 
 export async function getVolumes() {
   try {
@@ -36,6 +37,7 @@ export async function getVolumes() {
           name_on_cloud: volume.name_on_cloud,
           usedby_pods: volume.usedby_pods,
           usedby_clusters: volume.usedby_clusters,
+          error_message: volume.error_message || null,
         };
       }) || [];
 
@@ -61,9 +63,7 @@ export async function deleteVolume(volumeName) {
         msg: `Failed to delete volume with status ${response.status}`,
       };
     }
-    const id =
-      response.headers.get('X-SkyPilot-Request-ID') ||
-      response.headers.get('X-Request-ID');
+    const id = response.headers.get('X-SkyPilot-Request-ID');
     if (!id) {
       console.error('No request ID received from server for deleting volume');
       return {
@@ -73,7 +73,8 @@ export async function deleteVolume(volumeName) {
     }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
     if (!fetchedData.ok) {
-      msg = `Failed to delete volume with status ${fetchedData.status}`;
+      const errorMessage = await getErrorMessageFromResponse(fetchedData);
+      msg = `Failed to delete volume with status ${fetchedData.status}, error: ${errorMessage}`;
       console.error(msg);
       return { success: false, msg: msg };
     }
