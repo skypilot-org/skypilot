@@ -10,6 +10,7 @@ To update snapshots when intentional changes are made:
 """
 import os
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -316,3 +317,21 @@ class TestRcloneFlushScript:
         slurm_script = slurm_codegen.get_rclone_flush_script()
 
         assert ray_script == slurm_script
+
+    @pytest.mark.parametrize('cmd,expected_code', [
+        ('true', 0),
+        ('false', 1),
+        ('bash -c "exit 0"', 0),
+        ('bash -c "exit 1"', 1),
+        ('bash -c "exit 2"', 2),
+        ('python3 -c "import sys; sys.exit(0)"', 0),
+        ('python3 -c "import sys; sys.exit(1)"', 1),
+    ])
+    def test_flush_script_preserves_user_exit_code(self, cmd, expected_code):
+        """Test that rclone flush script preserves the user command's
+        exit code."""
+        script = task_codegen.TaskCodeGen.build_task_bash_script(cmd)
+        result = subprocess.run(['bash', '-c', script],
+                                capture_output=True,
+                                check=False)
+        assert result.returncode == expected_code

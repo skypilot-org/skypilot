@@ -59,7 +59,9 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+    # Limit the length of the volume name to match the label value
+    # limit (63 characters)
+    _MAX_VOLUME_NAME_LEN_LIMIT = 63
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -319,7 +321,7 @@ class Kubernetes(clouds.Cloud):
                          f'{context}. Reason: {reason}')
 
             autoscaler_type = skypilot_config.get_effective_region_config(
-                cloud='kubernetes',
+                cloud=cls._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -724,7 +726,7 @@ class Kubernetes(clouds.Cloud):
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
-                cloud='kubernetes',
+                cloud=self._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -1348,7 +1350,7 @@ class Kubernetes(clouds.Cloud):
         # Check if the cluster has any node pools with autoscaling enabled
         # with machine types that support high perf networking for GKE.
         autoscaler_type = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cls._REPR.lower(),
             region=context,
             keys=('autoscaler',),
             default_value=None)

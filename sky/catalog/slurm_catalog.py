@@ -145,9 +145,11 @@ def list_accelerators_realtime(
 
         # Apply name filter to the determined GPU type
         regex_flags = 0 if case_sensitive else re.IGNORECASE
-        if name_filter and not re.match(
-                name_filter, gpu_type, flags=regex_flags):
-            continue
+        if name_filter:
+            if gpu_type is None:
+                continue
+            if not re.match(name_filter, gpu_type, flags=regex_flags):
+                continue
 
         # Apply quantity filter (total GPUs on node must meet this)
         if quantity_filter and node_total_gpus < quantity_filter:

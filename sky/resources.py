@@ -2384,7 +2384,9 @@ class Resources:
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
 
-    def to_yaml_config(self) -> Dict[str, Union[str, int]]:
+    def to_yaml_config(self,
+                       redact_secrets: bool = False
+                      ) -> Dict[str, Union[str, int]]:
         """Returns a yaml-style dict of config for this resource bundle."""
         config = {}
 
@@ -2438,6 +2440,8 @@ class Resources:
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
+            if redact_secrets:
+                config['_docker_login_config']['password'] = '<redacted>'
         if self._docker_username_for_runpod is not None:
             config['_docker_username_for_runpod'] = (
                 self._docker_username_for_runpod)

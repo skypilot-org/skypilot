@@ -13,11 +13,11 @@ def isolated_database(tmp_path):
     temp_log_path = tmp_path / 'logs'
     temp_log_path.mkdir()
 
-    kv_cache._SQLALCHEMY_ENGINE = sqlalchemy.create_engine(
+    kv_cache._db_manager._engine = sqlalchemy.create_engine(
         f'sqlite:///{temp_db_path}')
-    kv_cache.create_table(kv_cache._SQLALCHEMY_ENGINE)
+    kv_cache.create_table(kv_cache._db_manager.get_engine())
     yield
-    kv_cache._SQLALCHEMY_ENGINE = None
+    kv_cache._db_manager._engine = None
 
 
 def test_cache_entry_basic(isolated_database):

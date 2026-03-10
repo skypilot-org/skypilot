@@ -21,7 +21,6 @@ import {
   UsersIcon,
   StarIcon,
   VolumeIcon,
-  KueueIcon,
   KeyIcon,
   ShieldIcon,
   PieChartIcon,
@@ -40,7 +39,6 @@ const ICON_MAP = {
   users: UsersIcon,
   volume: VolumeIcon,
   clock: Clock,
-  kueue: KueueIcon,
   filecode: FileCode,
   repeat: RepeatIcon,
   piechart: PieChartIcon,
@@ -659,9 +657,9 @@ export function TopBar() {
                   className="text-sm text-muted-foreground"
                 >
                   <Link
-                    href="/config"
+                    href="/settings"
                     className={`inline-flex items-center justify-center p-2 rounded-full transition-colors duration-150 cursor-pointer ${
-                      isActivePath('/config')
+                      isActivePath('/settings')
                         ? 'text-blue-600 hover:bg-gray-100'
                         : 'text-gray-600 hover:bg-gray-100'
                     }`}
@@ -726,21 +724,15 @@ export function TopBar() {
                         </>
                       );
                     })()}
-                    <div className="border-t border-gray-200 mx-1 my-1"></div>
-                    <Link
-                      href="/users"
-                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-blue-600"
-                      onClick={() => setIsDropdownOpen(false)}
-                      prefetch={false}
-                    >
-                      See all users
-                    </Link>
                     <PluginSlot
                       name="user-menu"
                       wrapperClassName="contents"
                       context={{
                         closeDropdown: () => setIsDropdownOpen(false),
                       }}
+                      prefix={
+                        <div className="border-t border-gray-200 mx-1 my-1"></div>
+                      }
                     />
                   </div>
                 )}
@@ -924,9 +916,9 @@ export function TopBar() {
                 </a>
 
                 <Link
-                  href="/config"
+                  href="/settings"
                   className={`flex items-center px-4 py-3 text-sm font-medium rounded-md transition-colors ${
-                    isActivePath('/config')
+                    isActivePath('/settings')
                       ? 'bg-blue-50 text-blue-600'
                       : 'text-gray-700 hover:bg-gray-100 hover:text-blue-600'
                   }`}
