@@ -7443,8 +7443,7 @@ def api_info():
                f'commit: {sky.__commit__}')
     try:
         api_server_info = sdk.api_info()
-    except (requests_lib.exceptions.ConnectionError,
-            requests_lib.exceptions.HTTPError):
+    except requests_lib.exceptions.RequestException:
         is_local = server_common.is_api_server_local()
         if is_local:
             click.echo('No SkyPilot API server is connected\n'
