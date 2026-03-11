@@ -37,6 +37,7 @@ resources:
   instance_type: p3.8xlarge
   use_spot: false
   disk_size: 256
+  ephemeral_storage: 50
   disk_tier: medium
   network_tier: best
   max_hourly_cost: 10.0
@@ -539,6 +540,48 @@ OR
 ```yaml
 resources:
   disk_size: 256GB
+
+
+```
+
+
+### ``resources.ephemeral_storage``
+
+Integer ephemeral storage size in GB to request for Kubernetes pods, OR specify units.
+
+This sets the `resources.requests.ephemeral-storage` field in the Kubernetes pod spec.
+When `set_pod_resource_limits` is configured in the SkyPilot config, it also sets
+`resources.limits.ephemeral-storage` with the corresponding multiplier.
+
+This field is **only effective on Kubernetes**. It is ignored on other clouds.
+
+Increase this if your tasks download large datasets or produce significant temporary files that
+could exhaust the node's ephemeral storage and trigger pod evictions.
+
+Units supported (case-insensitive):
+
+- KB (kilobytes, 2^10 bytes)
+- MB (megabytes, 2^20 bytes)
+- GB (gigabytes, 2^30 bytes)
+- TB (terabytes, 2^40 bytes)
+- PB (petabytes, 2^50 bytes)
+
+> **WARNING**:
+>
+> The ephemeral storage size will be rounded down (floored) to the nearest gigabyte.
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50
+```
+
+OR
+
+```yaml
+resources:
+  infra: kubernetes
+  ephemeral_storage: 50GB
 
 
 ```

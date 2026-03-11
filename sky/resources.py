@@ -1676,7 +1676,7 @@ class Resources:
         if self._ephemeral_storage is None:
             return
         if self.cloud is not None and not isinstance(self.cloud,
-                                                      clouds.Kubernetes):
+                                                     clouds.Kubernetes):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'ephemeral_storage is only supported on Kubernetes, '
