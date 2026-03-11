@@ -107,7 +107,7 @@ REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
 # When a daemon log exceeds this threshold, it is backed up to .log.1 and
 # then truncated. One backup is kept per daemon.
 # Configurable via api_server.daemon_log_max_bytes in ~/.sky/config.yaml.
-DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
+DEFAULT_DAEMON_LOG_MAX_BYTES = 128 * 1024 * 1024  # 128 MB
 
 # Interval for the server-side heartbeat daemon that sends plugin metrics
 # to Loki (e.g., GPU inventory from billing plugin).

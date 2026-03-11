@@ -43,7 +43,7 @@ def _rotate_daemon_log(log_path: str) -> None:
     try:
         max_bytes = skypilot_config.get_nested(
             ('api_server', 'daemon_log_max_bytes'),
-            server_constants.DAEMON_LOG_MAX_BYTES)
+            server_constants.DEFAULT_DAEMON_LOG_MAX_BYTES)
         if max_bytes <= 0:
             return
         sys.stdout.flush()
