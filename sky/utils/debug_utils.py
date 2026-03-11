@@ -948,19 +948,24 @@ def create_debug_dump(
         logger.debug(f'Building dump in temp directory: {dump_dir}')
 
         # Attach a file handler to capture debug-level logs into the
-        # dump. The logger's effective level is already DEBUG (inherited
-        # from root 'sky' logger), so we only need to set the handler
-        # level — no logger level changes needed.
+        # dump. We attach to the root 'sky' logger so that logs from
+        # all sky.* modules are captured, not just sky.utils.debug_utils.
+        # Also attach to sky.provision which has propagate=False.
+        # This mirrors sky_logging.add_debug_log_handler().
         debug_handler = logging.FileHandler(
             os.path.join(dump_dir, 'debug_dump.log'))
         debug_handler.setFormatter(sky_logging.FORMATTER)
         debug_handler.setLevel(logging.DEBUG)
-        logger.addHandler(debug_handler)
+        sky_root_logger = logging.getLogger('sky')
+        provision_logger = logging.getLogger('sky.provision')
         try:
+            sky_root_logger.addHandler(debug_handler)
+            provision_logger.addHandler(debug_handler)
             _build_debug_dump(dump_dir, debug_dump_context, recent_hours,
                               client_info)
         finally:
-            logger.removeHandler(debug_handler)
+            sky_root_logger.removeHandler(debug_handler)
+            provision_logger.removeHandler(debug_handler)
             debug_handler.flush()
             debug_handler.close()
 
