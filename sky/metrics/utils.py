@@ -239,7 +239,10 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     Raises:
         RuntimeError: If port forward fails to start
     """
-    start_port_forward_timeout = 10  # 10 second timeout
+    # Must be well under the per-context timeout in
+    # metrics.py (_PER_CONTEXT_TIMEOUT_SECONDS) to leave
+    # time for the HTTP request and cleanup.
+    start_port_forward_timeout = 5
     terminate_port_forward_timeout = 5  # 5 second timeout
 
     # Use ':service_port' to let kubectl choose the local port
@@ -400,9 +403,12 @@ async def send_metrics_request_with_port_forward(
                      f'{common_utils.format_exception(e)}')
         raise
     finally:
-        # Always clean up port forward
+        # Clean up port forward synchronously to guarantee cleanup
+        # even if the task is cancelled by asyncio.wait_for().
+        # Using await here would risk CancelledError preventing
+        # cleanup.
         if port_forward_process:
-            await asyncio.to_thread(stop_svc_port_forward, port_forward_process)
+            stop_svc_port_forward(port_forward_process)
 
 
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:
