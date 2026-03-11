@@ -659,6 +659,8 @@ MEMORY_SIZE_UNITS = {
     'pi': 2**50,
 }
 
+SUB_PATH_PATTERN = '^[a-zA-Z0-9./_-]+$'
+
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
     f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'

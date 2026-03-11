@@ -1,12 +1,14 @@
 """Volume utilities."""
 from dataclasses import dataclass
 import enum
+import re
 import time
 from typing import Any, Dict, Optional
 
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -80,6 +82,16 @@ class VolumeMount:
                 volume_name: str,
                 sub_path: Optional[str] = None) -> 'VolumeMount':
         """Resolve the volume mount by populating metadata of volume."""
+        if sub_path is not None:
+            if not re.match(constants.SUB_PATH_PATTERN, sub_path):
+                raise ValueError(
+                    f'sub_path contains invalid characters: {sub_path!r}. '
+                    'Only alphanumeric characters, dots, slashes, '
+                    'underscores and hyphens are allowed.')
+            if '..' in sub_path.split('/'):
+                raise ValueError(
+                    f'sub_path must not contain directory traversal '
+                    f'(..): {sub_path!r}')
         record = global_user_state.get_volume_by_name(volume_name)
         if record is None:
             raise exceptions.VolumeNotFoundError(

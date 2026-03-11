@@ -276,6 +276,63 @@ class TestVolumeMount:
         assert volume_mount.is_ephemeral is False
         mock_get_volume.assert_called_once_with('test-volume')
 
+    def test_resolve_rejects_invalid_characters_in_sub_path(self):
+        """Test resolve rejects sub_path with invalid characters."""
+        # Newline (YAML injection vector)
+        with pytest.raises(ValueError, match='invalid characters'):
+            volume.VolumeMount.resolve('/data',
+                                       'vol',
+                                       sub_path='models\nreadOnly: true')
+
+        # Space
+        with pytest.raises(ValueError, match='invalid characters'):
+            volume.VolumeMount.resolve('/data', 'vol', sub_path='my dir/sub')
+
+        # Empty string
+        with pytest.raises(ValueError, match='invalid characters'):
+            volume.VolumeMount.resolve('/data', 'vol', sub_path='')
+
+    def test_resolve_rejects_directory_traversal_in_sub_path(self):
+        """Test resolve rejects sub_path with directory traversal (..)."""
+        with pytest.raises(ValueError, match='directory traversal'):
+            volume.VolumeMount.resolve('/data', 'vol', sub_path='../etc')
+
+        with pytest.raises(ValueError, match='directory traversal'):
+            volume.VolumeMount.resolve('/data', 'vol', sub_path='a/../../b')
+
+    @mock.patch('sky.global_user_state.get_volume_by_name')
+    def test_resolve_allows_dot_prefixed_names_in_sub_path(
+            self, mock_get_volume):
+        """Test resolve allows names like ..foo or .hidden (not traversal)."""
+        mock_volume_config = models.VolumeConfig(
+            name='test-volume',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='us-central1',
+            zone=None,
+            name_on_cloud='pvc-12345',
+            size='10',
+            config={},
+            labels=None,
+        )
+        mock_get_volume.return_value = {
+            'name': 'test-volume',
+            'handle': mock_volume_config,
+            'status': status_lib.VolumeStatus.READY,
+        }
+
+        # ..foo is a valid directory name, not traversal
+        vm = volume.VolumeMount.resolve('/data',
+                                        'test-volume',
+                                        sub_path='..foo/bar')
+        assert vm.sub_path == '..foo/bar'
+
+        # .hidden is a valid directory name
+        vm = volume.VolumeMount.resolve('/data',
+                                        'test-volume',
+                                        sub_path='.hidden/dir')
+        assert vm.sub_path == '.hidden/dir'
+
     @mock.patch('sky.global_user_state.get_volume_by_name')
     def test_resolve_volume_not_found(self, mock_get_volume):
         """Test resolve with a non-existent volume."""
