@@ -1452,35 +1452,6 @@ def get_status_counts() -> Dict[str, int]:
     return results
 
 
-def get_active_job_recovery_counts() -> Dict[Tuple[int, int], int]:
-    """Get recovery_count per non-terminal task with recovery_count > 0.
-
-    Returns {(job_id, task_id): recovery_count} for all tasks whose status
-    is NOT terminal AND has recovery_count > 0.
-    This is used by the Prometheus ManagedJobsCollector, with labels
-    job_id and task_id so alerts can identify which specific task exceeded
-    the recovery limit.
-    """
-    terminal_values = [s.value for s in ManagedJobStatus.terminal_statuses()]
-
-    query = sqlalchemy.select(
-        spot_table.c.spot_job_id,
-        spot_table.c.task_id,
-        spot_table.c.recovery_count,
-    ).where(
-        spot_table.c.status.notin_(terminal_values),
-        spot_table.c.recovery_count > 0,
-    )
-
-    engine = _db_manager.get_engine()
-    with orm.Session(engine) as session:
-        rows = session.execute(query).fetchall()
-    results: Dict[Tuple[int, int], int] = {}
-    for job_id, task_id, rc in rows:
-        results[(int(job_id), int(task_id))] = int(rc)
-    return results
-
-
 def get_managed_jobs_with_filters(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,

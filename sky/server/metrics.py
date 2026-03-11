@@ -102,7 +102,7 @@ class ManagedJobsCollector:
     """Collector for managed job state metrics.
 
     Queries the managed jobs DB to produce real-time gauges for
-    job status counts, schedule state counts, and per-job recovery counts.
+    job status counts.
     """
 
     def __init__(self):
@@ -110,24 +110,17 @@ class ManagedJobsCollector:
         self._last_scrape_time = 0.0
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
         self._cached_status_counts: dict = {}
-        self._cached_recovery_counts: dict = {}
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
         from sky.jobs import state as managed_job_state
         self._cached_status_counts = (managed_job_state.get_status_counts())
-        self._cached_recovery_counts = (
-            managed_job_state.get_active_job_recovery_counts())
 
     def describe(self):
         yield prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_by_status',
-            'Current count of managed jobs by status',
+            'sky_managed_jobs_count',
+            'Current count of managed job tasks by status',
             labels=['status'])
-        yield prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_recovery_count',
-            'Recovery count per active managed job task',
-            labels=['job_id', 'task_id'])
 
     def collect(self):
         now = time.time()
@@ -135,27 +128,18 @@ class ManagedJobsCollector:
             if now - self._last_scrape_time >= self._cache_ttl:
                 try:
                     self._refresh()
+                    self._last_scrape_time = now
                 except Exception:  # pylint: disable=broad-except
                     logger.exception('Failed to collect managed jobs metrics')
-                self._last_scrape_time = now
             status_counts = self._cached_status_counts
-            recovery_counts = self._cached_recovery_counts
 
         status_metric = prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_by_status',
-            'Current count of managed jobs by status',
+            'sky_managed_jobs_count',
+            'Current count of managed job tasks by status',
             labels=['status'])
         for status, count in status_counts.items():
             status_metric.add_metric([status], count)
         yield status_metric
-
-        recovery_metric = prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_recovery_count',
-            'Recovery count per active managed job task',
-            labels=['job_id', 'task_id'])
-        for (job_id, task_id), count in recovery_counts.items():
-            recovery_metric.add_metric([str(job_id), str(task_id)], count)
-        yield recovery_metric
 
 
 _MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
