@@ -71,6 +71,23 @@ export function useVersionInfo() {
   return useContext(VersionContext);
 }
 
+// Check if all visible plugins share the same version and commit
+function getEnterpriseVersion(plugins) {
+  const visiblePlugins = plugins.filter((p) => !p.hidden_from_display);
+  if (visiblePlugins.length === 0) {
+    return { enterprise: null, visiblePlugins };
+  }
+  const first = visiblePlugins[0];
+  const allSame = visiblePlugins.every(
+    (p) => p.version === first.version && p.commit === first.commit
+  );
+  if (!allSame) {
+    return { enterprise: null, visiblePlugins };
+  }
+  const enterprise = { version: first.version, commit: first.commit };
+  return { enterprise, visiblePlugins };
+}
+
 export function VersionTooltip({
   children,
   version,
@@ -80,6 +97,8 @@ export function VersionTooltip({
   showUpdateInfo = true,
   showCommit = true,
 }) {
+  const { enterprise, visiblePlugins } = getEnterpriseVersion(plugins);
+
   // Create tooltip content
   const tooltipContent = (
     <div className="flex flex-col gap-0.5">
@@ -95,9 +114,10 @@ export function VersionTooltip({
           {plugins.length > 0 ? 'Core commit' : 'Commit'}: {commit}
         </div>
       )}
-      {plugins
-        .filter((plugin) => !plugin.hidden_from_display)
-        .map((plugin, index) => {
+      {enterprise ? (
+        <div>Enterprise version: {enterprise.commit || enterprise.version}</div>
+      ) : (
+        visiblePlugins.map((plugin, index) => {
           const pluginName = plugin.name || 'Unknown Plugin';
           const parts = [];
           if (plugin.version) parts.push(plugin.version);
@@ -107,7 +127,8 @@ export function VersionTooltip({
               {pluginName}: {parts.join(' - ')}
             </div>
           ) : null;
-        })}
+        })
+      )}
       {!commit &&
         plugins.length === 0 &&
         (!latestVersion || !showUpdateInfo) && (
@@ -168,6 +189,15 @@ export function VersionDisplay() {
 
   if (!version) return null;
 
+  const { enterprise } = getEnterpriseVersion(plugins);
+  const shortCommit = enterprise?.commit?.substring(0, 7) || null;
+
+  const VersionLine = ({ label, value }) => (
+    <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
+      {label}: {value}
+    </div>
+  );
+
   return (
     <VersionTooltip
       version={version}
@@ -176,10 +206,9 @@ export function VersionDisplay() {
       plugins={plugins}
       showUpdateInfo={false}
     >
-      <div className="inline-flex items-center justify-center transition-colors duration-150 cursor-help">
-        <div className="text-sm text-gray-500 border-b border-dotted border-gray-400 hover:text-blue-600 hover:border-blue-600">
-          Version: {version}
-        </div>
+      <div className="inline-flex items-center gap-2 transition-colors duration-150 cursor-help">
+        <VersionLine label="Version" value={version} />
+        {shortCommit && <VersionLine label="Enterprise" value={shortCommit} />}
       </div>
     </VersionTooltip>
   );
