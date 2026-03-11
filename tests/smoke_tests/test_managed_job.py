@@ -2905,8 +2905,11 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
 def test_managed_jobs_api_access(generic_cloud: str):
     """Test managed jobs with api_access: nested job launch from a job.
 
-    Requires a remote API server because the worker VM must be able to
-    reach the API server endpoint over the network.
+    This test only works with kubernetes and remote server enabled. It is the
+    only test configuration that gives us an API server that is accessible from
+    within the entity running the job since the kind cluster can access the
+    remote server container via the docker bridge network. If this assumption
+    changes then this test will not work.
     """
     if not smoke_tests_utils.is_remote_server_test():
         pytest.skip('Requires a remote API server (--remote-server)')
