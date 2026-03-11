@@ -566,41 +566,47 @@ async def cleanup_upload_ids():
 
 async def cleanup_unreferenced_blobs():
     """Delete content-addressed blobs not referenced by any active request."""
+
+    def _do_cleanup():
+        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        if not clients_dir.exists():
+            return
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            blobs_dir = user_dir / 'file_mounts' / 'blobs'
+            if not blobs_dir.exists():
+                continue
+            # Get all checksums referenced by active requests.
+            active_checksums = _get_active_blob_ids(user_dir.name)
+            # Delete unreferenced blobs older than grace period.
+            grace_cutoff = time.time() - 3600  # 1 hour grace
+            for blob in blobs_dir.glob('*.zip'):
+                checksum = blob.stem
+                if (checksum not in active_checksums and
+                        blob.stat().st_mtime < grace_cutoff):
+                    logger.info(f'GC: removing unreferenced blob '
+                                f'{blob.name} for user {user_dir.name}')
+                    blob.unlink(missing_ok=True)
+            # Clean orphaned extraction dirs whose request is no longer
+            # active. Only delete if the request has finished to avoid
+            # breaking long-running jobs.
+            exec_dir = user_dir / 'file_mounts' / 'exec'
+            if exec_dir.exists():
+                for req_dir in exec_dir.iterdir():
+                    if req_dir.stat().st_mtime < grace_cutoff:
+                        shutil.rmtree(req_dir, ignore_errors=True)
+            # Clean stale staging dirs.
+            staging_dir = blobs_dir / '.staging'
+            if staging_dir.exists():
+                for d in staging_dir.iterdir():
+                    if d.stat().st_mtime < grace_cutoff:
+                        shutil.rmtree(d, ignore_errors=True)
+
     while True:
         await asyncio.sleep(3600)  # Run every hour
         try:
-            clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-            if not clients_dir.exists():
-                continue
-            for user_dir in clients_dir.iterdir():
-                if not user_dir.is_dir():
-                    continue
-                blobs_dir = user_dir / 'file_mounts' / 'blobs'
-                if not blobs_dir.exists():
-                    continue
-                # Get all checksums referenced by active requests.
-                active_checksums = _get_active_blob_ids(user_dir.name)
-                # Delete unreferenced blobs older than grace period.
-                grace_cutoff = time.time() - 3600  # 1 hour grace
-                for blob in blobs_dir.glob('*.zip'):
-                    checksum = blob.stem
-                    if (checksum not in active_checksums and
-                            blob.stat().st_mtime < grace_cutoff):
-                        logger.info(f'GC: removing unreferenced blob '
-                                    f'{blob.name} for user {user_dir.name}')
-                        blob.unlink(missing_ok=True)
-                # Clean orphaned extraction dirs.
-                exec_dir = user_dir / 'file_mounts' / 'exec'
-                if exec_dir.exists():
-                    for req_dir in exec_dir.iterdir():
-                        if req_dir.stat().st_mtime < grace_cutoff:
-                            shutil.rmtree(req_dir, ignore_errors=True)
-                # Clean stale staging dirs.
-                staging_dir = blobs_dir / '.staging'
-                if staging_dir.exists():
-                    for d in staging_dir.iterdir():
-                        if d.stat().st_mtime < grace_cutoff:
-                            shutil.rmtree(d, ignore_errors=True)
+            await asyncio.to_thread(_do_cleanup)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_blobs: '
                          f'{common_utils.format_exception(e)}')
@@ -622,34 +628,38 @@ def _safe_unlink_if_old(path: pathlib.Path, cutoff: float) -> None:
 
 async def cleanup_stale_client_files():
     """Periodically clean stale task YAMLs and log staging dirs."""
+
+    def _do_cleanup():
+        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        if not clients_dir.exists():
+            return
+        cutoff = time.time() - 3600  # 1 hour
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            # Clean old task YAMLs.
+            tasks_dir = user_dir / 'tasks'
+            if tasks_dir.exists():
+                for f in tasks_dir.iterdir():
+                    _safe_unlink_if_old(f, cutoff)
+            # Clean old translated YAMLs.
+            for f in user_dir.glob('*_translated.yaml'):
+                _safe_unlink_if_old(f, cutoff)
+            # Clean old sky_logs dirs.
+            sky_logs_dir = user_dir / 'sky_logs'
+            if sky_logs_dir.exists():
+                for d in sky_logs_dir.iterdir():
+                    if d.is_dir():
+                        try:
+                            if d.stat().st_mtime < cutoff:
+                                shutil.rmtree(d, ignore_errors=True)
+                        except OSError:
+                            pass
+
     while True:
         await asyncio.sleep(3600)
         try:
-            clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-            if not clients_dir.exists():
-                continue
-            cutoff = time.time() - 3600  # 1 hour
-            for user_dir in clients_dir.iterdir():
-                if not user_dir.is_dir():
-                    continue
-                # Clean old task YAMLs.
-                tasks_dir = user_dir / 'tasks'
-                if tasks_dir.exists():
-                    for f in tasks_dir.iterdir():
-                        _safe_unlink_if_old(f, cutoff)
-                # Clean old translated YAMLs.
-                for f in user_dir.glob('*_translated.yaml'):
-                    _safe_unlink_if_old(f, cutoff)
-                # Clean old sky_logs dirs.
-                sky_logs_dir = user_dir / 'sky_logs'
-                if sky_logs_dir.exists():
-                    for d in sky_logs_dir.iterdir():
-                        if d.is_dir():
-                            try:
-                                if d.stat().st_mtime < cutoff:
-                                    shutil.rmtree(d, ignore_errors=True)
-                            except OSError:
-                                pass
+            await asyncio.to_thread(_do_cleanup)
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_stale_client_files: '
                          f'{common_utils.format_exception(e)}')

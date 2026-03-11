@@ -24,6 +24,7 @@ import contextlib
 import multiprocessing
 import os
 import queue as queue_lib
+import re
 import shutil
 import signal
 import sys
@@ -416,11 +417,14 @@ def _extract_blob_for_request(request_body: payloads.RequestBody,
 
     Returns the extraction directory path.
     """
+    blob_id = request_body.file_mounts_blob_id
+    assert blob_id is not None, 'file_mounts_blob_id is required'
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
     user_hash = request_body.env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
     client_dir = (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
                   user_hash / 'file_mounts')
-    blob_path = (client_dir / 'blobs' /
-                 f'{request_body.file_mounts_blob_id}.zip')
+    blob_path = client_dir / 'blobs' / f'{blob_id}.zip'
     extraction_dir = client_dir / 'exec' / request_id
     extraction_dir.mkdir(parents=True, exist_ok=True)
 
