@@ -578,7 +578,8 @@ async def cleanup_unreferenced_blobs():
             if not blobs_dir.exists():
                 continue
             # Get all blob_id referenced by active requests.
-            active_blob_ids = _get_active_blob_ids(user_dir.name)
+            active_blob_ids = requests_lib.get_active_file_mounts_blob_ids(
+                user_dir.name)
             # Delete unreferenced blobs older than grace period.
             grace_cutoff = time.time() - 3600  # 1 hour grace
             for blob in blobs_dir.glob('*.zip'):
@@ -596,20 +597,6 @@ async def cleanup_unreferenced_blobs():
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error in cleanup_unreferenced_blobs: '
                          f'{common_utils.format_exception(e)}')
-
-
-def _get_active_blob_ids(user_id: str) -> set:
-    """Query DB for blob IDs referenced by active requests for a user."""
-    return requests_lib.get_active_file_mounts_blob_ids(user_id)
-
-
-def _safe_unlink_if_old(path: pathlib.Path, cutoff: float) -> None:
-    """Unlink a file if it is older than cutoff."""
-    try:
-        if path.stat().st_mtime < cutoff:
-            path.unlink(missing_ok=True)
-    except OSError:
-        pass
 
 
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
