@@ -14,6 +14,7 @@ import {
 } from '@/components/elements/version-display';
 import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 export function Config() {
   const [editableConfig, setEditableConfig] = useState('');
@@ -197,7 +198,10 @@ export function Config() {
             </button>
           )}
           <NewVersionAvailable />
-          <VersionDisplay />
+          <PluginSlot
+            name="settings.version-display"
+            fallback={<VersionDisplay />}
+          />
         </div>
       </div>
 
