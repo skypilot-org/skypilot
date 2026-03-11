@@ -317,7 +317,7 @@ def _compute_file_mounts_blob_id(upload_list: list) -> str:
     return h.hexdigest()
 
 
-def _upload_v2(zip_file_path: str, checksum: str, upload_logger: logging.Logger,
+def _upload_v2(zip_file_path: str, blob_id: str, upload_logger: logging.Logger,
                log_file: str, status_updater) -> None:
     """Upload a zip file to /upload_v2 in chunks."""
     zip_file_size = os.path.getsize(zip_file_path)
@@ -334,14 +334,14 @@ def _upload_v2(zip_file_path: str, checksum: str, upload_logger: logging.Logger,
         for retry in range(total_retries):
             chunk_params = [
                 UploadChunkParams(client,
-                                  checksum,
+                                  blob_id,
                                   chunk_index,
                                   total_chunks,
                                   zip_file_path,
                                   upload_logger,
                                   log_file,
                                   endpoint='/upload_v2',
-                                  id_param_name='checksum')
+                                  id_param_name='blob_id')
                 for chunk_index in range(total_chunks)
             ]
             statuses = subprocess_utils.run_in_parallel(
@@ -463,7 +463,7 @@ def upload_mounts_to_api_server(
                     '/upload_v2',
                     params={
                         'user_hash': common_utils.get_user_hash(),
-                        'checksum': file_mounts_blob_id,
+                        'blob_id': file_mounts_blob_id,
                     })
                 if resp.status_code != 200:
                     raise RuntimeError(f'Failed to check blob existence: '

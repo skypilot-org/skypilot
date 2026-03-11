@@ -577,31 +577,17 @@ async def cleanup_unreferenced_blobs():
             blobs_dir = user_dir / 'file_mounts' / 'blobs'
             if not blobs_dir.exists():
                 continue
-            # Get all checksums referenced by active requests.
-            active_checksums = _get_active_blob_ids(user_dir.name)
+            # Get all blob_id referenced by active requests.
+            active_blob_ids = _get_active_blob_ids(user_dir.name)
             # Delete unreferenced blobs older than grace period.
             grace_cutoff = time.time() - 3600  # 1 hour grace
             for blob in blobs_dir.glob('*.zip'):
-                checksum = blob.stem
-                if (checksum not in active_checksums and
+                blob_id = blob.stem
+                if (blob_id not in active_blob_ids and
                         blob.stat().st_mtime < grace_cutoff):
                     logger.info(f'GC: removing unreferenced blob '
                                 f'{blob.name} for user {user_dir.name}')
                     blob.unlink(missing_ok=True)
-            # Clean orphaned extraction dirs whose request is no longer
-            # active. Only delete if the request has finished to avoid
-            # breaking long-running jobs.
-            exec_dir = user_dir / 'file_mounts' / 'exec'
-            if exec_dir.exists():
-                for req_dir in exec_dir.iterdir():
-                    if req_dir.stat().st_mtime < grace_cutoff:
-                        shutil.rmtree(req_dir, ignore_errors=True)
-            # Clean stale staging dirs.
-            staging_dir = blobs_dir / '.staging'
-            if staging_dir.exists():
-                for d in staging_dir.iterdir():
-                    if d.stat().st_mtime < grace_cutoff:
-                        shutil.rmtree(d, ignore_errors=True)
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
@@ -1353,14 +1339,22 @@ async def optimize(optimize_body: payloads.OptimizeBody,
 
 
 @app.post('/upload')
-async def upload_zip_file(request: fastapi.Request, user_hash: str,
-                          upload_id: str, chunk_index: int,
-                          total_chunks: int) -> payloads.UploadZipFileResponse:
+async def upload_zip_file(
+        request: fastapi.Request,
+        user_hash: str,
+        upload_id: str,
+        chunk_index: int,
+        total_chunks: int,
+        blob_id: Optional[str] = None) -> payloads.UploadZipFileResponse:
     """Uploads a zip file to the API server.
 
     This endpoints can be called multiple times for the same upload_id with
     different chunk_index. The server will merge the chunks and unzip the file
     when all chunks are uploaded.
+
+    When blob_id is provided, the assembled zip is stored as a content-addressed
+    blob (blobs/{blob_id}.zip) without extraction. Extraction is deferred to
+    request execution time.
 
     This implementation is simplified and may need to be improved in the future,
     e.g., adopting S3-style multipart upload.
@@ -1371,6 +1365,8 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
+        blob_id: Optional content-addressed blob ID (sha256 hex). When set,
+            the zip is stored as a blob instead of being extracted.
     """
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
@@ -1381,6 +1377,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
+    if blob_id is not None and not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid blob_id: {blob_id}')
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
@@ -1473,8 +1472,8 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
 
 @app.get('/upload_v2')
 async def check_blob_exists(request: fastapi.Request, user_hash: str,
-                            checksum: str) -> Dict[str, bool]:
-    """Check if a content-addressed blob already exists.
+                            blob_id: str) -> Dict[str, bool]:
+    """Check if a file mount blob already exists.
 
     Refreshes the blob's mtime on hit to prevent a race condition where:
     1. Client GET -> exists=True -> skips upload
@@ -1485,14 +1484,14 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     GC grace period (1 hour), which far exceeds the GET-to-submission
     window (seconds).
     """
-    if not re.match(r'^[0-9a-f]{64}$', checksum):
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
-                                    detail=f'Invalid checksum: {checksum}')
+                                    detail=f'Invalid blob_id: {blob_id}')
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
     blob_path = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-                 'file_mounts' / 'blobs' / f'{checksum}.zip')
+                 'file_mounts' / 'blobs' / f'{blob_id}.zip')
     if blob_path.exists():
         blob_path.touch()  # Refresh mtime to prevent GC race
         return {'exists': True}
@@ -1500,13 +1499,13 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
 
 
 @app.post('/upload_v2')
-async def upload_blob(request: fastapi.Request, user_hash: str, checksum: str,
+async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
                       chunk_index: int,
                       total_chunks: int) -> payloads.UploadZipFileResponse:
-    """Upload a content-addressed blob (chunked).
+    """Upload a file mount blob (chunked).
 
     Unlike /upload, this endpoint stores the assembled zip as a blob
-    (blobs/{checksum}.zip) without extracting it. Extraction happens at
+    (blobs/{blob_id}.zip) without extracting it. Extraction happens at
     execution time.
     """
     # Fail fast if body was already buffered.
@@ -1516,9 +1515,9 @@ async def upload_blob(request: fastapi.Request, user_hash: str, checksum: str,
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    if not re.match(r'^[0-9a-f]{64}$', checksum):
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
-                                    detail=f'Invalid checksum: {checksum}')
+                                    detail=f'Invalid blob_id: {blob_id}')
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid chunk_index: {chunk_index}')
@@ -1535,14 +1534,14 @@ async def upload_blob(request: fastapi.Request, user_hash: str, checksum: str,
         'file_mounts')
     blobs_dir = client_file_mounts_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
-    blob_path = blobs_dir / f'{checksum}.zip'
+    blob_path = blobs_dir / f'{blob_id}.zip'
 
     # If blob already exists (race with another upload), return immediately.
     if blob_path.exists():
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
-    staging_dir = blobs_dir / '.staging' / checksum
+    staging_dir = blobs_dir / '.staging' / blob_id
     await anyio.Path(staging_dir).mkdir(parents=True, exist_ok=True)
 
     if total_chunks == 1:
