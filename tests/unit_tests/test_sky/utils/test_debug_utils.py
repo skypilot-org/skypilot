@@ -76,11 +76,13 @@ class TestEpochToHuman:
         assert debug_dump_helpers.epoch_to_human(None) is None
 
     def test_zero_returns_valid_date(self):
-        """Epoch 0 should return a valid date (1970-01-01)."""
+        """Epoch 0 should return a valid date (1970-01-01 UTC)."""
         result = debug_dump_helpers.epoch_to_human(0)
         assert result is not None
+        # The result is in local time, so convert back to UTC to check.
         dt = datetime.datetime.fromisoformat(result)
-        assert dt.year == 1970
+        utc_dt = dt.astimezone(datetime.timezone.utc)
+        assert utc_dt.year == 1970
 
     def test_current_time(self):
         """Current time epoch should return a valid ISO date."""
