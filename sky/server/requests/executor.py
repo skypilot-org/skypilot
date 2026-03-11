@@ -32,7 +32,6 @@ import threading
 import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
-import zipfile
 
 import psutil
 import setproctitle
@@ -433,45 +432,7 @@ def _extract_blob_for_request(request_body: payloads.RequestBody,
             f'Blob not found: {blob_path}. The file mounts blob may have been '
             'garbage collected before execution started.')
 
-    with zipfile.ZipFile(blob_path, 'r') as zipf:
-        for member in zipf.infolist():
-            original_path = os.path.normpath(member.filename)
-            new_path = extraction_dir / original_path.lstrip('/')
-            resolved_path = new_path.resolve()
-            # Security check: prevent Zip Slip attacks.
-            try:
-                resolved_path.relative_to(extraction_dir.resolve())
-            except ValueError as exc:
-                raise ValueError(
-                    f'Zip member {member.filename!r} would extract '
-                    'outside target directory. Aborted.') from exc
-
-            if (member.external_attr >> 28) == 0xA:
-                # Symlink
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                target = zipf.read(member).decode()
-                assert not os.path.isabs(target), target
-                full_target_path = (new_path.parent / target).resolve()
-                try:
-                    full_target_path.relative_to(extraction_dir.resolve())
-                except ValueError as exc:
-                    raise ValueError(
-                        f'Symlink target {target} leads to a '
-                        'file not in extraction dir. Aborted.') from exc
-                if new_path.exists() or new_path.is_symlink():
-                    new_path.unlink(missing_ok=True)
-                new_path.symlink_to(
-                    target, target_is_directory=member.filename.endswith('/'))
-                continue
-
-            if member.filename.endswith('/'):
-                new_path.mkdir(parents=True, exist_ok=True)
-                continue
-
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            with zipf.open(member) as member_file, new_path.open('wb') as f:
-                shutil.copyfileobj(member_file, f)
-
+    server_common.unzip_to_dir(blob_path, extraction_dir)
     return str(extraction_dir)
 
 

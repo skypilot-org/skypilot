@@ -26,7 +26,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple, Type, Union)
+                    Tuple, Type)
 import uuid
 import zipfile
 
@@ -762,7 +762,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # then the user is attempting path traversal, so deny the request.
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
-            if not _is_relative_to(request_path, parent):
+            if not common.is_relative_to(request_path, parent):
                 return fastapi.responses.JSONResponse(
                     status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
@@ -1287,19 +1287,15 @@ async def optimize(optimize_body: payloads.OptimizeBody,
 
 async def _receive_and_assemble_chunks(
     request: fastapi.Request,
-    staging_dir: pathlib.Path,
+    chunk_dir: pathlib.Path,
+    assembled_zip_path: pathlib.Path,
     chunk_index: int,
     total_chunks: int,
-) -> Union[pathlib.Path, payloads.UploadZipFileResponse]:
-    """Receive a single chunk and, once all chunks arrive, assemble them.
-
-    Shared by ``/upload`` and ``/upload_v2``.
-
-    Returns:
-        The path to the assembled zip when all chunks have been received, or
-        an ``UploadZipFileResponse(UPLOADING)`` when chunks are still missing.
-    """
-    # Fail fast if body was already buffered.
+) -> Optional[payloads.UploadZipFileResponse]:
+    """Receive chunks and assemble them into a zip file."""
+    # Field _body would be set if the request body has been received, fail fast
+    # to surface potential memory issues, i.e. catch the issue in our smoke
+    # test.
     # pylint: disable=protected-access
     if hasattr(request, '_body'):
         raise fastapi.HTTPException(
@@ -1307,54 +1303,60 @@ async def _receive_and_assemble_chunks(
             detail='Upload request body should not be received before streaming'
         )
 
-    await anyio.Path(staging_dir).mkdir(parents=True, exist_ok=True)
-
+    # Check chunk_index to be a valid integer
+    if chunk_index < 0 or chunk_index >= total_chunks:
+        raise ValueError(
+            f'Invalid chunk_index: {chunk_index}. Please use a valid integer.')
+    # Check total_chunks to be a valid integer
+    if total_chunks < 1:
+        raise ValueError(
+            f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
+        )
     if total_chunks == 1:
-        chunk_path = staging_dir / 'assembled.zip'
+        zip_file_path = assembled_zip_path
     else:
-        chunk_path = staging_dir / f'part{chunk_index}.incomplete'
+        await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
+        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
     try:
-        async with aiofiles.open(chunk_path, 'wb') as f:
+        async with aiofiles.open(zip_file_path, 'wb') as f:
             async for chunk in request.stream():
                 await f.write(chunk)
     except starlette.requests.ClientDisconnect as e:
-        chunk_path.unlink(missing_ok=True)
+        # Client disconnected, remove the zip file.
+        zip_file_path.unlink(missing_ok=True)
         raise fastapi.HTTPException(
             status_code=400,
             detail='Client disconnected, please try again.') from e
     except Exception as e:
-        logger.error(f'Error uploading chunk: {chunk_path}')
-        chunk_path.unlink(missing_ok=True)
+        logger.error(f'Error uploading zip file: {zip_file_path}')
+        # Client disconnected, remove the zip file.
+        zip_file_path.unlink(missing_ok=True)
         raise fastapi.HTTPException(
             status_code=500,
-            detail=('Error uploading chunk: '
+            detail=('Error uploading zip file: '
                     f'{common_utils.format_exception(e)}'))
 
     if total_chunks > 1:
-        chunk_path.rename(chunk_path.with_suffix(''))
-        missing_chunks: Set[str] = (
-            set(f'part{i}' for i in range(total_chunks)) -
-            set(p.name for p in staging_dir.glob('part*')))
+        zip_file_path.rename(zip_file_path.with_suffix(''))
+        missing_chunks = (set(f'part{i}' for i in range(total_chunks)) -
+                          set(p.name for p in chunk_dir.glob('part*')))
         if missing_chunks:
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        # All chunks received – assemble them.
-        assembled_path = staging_dir / 'assembled.zip'
-        async with aiofiles.open(assembled_path, 'wb') as assembled:
-            for idx in range(total_chunks):
-                async with aiofiles.open(staging_dir / f'part{idx}',
-                                         'rb') as cf:
+        async with aiofiles.open(assembled_zip_path, 'wb') as zip_file:
+            for chunk in range(total_chunks):
+                async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
                     while True:
                         # Use 64KB buffer to avoid memory overflow, same size
                         # as shutil.copyfileobj.
-                        data = await cf.read(64 * 1024)
+                        data = await f.read(64 * 1024)
                         if not data:
                             break
-                        await assembled.write(data)
+                        await zip_file.write(data)
 
-    return staging_dir / 'assembled.zip'
+    return None
 
 
 @app.post('/upload')
@@ -1400,25 +1402,18 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
         raise ValueError(
             f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
-    # Check chunk_index to be a valid integer
-    if chunk_index < 0 or chunk_index >= total_chunks:
-        raise ValueError(
-            f'Invalid chunk_index: {chunk_index}. Please use a valid integer.')
-    # Check total_chunks to be a valid integer
-    if total_chunks < 1:
-        raise ValueError(
-            f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
-        )
 
-    staging_dir = client_file_mounts_dir / upload_id
-    result = await _receive_and_assemble_chunks(request, staging_dir,
-                                                chunk_index, total_chunks)
-    if isinstance(result, payloads.UploadZipFileResponse):
+    chunk_dir = client_file_mounts_dir / upload_id
+    zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+    result = await _receive_and_assemble_chunks(request, chunk_dir,
+                                                zip_file_path, chunk_index,
+                                                total_chunks)
+    if result is not None:
         return result
-
-    logger.info(f'Uploaded zip file: {result}')
-    await unzip_file(result, client_file_mounts_dir)
-    await asyncio.to_thread(shutil.rmtree, staging_dir, True)
+    logger.info(f'Uploaded zip file: {zip_file_path}')
+    await unzip_file(zip_file_path, client_file_mounts_dir)
+    if total_chunks > 1:
+        await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -1426,17 +1421,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
 @app.get('/upload_v2')
 async def check_blob_exists(request: fastapi.Request, user_hash: str,
                             blob_id: str) -> Dict[str, bool]:
-    """Check if a file mount blob already exists.
-
-    Refreshes the blob's mtime on hit to prevent a race condition where:
-    1. Client GET -> exists=True -> skips upload
-    2. GC runs between GET and request submission -> deletes blob
-    3. Request execution fails because blob is gone
-
-    By touching the blob, we guarantee it survives at least one more
-    GC grace period (1 hour), which far exceeds the GET-to-submission
-    window (seconds).
-    """
+    """Check if a file mount blob already exists."""
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid blob_id: {blob_id}')
@@ -1459,22 +1444,14 @@ async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
 
     Unlike /upload, this endpoint stores the assembled zip as a blob
     (blobs/{blob_id}.zip) without extracting it. Extraction happens at
-    execution time.
+    request execution time.
     """
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid blob_id: {blob_id}')
-    if chunk_index < 0 or chunk_index >= total_chunks:
-        raise fastapi.HTTPException(
-            status_code=400, detail=f'Invalid chunk_index: {chunk_index}')
-    if total_chunks < 1:
-        raise fastapi.HTTPException(
-            status_code=400, detail=f'Invalid total_chunks: {total_chunks}')
-
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
-
     client_file_mounts_dir = (
         common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
         'file_mounts')
@@ -1488,30 +1465,20 @@ async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
             status=responses.UploadStatus.COMPLETED.value)
 
     staging_dir = blobs_dir / '.staging' / blob_id
+    assembled_zip = staging_dir / 'assembled.zip'
     result = await _receive_and_assemble_chunks(request, staging_dir,
-                                                chunk_index, total_chunks)
-    if isinstance(result, payloads.UploadZipFileResponse):
+                                                assembled_zip, chunk_index,
+                                                total_chunks)
+    if result is not None:
         return result
 
     # Move assembled zip to final blob path (atomic on same filesystem).
-    result.rename(blob_path)
+    assembled_zip.rename(blob_path)
     logger.info(f'Uploaded blob: {blob_path}')
-
     # Clean staging dir.
     await asyncio.to_thread(shutil.rmtree, str(staging_dir), True)
-
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
-
-
-def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
-    """Checks if path is a subpath of parent."""
-    try:
-        # We cannot use is_relative_to, as it is only added after 3.9.
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
 
 
 async def unzip_file(zip_file_path: pathlib.Path,
@@ -1520,56 +1487,7 @@ async def unzip_file(zip_file_path: pathlib.Path,
 
     def _do_unzip() -> None:
         try:
-            with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-                for member in zipf.infolist():
-                    # Determine the new path
-                    original_path = os.path.normpath(member.filename)
-                    new_path = client_file_mounts_dir / original_path.lstrip(
-                        '/')
-
-                    # Security check: ensure extracted path stays within target
-                    # directory to prevent Zip Slip attacks (path traversal via
-                    # malicious "../" sequences in archive member names).
-                    resolved_path = new_path.resolve()
-                    if not _is_relative_to(resolved_path,
-                                           client_file_mounts_dir):
-                        raise ValueError(
-                            f'Zip member {member.filename!r} would extract '
-                            'outside target directory. Aborted.')
-
-                    if (member.external_attr >> 28) == 0xA:
-                        # Symlink. Read the target path and create a symlink.
-                        new_path.parent.mkdir(parents=True, exist_ok=True)
-                        target = zipf.read(member).decode()
-                        assert not os.path.isabs(target), target
-                        # Since target is a relative path, we need to check that
-                        # it is under `client_file_mounts_dir` for security.
-                        full_target_path = (new_path.parent / target).resolve()
-                        if not _is_relative_to(full_target_path,
-                                               client_file_mounts_dir):
-                            raise ValueError(
-                                f'Symlink target {target} leads to a '
-                                'file not in userspace. Aborted.')
-
-                        if new_path.exists() or new_path.is_symlink():
-                            new_path.unlink(missing_ok=True)
-                        new_path.symlink_to(
-                            target,
-                            target_is_directory=member.filename.endswith('/'))
-                        continue
-
-                    # Handle directories
-                    if member.filename.endswith('/'):
-                        new_path.mkdir(parents=True, exist_ok=True)
-                        continue
-
-                    # Handle files
-                    new_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zipf.open(member) as member_file, new_path.open(
-                            'wb') as f:
-                        # Use shutil.copyfileobj to copy files in chunks,
-                        # so it does not load the entire file into memory.
-                        shutil.copyfileobj(member_file, f)
+            common.unzip_to_dir(zip_file_path, client_file_mounts_dir)
         except zipfile.BadZipFile as e:
             logger.error(f'Bad zip file: {zip_file_path}')
             raise fastapi.HTTPException(

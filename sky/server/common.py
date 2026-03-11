@@ -19,6 +19,7 @@ from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
 from urllib.request import Request
 import uuid
+import zipfile
 
 import cachetools
 import click
@@ -1113,3 +1114,65 @@ def clear_local_api_server_database() -> None:
             os.remove(f'{db_path}{extension}')
         except FileNotFoundError:
             logger.debug(f'Database file {db_path}{extension} not found.')
+
+
+def is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    """Checks if path is a subpath of parent."""
+    try:
+        # We cannot use is_relative_to, as it is only added after 3.9.
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
+def unzip_to_dir(zip_file_path: pathlib.Path, target_dir: pathlib.Path) -> None:
+    """Unzip a file into target_dir with security checks.
+
+    Prevents Zip Slip attacks and validates symlink targets. Does NOT
+    delete the zip file – callers handle cleanup.
+    """
+    with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+        for member in zipf.infolist():
+            # Determine the new path
+            original_path = os.path.normpath(member.filename)
+            new_path = target_dir / original_path.lstrip('/')
+
+            # Security check: ensure extracted path stays within target
+            # directory to prevent Zip Slip attacks (path traversal via
+            # malicious "../" sequences in archive member names).
+            resolved_path = new_path.resolve()
+            if not is_relative_to(resolved_path, target_dir):
+                raise ValueError(
+                    f'Zip member {member.filename!r} would extract '
+                    'outside target directory. Aborted.')
+
+            if (member.external_attr >> 28) == 0xA:
+                # Symlink. Read the target path and create a symlink.
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                target = zipf.read(member).decode()
+                assert not os.path.isabs(target), target
+                # Since target is a relative path, we need to check that
+                # it is under `target_dir` for security.
+                full_target_path = (new_path.parent / target).resolve()
+                if not is_relative_to(full_target_path, target_dir):
+                    raise ValueError(f'Symlink target {target} leads to a '
+                                     'file not in userspace. Aborted.')
+
+                if new_path.exists() or new_path.is_symlink():
+                    new_path.unlink(missing_ok=True)
+                new_path.symlink_to(
+                    target, target_is_directory=member.filename.endswith('/'))
+                continue
+
+            # Handle directories
+            if member.filename.endswith('/'):
+                new_path.mkdir(parents=True, exist_ok=True)
+                continue
+
+            # Handle files
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipf.open(member) as member_file, new_path.open('wb') as f:
+                # Use shutil.copyfileobj to copy files in chunks,
+                # so it does not load the entire file into memory.
+                shutil.copyfileobj(member_file, f)
