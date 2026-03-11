@@ -2,6 +2,7 @@
 
 import contextlib
 import dataclasses
+import hashlib
 import json
 import logging
 import math
@@ -10,7 +11,7 @@ import pathlib
 import tempfile
 import time
 import typing
-from typing import Dict, Generator, Iterable
+from typing import Dict, Generator, Iterable, Optional, Tuple
 import uuid
 import zipfile
 
@@ -268,8 +269,160 @@ def _setup_upload_logger(
         handler.close()
 
 
-def upload_mounts_to_api_server(dag: 'sky.Dag',
-                                workdir_only: bool = False) -> 'dag_lib.Dag':
+def _compute_file_mounts_blob_id(zip_file_path: str) -> str:
+    """Compute SHA-256 checksum of a file."""
+    h = hashlib.sha256()
+    with open(zip_file_path, 'rb') as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _upload_chunk_v2_with_retry(params: UploadChunkParams) -> str:
+    """Uploads a chunk of a zip file to the /upload_v2 endpoint.
+
+    Returns:
+        Status of the upload.
+    """
+    upload_logger = params.upload_logger
+    upload_logger.info(
+        f'Uploading chunk: {params.chunk_index + 1} / {params.total_chunks}')
+
+    server_url = server_common.get_server_url()
+    max_attempts = 3
+    sa_headers = service_account_auth.get_service_account_headers()
+    with open(params.file_path, 'rb') as f:
+        for attempt in range(max_attempts):
+            response = params.client.post(
+                f'{server_url}/upload_v2',
+                params={
+                    'user_hash': common_utils.get_user_hash(),
+                    'checksum': params.upload_id,
+                    'chunk_index': str(params.chunk_index),
+                    'total_chunks': str(params.total_chunks),
+                },
+                content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
+                                          params.chunk_index),
+                headers={
+                    'Content-Type': 'application/octet-stream',
+                    **sa_headers,
+                },
+                cookies=server_common.get_api_cookie_jar())
+            if response.status_code == 200:
+                data = response.json()
+                status = data.get('status')
+                msg = ('Uploaded chunk: '
+                       f'{params.chunk_index + 1} / {params.total_chunks} '
+                       f'(Status: {status})')
+                if status == api_responses.UploadStatus.UPLOADING.value:
+                    missing_chunks = data.get('missing_chunks')
+                    if missing_chunks:
+                        msg += f' - Waiting for chunks: {missing_chunks}'
+                upload_logger.info(msg)
+                return status
+            elif attempt < max_attempts - 1:
+                upload_logger.error(
+                    f'Failed to upload chunk: '
+                    f'{params.chunk_index + 1} / {params.total_chunks}: '
+                    f'{response.content.decode("utf-8")}')
+                upload_logger.info(
+                    f'Retrying... ({attempt + 1} / {max_attempts})')
+                if response.status_code == 503:
+                    time.sleep(10)
+                else:
+                    time.sleep(1)
+            else:
+                try:
+                    response_details = response.json().get('detail')
+                except Exception:  # pylint: disable=broad-except
+                    response_details = response.content
+                error_msg = (
+                    f'Failed to upload chunk: {params.chunk_index + 1} / '
+                    f'{params.total_chunks}: {response_details} '
+                    f'(Status code: {response.status_code})')
+                upload_logger.error(error_msg)
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        ux_utils.error_message(error_msg + '\n',
+                                               params.log_file,
+                                               is_local=True))
+    return 'failed'
+
+
+def _try_upload_v2(zip_file_path: str, checksum: str,
+                   upload_logger: logging.Logger, log_file: str,
+                   status_updater) -> bool:
+    """Try uploading via /upload_v2.
+
+    Returns False if server doesn't support it (404).
+    """
+    # Check if blob already exists on server.
+    try:
+        resp = server_common.make_authenticated_request(
+            'GET',
+            '/upload_v2',
+            params={
+                'user_hash': common_utils.get_user_hash(),
+                'checksum': checksum,
+            },
+            retry=False)
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+    if resp.status_code == 404:
+        return False  # Old server, fall back to /upload
+    if resp.status_code == 405:
+        return False  # Old server without GET /upload_v2
+    if resp.status_code != 200:
+        upload_logger.warning(f'/upload_v2 check failed: {resp.status_code}')
+        return False
+
+    if resp.json().get('exists'):
+        upload_logger.info('File mounts blob already exists, skipping upload')
+        logger.info('File mounts unchanged, skipping upload')
+        return True
+
+    # Blob doesn't exist, upload chunks via /upload_v2.
+    zip_file_size = os.path.getsize(zip_file_path)
+    total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
+    status_updater(
+        ux_utils.spinner_message(
+            'Uploading files to API server (2/2 - Uploading)',
+            log_file,
+            is_local=True))
+    timeout = httpx.Timeout(None, read=180.0)
+    upload_completed = False
+    with httpx.Client(timeout=timeout) as client:
+        total_retries = 3
+        for retry in range(total_retries):
+            chunk_params = [
+                UploadChunkParams(client, checksum, chunk_index, total_chunks,
+                                  zip_file_path, upload_logger, log_file)
+                for chunk_index in range(total_chunks)
+            ]
+            statuses = subprocess_utils.run_in_parallel(
+                _upload_chunk_v2_with_retry, chunk_params)
+            if any(status == api_responses.UploadStatus.COMPLETED.value
+                   for status in statuses):
+                upload_completed = True
+                break
+            else:
+                upload_logger.info(
+                    f'No chunk upload returned completed status. '
+                    'Retrying entire upload... '
+                    f'({retry + 1} / {total_retries})')
+    if not upload_completed:
+        raise RuntimeError('Failed to upload files to API server.')
+    return True
+
+
+def upload_mounts_to_api_server(
+    dag: 'sky.Dag',
+    workdir_only: bool = False,
+) -> Tuple['dag_lib.Dag', Optional[str]]:
     """Upload user files to remote API server.
 
     This function needs to be called after sdk.validate(),
@@ -287,13 +440,13 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
             `exec`, as it does not need other files/folders in file_mounts.
 
     Returns:
-        The dag with the file_mounts_mapping updated, which maps the original
-        file paths to the full path, so that on API server, the file paths can
-        be retrieved by adding prefix to the full path.
+        A tuple of (dag, file_mounts_blob_id). The dag has file_mounts_mapping
+        updated. file_mounts_blob_id is the content-addressed blob ID if
+        /upload_v2 was used, or None if the old /upload path was used.
     """
 
     if server_common.is_api_server_local():
-        return dag
+        return dag, None
 
     def _full_path(src: str) -> str:
         return os.path.abspath(os.path.expanduser(src))
@@ -361,8 +514,26 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                                     temp_zip_file.name)
                 upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
 
+            # Compute checksum for content-addressed upload.
+            file_mounts_blob_id = _compute_file_mounts_blob_id(
+                temp_zip_file.name)
+            upload_logger.info(f'Computed blob ID: {file_mounts_blob_id}')
+
+            # Try /upload_v2 first (content-addressed, dedup-aware).
+            if _try_upload_v2(temp_zip_file.name, file_mounts_blob_id,
+                              upload_logger, log_file, status.update):
+                os.unlink(temp_zip_file.name)
+                upload_logger.info(f'Uploaded files via v2: {upload_list}')
+                logger.info(
+                    ux_utils.finishing_message('Files uploaded',
+                                               log_file,
+                                               is_local=True))
+                return dag, file_mounts_blob_id
+
+            # Fall back to /upload (old server).
+            upload_logger.info('Server does not support /upload_v2, '
+                               'falling back to /upload')
             zip_file_size = os.path.getsize(temp_zip_file.name)
-            # Per chunk size 512 MB
             total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
             timeout = httpx.Timeout(None, read=180.0)
             status.update(
@@ -401,4 +572,4 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                        log_file,
                                        is_local=True))
 
-    return dag
+    return dag, None

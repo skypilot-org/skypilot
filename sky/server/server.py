@@ -22,6 +22,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
@@ -563,6 +564,97 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def cleanup_unreferenced_blobs():
+    """Delete content-addressed blobs not referenced by any active request."""
+    while True:
+        await asyncio.sleep(3600)  # Run every hour
+        try:
+            clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+            if not clients_dir.exists():
+                continue
+            for user_dir in clients_dir.iterdir():
+                if not user_dir.is_dir():
+                    continue
+                blobs_dir = user_dir / 'file_mounts' / 'blobs'
+                if not blobs_dir.exists():
+                    continue
+                # Get all checksums referenced by active requests.
+                active_checksums = _get_active_blob_ids(user_dir.name)
+                # Delete unreferenced blobs older than grace period.
+                grace_cutoff = time.time() - 3600  # 1 hour grace
+                for blob in blobs_dir.glob('*.zip'):
+                    checksum = blob.stem
+                    if (checksum not in active_checksums and
+                            blob.stat().st_mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob.name} for user {user_dir.name}')
+                        blob.unlink(missing_ok=True)
+                # Clean orphaned extraction dirs.
+                exec_dir = user_dir / 'file_mounts' / 'exec'
+                if exec_dir.exists():
+                    for req_dir in exec_dir.iterdir():
+                        if req_dir.stat().st_mtime < grace_cutoff:
+                            shutil.rmtree(req_dir, ignore_errors=True)
+                # Clean stale staging dirs.
+                staging_dir = blobs_dir / '.staging'
+                if staging_dir.exists():
+                    for d in staging_dir.iterdir():
+                        if d.stat().st_mtime < grace_cutoff:
+                            shutil.rmtree(d, ignore_errors=True)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error in cleanup_unreferenced_blobs: '
+                         f'{common_utils.format_exception(e)}')
+
+
+def _get_active_blob_ids(user_id: str) -> set:
+    """Query DB for blob IDs referenced by active requests for a user."""
+    return requests_lib.get_active_file_mounts_blob_ids(user_id)
+
+
+def _safe_unlink_if_old(path: pathlib.Path, cutoff: float) -> None:
+    """Unlink a file if it is older than cutoff."""
+    try:
+        if path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+async def cleanup_stale_client_files():
+    """Periodically clean stale task YAMLs and log staging dirs."""
+    while True:
+        await asyncio.sleep(3600)
+        try:
+            clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+            if not clients_dir.exists():
+                continue
+            cutoff = time.time() - 3600  # 1 hour
+            for user_dir in clients_dir.iterdir():
+                if not user_dir.is_dir():
+                    continue
+                # Clean old task YAMLs.
+                tasks_dir = user_dir / 'tasks'
+                if tasks_dir.exists():
+                    for f in tasks_dir.iterdir():
+                        _safe_unlink_if_old(f, cutoff)
+                # Clean old translated YAMLs.
+                for f in user_dir.glob('*_translated.yaml'):
+                    _safe_unlink_if_old(f, cutoff)
+                # Clean old sky_logs dirs.
+                sky_logs_dir = user_dir / 'sky_logs'
+                if sky_logs_dir.exists():
+                    for d in sky_logs_dir.iterdir():
+                        if d.is_dir():
+                            try:
+                                if d.stat().st_mtime < cutoff:
+                                    shutil.rmtree(d, ignore_errors=True)
+                            except OSError:
+                                pass
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error in cleanup_stale_client_files: '
+                         f'{common_utils.format_exception(e)}')
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -627,6 +719,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             logger.debug(f'Request {event.id} already exists.')
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
+    asyncio.create_task(cleanup_unreferenced_blobs())
+    asyncio.create_task(cleanup_stale_client_files())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
     if metrics_utils.METRICS_ENABLED:
@@ -1363,6 +1457,136 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     await unzip_file(zip_file_path, client_file_mounts_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
+
+
+@app.get('/upload_v2')
+async def check_blob_exists(request: fastapi.Request, user_hash: str,
+                            checksum: str) -> Dict[str, bool]:
+    """Check if a content-addressed blob already exists.
+
+    Refreshes the blob's mtime on hit to prevent a race condition where:
+    1. Client GET -> exists=True -> skips upload
+    2. GC runs between GET and request submission -> deletes blob
+    3. Request execution fails because blob is gone
+
+    By touching the blob, we guarantee it survives at least one more
+    GC grace period (1 hour), which far exceeds the GET-to-submission
+    window (seconds).
+    """
+    if not re.match(r'^[0-9a-f]{64}$', checksum):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid checksum: {checksum}')
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+    blob_path = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+                 'file_mounts' / 'blobs' / f'{checksum}.zip')
+    if blob_path.exists():
+        blob_path.touch()  # Refresh mtime to prevent GC race
+        return {'exists': True}
+    return {'exists': False}
+
+
+@app.post('/upload_v2')
+async def upload_blob(request: fastapi.Request, user_hash: str, checksum: str,
+                      chunk_index: int,
+                      total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Upload a content-addressed blob (chunked).
+
+    Unlike /upload, this endpoint stores the assembled zip as a blob
+    (blobs/{checksum}.zip) without extracting it. Extraction happens at
+    execution time.
+    """
+    # Fail fast if body was already buffered.
+    # pylint: disable=protected-access
+    if hasattr(request, '_body'):
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Upload request body should not be received before streaming'
+        )
+    if not re.match(r'^[0-9a-f]{64}$', checksum):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid checksum: {checksum}')
+    if chunk_index < 0 or chunk_index >= total_chunks:
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Invalid chunk_index: {chunk_index}')
+    if total_chunks < 1:
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Invalid total_chunks: {total_chunks}')
+
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+
+    client_file_mounts_dir = (
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+        'file_mounts')
+    blobs_dir = client_file_mounts_dir / 'blobs'
+    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
+    blob_path = blobs_dir / f'{checksum}.zip'
+
+    # If blob already exists (race with another upload), return immediately.
+    if blob_path.exists():
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.COMPLETED.value)
+
+    staging_dir = blobs_dir / '.staging' / checksum
+    await anyio.Path(staging_dir).mkdir(parents=True, exist_ok=True)
+
+    if total_chunks == 1:
+        zip_file_path = staging_dir / 'assembled.zip'
+    else:
+        zip_file_path = staging_dir / f'part{chunk_index}.incomplete'
+
+    try:
+        async with aiofiles.open(zip_file_path, 'wb') as f:
+            async for chunk in request.stream():
+                await f.write(chunk)
+    except starlette.requests.ClientDisconnect as e:
+        zip_file_path.unlink(missing_ok=True)
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='Client disconnected, please try again.') from e
+    except Exception as e:
+        logger.error(f'Error uploading blob chunk: {zip_file_path}')
+        zip_file_path.unlink(missing_ok=True)
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=('Error uploading blob chunk: '
+                    f'{common_utils.format_exception(e)}'))
+
+    if total_chunks > 1:
+        # Rename .incomplete to final part name
+        zip_file_path.rename(zip_file_path.with_suffix(''))
+        missing_chunks: Set[str] = (
+            set(f'part{i}' for i in range(total_chunks)) -
+            set(p.name for p in staging_dir.glob('part*')))
+        if missing_chunks:
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
+        # All chunks received, assemble them.
+        assembled_path = staging_dir / 'assembled.zip'
+        async with aiofiles.open(assembled_path, 'wb') as assembled:
+            for chunk_idx in range(total_chunks):
+                chunk_path = staging_dir / f'part{chunk_idx}'
+                async with aiofiles.open(chunk_path, 'rb') as cf:
+                    while True:
+                        data = await cf.read(64 * 1024)
+                        if not data:
+                            break
+                        await assembled.write(data)
+
+    # Move assembled zip to final blob path (atomic on same filesystem).
+    assembled_path = staging_dir / 'assembled.zip'
+    assembled_path.rename(blob_path)
+    logger.info(f'Uploaded blob: {blob_path}')
+
+    # Clean staging dir.
+    await asyncio.to_thread(shutil.rmtree, str(staging_dir), ignore_errors=True)
+
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 

@@ -789,7 +789,7 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -809,6 +809,7 @@ def _launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -881,7 +882,8 @@ def exec(  # pylint: disable=redefined-builtin
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
-    dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
+        dag, workdir_only=True)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
@@ -889,6 +891,7 @@ def exec(  # pylint: disable=redefined-builtin
         dryrun=dryrun,
         down=down,
         backend=backend.NAME if backend else None,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
 
     response = server_common.make_authenticated_request(

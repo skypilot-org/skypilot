@@ -936,8 +936,11 @@ def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
     return cast(Callable[P, T], wrapper)
 
 
-def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
-                                         workdir_only: bool) -> 'dag_lib.Dag':
+def process_mounts_in_task_on_api_server(
+        task: str,
+        env_vars: Dict[str, str],
+        workdir_only: bool,
+        extraction_dir: Optional[str] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -951,6 +954,10 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         env_vars: The environment variables of the task.
         workdir_only: Whether to only translate the workdir, which is used for
             `exec`, as it does not need other files/folders in file_mounts.
+        extraction_dir: If set, resolve file mount paths relative to this
+            directory instead of the default client_file_mounts_dir. Used
+            with content-addressed blob uploads where files are extracted
+            to a per-request directory.
 
     Returns:
         The translated task as a single-task dag.
@@ -974,9 +981,15 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
+    # When extraction_dir is set (content-addressed blob upload), resolve
+    # file mount paths relative to the per-request extraction directory.
+    file_mounts_base = (pathlib.Path(extraction_dir) if extraction_dir
+                        is not None else client_file_mounts_dir)
+    file_mounts_base.mkdir(parents=True, exist_ok=True)
+
     def _get_client_file_mounts_path(
             original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(client_file_mounts_dir /
+        return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
     task_configs = yaml_utils.read_yaml_all(str(client_task_path))
@@ -992,8 +1005,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             workdir = task_config['workdir']
             if isinstance(workdir, str):
                 task_config['workdir'] = str(
-                    client_file_mounts_dir /
-                    file_mounts_mapping[workdir].lstrip('/'))
+                    file_mounts_base / file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

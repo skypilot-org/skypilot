@@ -150,6 +150,10 @@ class RequestBody(BasePayload):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
+    # Blob ID for uploaded file mounts (content-addressed). When set, the
+    # server stores uploads as blobs/{blob_id}.zip and extracts them at
+    # execution time rather than at upload time.
+    file_mounts_blob_id: Optional[str] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -169,11 +173,16 @@ class RequestBody(BasePayload):
             get_override_skypilot_config_path_from_client())
         super().__init__(**data)
 
-    def to_kwargs(self) -> Dict[str, Any]:
+    def to_kwargs(self, **extra) -> Dict[str, Any]:  # pylint: disable=unused-argument
         """Convert the request body to a kwargs dictionary on API server.
 
         This converts the request body into kwargs for the underlying SkyPilot
         backend's function.
+
+        Args:
+            **extra: Additional keyword arguments passed from the executor,
+                e.g. extraction_dir for content-addressed blob extraction.
+                Subclasses may consume these; unknown extras are ignored.
         """
         kwargs = self.model_dump()
         kwargs.pop('env_vars')
@@ -182,6 +191,7 @@ class RequestBody(BasePayload):
         kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
+        kwargs.pop('file_mounts_blob_id')
         return kwargs
 
     @property
@@ -219,13 +229,13 @@ class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str
 
-    def to_kwargs(self) -> Dict[str, Any]:
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
         # local clients.
         # pylint: disable=import-outside-toplevel
         from sky.utils import dag_utils
 
-        kwargs = super().to_kwargs()
+        kwargs = super().to_kwargs(**extra)
 
         dag = dag_utils.load_dag_from_yaml_str(self.dag)
         # We should not validate the dag here, as the file mounts are not
@@ -247,8 +257,8 @@ class DagRequestBodyWithRequestOptions(DagRequestBody):
             return admin_policy.RequestOptions(**self.request_options)
         return self.request_options
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         kwargs['request_options'] = self.get_request_options()
         return kwargs
 
@@ -286,12 +296,14 @@ class LaunchBody(RequestBody):
     is_launched_by_sky_serve_controller: bool = False
     disable_controller_check: bool = False
 
-    def to_kwargs(self) -> Dict[str, Any]:
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
 
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        kwargs = super().to_kwargs(**extra)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            extraction_dir=extra.get('extraction_dir'))
 
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
@@ -315,12 +327,14 @@ class ExecBody(RequestBody):
     down: bool = False
     backend: Optional[str] = None
 
-    def to_kwargs(self) -> Dict[str, Any]:
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
 
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=True)
+        kwargs = super().to_kwargs(**extra)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=True,
+            extraction_dir=extra.get('extraction_dir'))
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
@@ -386,8 +400,8 @@ class CancelBody(RequestBody):
     # include it in the request body.
     try_cancel_if_cluster_is_init: bool = False
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         kwargs['_try_cancel_if_cluster_is_init'] = kwargs.pop(
             'try_cancel_if_cluster_is_init')
         return kwargs
@@ -553,10 +567,13 @@ class JobsLaunchBody(RequestBody):
     pool: Optional[str] = None
     num_jobs: Optional[int] = None
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         kwargs['task'] = common.process_mounts_in_task_on_api_server(
-            self.task, self.env_vars, workdir_only=False)
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            extraction_dir=extra.get('extraction_dir'))
         return kwargs
 
 
@@ -633,11 +650,13 @@ class ServeUpBody(RequestBody):
     task: str
     service_name: str
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            extraction_dir=extra.get('extraction_dir'))
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -651,11 +670,13 @@ class ServeUpdateBody(RequestBody):
     service_name: str
     mode: serve.UpdateMode
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            extraction_dir=extra.get('extraction_dir'))
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -787,11 +808,14 @@ class JobsPoolApplyBody(RequestBody):
     pool_name: str
     mode: serve.UpdateMode
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         if self.task is not None:
             dag = common.process_mounts_in_task_on_api_server(
-                self.task, self.env_vars, workdir_only=False)
+                self.task,
+                self.env_vars,
+                workdir_only=False,
+                extraction_dir=extra.get('extraction_dir'))
             assert len(
                 dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                   'a pool.', dag)
@@ -896,6 +920,7 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+    file_mounts_blob_id: Optional[str] = None
 
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):
@@ -934,8 +959,8 @@ class RecipeListBody(RequestBody):
     recipe_type: Optional[
         str] = None  # See RecipeType: 'cluster', 'job', 'pool', 'volume'
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         # Inject user_id from env_vars for filtering by user
         # Fallback to 'local' for unauthenticated local servers
         kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
@@ -956,8 +981,8 @@ class RecipeCreateBody(RequestBody):
     description: Optional[str] = None
     owner_name: Optional[str] = None  # Override user_name for unauthenticated
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         # Inject user_id and user_name from env_vars
         # Fallback to 'local' for unauthenticated local servers
         kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
@@ -980,8 +1005,8 @@ class RecipeUpdateBody(RequestBody):
     description: Optional[str] = None
     content: Optional[str] = None
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         # Inject user_id and user_name from env_vars
         # Fallback to 'local' for unauthenticated local servers
         kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,
@@ -994,8 +1019,8 @@ class RecipeDeleteBody(RequestBody):
     """The request body for deleting a recipe."""
     recipe_name: str
 
-    def to_kwargs(self) -> Dict[str, Any]:
-        kwargs = super().to_kwargs()
+    def to_kwargs(self, **extra) -> Dict[str, Any]:
+        kwargs = super().to_kwargs(**extra)
         # Inject user_id from env_vars for ownership check
         # Fallback to 'local' for unauthenticated local servers
         kwargs['user_id'] = self.env_vars.get(constants.USER_ID_ENV_VAR,

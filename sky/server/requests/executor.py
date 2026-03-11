@@ -24,12 +24,14 @@ import contextlib
 import multiprocessing
 import os
 import queue as queue_lib
+import shutil
 import signal
 import sys
 import threading
 import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
+import zipfile
 
 import psutil
 import setproctitle
@@ -408,6 +410,67 @@ def override_request_env_and_config(
         os.environ.update(original_env)
 
 
+def _extract_blob_for_request(request_body: payloads.RequestBody,
+                              request_id: str) -> str:
+    """Extract the uploaded blob to a request-private directory.
+
+    Returns the extraction directory path.
+    """
+    user_hash = request_body.env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
+    client_dir = (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                  user_hash / 'file_mounts')
+    blob_path = (client_dir / 'blobs' /
+                 f'{request_body.file_mounts_blob_id}.zip')
+    extraction_dir = client_dir / 'exec' / request_id
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+
+    if not blob_path.exists():
+        raise FileNotFoundError(
+            f'Blob not found: {blob_path}. The file mounts blob may have been '
+            'garbage collected before execution started.')
+
+    with zipfile.ZipFile(blob_path, 'r') as zipf:
+        for member in zipf.infolist():
+            original_path = os.path.normpath(member.filename)
+            new_path = extraction_dir / original_path.lstrip('/')
+            resolved_path = new_path.resolve()
+            # Security check: prevent Zip Slip attacks.
+            try:
+                resolved_path.relative_to(extraction_dir.resolve())
+            except ValueError as exc:
+                raise ValueError(
+                    f'Zip member {member.filename!r} would extract '
+                    'outside target directory. Aborted.') from exc
+
+            if (member.external_attr >> 28) == 0xA:
+                # Symlink
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                target = zipf.read(member).decode()
+                assert not os.path.isabs(target), target
+                full_target_path = (new_path.parent / target).resolve()
+                try:
+                    full_target_path.relative_to(extraction_dir.resolve())
+                except ValueError as exc:
+                    raise ValueError(
+                        f'Symlink target {target} leads to a '
+                        'file not in extraction dir. Aborted.') from exc
+                if new_path.exists() or new_path.is_symlink():
+                    new_path.unlink(missing_ok=True)
+                new_path.symlink_to(
+                    target, target_is_directory=member.filename.endswith('/'))
+                continue
+
+            if member.filename.endswith('/'):
+                new_path.mkdir(parents=True, exist_ok=True)
+                continue
+
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            with zipf.open(member) as member_file, new_path.open('wb') as f:
+                shutil.copyfileobj(member_file, f)
+
+    return str(extraction_dir)
+
+
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
@@ -467,6 +530,7 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
+    extraction_dir = None
     try:
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -511,11 +575,17 @@ def _request_execution_wrapper(request_id: str,
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{yaml_utils.dump_yaml_str(dict(config))}')
+                # Extract content-addressed blob to a request-private
+                # dir before to_kwargs() resolves file paths.
+                if getattr(request_body, 'file_mounts_blob_id', None):
+                    extraction_dir = _extract_blob_for_request(
+                        request_body, request_id)
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
                                            group='request_execution'):
-                    return_value = func(**request_body.to_kwargs())
+                    return_value = func(**request_body.to_kwargs(
+                        extraction_dir=extraction_dir))
                 f.flush()
     except KeyboardInterrupt:
         logger.info(f'Request {request_id} cancelled by user')
@@ -556,6 +626,9 @@ def _request_execution_wrapper(request_id: str,
         logger.info(f'Request {request_id} finished')
     finally:
         _restore_output()
+        # Clean up per-request extraction dir from content-addressed blobs.
+        if extraction_dir is not None:
+            shutil.rmtree(extraction_dir, ignore_errors=True)
         try:
             # Capture the peak RSS before GC.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)
@@ -759,16 +832,18 @@ async def prepare_request_async(
             models.User(id=user_id,
                         name=user_id,
                         user_type=models.UserType.SYSTEM.value))
-    request = api_requests.Request(request_id=request_id,
-                                   name=server_constants.REQUEST_NAME_PREFIX +
-                                   request_name,
-                                   entrypoint=func,
-                                   request_body=request_body,
-                                   status=api_requests.RequestStatus.PENDING,
-                                   created_at=time.time(),
-                                   schedule_type=schedule_type,
-                                   user_id=user_id,
-                                   cluster_name=request_cluster_name)
+    request = api_requests.Request(
+        request_id=request_id,
+        name=server_constants.REQUEST_NAME_PREFIX + request_name,
+        entrypoint=func,
+        request_body=request_body,
+        status=api_requests.RequestStatus.PENDING,
+        created_at=time.time(),
+        schedule_type=schedule_type,
+        user_id=user_id,
+        cluster_name=request_cluster_name,
+        file_mounts_blob_id=getattr(request_body, 'file_mounts_blob_id', None),
+    )
 
     if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
