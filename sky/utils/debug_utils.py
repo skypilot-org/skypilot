@@ -131,36 +131,51 @@ def _get_requests_from_managed_jobs(
         requests = requests_lib.get_request_tasks(
             requests_lib.RequestTaskFilter(
                 include_request_names=managed_job_request_names,
-                fields=['request_id', 'request_body']))
+                fields=['request_id', 'name', 'request_body', 'return_value']))
 
         for request in requests:
-            body = request.request_body
-            if body is None:
-                continue
             matched = False
-            # Match by direct job ID
-            job_id = getattr(body, 'job_id', None)
-            job_ids = getattr(body, 'job_ids', None)
-            if (job_id is not None and
-                    job_id in debug_dump_context['managed_job_ids']):
-                matched = True
-            elif (job_ids is not None and
-                  any(jid in debug_dump_context['managed_job_ids']
-                      for jid in job_ids)):
-                matched = True
-            # Match cancel-by-name
-            elif getattr(body, 'name', None) in job_names:
-                matched = True
-            # Match cancel-all-users (affects all jobs)
-            elif getattr(body, 'all_users', False):
-                matched = True
-            # Match cancel-all (affects only the requesting
-            # user's jobs, so include if user owns a target job)
-            elif getattr(body, 'all', False):
-                cancel_user = getattr(body, 'env_vars',
-                                      {}).get(skylet_constants.USER_ID_ENV_VAR)
-                if cancel_user and cancel_user in job_user_hashes:
+            # Match by request body fields (job_id, job_ids, name, etc.)
+            body = request.request_body
+            if body is not None:
+                job_id = getattr(body, 'job_id', None)
+                job_ids = getattr(body, 'job_ids', None)
+                if (job_id is not None and
+                        job_id in debug_dump_context['managed_job_ids']):
                     matched = True
+                elif (job_ids is not None and
+                      any(jid in debug_dump_context['managed_job_ids']
+                          for jid in job_ids)):
+                    matched = True
+                # Match cancel-by-name
+                elif getattr(body, 'name', None) in job_names:
+                    matched = True
+                # Match cancel-all-users (affects all jobs)
+                elif getattr(body, 'all_users', False):
+                    matched = True
+                # Match cancel-all (affects only the requesting
+                # user's jobs, so include if user owns a target job)
+                elif getattr(body, 'all', False):
+                    cancel_user = getattr(body, 'env_vars', {}).get(
+                        skylet_constants.USER_ID_ENV_VAR)
+                    if cancel_user and cancel_user in job_user_hashes:
+                        matched = True
+            # For jobs.launch, also match by return_value job_id
+            if (not matched and request.name
+                    == prefix + request_names.RequestName.JOBS_LAUNCH.value):
+                rv = request.return_value
+                if isinstance(rv, dict):
+                    resp_job_id = rv.get('job_id')
+                    if isinstance(resp_job_id, list):
+                        matched = any(
+                            jid in debug_dump_context['managed_job_ids']
+                            for jid in resp_job_id)
+                    elif (resp_job_id is not None and
+                          resp_job_id in debug_dump_context['managed_job_ids']):
+                        matched = True
+                    if matched:
+                        logger.debug(f'Linked managed job(s) to request '
+                                     f'{request.request_id} via return_value')
             if matched:
                 debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
@@ -217,19 +232,36 @@ def _get_managed_jobs_from_requests(
 
     for request_id in debug_dump_context['request_ids']:
         try:
-            request = requests_lib.get_request(request_id,
-                                               fields=['name', 'request_body'])
+            request = requests_lib.get_request(
+                request_id, fields=['name', 'request_body', 'return_value'])
             if request is None or request.name not in managed_job_request_names:
                 continue
             body = request.request_body
-            if body is None:
-                continue
-            job_id = getattr(body, 'job_id', None)
-            if job_id is not None:
-                debug_dump_context['managed_job_ids'].add(job_id)
-            job_ids = getattr(body, 'job_ids', None)
-            if job_ids is not None:
-                debug_dump_context['managed_job_ids'].update(job_ids)
+            if body is not None:
+                job_id = getattr(body, 'job_id', None)
+                if job_id is not None:
+                    debug_dump_context['managed_job_ids'].add(job_id)
+                job_ids = getattr(body, 'job_ids', None)
+                if job_ids is not None:
+                    debug_dump_context['managed_job_ids'].update(job_ids)
+            # For jobs.launch, the job ID is in the response, not the
+            # request body.
+            if (request.name == prefix +
+                    request_names.RequestName.JOBS_LAUNCH.value):
+                rv = request.return_value
+                if isinstance(rv, dict):
+                    resp_job_id = rv.get('job_id')
+                    if isinstance(resp_job_id, list):
+                        debug_dump_context['managed_job_ids'].update(
+                            resp_job_id)
+                        logger.debug(f'Linked request {request.request_id} '
+                                     f'to managed jobs {resp_job_id} '
+                                     f'via return_value')
+                    elif resp_job_id is not None:
+                        debug_dump_context['managed_job_ids'].add(resp_job_id)
+                        logger.debug(f'Linked request {request.request_id} '
+                                     f'to managed job {resp_job_id} '
+                                     f'via return_value')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get managed job info for '
                            f'request {request_id}: {e}')
