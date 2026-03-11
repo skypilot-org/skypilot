@@ -38,6 +38,11 @@ def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
             'launched_nodes': getattr(handle, 'launched_nodes', None),
             'launched_resources': str(
                 getattr(handle, 'launched_resources', None)),
+            'stable_internal_external_ips': getattr(
+                handle, 'stable_internal_external_ips', None),
+            'stable_ssh_ports': getattr(handle, 'stable_ssh_ports', None),
+            'docker_user': getattr(handle, 'docker_user', None),
+            'ssh_user': getattr(handle, 'ssh_user', None),
         }
 
     launched_at = cluster_record.get('launched_at')
@@ -58,6 +63,12 @@ def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
         'is_managed': cluster_record.get('is_managed'),
         'user_hash': cluster_record.get('user_hash'),
         'user_name': cluster_record.get('user_name'),
+        'last_use': cluster_record.get('last_use'),
+        'owner': cluster_record.get('owner'),
+        'metadata': cluster_record.get('metadata'),
+        'last_creation_command': cluster_record.get('last_creation_command'),
+        'last_creation_yaml': cluster_record.get('last_creation_yaml'),
+        'last_event': cluster_record.get('last_event'),
         'handle': handle_info,
     }
 

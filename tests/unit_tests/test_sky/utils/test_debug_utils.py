@@ -1459,3 +1459,130 @@ class TestSensitiveEnvVarRedaction:
         assert env['SKY_NORMAL_VAR'] == 'visible'
         # Sensitive var should be redacted to bool
         assert env['SKYPILOT_DB_CONNECTION_URI'] is True
+
+
+# ---------------------------------------------------------------------------
+# Tests for serialize_cluster_record
+# ---------------------------------------------------------------------------
+class TestSerializeClusterRecord:
+
+    def _make_mock_handle(self, **overrides):
+        """Create a mock handle with all expected attributes."""
+        defaults = {
+            'cluster_name': 'test-cluster',
+            'cluster_name_on_cloud': 'sky-abc-test-cluster',
+            'head_ip': '10.0.0.1',
+            'launched_nodes': 2,
+            'launched_resources': 'AWS(p3.2xlarge)',
+            'stable_internal_external_ips': [('10.0.0.1', '54.1.2.3'),
+                                             ('10.0.0.2', '54.1.2.4')],
+            'stable_ssh_ports': [22, 22],
+            'docker_user': 'sky_user',
+            'ssh_user': 'ubuntu',
+        }
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    def _make_full_cluster_record(self, **overrides):
+        """Create a full cluster record dict matching get_cluster_from_name."""
+        defaults = {
+            'name': 'test-cluster',
+            'cluster_hash': 'abc123',
+            'status': 'UP',
+            'launched_at': 1700000000.0,
+            'autostop': 30,
+            'to_down': False,
+            'cluster_ever_up': True,
+            'status_updated_at': 1700001000.0,
+            'config_hash': 'cfg-hash',
+            'workspace': 'default',
+            'is_managed': False,
+            'user_hash': 'user-abc',
+            'user_name': 'testuser',
+            'last_use': 'sky exec test-cluster -- echo hi',
+            'owner': ['testuser'],
+            'metadata': {
+                'sky_version': '0.10.0'
+            },
+            'last_creation_command': 'sky launch test.yaml',
+            'last_creation_yaml': 'resources:\\n  cloud: aws',
+            'last_event': 'cluster UP',
+            'handle': self._make_mock_handle(),
+        }
+        defaults.update(overrides)
+        return defaults
+
+    def test_all_expected_keys_present(self):
+        """All expected keys should be present in serialized output."""
+        record = self._make_full_cluster_record()
+        result = debug_dump_helpers.serialize_cluster_record(record)
+
+        expected_top_keys = {
+            'name', 'cluster_hash', 'status', 'launched_at',
+            'launched_at_human', 'autostop', 'to_down', 'cluster_ever_up',
+            'status_updated_at', 'status_updated_at_human', 'config_hash',
+            'workspace', 'is_managed', 'user_hash', 'user_name', 'last_use',
+            'owner', 'metadata', 'last_creation_command', 'last_creation_yaml',
+            'last_event', 'handle'
+        }
+        assert set(result.keys()) == expected_top_keys
+
+        expected_handle_keys = {
+            'cluster_name', 'cluster_name_on_cloud', 'head_ip',
+            'launched_nodes', 'launched_resources',
+            'stable_internal_external_ips', 'stable_ssh_ports', 'docker_user',
+            'ssh_user'
+        }
+        assert set(result['handle'].keys()) == expected_handle_keys
+
+    def test_minimal_record(self):
+        """A near-empty record with no handle should not crash."""
+        record = {'name': 'bare-cluster'}
+        result = debug_dump_helpers.serialize_cluster_record(record)
+
+        assert result['name'] == 'bare-cluster'
+        assert result['handle'] == {}
+        # Missing fields default to None
+        assert result['cluster_hash'] is None
+        assert result['launched_at'] is None
+        assert result['last_use'] is None
+        assert result['owner'] is None
+        assert result['metadata'] is None
+        assert result['last_creation_command'] is None
+        assert result['last_creation_yaml'] is None
+        assert result['last_event'] is None
+
+    def test_handle_fields_extracted(self):
+        """Handle sub-fields should be correctly extracted."""
+        handle = self._make_mock_handle(
+            stable_internal_external_ips=[('10.0.0.1', '1.2.3.4')],
+            stable_ssh_ports=[2222],
+            docker_user='docker_u',
+            ssh_user='ec2-user',
+        )
+        record = {'name': 'c', 'handle': handle}
+        result = debug_dump_helpers.serialize_cluster_record(record)
+
+        h = result['handle']
+        assert h['stable_internal_external_ips'] == [('10.0.0.1', '1.2.3.4')]
+        assert h['stable_ssh_ports'] == [2222]
+        assert h['docker_user'] == 'docker_u'
+        assert h['ssh_user'] == 'ec2-user'
+
+    def test_timestamps_have_human_readable(self):
+        """Epoch timestamps should produce valid ISO datetime strings."""
+        record = self._make_full_cluster_record(
+            launched_at=1700000000.0,
+            status_updated_at=1700001000.0,
+        )
+        result = debug_dump_helpers.serialize_cluster_record(record)
+
+        # Both human-readable fields should be valid ISO datetimes
+        launched_human = result['launched_at_human']
+        assert launched_human is not None
+        dt = datetime.datetime.fromisoformat(launched_human)
+        assert dt.year == 2023
+
+        updated_human = result['status_updated_at_human']
+        assert updated_human is not None
+        datetime.datetime.fromisoformat(updated_human)
