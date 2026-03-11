@@ -816,13 +816,23 @@ class Resources:
             accelerators: A string or a dict of accelerator types to counts.
             accelerator_args: A dict of accelerator types to args.
         """
+        self._memory_accel_spec: Optional[str] = None
         if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
+                # Memory-based specs (e.g., '40GB+', 'NVIDIA:40GB+') are
+                # stored as-is and expanded later by from_yaml_config on
+                # the server side.
+                parsed = self.parse_accelerators_from_str(accelerators)
+                if any(not is_exact_name for _, is_exact_name in parsed):
+                    self._memory_accel_spec = accelerators
+                    self._accelerators: Optional[Dict[str, Union[int,
+                                                                 float]]] = None
+                    self._accelerator_args: Optional[Dict[
+                        str, Any]] = accelerator_args
+                    return
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
                 else:
-                    assert isinstance(accelerators,
-                                      str), (type(accelerators), accelerators)
                     splits = accelerators.split(':')
                     parse_error = ('The "accelerators" field as a str '
                                    'should be <name> or <name>:<cnt>. '
@@ -889,9 +899,8 @@ class Resources:
                                     'Cannot specify instance type (got '
                                     f'{self.instance_type!r}) for TPU VM.')
 
-        self._accelerators: Optional[Dict[str, Union[int,
-                                                     float]]] = accelerators
-        self._accelerator_args: Optional[Dict[str, Any]] = accelerator_args
+        self._accelerators = accelerators
+        self._accelerator_args = accelerator_args
 
     def _set_autostop_config(
         self,
@@ -2013,7 +2022,8 @@ class Resources:
             # Need to pass `self._accelerators` instead of `self.accelerators`
             # as the latter can auto-infer, causing potential conflicts with
             # instance_type override.
-            accelerators=override.pop('accelerators', self._accelerators),
+            accelerators=override.pop(
+                'accelerators', self._memory_accel_spec or self._accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
             use_spot=override.pop('use_spot', use_spot),
@@ -2402,7 +2412,8 @@ class Resources:
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
-        add_if_not_none('accelerators', self._accelerators)
+        add_if_not_none('accelerators', self._memory_accel_spec or
+                        self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
         if self._use_spot_specified:
