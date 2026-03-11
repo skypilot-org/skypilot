@@ -1586,3 +1586,60 @@ class TestSerializeClusterRecord:
         updated_human = result['status_updated_at_human']
         assert updated_human is not None
         datetime.datetime.fromisoformat(updated_human)
+
+
+# ---------------------------------------------------------------------------
+# Tests for redact_config
+# ---------------------------------------------------------------------------
+class TestRedactConfig:
+
+    def test_redacts_sensitive_fields(self):
+        """Sensitive fields should be replaced with '<redacted>'."""
+        config = {
+            'api_server': {
+                'endpoint': 'https://my-server.example.com',
+                'service_account_token': 'sky_secret123',
+                'requests_retention_hours': 24,
+            },
+            'jobs': {
+                'controller': {
+                    'consolidation_mode': True
+                }
+            },
+        }
+        result = debug_dump_helpers.redact_config(config)
+        assert result['api_server']['endpoint'] == '<redacted>'
+        assert result['api_server']['service_account_token'] == '<redacted>'
+        # Non-sensitive fields preserved
+        assert result['api_server']['requests_retention_hours'] == 24
+        assert result['jobs']['controller']['consolidation_mode'] is True
+
+    def test_no_sensitive_fields(self):
+        """Config without sensitive keys should pass through unchanged."""
+        config = {
+            'jobs': {
+                'controller': {
+                    'consolidation_mode': False
+                }
+            },
+            'kubernetes': {
+                'networking': 'nodeport'
+            },
+        }
+        result = debug_dump_helpers.redact_config(config)
+        assert result == config
+
+    def test_empty_config(self):
+        """Empty config should not crash."""
+        result = debug_dump_helpers.redact_config({})
+        assert not result
+
+    def test_does_not_mutate_original(self):
+        """Original config dict should not be modified."""
+        config = {
+            'api_server': {
+                'service_account_token': 'sky_secret',
+            },
+        }
+        debug_dump_helpers.redact_config(config)
+        assert config['api_server']['service_account_token'] == 'sky_secret'

@@ -53,9 +53,9 @@ from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
-from sky.utils import config_utils
 from sky.utils import context as sky_context
 from sky.utils import dag_utils
+from sky.utils import debug_dump_helpers
 from sky.utils import env_options
 from sky.utils import infra_utils
 from sky.utils import rich_utils
@@ -3067,26 +3067,14 @@ def _build_client_info() -> Dict[str, Any]:
     # so sys.modules lookup is safe.
     sky_mod = sys.modules['sky']
 
-    # Sensitive config paths to redact, following the same pattern as
-    # provision/common.py:ProvisionConfig.get_redacted_config().
-    sensitive_fields = [
-        ('api_server', 'endpoint'),
-    ]
-
-    def _redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
-        config_copy = config_utils.Config(config)
-        for field_path in sensitive_fields:
-            val = config_copy.get_nested(field_path, default_value=None)
-            if val is not None:
-                config_copy.set_nested(field_path, '<redacted>')
-        return dict(**config_copy)
-
     # Get configs
     user_config: Dict[str, Any] = {}
     merged_config: Dict[str, Any] = {}
     try:
-        user_config = _redact_config(dict(skypilot_config.get_user_config()))
-        merged_config = _redact_config(dict(skypilot_config.to_dict()))
+        user_config = debug_dump_helpers.redact_config(
+            dict(skypilot_config.get_user_config()))
+        merged_config = debug_dump_helpers.redact_config(
+            dict(skypilot_config.to_dict()))
     except Exception:  # pylint: disable=broad-except
         pass  # Config may not be available
 

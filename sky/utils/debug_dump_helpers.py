@@ -5,10 +5,33 @@ sky.jobs.utils (controller side) to serialize cluster records and events.
 Extracted to avoid a circular import:
   debug_utils -> jobs.server.core -> jobs.utils -> debug_utils
 """
+import copy
 import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
+from sky.utils import config_utils
+
+# Sensitive config paths to redact in debug dumps, following the same
+# pattern as provision/common.py:ProvisionConfig.get_redacted_config().
+_SENSITIVE_CONFIG_KEYS: List[Tuple[str, ...]] = [
+    ('api_server', 'endpoint'),
+    ('api_server', 'service_account_token'),
+]
+
+
+def redact_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of config with sensitive values replaced by '<redacted>'.
+
+    Used by both the client (sdk.py) and the server (debug_utils.py) when
+    including SkyPilot config in debug dumps.
+    """
+    config_copy = config_utils.Config(copy.deepcopy(config))
+    for field_path in _SENSITIVE_CONFIG_KEYS:
+        val = config_copy.get_nested(field_path, default_value=None)
+        if val is not None:
+            config_copy.set_nested(field_path, '<redacted>')
+    return dict(**config_copy)
 
 
 def epoch_to_human(epoch: Optional[float]) -> Optional[str]:
