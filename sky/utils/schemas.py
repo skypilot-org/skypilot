@@ -665,6 +665,10 @@ def get_volume_mount_schema():
             'is_ephemeral': {
                 'type': 'boolean',
             },
+            'sub_path': {
+                'type': 'string',
+                'pattern': constants.SUB_PATH_PATTERN,
+            },
             'volume_config': {
                 'type': 'object',
                 'required': [],
@@ -1872,6 +1876,10 @@ def get_config_schema():
             },
             'cluster_terminal_event_retention_hours': {
                 'type': 'number',
+            },
+            'daemon_log_max_bytes': {
+                'type': 'integer',
+                'minimum': 0,
             },
         }
     }
