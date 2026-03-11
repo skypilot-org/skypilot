@@ -167,15 +167,17 @@ def _get_requests_from_managed_jobs(
                 if isinstance(rv, dict):
                     resp_job_id = rv.get('job_id')
                     if isinstance(resp_job_id, list):
-                        matched = any(
-                            jid in debug_dump_context['managed_job_ids']
-                            for jid in resp_job_id)
-                    elif (resp_job_id is not None and
-                          resp_job_id in debug_dump_context['managed_job_ids']):
-                        matched = True
-                    if matched:
-                        logger.debug(f'Linked managed job(s) to request '
-                                     f'{request.request_id} via return_value')
+                        resp_jobs = resp_job_id
+                    else:
+                        resp_jobs = [resp_job_id]
+                    for job_id in resp_jobs:
+                        if (job_id is not None and job_id
+                                in debug_dump_context['managed_job_ids']):
+                            matched = True
+                            logger.debug(
+                                f'Linked managed job {job_id} to request '
+                                f'{request.request_id} via return_value')
+                            break
             if matched:
                 debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
