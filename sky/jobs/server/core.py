@@ -749,6 +749,9 @@ def launch(
         # Inject API server credentials for tasks with api_access enabled.
         # Create a single token for the entire DAG and reuse it across all
         # tasks that need API access, rather than creating one per task.
+        # Note: the API server endpoint env var is injected client-side
+        # (sky/jobs/client/sdk.py) where get_server_url() returns the
+        # externally reachable endpoint.
         any_api_access = any(task_.api_access for task_ in dag.tasks)
         if any_api_access:
             sa_enabled = os.environ.get(
@@ -762,13 +765,6 @@ def launch(
                                      f'server. Set {env_var}=true '
                                      'environment variable on the server.')
 
-            endpoint = server_common.get_server_url()
-            if server_common.is_api_server_local(endpoint):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('api_access: true requires a remote API '
-                                     'server. A local API server '
-                                     f'({endpoint}) is not reachable from '
-                                     'managed jobs running on remote clusters.')
             user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
             if user_id is None:
                 with ux_utils.print_exception_no_traceback():
@@ -782,9 +778,6 @@ def launch(
 
             for task_ in dag.tasks:
                 if task_.api_access:
-                    task_.update_envs({
-                        skylet_constants.SKY_API_SERVER_URL_ENV_VAR: endpoint,
-                    })
                     task_._secrets[  # pylint: disable=protected-access
                         skylet_constants.
                         SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)

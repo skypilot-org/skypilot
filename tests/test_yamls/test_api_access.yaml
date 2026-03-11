@@ -6,8 +6,6 @@ api_access: true
 
 setup: |
   pip install "skypilot-nightly[remote]" > /dev/null 2>&1
-  # Login to the API server using the injected credentials
-  sky api login -e "$SKYPILOT_API_SERVER_ENDPOINT" --token "$SKYPILOT_SERVICE_ACCOUNT_TOKEN"
 
 run: |
   # Verify API access env vars are set
@@ -23,7 +21,9 @@ run: |
 
   # Wait for nested job to complete
   for i in $(seq 1 60); do
-    status=$(sky jobs queue | grep nested-job | awk '{print $NF}')
+    # Strip ANSI codes and debug lines before parsing status
+    status=$(sky jobs queue 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep nested-job | grep -oE 'SUCCEEDED|FAILED[A-Z_]*|RUNNING|STARTING|CANCELLED' | head -1)
+    echo "Poll $i: status=$status"
     if [ "$status" = "SUCCEEDED" ]; then
       echo "NESTED_JOB_SUCCESS"
       exit 0
