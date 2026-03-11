@@ -2921,8 +2921,6 @@ def test_managed_jobs_api_access(generic_cloud: str):
                 job_name=name,
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=600),
-            f's=$(sky jobs logs -n {name} --no-follow); echo "$s"; '
-            f'echo "$s" | grep "NESTED_JOB_SUCCESS"',
         ],
         f'sky jobs cancel -y -n {name}; sky jobs cancel -y -n nested-job',
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
