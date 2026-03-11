@@ -131,8 +131,7 @@ def run_instances(
             # Extract vCPUs and memory from instance type
             # Format: instance_type__vcpus__memory[__SPOT]
             instance_type = config.node_config['InstanceType']
-            disk_size = config.node_config.get(
-                'DiskSize', DEFAULT_DISK_SIZE_GB)
+            disk_size = config.node_config.get('DiskSize', DEFAULT_DISK_SIZE_GB)
             # Preemptible - fancy way to call it a spot instance
             is_spot = config.node_config.get('Preemptible', None)
 
