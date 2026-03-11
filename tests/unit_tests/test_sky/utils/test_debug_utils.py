@@ -1921,3 +1921,219 @@ class TestRedactTaskYaml:
         result = debug_utils._redact_task_yaml(yaml_str)
         assert 'val1' not in result
         assert 'val2' not in result
+
+
+# ---------------------------------------------------------------------------
+# Tests for _dump_request_id_info
+# ---------------------------------------------------------------------------
+class TestDumpRequestIdInfo:
+    """Tests for the _dump_request_id_info function."""
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_happy_path_writes_request_info(self, mock_get_request, tmp_path):
+        """Should write request_info.json with correct fields."""
+        mock_get_request.return_value = _make_request(
+            request_id='req-1',
+            name='sky.launch',
+            status='SUCCEEDED',
+            cluster_name='my-cluster',
+            created_at=1700000000.0,
+            finished_at=1700001000.0,
+        )
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-1'}, str(tmp_path), errors)
+
+        info_path = tmp_path / 'requests' / 'req-1' / 'request_info.json'
+        assert info_path.exists()
+        with open(info_path) as f:
+            data = json.load(f)
+        assert data['request_id'] == 'req-1'
+        assert data['name'] == 'sky.launch'
+        assert data['status'] == 'SUCCEEDED'
+        assert data['cluster_name'] == 'my-cluster'
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_request_not_found(self, mock_get_request, tmp_path):
+        """Should handle request not found gracefully."""
+        mock_get_request.return_value = None
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-missing'}, str(tmp_path),
+                                          errors)
+
+        # No crash, no error recorded (not-found is not an error)
+        assert not errors
+        info_path = tmp_path / 'requests' / 'req-missing' / 'request_info.json'
+        assert not info_path.exists()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_db_failure_records_error(self, mock_get_request, tmp_path):
+        """DB failure should record error but not crash."""
+        mock_get_request.side_effect = RuntimeError('DB is down')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info({'req-fail'}, str(tmp_path), errors)
+
+        assert len(errors) == 1
+        assert errors[0]['component'] == 'requests'
+        assert 'DB is down' in errors[0]['error']
+        assert 'traceback' in errors[0]
+
+    def test_empty_request_ids_is_noop(self, tmp_path):
+        """Empty request_ids should not create any files."""
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_request_id_info(set(), str(tmp_path), errors)
+
+        assert not errors
+        assert not (tmp_path / 'requests').exists()
+
+    @mock.patch('sky.utils.debug_utils.shutil.copy2')
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_copies_log_file_when_exists(self, mock_get_request, mock_copy2,
+                                         tmp_path):
+        """Should copy request log when it exists."""
+        mock_get_request.return_value = _make_request(request_id='req-log')
+
+        with mock.patch('pathlib.Path.exists', return_value=True):
+            errors: List[Dict[str, str]] = []
+            debug_utils._dump_request_id_info({'req-log'}, str(tmp_path),
+                                              errors)
+
+        # copy2 should be called at least once (for the log file)
+        assert mock_copy2.called
+
+
+# ---------------------------------------------------------------------------
+# Tests for _dump_cluster_info
+# ---------------------------------------------------------------------------
+class TestDumpClusterInfo:
+    """Tests for the _dump_cluster_info function."""
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_happy_path_writes_cluster_info(self, mock_get_cluster, mock_events,
+                                            mock_requests, tmp_path):
+        """Should write cluster_info.json for found clusters."""
+        del mock_events, mock_requests  # unused but required by mock.patch
+        mock_get_cluster.return_value = {
+            'name': 'my-cluster',
+            'cluster_hash': 'abc123',
+            'status': 'UP',
+            'launched_at': 1700000000.0,
+            'status_updated_at': 1700001000.0,
+        }
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'my-cluster'}, str(tmp_path), errors)
+
+        info_path = (tmp_path / 'clusters' / 'my-cluster' / 'cluster_info.json')
+        assert info_path.exists()
+        with open(info_path) as f:
+            data = json.load(f)
+        assert data['name'] == 'my-cluster'
+        assert data['cluster_hash'] == 'abc123'
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_cluster_not_found(self, mock_get_cluster, mock_requests, tmp_path):
+        """Should handle missing cluster gracefully."""
+        del mock_requests  # unused but required by mock.patch
+        mock_get_cluster.return_value = None
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'gone-cluster'}, str(tmp_path), errors)
+
+        assert not errors
+        info_path = (tmp_path / 'clusters' / 'gone-cluster' /
+                     'cluster_info.json')
+        assert not info_path.exists()
+
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_db_failure_records_error(self, mock_get_cluster, tmp_path):
+        """DB failure should record error but not crash."""
+        mock_get_cluster.side_effect = RuntimeError('DB error')
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'fail-cluster'}, str(tmp_path), errors)
+
+        assert len(errors) >= 1
+        assert any(e['component'] == 'clusters' for e in errors)
+
+    def test_empty_cluster_names_is_noop(self, tmp_path):
+        """Empty cluster_names should not create any files."""
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info(set(), str(tmp_path), errors)
+
+        assert not errors
+        assert not (tmp_path / 'clusters').exists()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data')
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_writes_event_files(self, mock_get_cluster, mock_events,
+                                mock_requests, tmp_path):
+        """Should write event files for cluster events."""
+        del mock_requests  # unused but required by mock.patch
+        mock_get_cluster.return_value = {
+            'name': 'ev-cluster',
+            'cluster_hash': 'hash123',
+            'status': 'UP',
+        }
+        mock_events.return_value = [{
+            'event_type': 'provision',
+            'events': [{
+                'timestamp': '2023-01-01',
+                'message': 'provisioned'
+            }],
+        }]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'ev-cluster'}, str(tmp_path), errors)
+
+        event_path = (tmp_path / 'clusters' / 'ev-cluster' /
+                      'events_provision.json')
+        assert event_path.exists()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    @mock.patch('sky.utils.debug_utils.debug_dump_helpers'
+                '.get_cluster_events_data',
+                return_value=[])
+    @mock.patch('sky.utils.debug_utils.global_user_state'
+                '.get_cluster_from_name')
+    def test_writes_associated_requests(self, mock_get_cluster, mock_events,
+                                        mock_get_tasks, tmp_path):
+        """Should write associated_requests.json."""
+        del mock_events  # unused but required by mock.patch
+        mock_get_cluster.return_value = {
+            'name': 'assoc-cluster',
+            'cluster_hash': 'hash456',
+            'status': 'UP',
+        }
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-a', name='sky.launch'),
+        ]
+
+        errors: List[Dict[str, str]] = []
+        debug_utils._dump_cluster_info({'assoc-cluster'}, str(tmp_path), errors)
+
+        assoc_path = (tmp_path / 'clusters' / 'assoc-cluster' /
+                      'associated_requests.json')
+        assert assoc_path.exists()
+        with open(assoc_path) as f:
+            data = json.load(f)
+        assert len(data) == 1
+        assert data[0]['request_id'] == 'req-a'
