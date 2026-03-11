@@ -36,6 +36,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import gpu_names
 from sky.utils import kubernetes_enums
 from sky.utils import plugin_extensions
 from sky.utils import schemas
@@ -695,7 +696,7 @@ class GFDLabelFormatter(GPULabelFormatter):
         """Searches against a canonical list of NVIDIA GPUs and pattern
         matches the canonical GPU name against the GFD label.
         """
-        for canonical_name in kubernetes_constants.CANONICAL_GPU_NAMES:
+        for canonical_name in gpu_names.CANONICAL_GPU_NAMES:
             # A100-80GB accelerator is A100-SXM-80GB or A100-PCIE-80GB
             if canonical_name == 'A100-80GB' and re.search(
                     r'A100.*-80GB', value):

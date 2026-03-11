@@ -43,6 +43,7 @@ from sky.metrics import utils as metrics_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
 from sky.server.requests import payloads
@@ -496,7 +497,13 @@ def _request_execution_wrapper(request_id: str,
             # captured in the log file.
             _redirect_output(f)
 
-            with sky_logging.add_debug_log_handler(request_id), \
+            # Skip debug logging for daemon requests since the daemon
+            # requests has its own log level config and we don't want to
+            # duplicate the daemon logs.
+            debug_log_ctx = (contextlib.nullcontext()
+                             if daemons.is_daemon_request_id(request_id) else
+                             sky_logging.add_debug_log_handler(request_id))
+            with debug_log_ctx, \
                 override_request_env_and_config(
                     request_body, request_id, request_name), \
                 tempstore.tempdir():

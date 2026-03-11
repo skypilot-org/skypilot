@@ -871,7 +871,7 @@ class Task:
                 elif 'name' in vol:
                     # External volume with 'name' field
                     volume_mount = volume_lib.VolumeMount.resolve(
-                        dst_path, vol['name'])
+                        dst_path, vol['name'], sub_path=vol.get('sub_path'))
                 else:
                     raise ValueError(
                         f'Invalid volume config: {dst_path}: {vol}. '

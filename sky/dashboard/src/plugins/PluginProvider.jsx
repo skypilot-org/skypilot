@@ -25,6 +25,37 @@ const PluginContext = createContext({
   dataProviders: {},
 });
 
+const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
+
+function loadCachedNavLinks() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(NAV_LINKS_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        return parsed.map((link) => ({ ...link, _cached: true }));
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveCachedNavLinks(links) {
+  if (typeof window === 'undefined') return;
+  try {
+    // Strip _cached flag before persisting
+    const toCache = links
+      .filter((link) => !link._cached)
+      .map(({ _cached, ...rest }) => rest);
+    localStorage.setItem(NAV_LINKS_CACHE_KEY, JSON.stringify(toCache));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 const initialState = {
   topNavLinks: [],
   routes: [],
@@ -41,6 +72,7 @@ const actions = {
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
+  CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
 };
 
 function pluginReducer(state, action) {
@@ -122,6 +154,11 @@ function pluginReducer(state, action) {
           ...state.dataProviders,
           [action.payload.id]: action.payload,
         },
+      };
+    case actions.CLEAR_CACHED_NAV_LINKS:
+      return {
+        ...state,
+        topNavLinks: state.topNavLinks.filter((link) => !link._cached),
       };
     default:
       return state;
@@ -687,9 +724,13 @@ function createPluginApi(dispatch) {
 }
 
 export function PluginProvider({ children }) {
-  const [state, dispatch] = useReducer(pluginReducer, initialState);
+  const [state, dispatch] = useReducer(pluginReducer, null, () => ({
+    ...initialState,
+    topNavLinks: loadCachedNavLinks(),
+  }));
   const router = useRouter();
   const routerRef = useRef(router);
+  const pluginsLoadedRef = useRef(false);
 
   // Keep router ref up to date
   useEffect(() => {
@@ -720,6 +761,13 @@ export function PluginProvider({ children }) {
     }
   }, [state]);
 
+  // Persist nav links to localStorage after plugins have fully loaded
+  useEffect(() => {
+    if (pluginsLoadedRef.current) {
+      saveCachedNavLinks(state.topNavLinks);
+    }
+  }, [state.topNavLinks]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -740,14 +788,27 @@ export function PluginProvider({ children }) {
       if (cancelled) {
         return;
       }
+      const loadPromises = [];
       manifest.forEach((pluginDescriptor) => {
         const jsPath = extractJsPath(pluginDescriptor);
         if (jsPath && !cancelled) {
           const requiresEarlyInit =
             pluginDescriptor.requires_early_init === true;
-          loadPluginScript(jsPath, requiresEarlyInit);
+          const promise = loadPluginScript(jsPath, requiresEarlyInit);
+          if (promise) {
+            loadPromises.push(promise);
+          }
         }
       });
+      // After all plugin scripts have loaded and registered,
+      // clear stale cached nav links and enable cache persistence
+      if (loadPromises.length > 0) {
+        await Promise.all(loadPromises);
+      }
+      if (!cancelled) {
+        pluginsLoadedRef.current = true;
+        dispatch({ type: actions.CLEAR_CACHED_NAV_LINKS });
+      }
     };
     void bootstrapPlugins();
 

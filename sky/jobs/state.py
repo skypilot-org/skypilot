@@ -1442,6 +1442,25 @@ def get_status_count_with_filters(
     return results
 
 
+def get_status_counts() -> Dict[str, int]:
+    """Get count of tasks grouped by ManagedJobStatus.
+
+    This is used by the Prometheus ManagedJobsCollector.
+    """
+    query = sqlalchemy.select(
+        spot_table.c.status,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).group_by(spot_table.c.status)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    results: Dict[str, int] = {}
+    for status_value, count in rows:
+        results[str(status_value)] = int(count)
+    return results
+
+
 def get_managed_jobs_with_filters(
     fields: Optional[List[str]] = None,
     job_ids: Optional[List[int]] = None,

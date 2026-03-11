@@ -208,6 +208,33 @@ This allows you to:
   $ sky volumes apply volume.yaml
   # SkyPilot finds the existing PVC by its skypilot-name label
 
+Mounting a subdirectory of a volume
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can mount a specific subdirectory of a persistent volume using the ``sub_path`` option. This maps to Kubernetes' `subPath <https://kubernetes.io/docs/concepts/storage/volumes/#using-subpath>`_ field on the volume mount.
+
+When using ``sub_path``, the volume must be specified using the dict form with the ``name`` key:
+
+.. code-block:: yaml
+
+  # task.yaml
+  resources:
+    infra: kubernetes
+
+  volumes:
+    /mnt/models:
+      name: my-volume
+      sub_path: models/v1  # Only mount the models/v1 subdirectory
+
+  run: |
+    ls /mnt/models  # Contents of my-volume/models/v1
+
+This is useful when a single volume contains multiple datasets or projects and you want to mount only a specific subdirectory to the container.
+
+.. note::
+
+  ``sub_path`` is only supported for persistent volumes (not ephemeral volumes).
+
 .. _ephemeral-volumes:
 
 Ephemeral volumes

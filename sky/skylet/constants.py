@@ -500,6 +500,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('gcp', 'placement_policy'),
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
+    ('slurm', 'sbatch_options'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
@@ -658,6 +659,8 @@ MEMORY_SIZE_UNITS = {
     'pb': 2**50,
     'pi': 2**50,
 }
+
+SUB_PATH_PATTERN = '^[a-zA-Z0-9._-][a-zA-Z0-9./_-]*$'
 
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('

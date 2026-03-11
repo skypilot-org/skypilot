@@ -667,7 +667,7 @@ def _dump_request_id_info(
         # Copy request log file
         try:
             log_path = (pathlib.Path(
-                requests_lib.REQUEST_LOG_PATH_PREFIX).expanduser() /
+                server_constants.REQUEST_LOG_PATH_PREFIX).expanduser() /
                         f'{request_id}.log')
             if log_path.exists():
                 shutil.copy2(log_path, os.path.join(request_dir, 'request.log'))
