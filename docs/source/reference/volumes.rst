@@ -250,7 +250,7 @@ Create a PV that maps to your file system. The ``storageClassName`` must match t
 
 **Step 3: Create a SkyPilot volume**
 
-Create a SkyPilot volume with the same ``storage_class_name`` as the PV above. SkyPilot will create a PVC, and the Kubernetes CSI driver will automatically bind it to the matching PV:
+Create a SkyPilot volume. Its ``config.storage_class_name`` and ``config.access_mode`` must match the PV, and its ``size`` must be less than or equal to the PV's capacity. SkyPilot will create a PVC with these specifications, and the Kubernetes CSI driver will automatically bind it to the matching PV:
 
 .. code-block:: yaml
 
