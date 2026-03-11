@@ -33,6 +33,9 @@ VERSION_HEADER = 'X-SkyPilot-Version'
 # Minimum client API version required to launch recipes.
 MIN_RECIPE_LAUNCH_API_VERSION = 33
 
+# Minimum API version that supports upload API v2.
+UPLOAD_API_V2_VERSION = 40
+
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
 # The memory (GB) that SkyPilot tries to not use to prevent OOM.
