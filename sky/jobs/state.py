@@ -1434,61 +1434,21 @@ def get_status_count_with_filters(
 
 
 def get_status_counts() -> Dict[str, int]:
-    """Get count of jobs grouped by ManagedJobStatus.
-
-    Returns the latest task status for each job, grouped by status.
-    The "latest" task follows the same logic as get_latest_task_id_status:
-    the first non-terminal task (by task_id asc), or the last task if all
-    tasks are terminal.
+    """Get count of tasks grouped by ManagedJobStatus.
 
     This is used by the Prometheus ManagedJobsCollector.
     """
-    terminal_values = {s.value for s in ManagedJobStatus.terminal_statuses()}
-
-    # Fetch all (job_id, task_id, status) ordered by task_id asc.
     query = sqlalchemy.select(
-        spot_table.c.spot_job_id,
-        spot_table.c.task_id,
         spot_table.c.status,
-    ).order_by(spot_table.c.spot_job_id, spot_table.c.task_id.asc())
-
-    engine = _db_manager.get_engine()
-    results: Dict[str, int] = {}
-    with orm.Session(engine) as session:
-        rows = session.execute(query).fetchall()
-
-    # Group by job_id and apply get_latest_task_id_status logic:
-    # first non-terminal task, else last task.
-    jobs: Dict[int, List[Tuple[int, str]]] = {}
-    for job_id, task_id, status in rows:
-        jobs.setdefault(job_id, []).append((task_id, str(status)))
-
-    for tasks in jobs.values():
-        # tasks is already sorted by task_id asc
-        latest_status = next(
-            (st for _, st in tasks if st not in terminal_values),
-            tasks[-1][1],
-        )
-        results[latest_status] = results.get(latest_status, 0) + 1
-    return results
-
-
-def get_schedule_state_counts() -> Dict[str, int]:
-    """Get count of jobs grouped by ManagedJobScheduleState.
-
-    This is used by the Prometheus ManagedJobsCollector.
-    """
-    query = sqlalchemy.select(
-        job_info_table.c.schedule_state,
         sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
-    ).group_by(job_info_table.c.schedule_state)
+    ).group_by(spot_table.c.status)
 
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         rows = session.execute(query).fetchall()
     results: Dict[str, int] = {}
-    for state_value, count in rows:
-        results[str(state_value)] = int(count)
+    for status_value, count in rows:
+        results[str(status_value)] = int(count)
     return results
 
 

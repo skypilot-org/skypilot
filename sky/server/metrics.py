@@ -110,15 +110,12 @@ class ManagedJobsCollector:
         self._last_scrape_time = 0.0
         self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
         self._cached_status_counts: dict = {}
-        self._cached_schedule_state_counts: dict = {}
         self._cached_recovery_counts: dict = {}
 
     def _refresh(self):
         # pylint: disable=import-outside-toplevel
         from sky.jobs import state as managed_job_state
         self._cached_status_counts = (managed_job_state.get_status_counts())
-        self._cached_schedule_state_counts = (
-            managed_job_state.get_schedule_state_counts())
         self._cached_recovery_counts = (
             managed_job_state.get_active_job_recovery_counts())
 
@@ -127,10 +124,6 @@ class ManagedJobsCollector:
             'sky_managed_jobs_by_status',
             'Current count of managed jobs by status',
             labels=['status'])
-        yield prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_by_schedule_state',
-            'Current count of managed jobs by schedule state',
-            labels=['schedule_state'])
         yield prom_core.GaugeMetricFamily(
             'sky_managed_jobs_recovery_count',
             'Recovery count per active managed job task',
@@ -146,7 +139,6 @@ class ManagedJobsCollector:
                     logger.exception('Failed to collect managed jobs metrics')
                 self._last_scrape_time = now
             status_counts = self._cached_status_counts
-            schedule_state_counts = self._cached_schedule_state_counts
             recovery_counts = self._cached_recovery_counts
 
         status_metric = prom_core.GaugeMetricFamily(
@@ -156,14 +148,6 @@ class ManagedJobsCollector:
         for status, count in status_counts.items():
             status_metric.add_metric([status], count)
         yield status_metric
-
-        schedule_metric = prom_core.GaugeMetricFamily(
-            'sky_managed_jobs_by_schedule_state',
-            'Current count of managed jobs by schedule state',
-            labels=['schedule_state'])
-        for sstate, count in schedule_state_counts.items():
-            schedule_metric.add_metric([sstate], count)
-        yield schedule_metric
 
         recovery_metric = prom_core.GaugeMetricFamily(
             'sky_managed_jobs_recovery_count',

@@ -11,7 +11,6 @@ class TestManagedJobsCollector:
     def test_collect_returns_all_metric_families(self):
         """Verify collect() yields the expected metric families."""
         mock_status_counts = {'RUNNING': 3, 'PENDING': 2, 'SUCCEEDED': 10}
-        mock_schedule_counts = {'ALIVE': 3, 'DONE': 10, 'WAITING': 1}
         mock_recovery_counts = {(42, 0): 3, (99, 1): 1}
 
         collector = metrics.ManagedJobsCollector()
@@ -19,14 +18,13 @@ class TestManagedJobsCollector:
 
             def side_effect():
                 collector._cached_status_counts = mock_status_counts
-                collector._cached_schedule_state_counts = (mock_schedule_counts)
                 collector._cached_recovery_counts = mock_recovery_counts
 
             mock_refresh.side_effect = side_effect
 
             families = list(collector.collect())
 
-        assert len(families) == 3
+        assert len(families) == 2
 
         # Check status metric
         status_family = families[0]
@@ -36,16 +34,8 @@ class TestManagedJobsCollector:
         }
         assert status_samples == {'RUNNING': 3, 'PENDING': 2, 'SUCCEEDED': 10}
 
-        # Check schedule state metric
-        schedule_family = families[1]
-        assert schedule_family.name == 'sky_managed_jobs_by_schedule_state'
-        schedule_samples = {
-            s.labels['schedule_state']: s.value for s in schedule_family.samples
-        }
-        assert schedule_samples == {'ALIVE': 3, 'DONE': 10, 'WAITING': 1}
-
         # Check recovery count metric
-        recovery_family = families[2]
+        recovery_family = families[1]
         assert recovery_family.name == 'sky_managed_jobs_recovery_count'
         recovery_samples = {(s.labels['job_id'], s.labels['task_id']): s.value
                             for s in recovery_family.samples}
@@ -60,7 +50,6 @@ class TestManagedJobsCollector:
 
             def side_effect():
                 collector._cached_status_counts = {'RUNNING': 1}
-                collector._cached_schedule_state_counts = {'ALIVE': 1}
                 collector._cached_recovery_counts = {}
 
             mock_refresh.side_effect = side_effect
@@ -82,7 +71,7 @@ class TestManagedJobsCollector:
                           side_effect=RuntimeError('DB error')):
             # Should not raise, should yield empty metrics
             families = list(collector.collect())
-            assert len(families) == 3
+            assert len(families) == 2
 
     def test_describe_yields_expected_families(self):
         """Verify describe() yields the expected metric family names."""
@@ -90,5 +79,16 @@ class TestManagedJobsCollector:
         families = list(collector.describe())
         names = [f.name for f in families]
         assert 'sky_managed_jobs_by_status' in names
-        assert 'sky_managed_jobs_by_schedule_state' in names
         assert 'sky_managed_jobs_recovery_count' in names
+
+
+class TestManagedJobsLimitMetrics:
+    """Tests for managed jobs limit gauge."""
+
+    def test_launches_per_worker_gauge(self):
+        """Verify the LAUNCHES_PER_WORKER gauge can be set and read."""
+        gauge = metrics_utils.SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER
+        gauge.labels(pid='12345').set(8)
+        # In non-multiprocess mode we can read the labeled child directly.
+        val = gauge.labels(pid='12345')._value.get()
+        assert val == 8.0
