@@ -22,7 +22,7 @@ NAME = 'VastData'
 DEFAULT_REGION = 'auto'
 _INDENT_PREFIX = '    '
 
-_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for VastData.'
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for VastData. '
                          'Try pip install "skypilot[aws]"')
 
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
@@ -235,6 +235,8 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
                       f'{VASTDATA_CONFIG_PATH} aws configure set endpoint_url'
                       f' <ENDPOINT_URL> --profile '
                       f'{VASTDATA_PROFILE_NAME}')
+            hints += f'\n{_INDENT_PREFIX} For more information, see: '
+            hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#vastdata'
 
     return (False, hints) if hints else (True, hints)
 

@@ -26,6 +26,7 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+STORAGE_ONLY_CLOUDS = ('Cloudflare', 'CoreWeave', 'VastData')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -284,20 +285,20 @@ def check_capabilities(
             # registry.CLOUD_REGISTRY, and should not be inserted into the DB
             # (otherwise `sky launch` and other code would error out when it's
             # trying to look it up in the registry).
-            storage_only = ('Cloudflare', 'CoreWeave', 'VastData')
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
                 if capability in capabilities and not any(
-                    cloud.startswith(s) for s in storage_only)
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
                 if capability in capabilities and not any(
-                    cloud.startswith(s) for s in storage_only)
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not any(cloud.startswith(s) for s in storage_only)
+                if not any(
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             previously_enabled_clouds_set = {
                 repr(cloud)
