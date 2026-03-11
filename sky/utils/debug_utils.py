@@ -7,6 +7,7 @@ import pathlib
 import platform
 import shutil
 import time
+import traceback
 from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 import zipfile
 
@@ -169,7 +170,8 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
             debug_dump_context['errors'].append({
                 'component': 'cross_link',
                 'resource': f'requests_from_cluster/{cluster_name}',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
 
 
@@ -202,7 +204,8 @@ def _get_requests_from_managed_jobs(
         debug_dump_context['errors'].append({
             'component': 'cross_link',
             'resource': 'managed_job_details',
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         })
 
     # Request names related to managed jobs (excludes read-only queue).
@@ -274,7 +277,8 @@ def _get_requests_from_managed_jobs(
         debug_dump_context['errors'].append({
             'component': 'cross_link',
             'resource': 'requests_from_managed_jobs',
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         })
 
 
@@ -299,7 +303,8 @@ def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
             debug_dump_context['errors'].append({
                 'component': 'cross_link',
                 'resource': f'clusters_from_request/{request_id}',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
 
 
@@ -365,7 +370,8 @@ def _get_managed_jobs_from_requests(
             debug_dump_context['errors'].append({
                 'component': 'cross_link',
                 'resource': f'managed_jobs_from_request/{request_id}',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
 
 
@@ -408,7 +414,8 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
         debug_dump_context['errors'].append({
             'component': 'recent_context',
             'resource': 'requests',
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         })
 
     # Get recent clusters
@@ -435,7 +442,8 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
         debug_dump_context['errors'].append({
             'component': 'recent_context',
             'resource': 'clusters',
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         })
 
     # Get recent managed jobs via queue_v2 (handles remote controllers
@@ -464,7 +472,8 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
         debug_dump_context['errors'].append({
             'component': 'recent_context',
             'resource': 'managed_jobs',
-            'error': str(e)
+            'error': str(e),
+            'traceback': traceback.format_exc()
         })
 
     logger.debug(f'Found {len(debug_dump_context["request_ids"])} requests, '
@@ -519,7 +528,8 @@ def _dump_server_info(dump_dir: str,
             errors.append({
                 'component': 'server_info',
                 'resource': 'config',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
 
     # Add all SKYPILOT_*/SKY_* environment variables, redacting sensitive ones
@@ -539,7 +549,8 @@ def _dump_server_info(dump_dir: str,
             errors.append({
                 'component': 'server_info',
                 'resource': 'cloud_status',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
 
     server_info_path = os.path.join(dump_dir, 'server_info.json')
@@ -650,7 +661,8 @@ def _dump_request_id_info(
                 errors.append({
                     'component': 'requests',
                     'resource': request_id,
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
         # Copy request log file
@@ -670,7 +682,8 @@ def _dump_request_id_info(
                 errors.append({
                     'component': 'requests',
                     'resource': f'{request_id}/log',
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
         # Copy debug log file (only exists when
@@ -689,7 +702,8 @@ def _dump_request_id_info(
                 errors.append({
                     'component': 'requests',
                     'resource': f'{request_id}/request_debug.log',
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
     logger.debug('Exiting _dump_request_id_info')
@@ -735,7 +749,8 @@ def _dump_cluster_info(cluster_names: Set[str],
                 errors.append({
                     'component': 'clusters',
                     'resource': cluster_name,
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
         # Get cluster events
@@ -759,7 +774,8 @@ def _dump_cluster_info(cluster_names: Set[str],
                 errors.append({
                     'component': 'clusters',
                     'resource': f'{cluster_name}/events',
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
         # Get associated requests
@@ -787,7 +803,8 @@ def _dump_cluster_info(cluster_names: Set[str],
                 errors.append({
                     'component': 'clusters',
                     'resource': f'{cluster_name}/associated_requests',
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
     logger.debug('Exiting _dump_cluster_info')
@@ -858,7 +875,8 @@ def _dump_managed_job_queue_info(
                 errors.append({
                     'component': 'managed_jobs',
                     'resource': str(job_id),
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
 
@@ -890,7 +908,8 @@ def _collect_controller_debug_data(
             errors.append({
                 'component': 'managed_jobs',
                 'resource': 'controller_access',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
         return
 
@@ -916,7 +935,8 @@ def _collect_controller_debug_data(
             errors.append({
                 'component': 'managed_jobs',
                 'resource': 'controller_manifest',
-                'error': str(e)
+                'error': str(e),
+                'traceback': traceback.format_exc()
             })
         return
 
@@ -988,7 +1008,8 @@ def _collect_controller_debug_data(
                             errors.append({
                                 'component': 'managed_jobs',
                                 'resource': f'rsync/{relative_path}',
-                                'error': str(e)
+                                'error': str(e),
+                                'traceback': traceback.format_exc()
                             })
 
             subprocess_utils.run_in_parallel(_rsync_file, file_path_entries)
@@ -998,7 +1019,8 @@ def _collect_controller_debug_data(
                 errors.append({
                     'component': 'managed_jobs',
                     'resource': 'controller_rsync',
-                    'error': str(e)
+                    'error': str(e),
+                    'traceback': traceback.format_exc()
                 })
 
     # Propagate controller-side errors
