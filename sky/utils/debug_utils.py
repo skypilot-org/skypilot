@@ -7,7 +7,7 @@ import pathlib
 import platform
 import shutil
 import time
-from typing import Any, Dict, List, Optional, Set, TypedDict
+from typing import Any, Dict, List, Optional, Set, Tuple, TypedDict
 import zipfile
 
 import sky
@@ -16,6 +16,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.jobs import utils as managed_job_utils
@@ -31,18 +32,105 @@ from sky.utils import debug_dump_helpers
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
+from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
 
-# Env var names whose values should be redacted (show bool presence only)
+# Env var names whose values should be redacted (show bool presence only).
+# Used for both server_info environment and request body sanitization.
 _SENSITIVE_ENV_VARS = {
     'SKYPILOT_DB_CONNECTION_URI',
     'SKYPILOT_INITIAL_BASIC_AUTH',
     'SKYPILOT_SERVICE_ACCOUNT_TOKEN',
     'SKYPILOT_DOCKER_PASSWORD',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'AWS_ACCESS_KEY_ID',
+    'AZURE_CLIENT_SECRET',
+}
+
+# Maps request name → field names containing task/dag YAML to redact.
+# Empty tuple means include body verbatim (no YAML fields).
+# Requests not in this dict have their body excluded entirely.
+_REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
+    # Category 1: verbatim (metadata only — cluster names, job IDs, flags, etc.)
+    'sky.check': (),
+    'sky.enabled_clouds': (),
+    'sky.enabled_clouds_batch': (),
+    'sky.stop': (),
+    'sky.down': (),
+    'sky.start': (),
+    'sky.autostop': (),
+    'sky.status': (),
+    'sky.endpoints': (),
+    'sky.cost_report': (),
+    'sky.cluster_events': (),
+    'sky.queue': (),
+    'sky.job_status': (),
+    'sky.cancel': (),
+    'sky.logs': (),
+    'sky.download_logs': (),
+    'sky.autostop_logs': (),
+    'sky.jobs.queue': (),
+    'sky.jobs.queue_v2': (),
+    'sky.jobs.cancel': (),
+    'sky.jobs.logs': (),
+    'sky.jobs.download_logs': (),
+    'sky.jobs.pool_down': (),
+    'sky.jobs.pool_status': (),
+    'sky.jobs.pool_logs': (),
+    'sky.jobs.pool_sync_down_logs': (),
+    'sky.jobs.events': (),
+    'sky.serve.down': (),
+    'sky.serve.logs': (),
+    'sky.serve.sync_down_logs': (),
+    'sky.serve.status': (),
+    'sky.serve.terminate_replica': (),
+    'sky.storage_ls': (),
+    'sky.storage_delete': (),
+    'sky.volume_list': (),
+    'sky.volume_delete': (),
+    'sky.volume_apply': (),
+    'sky.local_up': (),
+    'sky.local_down': (),
+    'sky.ssh_node_pools.up': (),
+    'sky.ssh_node_pools.down': (),
+    'sky.api_cancel': (),
+    'sky.all_contexts': (),
+    'sky.create_debug_dump': (),
+    'sky.kubernetes_label_gpus': (),
+    'sky.realtime_kubernetes_gpu_availability': (),
+    'sky.kubernetes_node_info': (),
+    'sky.status_kubernetes': (),
+    'sky.realtime_slurm_gpu_availability': (),
+    'sky.slurm_node_info': (),
+    'sky.list_accelerators': (),
+    'sky.list_accelerator_counts': (),
+    'sky.workspaces.delete': (),
+    'sky.workspaces.get': (),
+    'sky.workspaces.get_config': (),
+    'sky.recipes.list': (),
+    'sky.recipes.get': (),
+    'sky.recipes.delete': (),
+    'sky.recipes.pin': (),
+    # Internal daemons
+    'sky.status-refresh': (),
+    'sky.volume-refresh': (),
+    'sky.managed-job-status-refresh': (),
+    'sky.sky-serve-status-refresh': (),
+    'sky.pool-status-refresh': (),
+    'sky.server-heartbeat': (),
+    # Category 2: redact task/dag YAML fields before including
+    'sky.launch': ('task',),
+    'sky.exec': ('task',),
+    'sky.optimize': ('dag',),
+    'sky.jobs.launch': ('task',),
+    'sky.jobs.pool_apply': ('task',),
+    'sky.serve.up': ('task',),
+    'sky.serve.update': ('task',),
 }
 
 # System daemon request IDs to always include in debug dumps.
@@ -429,6 +517,47 @@ def _dump_server_info(dump_dir: str,
     logger.debug('Exiting _dump_server_info')
 
 
+def _redact_task_yaml(yaml_str: str) -> str:
+    """Parse a task/dag YAML string and redact secrets and credentials."""
+    try:
+        docs = list(yaml_utils.safe_load_all(yaml_str))
+    except Exception:  # pylint: disable=broad-except
+        return '<parse error, redacted>'
+    for doc in docs:
+        if isinstance(doc, dict):
+            task_lib.redact_yaml_config(doc)
+    return yaml_utils.dump_yaml_str(docs)
+
+
+def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
+    """Sanitize a request body for inclusion in a debug dump.
+
+    Returns None if the request type is not in the allowlist or has no body.
+    For allowed requests, redacts sensitive env vars and task/dag YAML fields.
+    """
+    task_fields = _REQUEST_BODY_ALLOWLIST.get(request.name)
+    if task_fields is None:
+        return None
+    body = request.request_body
+    if body is None:
+        return None
+    try:
+        data = body.model_dump()
+    except Exception:  # pylint: disable=broad-except
+        return None
+    # Redact sensitive env var values
+    env_vars = data.get('env_vars')
+    if isinstance(env_vars, dict):
+        for k in env_vars:
+            if k in _SENSITIVE_ENV_VARS:
+                env_vars[k] = '<redacted>'
+    # Redact task/dag YAML fields
+    for field in task_fields:
+        if field in data and isinstance(data[field], str):
+            data[field] = _redact_task_yaml(data[field])
+    return data
+
+
 def _dump_request_id_info(
         request_ids: Set[str],
         dump_dir: str,
@@ -466,7 +595,7 @@ def _dump_request_id_info(
                     'status_msg': request.status_msg,
                     'schedule_type': (request.schedule_type.value
                                       if request.schedule_type else None),
-                    'request_body': str(request.request_body),
+                    'request_body': _sanitize_request_body(request),
                 }
 
                 # Include error info if present

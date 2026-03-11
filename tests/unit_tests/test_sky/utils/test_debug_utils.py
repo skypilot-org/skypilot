@@ -10,6 +10,8 @@ import zipfile
 
 import pytest
 
+from sky.server import constants as server_constants
+from sky.server.requests import request_names
 from sky.utils import debug_dump_helpers
 from sky.utils import debug_utils
 
@@ -1645,3 +1647,191 @@ class TestRedactConfig:
         }
         debug_dump_helpers.redact_config(config)
         assert config['api_server']['service_account_token'] == 'sky_secret'
+
+
+# ---------------------------------------------------------------------------
+# Tests for _REQUEST_BODY_ALLOWLIST coverage
+# ---------------------------------------------------------------------------
+class TestRequestBodyAllowlistCoverage:
+    """Every RequestName must be in the allowlist or the test denylist."""
+
+    # Request names intentionally excluded from the allowlist because they
+    # contain sensitive non-task data (passwords, config dicts, recipe YAML).
+    # Update this set when adding new request names that should be excluded.
+    _EXCLUDED_REQUEST_NAMES = {
+        # Workspace config: config dict may contain credentials
+        'sky.workspaces.update',
+        'sky.workspaces.create',
+        'sky.workspaces.update_config',
+        # Recipe content: YAML content similar to tasks
+        'sky.recipes.create',
+        'sky.recipes.update',
+    }
+
+    def test_all_request_names_covered(self):
+        """Every RequestName must be in the allowlist or the test denylist."""
+        all_request_names = {
+            server_constants.REQUEST_NAME_PREFIX + r.value
+            for r in request_names.RequestName
+        }
+        covered = (set(debug_utils._REQUEST_BODY_ALLOWLIST.keys()) |
+                   self._EXCLUDED_REQUEST_NAMES)
+        uncovered = all_request_names - covered
+        assert not uncovered, (
+            f'Request names not in allowlist or denylist: {uncovered}. '
+            'Add to _REQUEST_BODY_ALLOWLIST in debug_utils.py or '
+            '_EXCLUDED_REQUEST_NAMES in this test.')
+
+    def test_no_stale_allowlist_entries(self):
+        """Allowlist should not contain entries not in RequestName enum."""
+        all_request_names = {
+            server_constants.REQUEST_NAME_PREFIX + r.value
+            for r in request_names.RequestName
+        }
+        for name in debug_utils._REQUEST_BODY_ALLOWLIST:
+            assert name in all_request_names, (
+                f'Stale allowlist entry: {name} is not a valid RequestName')
+
+    def test_no_stale_denylist_entries(self):
+        """Denylist should not contain entries not in RequestName enum."""
+        all_request_names = {
+            server_constants.REQUEST_NAME_PREFIX + r.value
+            for r in request_names.RequestName
+        }
+        for name in self._EXCLUDED_REQUEST_NAMES:
+            assert name in all_request_names, (
+                f'Stale denylist entry: {name} is not a valid RequestName')
+
+
+# ---------------------------------------------------------------------------
+# Tests for _sanitize_request_body
+# ---------------------------------------------------------------------------
+class TestSanitizeRequestBody:
+
+    def test_excluded_request_returns_none(self):
+        """Requests not in allowlist should return None."""
+        request = _make_request(name='sky.workspaces.update')
+        result = debug_utils._sanitize_request_body(request)
+        assert result is None
+
+    def test_allowed_request_with_none_body(self):
+        """Allowed request with None body should return None."""
+        request = _make_request(name='sky.status', request_body=None)
+        result = debug_utils._sanitize_request_body(request)
+        assert result is None
+
+    def test_allowed_verbatim_request(self):
+        """Allowed verbatim request should return model_dump()."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {'cluster_name': 'test', 'refresh': True}
+
+        request = _make_request(name='sky.status', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result == {'cluster_name': 'test', 'refresh': True}
+
+    def test_sensitive_env_vars_redacted(self):
+        """Sensitive env vars in request body should be redacted."""
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {
+                    'cluster_name': 'test',
+                    'env_vars': {
+                        'NORMAL_VAR': 'visible',
+                        'AWS_SECRET_ACCESS_KEY': 'super-secret',
+                        'SKYPILOT_DB_CONNECTION_URI': 'postgres://...',
+                    }
+                }
+
+        request = _make_request(name='sky.stop', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        assert result['env_vars']['NORMAL_VAR'] == 'visible'
+        assert result['env_vars']['AWS_SECRET_ACCESS_KEY'] == '<redacted>'
+        assert result['env_vars']['SKYPILOT_DB_CONNECTION_URI'] == '<redacted>'
+
+    def test_task_yaml_field_redacted(self):
+        """Task YAML fields should have secrets redacted."""
+        task_yaml = ('name: my-task\n'
+                     'secrets:\n'
+                     '  MY_SECRET: secret_value\n'
+                     'resources:\n'
+                     '  cloud: aws\n'
+                     '  _docker_login_config:\n'
+                     '    password: docker_pass\n')
+
+        class FakeBody:
+
+            def model_dump(self):
+                return {'task': task_yaml, 'cluster_name': 'test'}
+
+        request = _make_request(name='sky.launch', request_body=FakeBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is not None
+        # The redacted YAML should not contain the actual secret values
+        assert 'secret_value' not in result['task']
+        assert 'docker_pass' not in result['task']
+        assert '<redacted>' in result['task']
+        # Cluster name should be unchanged
+        assert result['cluster_name'] == 'test'
+
+    def test_model_dump_failure_returns_none(self):
+        """If model_dump() raises, should return None."""
+
+        class BadBody:
+
+            def model_dump(self):
+                raise RuntimeError('oops')
+
+        request = _make_request(name='sky.status', request_body=BadBody())
+        result = debug_utils._sanitize_request_body(request)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for _redact_task_yaml
+# ---------------------------------------------------------------------------
+class TestRedactTaskYaml:
+
+    def test_redacts_secrets(self):
+        """Secrets should be redacted."""
+        yaml_str = ('name: my-task\n'
+                    'secrets:\n'
+                    '  API_KEY: real_api_key\n'
+                    '  TOKEN: real_token\n')
+        result = debug_utils._redact_task_yaml(yaml_str)
+        assert 'real_api_key' not in result
+        assert 'real_token' not in result
+        assert '<redacted>' in result
+
+    def test_redacts_docker_password(self):
+        """Docker login password should be redacted."""
+        yaml_str = ('name: my-task\n'
+                    'resources:\n'
+                    '  _docker_login_config:\n'
+                    '    password: my_docker_pass\n')
+        result = debug_utils._redact_task_yaml(yaml_str)
+        assert 'my_docker_pass' not in result
+        assert '<redacted>' in result
+
+    def test_invalid_yaml_returns_error_string(self):
+        """Invalid YAML should return a redacted error string."""
+        result = debug_utils._redact_task_yaml(': invalid: yaml: {{')
+        assert result == '<parse error, redacted>'
+
+    def test_multi_doc_yaml(self):
+        """Multi-document YAML (dag) should redact each document."""
+        yaml_str = ('name: task1\n'
+                    'secrets:\n'
+                    '  KEY1: val1\n'
+                    '---\n'
+                    'name: task2\n'
+                    'secrets:\n'
+                    '  KEY2: val2\n')
+        result = debug_utils._redact_task_yaml(yaml_str)
+        assert 'val1' not in result
+        assert 'val2' not in result
