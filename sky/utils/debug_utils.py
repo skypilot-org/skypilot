@@ -138,6 +138,18 @@ _REQUEST_BODY_ALLOWLIST: Dict[str, Tuple[str, ...]] = {
 SYSTEM_REQUEST_IDS = [d.id for d in daemons.INTERNAL_REQUEST_DAEMONS
                      ] + [server_constants.ON_BOOT_CHECK_REQUEST_ID]
 
+# Request names for managed job mutations (excludes read-only queue).
+# Used by both _get_requests_from_managed_jobs and
+# _get_managed_jobs_from_requests.
+_MANAGED_JOB_REQUEST_NAMES = frozenset({
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LAUNCH.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_CANCEL.value,
+    server_constants.REQUEST_NAME_PREFIX +
+    request_names.RequestName.JOBS_LOGS.value,
+})
+
 
 class DebugDumpContext(TypedDict):
     """The context for a debug dump."""
@@ -208,20 +220,11 @@ def _get_requests_from_managed_jobs(
             'traceback': traceback.format_exc()
         })
 
-    # Request names related to managed jobs (excludes read-only queue).
-    # DB stores names with 'sky.' prefix (see server_constants).
-    prefix = server_constants.REQUEST_NAME_PREFIX
-    managed_job_request_names = [
-        prefix + request_names.RequestName.JOBS_LAUNCH.value,
-        prefix + request_names.RequestName.JOBS_CANCEL.value,
-        prefix + request_names.RequestName.JOBS_LOGS.value,
-    ]
-
     try:
         # Get all requests with managed job-related names
         requests = requests_lib.get_request_tasks(
             requests_lib.RequestTaskFilter(
-                include_request_names=managed_job_request_names,
+                include_request_names=list(_MANAGED_JOB_REQUEST_NAMES),
                 fields=['request_id', 'name', 'request_body', 'return_value']))
 
         for request in requests:
@@ -253,8 +256,9 @@ def _get_requests_from_managed_jobs(
                     if cancel_user and cancel_user in job_user_hashes:
                         match_reason = (f'body.all=True (user={cancel_user})')
             # For jobs.launch, also match by return_value job_id
-            if (not match_reason and request.name
-                    == prefix + request_names.RequestName.JOBS_LAUNCH.value):
+            jobs_launch_name = (server_constants.REQUEST_NAME_PREFIX +
+                                request_names.RequestName.JOBS_LAUNCH.value)
+            if (not match_reason and request.name == jobs_launch_name):
                 rv = request.return_value
                 if isinstance(rv, dict):
                     resp_job_id = rv.get('job_id')
@@ -320,19 +324,12 @@ def _get_managed_jobs_from_requests(
     logger.debug(f'Getting managed jobs for '
                  f'{len(debug_dump_context["request_ids"])} requests')
 
-    # DB stores names with 'sky.' prefix (see server_constants).
-    prefix = server_constants.REQUEST_NAME_PREFIX
-    managed_job_request_names = {
-        prefix + request_names.RequestName.JOBS_LAUNCH.value,
-        prefix + request_names.RequestName.JOBS_CANCEL.value,
-        prefix + request_names.RequestName.JOBS_LOGS.value,
-    }
-
     for request_id in debug_dump_context['request_ids']:
         try:
             request = requests_lib.get_request(
                 request_id, fields=['name', 'request_body', 'return_value'])
-            if request is None or request.name not in managed_job_request_names:
+            if (request is None or
+                    request.name not in _MANAGED_JOB_REQUEST_NAMES):
                 continue
             body = request.request_body
             if body is not None:
@@ -348,8 +345,9 @@ def _get_managed_jobs_from_requests(
                     debug_dump_context['managed_job_ids'].update(job_ids)
             # For jobs.launch, the job ID is in the response, not the
             # request body.
-            if (request.name == prefix +
-                    request_names.RequestName.JOBS_LAUNCH.value):
+            jobs_launch_name = (server_constants.REQUEST_NAME_PREFIX +
+                                request_names.RequestName.JOBS_LAUNCH.value)
+            if request.name == jobs_launch_name:
                 rv = request.return_value
                 if isinstance(rv, dict):
                     resp_job_id = rv.get('job_id')
