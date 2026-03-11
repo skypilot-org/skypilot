@@ -224,7 +224,7 @@ def test_debug_dump_recent(generic_cloud: str):
         'debug_dump_recent',
         [
             # Create a debug dump with --recent (no clusters/jobs needed)
-            'sky debug-dump --recent 1 -o /tmp/test_debug_dump_recent.zip',
+            'sky debug-dump --recent 1 --output /tmp/test_debug_dump_recent.zip',
             # Verify the zip file was created and is a valid zip
             'test -f /tmp/test_debug_dump_recent.zip',
             's=$(unzip -l /tmp/test_debug_dump_recent.zip) && echo "$s" && '
@@ -252,6 +252,9 @@ def test_debug_dump_recent(generic_cloud: str):
             'assert \\\"python_version\\\" in d; '
             'assert \\\"os_platform\\\" in d; '
             'assert \\\"dump_timestamp_human\\\" in d; '
+            'assert isinstance(d[\\\"enabled_clouds\\\"], dict), '
+            '\\\"enabled_clouds should be a dict keyed by workspace\\\"; '
+            'assert len(d[\\\"enabled_clouds\\\"]) > 0; '
             '"',
         ],
         teardown='rm -f /tmp/test_debug_dump_recent.zip && '
@@ -273,7 +276,7 @@ def test_debug_dump_cluster(generic_cloud: str):
             f' --infra {generic_cloud} tests/test_yamls/minimal.yaml',
             # Create a debug dump for the cluster
             f'sky debug-dump -c {name}'
-            ' -o /tmp/test_debug_dump_cluster.zip',
+            ' --output /tmp/test_debug_dump_cluster.zip',
             # Verify the cluster directory exists in the dump
             's=$(unzip -l /tmp/test_debug_dump_cluster.zip) && echo "$s" && '
             f'echo "$s" | grep "clusters/{name}/cluster_info.json" && '
@@ -332,7 +335,7 @@ def test_debug_dump_request_id(generic_cloud: str):
             'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
             ' | head -1 | sed "s/.*Request ID: //") && '
             'sky debug-dump -r "$req_id"'
-            ' -o /tmp/test_debug_dump_reqid.zip',
+            ' --output /tmp/test_debug_dump_reqid.zip',
             # Verify the request directory exists in the dump
             'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
             ' | head -1 | sed "s/.*Request ID: //") && '
@@ -382,7 +385,7 @@ def test_debug_dump_job(generic_cloud: str):
             'echo "Job ID: $job_id" && test -n "$job_id" && '
             # Create a debug dump for the managed job
             'sky debug-dump -j "$job_id"'
-            ' -o /tmp/test_debug_dump_job.zip',
+            ' --output /tmp/test_debug_dump_job.zip',
             # Verify the managed_jobs directory exists in the dump
             f'job_id=$(sky jobs queue | grep {name}'
             ' | head -1 | awk \'{print $1}\') && '

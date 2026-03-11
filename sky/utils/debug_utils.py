@@ -375,17 +375,10 @@ def _dump_server_info(dump_dir: str,
             env[k] = bool(v) if k in _SENSITIVE_ENV_VARS else v
     server_info['environment'] = env
 
-    # Add cloud status
+    # Add cloud status (keyed by workspace name, each mapping cloud names
+    # to a list of capability strings — already JSON-serializable).
     try:
-        cloud_status = sky_check.check(quiet=True)
-        # Convert to serializable format
-        enabled_clouds = []
-        for cloud, enabled in cloud_status.items():
-            enabled_clouds.append({
-                'cloud': str(cloud),
-                'enabled': enabled,
-            })
-        server_info['enabled_clouds'] = enabled_clouds
+        server_info['enabled_clouds'] = sky_check.check(quiet=True)
     except Exception as e:  # pylint: disable=broad-except
         server_info['cloud_status_error'] = str(e)
         if errors is not None:
