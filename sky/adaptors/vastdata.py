@@ -226,7 +226,7 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     if hints:
         hints += ' Run the following commands:'
         if not profile_in_cred:
-            hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
+            hints += f'\n{_INDENT_PREFIX}  $ pip install "skypilot[aws]"'
             hints += (f'\n{_INDENT_PREFIX}  $ AWS_SHARED_CREDENTIALS_FILE='
                       f'{VASTDATA_CREDENTIALS_PATH} aws configure --profile '
                       f'{VASTDATA_PROFILE_NAME}')
