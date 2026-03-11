@@ -276,45 +276,50 @@ def _setup_upload_logger(
         handler.close()
 
 
-def _compute_file_mounts_blob_id(zip_file_path: str) -> str:
-    """Compute SHA-256 checksum of a file."""
+def _compute_file_mounts_blob_id(upload_list: list) -> str:
+    """Compute a deterministic content hash of the files to be uploaded.
+
+    Walks the file tree using the same logic as zip_files_and_folders
+    (exclusions, symlink handling, socket skipping) and hashes the sorted
+    (archive_name, per_entry_hash) pairs. Each file is hashed individually
+    in a streaming fashion so that memory usage stays constant regardless
+    of workdir size.
+    """
+    # Collect (archive_name, entry_digest) - only small hashes are kept.
+    entries: list = []
+    for archive_name, file_path, kind in storage_utils.iter_zip_entries(
+            upload_list):
+        if kind == storage_utils.ZipEntryKind.SYMLINK:
+            target = os.readlink(file_path)
+            if os.path.isabs(target):
+                target = os.path.relpath(target, os.path.dirname(file_path))
+            is_dir = os.path.isdir(file_path)
+            name = archive_name + '/' if is_dir else archive_name
+            entry_hash = hashlib.sha256(target.encode('utf-8')).digest()
+            entries.append((name, entry_hash))
+        elif kind == storage_utils.ZipEntryKind.DIR:
+            entries.append((archive_name, hashlib.sha256(b'').digest()))
+        else:
+            eh = hashlib.sha256()
+            with open(file_path, 'rb') as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    eh.update(chunk)
+            entries.append((archive_name, eh.digest()))
+
+    entries.sort(key=lambda e: e[0])
     h = hashlib.sha256()
-    with open(zip_file_path, 'rb') as f:
-        while True:
-            chunk = f.read(65536)
-            if not chunk:
-                break
-            h.update(chunk)
+    for name, digest in entries:
+        h.update(name.encode('utf-8'))
+        h.update(digest)
     return h.hexdigest()
 
 
-def _try_upload_v2(zip_file_path: str, checksum: str,
-                   upload_logger: logging.Logger, log_file: str,
-                   status_updater) -> None:
-    """Upload via /upload_v2 (content-addressed, dedup-aware).
-
-    Checks if the blob already exists on the server; if so, skips upload.
-    Otherwise uploads the zip in chunks.
-    """
-    # Check if blob already exists on server.
-    resp = server_common.make_authenticated_request(
-        'GET',
-        '/upload_v2',
-        params={
-            'user_hash': common_utils.get_user_hash(),
-            'checksum': checksum,
-        })
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f'Failed to check blob existence: {resp.status_code} '
-            f'{resp.content.decode("utf-8")}')
-
-    if resp.json().get('exists'):
-        upload_logger.info('File mounts blob already exists, skipping upload')
-        logger.info('File mounts unchanged, skipping upload')
-        return
-
-    # Blob doesn't exist, upload chunks via /upload_v2.
+def _upload_v2(zip_file_path: str, checksum: str, upload_logger: logging.Logger,
+               log_file: str, status_updater) -> None:
+    """Upload a zip file to /upload_v2 in chunks."""
     zip_file_size = os.path.getsize(zip_file_path)
     total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
     status_updater(
@@ -434,34 +439,59 @@ def upload_mounts_to_api_server(
         upload_id = f'{upload_id}-{uuid.uuid4().hex[:8]}'
         log_file = os.path.join(FILE_UPLOAD_LOGS_DIR, f'{upload_id}.log')
 
+        # Check if the server supports content-addressed uploads.
+        remote_api_version = versions.get_remote_api_version()
+        use_v2 = (remote_api_version is not None and
+                  remote_api_version >= server_constants.UPLOAD_API_V2_VERSION)
+
         logger.info(ux_utils.starting_message('Uploading files to API server'))
         with rich_utils.client_status(
                 ux_utils.spinner_message(
-                    'Uploading files to API server (1/2 - Zipping)',
-                    log_file,
+                    'Uploading files to API server', log_file,
                     is_local=True)) as status, _setup_upload_logger(
                         log_file) as upload_logger:
-            with tempfile.NamedTemporaryFile(suffix='.zip',
-                                             delete=False) as temp_zip_file:
-                upload_logger.info(
-                    f'Zipping files to be uploaded: {upload_list}')
-                storage_utils.zip_files_and_folders(upload_list,
-                                                    temp_zip_file.name)
-                upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
-
-            # Check if the server supports content-addressed uploads.
-            remote_api_version = versions.get_remote_api_version()
-            use_v2 = (
-                remote_api_version is not None and
-                remote_api_version >= server_constants.UPLOAD_API_V2_VERSION)
-
             if use_v2:
-                file_mounts_blob_id = _compute_file_mounts_blob_id(
-                    temp_zip_file.name)
+                # Content-addressed path: hash file tree first, skip
+                # zip+upload when the blob already exists on the server.
+                upload_logger.info(f'Computing content hash: {upload_list}')
+                file_mounts_blob_id = _compute_file_mounts_blob_id(upload_list)
                 upload_logger.info(f'Computed blob ID: {file_mounts_blob_id}')
-                _try_upload_v2(temp_zip_file.name, file_mounts_blob_id,
+
+                # Check existence and upload if needed.
+                resp = server_common.make_authenticated_request(
+                    'GET',
+                    '/upload_v2',
+                    params={
+                        'user_hash': common_utils.get_user_hash(),
+                        'checksum': file_mounts_blob_id,
+                    })
+                if resp.status_code != 200:
+                    raise RuntimeError(f'Failed to check blob existence: '
+                                       f'{resp.status_code} '
+                                       f'{resp.content.decode("utf-8")}')
+
+                if resp.json().get('exists'):
+                    upload_logger.info('Blob already exists, skipping upload')
+                    logger.info('File mounts unchanged, skipping upload')
+                else:
+                    # Blob not on server - zip and upload.
+                    status.update(
+                        ux_utils.spinner_message(
+                            'Uploading files to API server '
+                            '(1/2 - Zipping)',
+                            log_file,
+                            is_local=True))
+                    with tempfile.NamedTemporaryFile(
+                            suffix='.zip', delete=False) as temp_zip_file:
+                        upload_logger.info(f'Zipping files: {upload_list}')
+                        storage_utils.zip_files_and_folders(
+                            upload_list, temp_zip_file.name)
+                        upload_logger.info(
+                            f'Zipped files to: {temp_zip_file.name}')
+                    _upload_v2(temp_zip_file.name, file_mounts_blob_id,
                                upload_logger, log_file, status.update)
-                os.unlink(temp_zip_file.name)
+                    os.unlink(temp_zip_file.name)
+
                 upload_logger.info(f'Uploaded files via v2: {upload_list}')
                 logger.info(
                     ux_utils.finishing_message('Files uploaded',
@@ -470,6 +500,18 @@ def upload_mounts_to_api_server(
                 return dag, file_mounts_blob_id
 
             # Fall back to /upload (old server).
+            status.update(
+                ux_utils.spinner_message(
+                    'Uploading files to API server (1/2 - Zipping)',
+                    log_file,
+                    is_local=True))
+            with tempfile.NamedTemporaryFile(suffix='.zip',
+                                             delete=False) as temp_zip_file:
+                upload_logger.info(
+                    f'Zipping files to be uploaded: {upload_list}')
+                storage_utils.zip_files_and_folders(upload_list,
+                                                    temp_zip_file.name)
+                upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
             zip_file_size = os.path.getsize(temp_zip_file.name)
             total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
             timeout = httpx.Timeout(None, read=180.0)
@@ -502,11 +544,11 @@ def upload_mounts_to_api_server(
                             f'({retry + 1} / {total_retries})')
             if not upload_completed:
                 raise RuntimeError('Failed to upload files to API server.')
-        os.unlink(temp_zip_file.name)
-        upload_logger.info(f'Uploaded files: {upload_list}')
-        logger.info(
-            ux_utils.finishing_message('Files uploaded',
-                                       log_file,
-                                       is_local=True))
+            os.unlink(temp_zip_file.name)
+            upload_logger.info(f'Uploaded files: {upload_list}')
+            logger.info(
+                ux_utils.finishing_message('Files uploaded',
+                                           log_file,
+                                           is_local=True))
 
     return dag, None

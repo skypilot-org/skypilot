@@ -1,11 +1,12 @@
 """Utility functions for the storage module."""
+import enum
 import glob
 import os
 import pathlib
 import shlex
 import stat
 import subprocess
-from typing import List, Optional, Set, TextIO, Union
+from typing import Iterator, List, Optional, Set, TextIO, Tuple, Union
 import warnings
 import zipfile
 
@@ -206,6 +207,74 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
     return excluded_paths
 
 
+class ZipEntryKind(enum.Enum):
+    """Kind of entry yielded by _iter_zip_entries."""
+    FILE = 'file'
+    DIR = 'dir'
+    SYMLINK = 'symlink'
+
+
+def iter_zip_entries(
+    items: List[str],
+    relative_to_items: bool = False,
+) -> Iterator[Tuple[str, str, ZipEntryKind]]:
+    """Iterate over file-tree entries that would be included in a zip.
+
+    Yields (archive_name, file_path, kind) tuples in walk order, applying
+    gitignore/skyignore exclusions and skipping sockets.
+
+    For symlinks, file_path is the symlink path itself (caller reads the
+    target via os.readlink).  For directories, file_path is the dir path.
+    """
+
+    def _get_archive_name(file_path: str, item_path: str) -> str:
+        if relative_to_items:
+            return os.path.relpath(file_path, os.path.dirname(item_path))
+        return file_path
+
+    for item in items:
+        item = os.path.expanduser(item)
+        if not os.path.isfile(item) and not os.path.isdir(item):
+            raise ValueError(f'{item} does not exist.')
+        if os.path.isfile(item):
+            archive_name = _get_archive_name(item, item)
+            yield (archive_name, item, ZipEntryKind.FILE)
+        elif os.path.isdir(item):
+            archive_name = _get_archive_name(item, item)
+            if os.path.islink(item):
+                yield (archive_name, item, ZipEntryKind.SYMLINK)
+            else:
+                yield (archive_name, item, ZipEntryKind.DIR)
+
+            excluded_files = set([
+                os.path.join(item, f.rstrip('/'))
+                for f in get_excluded_files(item)
+            ])
+            for root, dirs, files in os.walk(item, followlinks=False):
+                dirs[:] = [
+                    d for d in dirs
+                    if os.path.join(root, d) not in excluded_files
+                ]
+                for dir_name in dirs:
+                    dir_path = os.path.join(root, dir_name)
+                    archive_name = _get_archive_name(dir_path, item)
+                    if os.path.islink(dir_path):
+                        yield (archive_name, dir_path, ZipEntryKind.SYMLINK)
+                    else:
+                        yield (archive_name, dir_path, ZipEntryKind.DIR)
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if file_path in excluded_files:
+                        continue
+                    archive_name = _get_archive_name(file_path, item)
+                    if os.path.islink(file_path):
+                        yield (archive_name, file_path, ZipEntryKind.SYMLINK)
+                        continue
+                    if stat.S_ISSOCK(os.stat(file_path).st_mode):
+                        continue
+                    yield (archive_name, file_path, ZipEntryKind.FILE)
+
+
 def zip_files_and_folders(items: List[str],
                           output_file: Union[str, pathlib.Path],
                           log_file: Optional[TextIO] = None,
@@ -225,28 +294,14 @@ def zip_files_and_folders(items: List[str],
             the default (6).
     """
 
-    def _get_archive_name(file_path: str, item_path: str) -> str:
-        """Get the archive name for a file based on the relative parameters."""
-        if relative_to_items:
-            # Make paths relative to the item itself
-            return os.path.relpath(file_path, os.path.dirname(item_path))
-        else:
-            # Default: use full path (existing behavior)
-            return file_path
-
-    def _store_symlink(zipf, path: str, archive_name: str, is_dir: bool):
-        # Get the target of the symlink
+    def _store_symlink(zipf: zipfile.ZipFile, path: str, archive_name: str):
         target = os.readlink(path)
-        # Use relative path as absolute path will not be able to resolve on
-        # remote API server.
         if os.path.isabs(target):
             target = os.path.relpath(target, os.path.dirname(path))
-        # Create a ZipInfo instance using the archive name
+        is_dir = os.path.isdir(path)
         zi = zipfile.ZipInfo(archive_name +
                              '/') if is_dir else zipfile.ZipInfo(archive_name)
-        # Set external attributes to mark as symlink
         zi.external_attr = 0xA1ED0000
-        # Write symlink target as content
         zipf.writestr(zi, target)
 
     with warnings.catch_warnings():
@@ -257,70 +312,12 @@ def zip_files_and_folders(items: List[str],
                              'w',
                              compression=compression,
                              compresslevel=compresslevel) as zipf:
-            for item in items:
-                item = os.path.expanduser(item)
-                if not os.path.isfile(item) and not os.path.isdir(item):
-                    raise ValueError(f'{item} does not exist.')
-                if os.path.isfile(item):
-                    # Add the file to the zip archive even if it matches
-                    # patterns in dot ignore files, as it was explicitly
-                    # specified by user.
-                    archive_name = _get_archive_name(item, item)
-                    zipf.write(item, archive_name)
-                elif os.path.isdir(item):
-                    # Include root dir
-                    archive_name = _get_archive_name(item, item)
-                    # If it's a symlink, store it as a symlink
-                    if os.path.islink(item):
-                        _store_symlink(zipf, item, archive_name, is_dir=True)
-                    else:
-                        zipf.write(item, archive_name)
-
-                    # Include dir contents recursively
-                    excluded_files = set([
-                        os.path.join(item, f.rstrip('/'))
-                        for f in get_excluded_files(item)
-                    ])
-                    for root, dirs, files in os.walk(item, followlinks=False):
-                        # Modify dirs in-place to control os.walk()'s traversal
-                        # behavior. This filters out excluded directories BEFORE
-                        # os.walk() visits the files and sub-directories under
-                        # them, preventing traversal into any excluded directory
-                        # and its contents.
-                        # Note: dirs[:] = ... is required for in-place
-                        # modification.
-                        dirs[:] = [
-                            d for d in dirs
-                            if os.path.join(root, d) not in excluded_files
-                        ]
-
-                        # Store directory entries (important for empty
-                        # directories)
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
-                            archive_name = _get_archive_name(dir_path, item)
-                            # If it's a symlink, store it as a symlink
-                            if os.path.islink(dir_path):
-                                _store_symlink(zipf,
-                                               dir_path,
-                                               archive_name,
-                                               is_dir=True)
-                            else:
-                                zipf.write(dir_path, archive_name)
-
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            if file_path in excluded_files:
-                                continue
-                            archive_name = _get_archive_name(file_path, item)
-                            if os.path.islink(file_path):
-                                _store_symlink(zipf,
-                                               file_path,
-                                               archive_name,
-                                               is_dir=False)
-                                continue
-                            if stat.S_ISSOCK(os.stat(file_path).st_mode):
-                                continue
-                            zipf.write(file_path, archive_name)
-                if log_file is not None:
-                    log_file.write(f'Zipped {item}\n')
+            for archive_name, file_path, kind in iter_zip_entries(
+                    items, relative_to_items):
+                if kind == ZipEntryKind.SYMLINK:
+                    _store_symlink(zipf, file_path, archive_name)
+                else:
+                    zipf.write(file_path, archive_name)
+    if log_file is not None:
+        for item in items:
+            log_file.write(f'Zipped {item}\n')
