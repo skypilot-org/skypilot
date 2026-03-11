@@ -7544,8 +7544,9 @@ def api_logout():
 def api_info(output_format: str):
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
-    click.echo(f'SkyPilot client version: {sky.__version__}, '
-               f'commit: {sky.__commit__}')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.echo(f'SkyPilot client version: {sky.__version__}, '
+                   f'commit: {sky.__commit__}')
     try:
         api_server_info = sdk.api_info()
     except requests_lib.exceptions.RequestException:
