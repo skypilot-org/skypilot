@@ -744,3 +744,18 @@ Set up a cluster using SSH targets from a file. If not specified,     ~/.sky/ssh
 - `--infra` — Name of the cluster to set up in ~/.sky/ssh_node_pools.yaml. If not specified, all clusters in the file will be set up.
 - `--async` — Run the command asynchronously.
 - `--file`, `-f` — The file containing the SSH targets.
+
+## Other Commands
+
+### `sky debug-dump`
+
+Create a debug dump for troubleshooting.
+
+**Options:**
+
+- `--request-ids`, `-r` — Request IDs to include in the dump.
+- `--cluster-names`, `-c` — Cluster names to include in the dump.
+- `--job-ids`, `-j` — Managed job IDs to include in the dump.
+- `--recent` — Include resources active within the last N hours.
+- `--output` — Output path for the dump file.
+- `--async` — Run the command asynchronously.

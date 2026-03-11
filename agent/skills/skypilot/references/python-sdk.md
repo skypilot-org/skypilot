@@ -1215,6 +1215,43 @@ Gets the workspaces.
 
 ## Other Functions
 
+### `sky.create_debug_dump`
+
+```python
+sky.create_debug_dump(request_ids: Optional[List[str]] = None, cluster_names: Optional[List[str]] = None, managed_job_ids: Optional[List[int]] = None, recent_hours: Optional[float] = None) -> server_common.RequestId[str]
+```
+
+Create a debug dump for troubleshooting.
+
+**Args:**
+    request_ids: List of request IDs to include in the dump.
+    cluster_names: List of cluster names to include in the dump.
+    managed_job_ids: List of managed job IDs to include in the dump.
+    recent_hours: If specified, include all resources active within
+        this many hours.
+
+**Returns:**
+    The request ID of the debug dump creation request.
+
+**Request Returns:**
+    Path to the created zip file on the server.
+
+### `sky.download_debug_dump`
+
+```python
+sky.download_debug_dump(dump_filename: str, local_path: Optional[str] = None) -> str
+```
+
+Download a debug dump from the server.
+
+**Args:**
+    dump_filename: The filename of the dump to download.
+    local_path: Local path to save the dump. If None, saves to
+        current directory with the original filename.
+
+**Returns:**
+    Path to the downloaded file.
+
 ### `sky.kubernetes_label_gpus`
 
 ```python
