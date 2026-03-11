@@ -344,7 +344,8 @@ class DockerInitializer:
                 # docker config (/root/.docker/config.json), since docker
                 # commands run with sudo. See #8906.
                 self._run('sudo gcloud auth configure-docker '
-                          f'{docker_login_config.server} --quiet || true')
+                          f'{shlex.quote(docker_login_config.server)} '
+                          '--quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
