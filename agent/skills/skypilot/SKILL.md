@@ -231,6 +231,10 @@ resources:
 # Launch and run a task
 sky launch -c mycluster task.yaml
 
+# Launch with autostop at launch time (preferred: saves cost, no follow-up command needed)
+sky launch -c mycluster task.yaml -i 30        # stop after 30 min idle
+sky launch -c mycluster task.yaml -i 30 --down # tear down after 30 min idle
+
 # Override or pass environment variables via CLI
 sky launch -c mycluster task.yaml --env MODEL_NAME=llama3 --env BATCH_SIZE=64
 
@@ -240,11 +244,9 @@ sky exec mycluster another_task.yaml
 # Run an inline command
 sky exec mycluster -- python train.py --epochs 10
 
-# Set autostop (stop after 30 min idle, preserving disk)
-sky autostop mycluster -i 30
-
-# Set autodown (tear down after 30 min idle)
-sky autostop mycluster -i 30 --down
+# Set autostop after launch (use if you forgot to set -i at launch time)
+sky autostop mycluster -i 30        # stop after 30 min idle, preserving disk (can restart with sky start)
+sky autostop mycluster -i 30 --down # tear down after 30 min idle (disk is deleted, cannot restart)
 
 # Stop to save costs, restart later
 sky stop mycluster
