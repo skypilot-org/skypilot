@@ -317,9 +317,17 @@ def _compute_file_mounts_blob_id(upload_list: list) -> str:
     return h.hexdigest()
 
 
-def _upload_v2(zip_file_path: str, blob_id: str, upload_logger: logging.Logger,
-               log_file: str, status_updater) -> None:
-    """Upload a zip file to /upload_v2 in chunks."""
+def _chunked_upload(zip_file_path: str,
+                    upload_id: str,
+                    upload_logger: logging.Logger,
+                    log_file: str,
+                    status_updater,
+                    endpoint: str = '/upload',
+                    id_param_name: str = 'upload_id') -> None:
+    """Upload a zip file to the API server in chunks.
+
+    Shared by both the legacy ``/upload`` and ``/upload_v2`` paths.
+    """
     zip_file_size = os.path.getsize(zip_file_path)
     total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
     status_updater(
@@ -334,14 +342,14 @@ def _upload_v2(zip_file_path: str, blob_id: str, upload_logger: logging.Logger,
         for retry in range(total_retries):
             chunk_params = [
                 UploadChunkParams(client,
-                                  blob_id,
+                                  upload_id,
                                   chunk_index,
                                   total_chunks,
                                   zip_file_path,
                                   upload_logger,
                                   log_file,
-                                  endpoint='/upload_v2',
-                                  id_param_name='blob_id')
+                                  endpoint=endpoint,
+                                  id_param_name=id_param_name)
                 for chunk_index in range(total_chunks)
             ]
             statuses = subprocess_utils.run_in_parallel(
@@ -488,8 +496,13 @@ def upload_mounts_to_api_server(
                             upload_list, temp_zip_file.name)
                         upload_logger.info(
                             f'Zipped files to: {temp_zip_file.name}')
-                    _upload_v2(temp_zip_file.name, file_mounts_blob_id,
-                               upload_logger, log_file, status.update)
+                    _chunked_upload(temp_zip_file.name,
+                                    file_mounts_blob_id,
+                                    upload_logger,
+                                    log_file,
+                                    status.update,
+                                    endpoint='/upload_v2',
+                                    id_param_name='blob_id')
                     os.unlink(temp_zip_file.name)
 
                 upload_logger.info(f'Uploaded files via v2: {upload_list}')
@@ -512,38 +525,8 @@ def upload_mounts_to_api_server(
                 storage_utils.zip_files_and_folders(upload_list,
                                                     temp_zip_file.name)
                 upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
-            zip_file_size = os.path.getsize(temp_zip_file.name)
-            total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
-            timeout = httpx.Timeout(None, read=180.0)
-            status.update(
-                ux_utils.spinner_message(
-                    'Uploading files to API server (2/2 - Uploading)',
-                    log_file,
-                    is_local=True))
-
-            upload_completed = False
-            with httpx.Client(timeout=timeout) as client:
-                total_retries = 3
-                for retry in range(total_retries):
-                    chunk_params = [
-                        UploadChunkParams(client, upload_id, chunk_index,
-                                          total_chunks, temp_zip_file.name,
-                                          upload_logger, log_file)
-                        for chunk_index in range(total_chunks)
-                    ]
-                    statuses = subprocess_utils.run_in_parallel(
-                        _upload_chunk_with_retry, chunk_params)
-                    if any(status == api_responses.UploadStatus.COMPLETED.value
-                           for status in statuses):
-                        upload_completed = True
-                        break
-                    else:
-                        upload_logger.info(
-                            f'No chunk upload returned completed status. '
-                            'Retrying entire upload... '
-                            f'({retry + 1} / {total_retries})')
-            if not upload_completed:
-                raise RuntimeError('Failed to upload files to API server.')
+            _chunked_upload(temp_zip_file.name, upload_id, upload_logger,
+                            log_file, status.update)
             os.unlink(temp_zip_file.name)
             upload_logger.info(f'Uploaded files: {upload_list}')
             logger.info(

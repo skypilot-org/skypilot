@@ -26,7 +26,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple, Type)
+                    Set, Tuple, Type, Union)
 import uuid
 import zipfile
 
@@ -1298,6 +1298,78 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
+async def _receive_and_assemble_chunks(
+    request: fastapi.Request,
+    staging_dir: pathlib.Path,
+    chunk_index: int,
+    total_chunks: int,
+) -> Union[pathlib.Path, payloads.UploadZipFileResponse]:
+    """Receive a single chunk and, once all chunks arrive, assemble them.
+
+    Shared by ``/upload`` and ``/upload_v2``.
+
+    Returns:
+        The path to the assembled zip when all chunks have been received, or
+        an ``UploadZipFileResponse(UPLOADING)`` when chunks are still missing.
+    """
+    # Fail fast if body was already buffered.
+    # pylint: disable=protected-access
+    if hasattr(request, '_body'):
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail='Upload request body should not be received before streaming'
+        )
+
+    await anyio.Path(staging_dir).mkdir(parents=True, exist_ok=True)
+
+    if total_chunks == 1:
+        chunk_path = staging_dir / 'assembled.zip'
+    else:
+        chunk_path = staging_dir / f'part{chunk_index}.incomplete'
+
+    try:
+        async with aiofiles.open(chunk_path, 'wb') as f:
+            async for chunk in request.stream():
+                await f.write(chunk)
+    except starlette.requests.ClientDisconnect as e:
+        chunk_path.unlink(missing_ok=True)
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='Client disconnected, please try again.') from e
+    except Exception as e:
+        logger.error(f'Error uploading chunk: {chunk_path}')
+        chunk_path.unlink(missing_ok=True)
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=('Error uploading chunk: '
+                    f'{common_utils.format_exception(e)}'))
+
+    if total_chunks > 1:
+        chunk_path.rename(chunk_path.with_suffix(''))
+        missing_chunks: Set[str] = (
+            set(f'part{i}' for i in range(total_chunks)) -
+            set(p.name for p in staging_dir.glob('part*')))
+        if missing_chunks:
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.UPLOADING.value,
+                missing_chunks=missing_chunks)
+        # All chunks received – assemble them.
+        assembled_path = staging_dir / 'assembled.zip'
+        async with aiofiles.open(assembled_path, 'wb') as assembled:
+            for idx in range(total_chunks):
+                async with aiofiles.open(staging_dir / f'part{idx}',
+                                         'rb') as cf:
+                    while True:
+                        # Use 64KB buffer to avoid memory overflow, same size
+                        # as shutil.copyfileobj.
+                        data = await cf.read(64 * 1024)
+                        if not data:
+                            break
+                        await assembled.write(data)
+
+    return staging_dir / 'assembled.zip'
+
+
 @app.post('/upload')
 async def upload_zip_file(request: fastapi.Request, user_hash: str,
                           upload_id: str, chunk_index: int,
@@ -1318,15 +1390,6 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
     """
-    # Field _body would be set if the request body has been received, fail fast
-    # to surface potential memory issues, i.e. catch the issue in our smoke
-    # test.
-    # pylint: disable=protected-access
-    if hasattr(request, '_body'):
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail='Upload request body should not be received before streaming'
-        )
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
@@ -1360,59 +1423,15 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
 
-    if total_chunks == 1:
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
-    else:
-        chunk_dir = client_file_mounts_dir / upload_id
-        await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
-        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
+    staging_dir = client_file_mounts_dir / upload_id
+    result = await _receive_and_assemble_chunks(request, staging_dir,
+                                                chunk_index, total_chunks)
+    if isinstance(result, payloads.UploadZipFileResponse):
+        return result
 
-    try:
-        async with aiofiles.open(zip_file_path, 'wb') as f:
-            async for chunk in request.stream():
-                await f.write(chunk)
-    except starlette.requests.ClientDisconnect as e:
-        # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail='Client disconnected, please try again.') from e
-    except Exception as e:
-        logger.error(f'Error uploading zip file: {zip_file_path}')
-        # Client disconnected, remove the zip file.
-        zip_file_path.unlink(missing_ok=True)
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail=('Error uploading zip file: '
-                    f'{common_utils.format_exception(e)}'))
-
-    def get_missing_chunks(total_chunks: int) -> Set[str]:
-        return set(f'part{i}' for i in range(total_chunks)) - set(
-            p.name for p in chunk_dir.glob('part*'))
-
-    if total_chunks > 1:
-        zip_file_path.rename(zip_file_path.with_suffix(''))
-        missing_chunks = get_missing_chunks(total_chunks)
-        if missing_chunks:
-            return payloads.UploadZipFileResponse(
-                status=responses.UploadStatus.UPLOADING.value,
-                missing_chunks=missing_chunks)
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
-        async with aiofiles.open(zip_file_path, 'wb') as zip_file:
-            for chunk in range(total_chunks):
-                async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
-                    while True:
-                        # Use 64KB buffer to avoid memory overflow, same size as
-                        # shutil.copyfileobj.
-                        data = await f.read(64 * 1024)
-                        if not data:
-                            break
-                        await zip_file.write(data)
-
-    logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
-    if total_chunks > 1:
-        await asyncio.to_thread(shutil.rmtree, chunk_dir)
+    logger.info(f'Uploaded zip file: {result}')
+    await unzip_file(result, client_file_mounts_dir)
+    await asyncio.to_thread(shutil.rmtree, staging_dir, True)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -1455,13 +1474,6 @@ async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
     (blobs/{blob_id}.zip) without extracting it. Extraction happens at
     execution time.
     """
-    # Fail fast if body was already buffered.
-    # pylint: disable=protected-access
-    if hasattr(request, '_body'):
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail='Upload request body should not be received before streaming'
-        )
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid blob_id: {blob_id}')
@@ -1489,59 +1501,17 @@ async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
             status=responses.UploadStatus.COMPLETED.value)
 
     staging_dir = blobs_dir / '.staging' / blob_id
-    await anyio.Path(staging_dir).mkdir(parents=True, exist_ok=True)
-
-    if total_chunks == 1:
-        zip_file_path = staging_dir / 'assembled.zip'
-    else:
-        zip_file_path = staging_dir / f'part{chunk_index}.incomplete'
-
-    try:
-        async with aiofiles.open(zip_file_path, 'wb') as f:
-            async for chunk in request.stream():
-                await f.write(chunk)
-    except starlette.requests.ClientDisconnect as e:
-        zip_file_path.unlink(missing_ok=True)
-        raise fastapi.HTTPException(
-            status_code=400,
-            detail='Client disconnected, please try again.') from e
-    except Exception as e:
-        logger.error(f'Error uploading blob chunk: {zip_file_path}')
-        zip_file_path.unlink(missing_ok=True)
-        raise fastapi.HTTPException(
-            status_code=500,
-            detail=('Error uploading blob chunk: '
-                    f'{common_utils.format_exception(e)}'))
-
-    if total_chunks > 1:
-        # Rename .incomplete to final part name
-        zip_file_path.rename(zip_file_path.with_suffix(''))
-        missing_chunks: Set[str] = (
-            set(f'part{i}' for i in range(total_chunks)) -
-            set(p.name for p in staging_dir.glob('part*')))
-        if missing_chunks:
-            return payloads.UploadZipFileResponse(
-                status=responses.UploadStatus.UPLOADING.value,
-                missing_chunks=missing_chunks)
-        # All chunks received, assemble them.
-        assembled_path = staging_dir / 'assembled.zip'
-        async with aiofiles.open(assembled_path, 'wb') as assembled:
-            for chunk_idx in range(total_chunks):
-                chunk_path = staging_dir / f'part{chunk_idx}'
-                async with aiofiles.open(chunk_path, 'rb') as cf:
-                    while True:
-                        data = await cf.read(64 * 1024)
-                        if not data:
-                            break
-                        await assembled.write(data)
+    result = await _receive_and_assemble_chunks(request, staging_dir,
+                                                chunk_index, total_chunks)
+    if isinstance(result, payloads.UploadZipFileResponse):
+        return result
 
     # Move assembled zip to final blob path (atomic on same filesystem).
-    assembled_path = staging_dir / 'assembled.zip'
-    assembled_path.rename(blob_path)
+    result.rename(blob_path)
     logger.info(f'Uploaded blob: {blob_path}')
 
     # Clean staging dir.
-    await asyncio.to_thread(shutil.rmtree, str(staging_dir), ignore_errors=True)
+    await asyncio.to_thread(shutil.rmtree, str(staging_dir), True)
 
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
