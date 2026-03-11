@@ -289,7 +289,7 @@ def test_debug_dump_cluster(generic_cloud: str):
             f's=$(cat clusters/{name}/cluster_info.json) && echo "$s" && '
             'echo "$s" | python3 -c "'
             'import sys, json; d = json.load(sys.stdin); '
-            'assert \\\"cluster_name\\\" in d; '
+            'assert \\\"name\\\" in d; '
             'assert \\\"status\\\" in d; '
             '"',
             # Verify summary shows the cluster was collected
@@ -323,8 +323,9 @@ def test_debug_dump_request_id(generic_cloud: str):
             f' --infra {generic_cloud} tests/test_yamls/minimal.yaml'
             ' | tee /tmp/test_debug_dump_reqid_launch.txt',
             # Extract request ID from async output
-            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
-            ' | head -1 | sed "s/.*Request ID: //") && '
+            # Output format: "Submitted sky.launch request: <uuid>"
+            'req_id=$(grep "Submitted.*request:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*request: //") && '
             'echo "Captured request ID: $req_id" && '
             'test -n "$req_id" && '
             # Wait for the request to finish
@@ -332,18 +333,18 @@ def test_debug_dump_request_id(generic_cloud: str):
             f' {smoke_tests_utils.LOW_RESOURCE_ARG}'
             f' --infra {generic_cloud} tests/test_yamls/minimal.yaml',
             # Create a debug dump for the request ID
-            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
-            ' | head -1 | sed "s/.*Request ID: //") && '
+            'req_id=$(grep "Submitted.*request:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*request: //") && '
             'sky debug-dump -r "$req_id"'
             ' --output /tmp/test_debug_dump_reqid.zip',
             # Verify the request directory exists in the dump
-            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
-            ' | head -1 | sed "s/.*Request ID: //") && '
+            'req_id=$(grep "Submitted.*request:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*request: //") && '
             's=$(unzip -l /tmp/test_debug_dump_reqid.zip) && echo "$s" && '
             'echo "$s" | grep "requests/$req_id/request_info.json"',
             # Verify request_info.json contents
-            'req_id=$(grep "Request ID:" /tmp/test_debug_dump_reqid_launch.txt'
-            ' | head -1 | sed "s/.*Request ID: //") && '
+            'req_id=$(grep "Submitted.*request:" /tmp/test_debug_dump_reqid_launch.txt'
+            ' | head -1 | sed "s/.*request: //") && '
             'unzip -o /tmp/test_debug_dump_reqid.zip'
             ' -d /tmp/test_debug_dump_reqid && '
             'cd /tmp/test_debug_dump_reqid/debug_dump_* && '
