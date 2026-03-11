@@ -612,45 +612,6 @@ def _safe_unlink_if_old(path: pathlib.Path, cutoff: float) -> None:
         pass
 
 
-async def cleanup_stale_client_files():
-    """Periodically clean stale task YAMLs and log staging dirs."""
-
-    def _do_cleanup():
-        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
-        if not clients_dir.exists():
-            return
-        cutoff = time.time() - 3600  # 1 hour
-        for user_dir in clients_dir.iterdir():
-            if not user_dir.is_dir():
-                continue
-            # Clean old task YAMLs.
-            tasks_dir = user_dir / 'tasks'
-            if tasks_dir.exists():
-                for f in tasks_dir.iterdir():
-                    _safe_unlink_if_old(f, cutoff)
-            # Clean old translated YAMLs.
-            for f in user_dir.glob('*_translated.yaml'):
-                _safe_unlink_if_old(f, cutoff)
-            # Clean old sky_logs dirs.
-            sky_logs_dir = user_dir / 'sky_logs'
-            if sky_logs_dir.exists():
-                for d in sky_logs_dir.iterdir():
-                    if d.is_dir():
-                        try:
-                            if d.stat().st_mtime < cutoff:
-                                shutil.rmtree(d, ignore_errors=True)
-                        except OSError:
-                            pass
-
-    while True:
-        await asyncio.sleep(3600)
-        try:
-            await asyncio.to_thread(_do_cleanup)
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Error in cleanup_stale_client_files: '
-                         f'{common_utils.format_exception(e)}')
-
-
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -716,7 +677,6 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
     asyncio.create_task(cleanup_unreferenced_blobs())
-    asyncio.create_task(cleanup_stale_client_files())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
     if metrics_utils.METRICS_ENABLED:
@@ -1339,22 +1299,14 @@ async def optimize(optimize_body: payloads.OptimizeBody,
 
 
 @app.post('/upload')
-async def upload_zip_file(
-        request: fastapi.Request,
-        user_hash: str,
-        upload_id: str,
-        chunk_index: int,
-        total_chunks: int,
-        blob_id: Optional[str] = None) -> payloads.UploadZipFileResponse:
+async def upload_zip_file(request: fastapi.Request, user_hash: str,
+                          upload_id: str, chunk_index: int,
+                          total_chunks: int) -> payloads.UploadZipFileResponse:
     """Uploads a zip file to the API server.
 
     This endpoints can be called multiple times for the same upload_id with
     different chunk_index. The server will merge the chunks and unzip the file
     when all chunks are uploaded.
-
-    When blob_id is provided, the assembled zip is stored as a content-addressed
-    blob (blobs/{blob_id}.zip) without extraction. Extraction is deferred to
-    request execution time.
 
     This implementation is simplified and may need to be improved in the future,
     e.g., adopting S3-style multipart upload.
@@ -1365,8 +1317,6 @@ async def upload_zip_file(
             hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
         chunk_index: The chunk index, starting from 0.
         total_chunks: The total number of chunks.
-        blob_id: Optional content-addressed blob ID (sha256 hex). When set,
-            the zip is stored as a blob instead of being extracted.
     """
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
@@ -1377,9 +1327,6 @@ async def upload_zip_file(
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    if blob_id is not None and not re.match(r'^[0-9a-f]{64}$', blob_id):
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=f'Invalid blob_id: {blob_id}')
     # Add the upload id to the cleanup list.
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
