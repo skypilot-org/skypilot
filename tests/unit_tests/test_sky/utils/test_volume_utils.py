@@ -288,6 +288,10 @@ class TestVolumeMount:
         with pytest.raises(ValueError, match='invalid characters'):
             volume.VolumeMount.resolve('/data', 'vol', sub_path='my dir/sub')
 
+        # Absolute path (leading /)
+        with pytest.raises(ValueError, match='invalid characters'):
+            volume.VolumeMount.resolve('/data', 'vol', sub_path='/abs/path')
+
         # Empty string
         with pytest.raises(ValueError, match='invalid characters'):
             volume.VolumeMount.resolve('/data', 'vol', sub_path='')

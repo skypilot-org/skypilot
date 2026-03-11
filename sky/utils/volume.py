@@ -86,8 +86,10 @@ class VolumeMount:
             if not re.match(constants.SUB_PATH_PATTERN, sub_path):
                 raise ValueError(
                     f'sub_path contains invalid characters: {sub_path!r}. '
-                    'Only alphanumeric characters, dots, slashes, '
-                    'underscores and hyphens are allowed.')
+                    'Must be a relative path containing only '
+                    'alphanumeric characters, dots, slashes, '
+                    'underscores and hyphens, and must not start '
+                    'with a slash.')
             if '..' in sub_path.split('/'):
                 raise ValueError(
                     f'sub_path must not contain directory traversal '
