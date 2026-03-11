@@ -2899,6 +2899,7 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.kubernetes
 @pytest.mark.remote_server
 @pytest.mark.managed_jobs
 def test_managed_jobs_api_access(generic_cloud: str):
