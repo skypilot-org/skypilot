@@ -648,7 +648,7 @@ class Rclone:
                 Rclone.RcloneStores.AZURE: 'sky-azure',
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
                 Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
-                Rclone.RcloneStores.VASTDATA: 'sky-vastdata'
+                Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
