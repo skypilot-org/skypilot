@@ -35,6 +35,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_lib
 from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2175,6 +2176,7 @@ class ControllerManager:
     async def monitor_loop(self):
         """Monitor the job loop."""
         logger.info(f'Starting monitor loop for pid {self._pid}...')
+        pid_str = str(self._pid)
 
         while True:
             async with self._job_tasks_lock:
@@ -2184,6 +2186,15 @@ class ControllerManager:
 
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
+
+            # Report per-process metrics.
+            if metrics_lib.METRICS_ENABLED:
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT.labels(
+                    pid=pid_str).set(starting_count)
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT.labels(
+                    pid=pid_str).set(len(running_tasks))
+                metrics_lib.SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER.labels(
+                    pid=pid_str).set(controller_utils.LAUNCHES_PER_WORKER)
 
             if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
                 # launching a job takes around 1 minute, so lets wait half that
@@ -2198,6 +2209,10 @@ class ControllerManager:
             max_jobs = min(controller_utils.MAX_JOBS_PER_WORKER,
                            (controller_utils.MAX_TOTAL_RUNNING_JOBS //
                             controller_utils.get_number_of_jobs_controllers()))
+
+            if metrics_lib.METRICS_ENABLED:
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS.labels(
+                    pid=pid_str).set(max_jobs)
 
             if len(running_tasks) >= max_jobs:
                 logger.info('Too many jobs running, waiting for 60 seconds')
