@@ -558,7 +558,7 @@ def _redact_task_yaml(yaml_str: str) -> str:
         return '<parse error, redacted>'
     for doc in docs:
         if isinstance(doc, dict):
-            task_lib.redact_yaml_config(doc)
+            task_lib.redact_task_yaml_dict(doc)
     return yaml_utils.dump_yaml_str(docs)
 
 
