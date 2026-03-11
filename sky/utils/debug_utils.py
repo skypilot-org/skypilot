@@ -1,4 +1,5 @@
 """Debug dump utilities for troubleshooting SkyPilot issues."""
+import collections
 import datetime
 import json
 import logging
@@ -840,42 +841,48 @@ def _dump_managed_job_queue_info(
     """Collect managed job info from queue_v2.
 
     This works in both consolidation and non-consolidation modes.
+    Makes a single batched queue_v2 call for all job IDs.
     """
+    try:
+        all_records, _, _, _ = managed_jobs_core.queue_v2(
+            refresh=False, job_ids=list(managed_job_ids), all_users=True)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning(f'Failed to fetch managed job queue info: {e}')
+        if errors is not None:
+            errors.append({
+                'component': 'managed_jobs',
+                'resource': 'queue_v2_batch',
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            })
+        return
+
+    # Group records by job_id (multi-task jobs return multiple records).
+    jobs_by_id: Dict[int, list] = collections.defaultdict(list)
+    for record in all_records:
+        jobs_by_id[record.get('job_id')].append(record)
+
     for job_id in managed_job_ids:
         job_dir = os.path.join(jobs_dir, str(job_id))
         os.makedirs(job_dir, exist_ok=True)
 
-        try:
-            jobs, _, _, _ = managed_jobs_core.queue_v2(refresh=False,
-                                                       job_ids=[job_id],
-                                                       all_users=True)
-            if jobs:
-                for task_idx, job in enumerate(jobs):
-                    job_info = {
-                        k: (str(v) if not isinstance(v,
-                                                     (str, int, float, bool,
-                                                      type(None), list, dict))
-                            else v) for k, v in job.items()
-                    }
+        tasks = jobs_by_id.get(job_id, [])
+        if not tasks:
+            logger.debug(f'Managed job {job_id} not found in queue')
+            continue
 
-                    suffix = f'_task{task_idx}' if len(jobs) > 1 else ''
-                    job_info_path = os.path.join(job_dir,
-                                                 f'job_info{suffix}.json')
-                    with open(job_info_path, 'w', encoding='utf-8') as f:
-                        json.dump(job_info, f, indent=2, default=str)
-                logger.debug(f'Dumped managed job {job_id} '
-                             f'({len(jobs)} task(s))')
-            else:
-                logger.debug(f'Managed job {job_id} not found in queue')
-        except Exception as e:  # pylint: disable=broad-except
-            logger.warning(f'Failed to get info for job {job_id}: {e}')
-            if errors is not None:
-                errors.append({
-                    'component': 'managed_jobs',
-                    'resource': str(job_id),
-                    'error': str(e),
-                    'traceback': traceback.format_exc()
-                })
+        for task_idx, job in enumerate(tasks):
+            job_info = {
+                k: (str(v) if not isinstance(v,
+                                             (str, int, float, bool, type(None),
+                                              list, dict)) else v)
+                for k, v in job.items()
+            }
+            suffix = f'_task{task_idx}' if len(tasks) > 1 else ''
+            job_info_path = os.path.join(job_dir, f'job_info{suffix}.json')
+            with open(job_info_path, 'w', encoding='utf-8') as f:
+                json.dump(job_info, f, indent=2, default=str)
+        logger.debug(f'Dumped managed job {job_id} ({len(tasks)} task(s))')
 
 
 def _collect_controller_debug_data(
