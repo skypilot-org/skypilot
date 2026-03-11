@@ -35,6 +35,7 @@ def _make_request(
     request_id: str = 'req-123',
     cluster_name: Optional[str] = None,
     request_body: Any = None,
+    return_value: Any = None,
     created_at: Optional[float] = None,
     finished_at: Optional[float] = None,
     status: Optional[str] = 'RUNNING',
@@ -48,6 +49,7 @@ def _make_request(
         request_id=request_id,
         cluster_name=cluster_name,
         request_body=request_body,
+        return_value=return_value,
         created_at=created_at or time.time(),
         finished_at=finished_at,
         status=SimpleNamespace(value=status) if status else None,
@@ -378,6 +380,41 @@ class TestGetRequestsFromManagedJobs:
 
         assert 'req-cancel-other' not in ctx['request_ids']
 
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_matches_launch_by_return_value(self, mock_get_tasks, _mock_queue):
+        """Should match jobs.launch request via return_value.job_id."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-rv',
+                          request_body=SimpleNamespace(job_id=None,
+                                                       job_ids=None),
+                          return_value={'job_id': 42},
+                          name='sky.jobs.launch'),
+        ]
+        ctx = _make_context(managed_job_ids={42})
+
+        debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-rv' in ctx['request_ids']
+
+    @mock.patch(MOCK_QUEUE_V2, return_value=([], 0, {}, 0))
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request_tasks')
+    def test_matches_launch_by_return_value_list(self, mock_get_tasks,
+                                                 _mock_queue):
+        """Should match jobs.launch when return_value.job_id is a list."""
+        mock_get_tasks.return_value = [
+            _make_request(request_id='req-rv-list',
+                          request_body=SimpleNamespace(job_id=None,
+                                                       job_ids=None),
+                          return_value={'job_id': [42, 43]},
+                          name='sky.jobs.launch'),
+        ]
+        ctx = _make_context(managed_job_ids={43})
+
+        debug_utils._get_requests_from_managed_jobs(ctx)
+
+        assert 'req-rv-list' in ctx['request_ids']
+
 
 # ---------------------------------------------------------------------------
 # Tests for _get_clusters_from_requests
@@ -553,6 +590,35 @@ class TestGetManagedJobsFromRequests:
         debug_utils._get_managed_jobs_from_requests(ctx)
 
         assert ctx['managed_job_ids'] == set()
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_extracts_job_id_from_return_value(self, mock_get_request):
+        """Should extract job_id from jobs.launch return_value."""
+        mock_get_request.return_value = _make_request(
+            request_id='req-1',
+            request_body=SimpleNamespace(job_id=None, job_ids=None),
+            return_value={'job_id': 42},
+            name='sky.jobs.launch')
+        ctx = _make_context(request_ids={'req-1'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert 42 in ctx['managed_job_ids']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_request')
+    def test_extracts_job_ids_list_from_return_value(self, mock_get_request):
+        """Should extract list of job_ids from jobs.launch return_value."""
+        mock_get_request.return_value = _make_request(
+            request_id='req-1',
+            request_body=SimpleNamespace(job_id=None, job_ids=None),
+            return_value={'job_id': [42, 43]},
+            name='sky.jobs.launch')
+        ctx = _make_context(request_ids={'req-1'})
+
+        debug_utils._get_managed_jobs_from_requests(ctx)
+
+        assert 42 in ctx['managed_job_ids']
+        assert 43 in ctx['managed_job_ids']
 
 
 # ---------------------------------------------------------------------------
