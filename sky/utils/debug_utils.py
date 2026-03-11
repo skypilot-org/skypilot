@@ -982,11 +982,11 @@ def create_debug_dump(
         os.makedirs(dump_dir)
         logger.debug(f'Building dump in temp directory: {dump_dir}')
 
-        # Attach a file handler to capture debug-level logs into the
-        # dump. We attach to the root 'sky' logger so that logs from
-        # all sky.* modules are captured, not just sky.utils.debug_utils.
-        # Also attach to sky.provision which has propagate=False.
-        # This mirrors sky_logging.add_debug_log_handler().
+        # Attach a file handler to capture debug-level logs into the dump
+        # itself. We attach to the root 'sky' logger so that logs from all sky.*
+        # modules are captured, not just sky.utils.debug_utils.  Also attach to
+        # sky.provision which has propagate=False.  This mirrors
+        # sky_logging.add_debug_log_handler().
         debug_handler = logging.FileHandler(
             os.path.join(dump_dir, 'debug_dump.log'))
         debug_handler.setFormatter(sky_logging.FORMATTER)
