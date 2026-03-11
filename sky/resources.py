@@ -820,8 +820,10 @@ class Resources:
         if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
                 # Memory-based specs (e.g., '40GB+', 'NVIDIA:40GB+') are
-                # stored as-is and expanded later by from_yaml_config on
-                # the server side.
+                # stored as-is here. They are expanded into concrete
+                # accelerator names by from_yaml_config() when the task
+                # is deserialized on the API server side. This means
+                # self.accelerators will be None until expansion happens.
                 parsed = self.parse_accelerators_from_str(accelerators)
                 if any(not is_exact_name for _, is_exact_name in parsed):
                     self._memory_accel_spec = accelerators
@@ -2239,7 +2241,11 @@ class Resources:
                 raise ValueError(
                     'Cannot specify both "any_of" and "ordered" in resources.')
 
-        # Parse resources.accelerators field.
+        # Parse resources.accelerators field. This is where memory-based
+        # specs (e.g., '40GB+', 'NVIDIA:40GB+') get expanded into concrete
+        # accelerator names. This expansion happens on the API server side
+        # when the task YAML is deserialized (see _set_accelerators for
+        # how memory specs are stored as-is on the client side).
         accelerators = config.get('accelerators')
         if config and accelerators is not None:
             if isinstance(accelerators, str):
