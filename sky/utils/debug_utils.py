@@ -344,12 +344,12 @@ def _get_managed_jobs_from_requests(
                     if isinstance(resp_job_id, list):
                         debug_dump_context['managed_job_ids'].update(
                             resp_job_id)
-                        logger.debug(f'Linked request {request.request_id} '
+                        logger.debug(f'Linked request {request_id} '
                                      f'to managed jobs {resp_job_id} '
                                      f'via return_value')
                     elif resp_job_id is not None:
                         debug_dump_context['managed_job_ids'].add(resp_job_id)
-                        logger.debug(f'Linked request {request.request_id} '
+                        logger.debug(f'Linked request {request_id} '
                                      f'to managed job {resp_job_id} '
                                      f'via return_value')
         except Exception as e:  # pylint: disable=broad-except
