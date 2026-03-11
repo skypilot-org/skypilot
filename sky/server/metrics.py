@@ -115,6 +115,15 @@ def metrics() -> fastapi.Response:
                             headers={'Cache-Control': 'no-cache'})
 
 
+# Per-context timeout for metrics collection. Must be shorter than the
+# Prometheus scrape_timeout (default 10s in our Helm chart) so that the
+# endpoint responds promptly even when one remote cluster is unreachable.
+# Without this, a single hanging port-forward (e.g. 30s httpx timeout)
+# blocks the entire /gpu-metrics response, causing Prometheus to mark the
+# scrape target as down.
+_PER_CONTEXT_TIMEOUT_SECONDS = 8
+
+
 @metrics_app.get('/gpu-metrics')
 async def gpu_metrics() -> fastapi.Response:
     """Gets the GPU metrics from multiple external k8s clusters"""
@@ -126,8 +135,11 @@ async def gpu_metrics() -> fastapi.Response:
         context for context in contexts if context != 'in-cluster'
     ]
     tasks = [
-        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
-        for context in remote_contexts
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_context(context),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for context in remote_contexts
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
