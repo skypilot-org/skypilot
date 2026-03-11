@@ -297,8 +297,7 @@ def check_capabilities(
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not any(
-                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
+                if not any(cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             previously_enabled_clouds_set = {
                 repr(cloud)

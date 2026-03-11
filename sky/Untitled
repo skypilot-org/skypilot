@@ -1,0 +1,1 @@
+cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)

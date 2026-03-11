@@ -235,8 +235,9 @@ def check_storage_credentials() -> Tuple[bool, Optional[str]]:
                       f'{VASTDATA_CONFIG_PATH} aws configure set endpoint_url'
                       f' <ENDPOINT_URL> --profile '
                       f'{VASTDATA_PROFILE_NAME}')
-            hints += f'\n{_INDENT_PREFIX} For more information, see: '
-            hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#vastdata'
+            hints += (f'\n{_INDENT_PREFIX} For more information, see: '
+                      'https://docs.skypilot.co/en/latest/'
+                      'getting-started/installation.html#vastdata')
 
     return (False, hints) if hints else (True, hints)
 
