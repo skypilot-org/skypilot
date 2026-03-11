@@ -665,6 +665,10 @@ def get_volume_mount_schema():
             'is_ephemeral': {
                 'type': 'boolean',
             },
+            'sub_path': {
+                'type': 'string',
+                'pattern': constants.SUB_PATH_PATTERN,
+            },
             'volume_config': {
                 'type': 'object',
                 'required': [],

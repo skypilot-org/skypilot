@@ -131,6 +131,13 @@ def _get_volume_usedby(
     for pod in pods.items:
         if pod.spec.volumes is None:
             continue
+        # Skip terminating pods. Terminating is not a pod phase (the phase
+        # is still Running), but the pod has a deletionTimestamp set.
+        # It is safe to proceed with PVC deletion even if terminating pods
+        # reference it: the pvc-protection finalizer will keep the PVC
+        # alive until all pods fully terminate.
+        if pod.metadata.deletion_timestamp is not None:
+            continue
         for volume in pod.spec.volumes:
             if volume.persistent_volume_claim is None:
                 continue
@@ -245,6 +252,8 @@ def get_all_volumes_usedby(
                 continue
             for pod in pods.items:
                 if pod.spec.volumes is None:
+                    continue
+                if pod.metadata.deletion_timestamp is not None:
                     continue
                 for volume in pod.spec.volumes:
                     if volume.persistent_volume_claim is None:

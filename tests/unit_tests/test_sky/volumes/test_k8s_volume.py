@@ -46,14 +46,18 @@ class MockPod:
                  name: str,
                  namespace: str,
                  pvc_names: List[str] = None,
-                 cluster_name: str = None):
+                 cluster_name: str = None,
+                 terminating: bool = False):
         self.metadata = Mock()
         self.metadata.name = name
         self.metadata.namespace = namespace
+        self.metadata.deletion_timestamp = (Mock() if terminating else None)
         self.metadata.labels = {}
         if cluster_name:
             self.metadata.labels[
                 constants.TAG_SKYPILOT_CLUSTER_NAME] = cluster_name
+
+        self.status = Mock()
 
         self.spec = Mock()
         if pvc_names:
@@ -489,10 +493,60 @@ class TestGetVolumeUsedBy:
         # Pod with volume but no PVC
         mock_pod = Mock()
         mock_pod.metadata.name = 'pod-with-configmap'
+        mock_pod.metadata.deletion_timestamp = None
         mock_pod.spec.volumes = [Mock()]
         mock_pod.spec.volumes[0].persistent_volume_claim = None
         mock_pods = Mock()
         mock_pods.items = [mock_pod]
+        mock_k8s.core_api.return_value.list_namespaced_pod.return_value = mock_pods
+
+        usedby_pods, usedby_clusters = k8s_volume._get_volume_usedby(
+            'my-context', 'my-namespace', 'test-pvc')
+
+        assert usedby_pods == []
+        assert usedby_clusters == []
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    def test_get_volume_usedby_skips_terminating_pod(self, mock_get_map,
+                                                     mock_k8s):
+        """Test that terminating pods are skipped."""
+        mock_get_map.return_value = {'cluster-on-cloud': 'my-cluster'}
+
+        # One running pod and one terminating pod, both using the same PVC
+        running_pod = MockPod('running-pod', 'my-namespace', ['test-pvc'],
+                              'cluster-on-cloud')
+        terminating_pod = MockPod('terminating-pod',
+                                  'my-namespace', ['test-pvc'],
+                                  'cluster-on-cloud',
+                                  terminating=True)
+        mock_pods = Mock()
+        mock_pods.items = [running_pod, terminating_pod]
+        mock_k8s.core_api.return_value.list_namespaced_pod.return_value = mock_pods
+
+        usedby_pods, usedby_clusters = k8s_volume._get_volume_usedby(
+            'my-context', 'my-namespace', 'test-pvc')
+
+        assert usedby_pods == ['running-pod']
+        assert usedby_clusters == ['my-cluster']
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    def test_get_volume_usedby_all_pods_terminating(self, mock_get_map,
+                                                    mock_k8s):
+        """Test that volume appears unused when all pods are terminating."""
+        mock_get_map.return_value = {'cluster-on-cloud': 'my-cluster'}
+
+        terminating_pod = MockPod('terminating-pod',
+                                  'my-namespace', ['test-pvc'],
+                                  'cluster-on-cloud',
+                                  terminating=True)
+        mock_pods = Mock()
+        mock_pods.items = [terminating_pod]
         mock_k8s.core_api.return_value.list_namespaced_pod.return_value = mock_pods
 
         usedby_pods, usedby_clusters = k8s_volume._get_volume_usedby(
@@ -660,6 +714,51 @@ class TestGetAllVolumesUsedBy:
         'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
     )
     @patch('sky.provision.kubernetes.volume._get_context_namespace')
+    def test_get_all_volumes_usedby_skips_terminating_pod(
+            self, mock_get_context, mock_get_map, mock_k8s):
+        """Test that terminating pods are skipped in get_all_volumes_usedby."""
+        mock_get_context.return_value = ('my-context', 'my-namespace')
+        mock_get_map.return_value = {
+            'cluster-1-on-cloud': 'cluster-1',
+            'cluster-2-on-cloud': 'cluster-2'
+        }
+
+        running_pod = MockPod('running-pod', 'my-namespace', ['test-pvc'],
+                              'cluster-1-on-cloud')
+        terminating_pod = MockPod('terminating-pod',
+                                  'my-namespace', ['test-pvc'],
+                                  'cluster-2-on-cloud',
+                                  terminating=True)
+        mock_pods = Mock()
+        mock_pods.items = [running_pod, terminating_pod]
+        mock_k8s.core_api.return_value.list_namespaced_pod.return_value = mock_pods
+
+        config = models.VolumeConfig(
+            _version=1,
+            name='test-vol',
+            type='k8s-pvc',
+            cloud='kubernetes',
+            region='my-context',
+            zone=None,
+            name_on_cloud='test-pvc',
+            size=None,
+        )
+
+        used_by_pods, used_by_clusters, _ = k8s_volume.get_all_volumes_usedby(
+            [config])
+
+        pods_list = used_by_pods['my-context']['my-namespace'].get(
+            'test-pvc', [])
+        assert pods_list == ['running-pod']
+        # used_by_clusters is keyed by cluster_name
+        assert 'cluster-1' in used_by_clusters['my-context']['my-namespace']
+        assert 'cluster-2' not in used_by_clusters['my-context']['my-namespace']
+
+    @patch('sky.provision.kubernetes.volume.kubernetes')
+    @patch(
+        'sky.provision.kubernetes.volume._get_cluster_name_on_cloud_to_cluster_name_map'
+    )
+    @patch('sky.provision.kubernetes.volume._get_context_namespace')
     def test_get_all_volumes_usedby_pod_no_volumes(self, mock_get_context,
                                                    mock_get_map, mock_k8s):
         """Test with pod that has no volumes (covers line 198)."""
@@ -705,6 +804,7 @@ class TestGetAllVolumesUsedBy:
         # Pod with volume but no PVC
         mock_pod = Mock()
         mock_pod.metadata.name = 'pod-with-configmap'
+        mock_pod.metadata.deletion_timestamp = None
         mock_pod.metadata.labels = {}
         mock_pod.spec.volumes = [Mock()]
         mock_pod.spec.volumes[0].persistent_volume_claim = None
