@@ -176,15 +176,3 @@ ds = ds.map_batches(
 # Write results
 ds.write_json("s3://my-bucket/output")
 ```
-
-### Why Sky Batch over Ray Data?
-
-Sky Batch offers similar ease of use with additional benefits:
-
-| Feature | Sky Batch | Ray Data |
-|---------|-----------|----------|
-| Cluster management | Automatic provisioning | Manual Ray cluster setup |
-| Multi-cloud | Scale across AWS, GCP, Azure | Single cluster |
-| Multi-cluster | Distribute across multiple k8s clusters | Single cluster |
-| Spot instance | Multi-region, improved availability & reduced cost | Single-region, limited capacity |
-| Cost optimization | Automatic cloud selection | Fixed to one cloud/cluster |
