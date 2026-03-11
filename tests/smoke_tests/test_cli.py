@@ -423,3 +423,38 @@ def test_debug_dump_no_args(generic_cloud: str):
         timeout=30,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_debug_dump_nonexistent_resources(generic_cloud: str):
+    """Test debug-dump with nonexistent cluster and request IDs."""
+    test = smoke_tests_utils.Test(
+        'debug_dump_nonexistent_resources',
+        [
+            # Should succeed even with nonexistent resources
+            'sky debug-dump -c nonexistent-cluster-xyz'
+            ' -r nonexistent-request-xyz'
+            ' --output /tmp/test_debug_dump_nonexistent.zip',
+            # Verify the zip file was created and is valid
+            'test -f /tmp/test_debug_dump_nonexistent.zip',
+            's=$(unzip -l /tmp/test_debug_dump_nonexistent.zip) && echo "$s"'
+            ' && echo "$s" | grep "summary.json"'
+            ' && echo "$s" | grep "errors.json"',
+            # Verify summary records the requested resources
+            'rm -rf /tmp/test_debug_dump_nonexistent_d && '
+            'unzip -o /tmp/test_debug_dump_nonexistent.zip'
+            ' -d /tmp/test_debug_dump_nonexistent_d && '
+            'cd /tmp/test_debug_dump_nonexistent_d/debug_dump_* && '
+            's=$(cat summary.json) && echo "$s" && '
+            'echo "$s" | python3 -c "'
+            'import sys, json; d = json.load(sys.stdin); '
+            'assert \\\"nonexistent-cluster-xyz\\\" in '
+            'd[\\\"requested\\\"][\\\"cluster_names\\\"]; '
+            'assert \\\"nonexistent-request-xyz\\\" in '
+            'd[\\\"requested\\\"][\\\"request_ids\\\"]; '
+            '"',
+        ],
+        teardown='rm -f /tmp/test_debug_dump_nonexistent.zip && '
+        'rm -rf /tmp/test_debug_dump_nonexistent_d',
+        timeout=2 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
