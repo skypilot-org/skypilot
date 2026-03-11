@@ -38,8 +38,8 @@ from sky import exceptions
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
-from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
