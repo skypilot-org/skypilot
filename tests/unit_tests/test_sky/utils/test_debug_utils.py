@@ -1591,6 +1591,26 @@ class TestSerializeClusterRecord:
         assert updated_human is not None
         datetime.datetime.fromisoformat(updated_human)
 
+    def test_last_creation_yaml_redacted(self):
+        """Secrets in last_creation_yaml should be redacted."""
+        yaml_str = ('name: my-task\n'
+                    'secrets:\n'
+                    '  API_KEY: super_secret_key\n'
+                    'resources:\n'
+                    '  cloud: aws\n')
+        record = self._make_full_cluster_record(last_creation_yaml=yaml_str)
+        result = debug_dump_helpers.serialize_cluster_record(record)
+        assert 'super_secret_key' not in result['last_creation_yaml']
+        assert '<redacted>' in result['last_creation_yaml']
+        # Non-secret fields should still be present
+        assert 'my-task' in result['last_creation_yaml']
+
+    def test_last_creation_yaml_none_stays_none(self):
+        """None last_creation_yaml should remain None."""
+        record = self._make_full_cluster_record(last_creation_yaml=None)
+        result = debug_dump_helpers.serialize_cluster_record(record)
+        assert result['last_creation_yaml'] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests for redact_config

@@ -10,7 +10,9 @@ import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import global_user_state
+from sky import task as task_lib
 from sky.utils import config_utils
+from sky.utils import yaml_utils
 
 # Sensitive config paths to redact in debug dumps, following the same
 # pattern as provision/common.py:ProvisionConfig.get_redacted_config().
@@ -42,6 +44,22 @@ def epoch_to_human(epoch: Optional[float]) -> Optional[str]:
         return datetime.datetime.fromtimestamp(epoch).isoformat()
     except (OSError, ValueError, OverflowError):
         return None
+
+
+def redact_task_yaml(yaml_str: str) -> str:
+    """Parse a task/dag YAML string and redact secrets and credentials.
+
+    Shared by the API server dump (debug_utils.py) and the controller
+    manifest (jobs/utils.py).
+    """
+    try:
+        docs = list(yaml_utils.safe_load_all(yaml_str))
+    except Exception:  # pylint: disable=broad-except
+        return '<parse error, redacted>'
+    for doc in docs:
+        if isinstance(doc, dict):
+            task_lib.redact_task_yaml_dict(doc)
+    return yaml_utils.dump_yaml_str(docs)
 
 
 def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
@@ -90,7 +108,9 @@ def serialize_cluster_record(cluster_record: Dict[str, Any]) -> Dict[str, Any]:
         'owner': cluster_record.get('owner'),
         'metadata': cluster_record.get('metadata'),
         'last_creation_command': cluster_record.get('last_creation_command'),
-        'last_creation_yaml': cluster_record.get('last_creation_yaml'),
+        'last_creation_yaml':
+            (redact_task_yaml(cluster_record['last_creation_yaml'])
+             if cluster_record.get('last_creation_yaml') is not None else None),
         'last_event': cluster_record.get('last_event'),
         'handle': handle_info,
     }

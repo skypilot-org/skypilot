@@ -16,7 +16,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.jobs import utils as managed_job_utils
@@ -32,7 +31,6 @@ from sky.utils import debug_dump_helpers
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
-from sky.utils import yaml_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -552,14 +550,7 @@ def _dump_server_info(dump_dir: str,
 
 def _redact_task_yaml(yaml_str: str) -> str:
     """Parse a task/dag YAML string and redact secrets and credentials."""
-    try:
-        docs = list(yaml_utils.safe_load_all(yaml_str))
-    except Exception:  # pylint: disable=broad-except
-        return '<parse error, redacted>'
-    for doc in docs:
-        if isinstance(doc, dict):
-            task_lib.redact_task_yaml_dict(doc)
-    return yaml_utils.dump_yaml_str(docs)
+    return debug_dump_helpers.redact_task_yaml(yaml_str)
 
 
 def _sanitize_request_body(request) -> Optional[Dict[str, Any]]:
