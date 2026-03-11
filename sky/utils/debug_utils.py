@@ -160,9 +160,11 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
             requests = requests_lib.get_request_tasks(
                 requests_lib.RequestTaskFilter(cluster_names=[cluster_name],
                                                fields=['request_id']))
-            debug_dump_context['request_ids'] |= {
-                request.request_id for request in requests
-            }
+            new_ids = {request.request_id for request in requests}
+            if new_ids:
+                logger.debug(f'Cross-link: cluster {cluster_name!r} -> '
+                             f'{len(new_ids)} requests: {sorted(new_ids)}')
+            debug_dump_context['request_ids'] |= new_ids
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get requests for cluster '
                            f'{cluster_name}: {e}')
@@ -222,7 +224,7 @@ def _get_requests_from_managed_jobs(
                 fields=['request_id', 'name', 'request_body', 'return_value']))
 
         for request in requests:
-            matched = False
+            match_reason: Optional[str] = None
             # Match by request body fields (job_id, job_ids, name, etc.)
             body = request.request_body
             if body is not None:
@@ -230,26 +232,27 @@ def _get_requests_from_managed_jobs(
                 job_ids = getattr(body, 'job_ids', None)
                 if (job_id is not None and
                         job_id in debug_dump_context['managed_job_ids']):
-                    matched = True
+                    match_reason = f'body.job_id={job_id}'
                 elif (job_ids is not None and
                       any(jid in debug_dump_context['managed_job_ids']
                           for jid in job_ids)):
-                    matched = True
+                    match_reason = f'body.job_ids={job_ids}'
                 # Match cancel-by-name
                 elif getattr(body, 'name', None) in job_names:
-                    matched = True
+                    match_reason = (
+                        f'body.name={getattr(body, "name", None)!r}')
                 # Match cancel-all-users (affects all jobs)
                 elif getattr(body, 'all_users', False):
-                    matched = True
+                    match_reason = 'body.all_users=True'
                 # Match cancel-all (affects only the requesting
                 # user's jobs, so include if user owns a target job)
                 elif getattr(body, 'all', False):
                     cancel_user = getattr(body, 'env_vars', {}).get(
                         skylet_constants.USER_ID_ENV_VAR)
                     if cancel_user and cancel_user in job_user_hashes:
-                        matched = True
+                        match_reason = (f'body.all=True (user={cancel_user})')
             # For jobs.launch, also match by return_value job_id
-            if (not matched and request.name
+            if (not match_reason and request.name
                     == prefix + request_names.RequestName.JOBS_LAUNCH.value):
                 rv = request.return_value
                 if isinstance(rv, dict):
@@ -261,12 +264,12 @@ def _get_requests_from_managed_jobs(
                     for job_id in resp_jobs:
                         if (job_id is not None and job_id
                                 in debug_dump_context['managed_job_ids']):
-                            matched = True
-                            logger.debug(
-                                f'Linked managed job {job_id} to request '
-                                f'{request.request_id} via return_value')
+                            match_reason = (f'return_value.job_id={job_id}')
                             break
-            if matched:
+            if match_reason:
+                logger.debug(f'Cross-link: managed jobs -> request '
+                             f'{request.request_id} ({request.name}) '
+                             f'via {match_reason}')
                 debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get requests for managed jobs: {e}')
@@ -289,6 +292,8 @@ def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
             request = requests_lib.get_request(request_id,
                                                fields=['cluster_name'])
             if request is not None and request.cluster_name is not None:
+                logger.debug(f'Cross-link: request {request_id} -> '
+                             f'cluster {request.cluster_name!r}')
                 debug_dump_context['cluster_names'].add(request.cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get cluster for request '
@@ -330,9 +335,13 @@ def _get_managed_jobs_from_requests(
             if body is not None:
                 job_id = getattr(body, 'job_id', None)
                 if job_id is not None:
+                    logger.debug(f'Cross-link: request {request_id} -> '
+                                 f'managed job {job_id} via body.job_id')
                     debug_dump_context['managed_job_ids'].add(job_id)
                 job_ids = getattr(body, 'job_ids', None)
                 if job_ids is not None:
+                    logger.debug(f'Cross-link: request {request_id} -> '
+                                 f'managed jobs {job_ids} via body.job_ids')
                     debug_dump_context['managed_job_ids'].update(job_ids)
             # For jobs.launch, the job ID is in the response, not the
             # request body.
@@ -372,6 +381,9 @@ def _get_clusters_from_managed_jobs(
     """
     if not debug_dump_context['managed_job_ids']:
         return
+    logger.debug(f'Cross-link: {len(debug_dump_context["managed_job_ids"])} '
+                 f'managed jobs -> adding jobs controller cluster '
+                 f'{common.JOB_CONTROLLER_NAME!r}')
     debug_dump_context['cluster_names'].add(common.JOB_CONTROLLER_NAME)
 
 
@@ -386,8 +398,12 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
     try:
         requests = requests_lib.get_request_tasks(
             requests_lib.RequestTaskFilter(finished_after=cutoff_time,
-                                           fields=['request_id']))
+                                           fields=['request_id',
+                                                   'finished_at']))
         for request in requests:
+            logger.debug(f'Recent: including request {request.request_id} '
+                         f'(finished_at={request.finished_at},'
+                         f' cutoff={cutoff_time:.0f})')
             debug_dump_context['request_ids'].add(request.request_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent requests: {e}')
@@ -406,6 +422,15 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             if status_updated_at >= cutoff_time or launched_at >= cutoff_time:
                 cluster_name = cluster.get('name')
                 if cluster_name:
+                    reasons = []
+                    if status_updated_at >= cutoff_time:
+                        reasons.append(
+                            f'status_updated_at={status_updated_at:.0f}')
+                    if launched_at >= cutoff_time:
+                        reasons.append(f'launched_at={launched_at:.0f}')
+                    logger.debug(f'Recent: including cluster {cluster_name!r} '
+                                 f'({", ".join(reasons)} >= '
+                                 f'cutoff {cutoff_time:.0f})')
                     debug_dump_context['cluster_names'].add(cluster_name)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent clusters: {e}')
@@ -427,6 +452,14 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             if submitted_at >= cutoff_time or end_at >= cutoff_time:
                 job_id = job.get('job_id')
                 if job_id is not None:
+                    reasons = []
+                    if submitted_at >= cutoff_time:
+                        reasons.append(f'submitted_at={submitted_at:.0f}')
+                    if end_at >= cutoff_time:
+                        reasons.append(f'end_at={end_at:.0f}')
+                    logger.debug(f'Recent: including managed job {job_id} '
+                                 f'({", ".join(reasons)} >= '
+                                 f'cutoff {cutoff_time:.0f})')
                     debug_dump_context['managed_job_ids'].add(job_id)
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to get recent managed jobs: {e}')
@@ -613,6 +646,13 @@ def _dump_request_id_info(
                                                  'request_info.json')
                 with open(request_info_path, 'w', encoding='utf-8') as f:
                     json.dump(request_info, f, indent=2, default=str)
+                logger.debug(
+                    f'Dumped request {request_id} '
+                    f'(name={request.name}, '
+                    f'status='
+                    f'{request.status.value if request.status else None})')
+            else:
+                logger.debug(f'Request {request_id} not found in DB')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for request {request_id}: {e}')
             if errors is not None:
@@ -693,6 +733,10 @@ def _dump_cluster_info(cluster_names: Set[str],
                                                  'cluster_info.json')
                 with open(cluster_info_path, 'w', encoding='utf-8') as f:
                     json.dump(cluster_info, f, indent=2, default=str)
+                logger.debug(f'Dumped cluster {cluster_name!r} '
+                             f'(status={cluster_record.get("status")})')
+            else:
+                logger.debug(f'Cluster {cluster_name!r} not found in DB')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for cluster '
                            f'{cluster_name}: {e}')
@@ -813,6 +857,10 @@ def _dump_managed_job_queue_info(
                                                  f'job_info{suffix}.json')
                     with open(job_info_path, 'w', encoding='utf-8') as f:
                         json.dump(job_info, f, indent=2, default=str)
+                logger.debug(f'Dumped managed job {job_id} '
+                             f'({len(jobs)} task(s))')
+            else:
+                logger.debug(f'Managed job {job_id} not found in queue')
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'Failed to get info for job {job_id}: {e}')
             if errors is not None:
