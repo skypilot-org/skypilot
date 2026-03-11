@@ -32,6 +32,7 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -102,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # Remove the in-cluster context name - this is only meaningful for the
+    # local Kubernetes environment and should not be forwarded to the server,
+    # which has its own cluster context configuration.
+    env_vars.pop(kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
     return env_vars
 
 
