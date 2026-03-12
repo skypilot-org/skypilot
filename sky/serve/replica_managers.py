@@ -47,6 +47,13 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# Shared thread pool for querying replica endpoint URLs with timeouts.
+# Reused across all calls to avoid the overhead of creating/tearing down
+# an executor on each invocation.
+_URL_QUERY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=max(4,
+                    os.cpu_count() or 1))
+
 _JOB_STATUS_FETCH_INTERVAL = 30
 _PROCESS_POOL_REFRESH_INTERVAL = 20
 _RETRY_INIT_GAP_SECONDS = 60
@@ -513,16 +520,14 @@ class ReplicaInfo:
         # cloud API is slow (e.g., K8s get_loadbalancer_ip polls for
         # up to 60s). This prevents sky serve status from hanging when
         # replicas are still provisioning.
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            future = executor.submit(backend_utils.get_endpoints,
-                                     handle.cluster_name, replica_port_int)
+            future = _URL_QUERY_EXECUTOR.submit(backend_utils.get_endpoints,
+                                                handle.cluster_name,
+                                                replica_port_int)
             endpoint_dict = future.result(
                 timeout=self._URL_QUERY_TIMEOUT_SECONDS)
         except (exceptions.ClusterNotUpError, concurrent.futures.TimeoutError):
             return None
-        finally:
-            executor.shutdown(wait=False)
         endpoint = endpoint_dict.get(replica_port_int, None)
         if not endpoint:
             return None
