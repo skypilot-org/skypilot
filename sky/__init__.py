@@ -158,6 +158,7 @@ Mithril = clouds.Mithril
 Shadeform = clouds.Shadeform
 Seeweb = clouds.Seeweb
 Yotta = clouds.Yotta
+Verda = clouds.Verda
 
 __all__ = [
     '__version__',

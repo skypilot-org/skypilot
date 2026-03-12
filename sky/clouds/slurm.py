@@ -15,6 +15,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -485,6 +486,14 @@ class Slurm(clouds.Cloud):
                                                       default_value=None)
             if level_config is not None:
                 sbatch_options.update(level_config)
+        # Merge task-level config overrides (from `config:` in task YAML).
+        task_sbatch = config_utils.get_cloud_config_value_from_dict(
+            dict_config=resources.cluster_config_overrides,
+            cloud='slurm',
+            region=cluster,
+            keys=('sbatch_options',))
+        if task_sbatch is not None:
+            sbatch_options.update(task_sbatch)
 
         deploy_vars = {
             'instance_type': resources.instance_type,

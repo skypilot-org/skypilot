@@ -704,7 +704,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not support T4 GPUs
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
@@ -1921,7 +1921,7 @@ def test_cancel_azure():
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
