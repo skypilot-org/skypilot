@@ -9,6 +9,7 @@ import unittest.mock as mock
 import filelock
 import pytest
 
+from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.requests import RequestStatus
@@ -30,7 +31,7 @@ def isolated_database(tmp_path):
     # Patch the database path and log path constants
     with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
                     str(temp_db_path)):
-        with mock.patch('sky.server.requests.requests.REQUEST_LOG_PATH_PREFIX',
+        with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
             # Reset the global database variable to force re-initialization
             requests._DB = None
@@ -184,9 +185,9 @@ async def test_clean_finished_requests_with_retention(isolated_database):
     # Verify old running request was NOT deleted
     assert requests.get_request('old-running-1') is not None
 
-    # Verify log file unlink was called for both current and legacy paths
-    # (2 calls per deleted request: current path + legacy path)
-    assert mock_unlink.call_count == 2
+    # Verify log file unlink was called for current, legacy, and debug paths
+    # (3 calls per deleted request: current path + legacy path + debug log)
+    assert mock_unlink.call_count == 3
 
     # Verify logging
     mock_logger.info.assert_called_once()
@@ -278,8 +279,8 @@ async def test_clean_finished_requests_with_retention_batch_size_functionality(
     assert call_counts[2] == 5  # Third batch (remaining)
 
     # Verify log file unlink was called for each deleted request
-    # (2 calls per request: current path + legacy path)
-    assert mock_unlink.call_count == 50
+    # (3 calls per request: current path + legacy path + debug log)
+    assert mock_unlink.call_count == 75
 
     # Verify logging shows correct total
     mock_logger.info.assert_called_once()
@@ -622,7 +623,7 @@ def test_get_legacy_log_path():
 
     # Verify it's different from the current path
     current_path_prefix = pathlib.Path(
-        requests.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
     assert legacy_path.parent != current_path_prefix
 
 
@@ -665,14 +666,13 @@ async def test_clean_finished_requests_cleans_both_paths(
                 await requests.clean_finished_requests_with_retention(
                     retention_seconds)
 
-    # Verify that unlink was called for both current and legacy paths
-    assert len(unlinked_paths) == 2
+    # Verify that unlink was called for current, legacy, and debug log paths
+    assert len(unlinked_paths) == 3
 
-    # One path should be under the current log path prefix (from isolated_database)
-    # One path should be under the legacy log path prefix
+    # All paths should contain the request ID
     current_path_count = sum(
         1 for p in unlinked_paths if 'legacy-test-req-1.log' in p)
-    assert current_path_count == 2  # Both paths should have the request ID
+    assert current_path_count == 3  # All paths should have the request ID
 
     # Verify the request was deleted
     assert requests.get_request('legacy-test-req-1') is None

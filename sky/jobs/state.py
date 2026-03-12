@@ -1088,6 +1088,23 @@ def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
 
+def get_latest_task_id_from_statuses(
+    id_statuses: List[Tuple[int, ManagedJobStatus]]
+) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
+    """Returns the (task_id, status) of the latest non-terminal task.
+
+    If all tasks are terminal, returns the last task. If the list is empty,
+    returns (None, None).
+    """
+    if not id_statuses:
+        return None, None
+    task_id, status = next(
+        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
+        id_statuses[-1],
+    )
+    return task_id, status
+
+
 def get_latest_task_id_status(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job.
@@ -1100,15 +1117,7 @@ def get_latest_task_id_status(
     If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
-    if not id_statuses:
-        return None, None
-    task_id, status = next(
-        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
-        id_statuses[-1],
-    )
-    # Unpack the tuple first, or it triggers a Pylint's bug on recognizing
-    # the return type.
-    return task_id, status
+    return get_latest_task_id_from_statuses(id_statuses)
 
 
 def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
@@ -1430,6 +1439,25 @@ def get_status_count_with_filters(
         for status_value, count in rows:
             # status_value is already a string (enum value)
             results[str(status_value)] = int(count)
+    return results
+
+
+def get_status_counts() -> Dict[str, int]:
+    """Get count of tasks grouped by ManagedJobStatus.
+
+    This is used by the Prometheus ManagedJobsCollector.
+    """
+    query = sqlalchemy.select(
+        spot_table.c.status,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).group_by(spot_table.c.status)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    results: Dict[str, int] = {}
+    for status_value, count in rows:
+        results[str(status_value)] = int(count)
     return results
 
 
@@ -2151,6 +2179,13 @@ def get_workspace(job_id: int) -> str:
 async def get_latest_task_id_status_async(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job."""
+    id_statuses = await get_all_task_ids_statuses_async(job_id)
+    return get_latest_task_id_from_statuses(id_statuses)
+
+
+async def get_all_task_ids_statuses_async(
+        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+    """Returns all (task_id, status) pairs for a job (async version)."""
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
@@ -2159,17 +2194,7 @@ async def get_latest_task_id_status_async(
                 spot_table.c.status,
             ).where(spot_table.c.spot_job_id == job_id).order_by(
                 spot_table.c.task_id.asc()))
-        id_statuses = [
-            (row[0], ManagedJobStatus(row[1])) for row in result.fetchall()
-        ]
-
-    if not id_statuses:
-        return None, None
-    task_id, status = next(
-        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
-        id_statuses[-1],
-    )
-    return task_id, status
+        return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 
 async def set_starting_async(job_id: int,

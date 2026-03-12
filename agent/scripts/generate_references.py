@@ -7,7 +7,7 @@ Generates three reference files from source:
   - references/python-sdk.md: From sky/client/sdk.py docstrings
 
 Usage:
-    python skills/skypilot/scripts/generate_references.py
+    python agent/scripts/generate_references.py
 
 Run from the SkyPilot repository root.
 """
@@ -22,13 +22,13 @@ import textwrap
 def _get_repo_root():
     """Get the repository root directory."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    # scripts/ -> skypilot/ -> skills/ -> repo root
-    return os.path.normpath(os.path.join(script_dir, '..', '..', '..'))
+    # scripts/ -> agent/ -> repo root
+    return os.path.normpath(os.path.join(script_dir, '..', '..'))
 
 
 REPO_ROOT = _get_repo_root()
-REFERENCES_DIR = os.path.join(REPO_ROOT, 'skills', 'skypilot', 'skills',
-                              'skypilot', 'references')
+REFERENCES_DIR = os.path.join(REPO_ROOT, 'agent', 'skills', 'skypilot',
+                              'references')
 
 # ---------------------------------------------------------------------------
 # YAML Spec Generation
@@ -360,7 +360,7 @@ def generate_cli_reference():
 
     lines = [
         '<!-- AUTO-GENERATED from sky/client/cli/command.py -->',
-        '<!-- Run: python skills/skypilot/scripts/generate_references.py -->',
+        '<!-- Run: python agent/scripts/generate_references.py -->',
         '',
         '# SkyPilot CLI Reference',
         '',
@@ -660,7 +660,7 @@ def generate_python_sdk():
 
     lines = [
         '<!-- AUTO-GENERATED from sky/client/sdk.py -->',
-        '<!-- Run: python skills/skypilot/scripts/generate_references.py -->',
+        '<!-- Run: python agent/scripts/generate_references.py -->',
         '',
         '# SkyPilot Python SDK Reference',
         '',
@@ -748,7 +748,7 @@ def main():
     generate_python_sdk()
     print()
 
-    print('Done! All references generated in skills/skypilot/references/')
+    print('Done! All references generated in agent/skills/skypilot/references/')
 
 
 if __name__ == '__main__':

@@ -45,25 +45,45 @@ SkyPilot has three core abstractions. Use the right one for each stage of your w
 
 ## Before You Start (Agent Bootstrap)
 
-Before running any SkyPilot command, verify the environment:
+Bootstrap to confirm SkyPilot is installed, connected to an API server, and has cloud credentials. Once confirmed, skip straight to the user's task.
 
-**Step 1: Check if SkyPilot is installed**
+**Step 1: Check installation and API server connectivity**
+
 ```bash
-sky --version
+sky api status -l 1
 ```
-If `sky` is not found, install it first:
+| Output contains | Meaning | Next action |
+|-----------------|---------|-------------|
+| A table with request data | Server is running and connected | **Bootstrap done.** Skip to user's task. |
+| `SkyPilot API server is not running.` | No server connected | Go to "Start or connect a server" below. |
+| `command not found: sky` | SkyPilot not installed | Go to "Install SkyPilot" below. |
+| Connection error or authentication error | Remote server unreachable or auth expired | Tell the user and suggest `sky api login -e <endpoint>` to reconnect. |
+
+**Install SkyPilot** (only if `sky` command not found):
 ```bash
 pip install "skypilot[aws,gcp,kubernetes]"  # Pick clouds the user needs
 ```
-Ask the user which clouds they need if unclear.
+Ask the user which clouds they need if unclear, then re-run `sky api status -l 1`.
 
-**Step 2: Check cloud credentials**
+**Start or connect a server** (only if "not running"):
+
+Ask the user:
+> Do you have an existing SkyPilot API server to connect to, or should I start one locally?
+
+- **Connect to existing server:** `sky api login -e <API_SERVER_URL>` — get the URL from the user.
+- **Start locally:** `sky api start`
+
+After either path, re-run `sky api status -l 1` to confirm the server is reachable.
+
+**Step 2: Check cloud credentials** (only for fresh setups — skip if the server was already running)
 ```bash
-sky check
+sky check -o json
 ```
-This shows which clouds are configured. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
+This shows which clouds are enabled or disabled. If the user's target cloud is not enabled, guide them through credential setup (see [Troubleshooting](references/troubleshooting.md#1-installation-and-credentials)).
 
 ## Essential Commands
+
+Use `-o json` with status/query commands to get structured JSON output instead of tables.
 
 **Clusters** — interactive development and debugging:
 
@@ -71,18 +91,18 @@ This shows which clouds are configured. If the user's target cloud is not enable
 |---------|-------------|
 | `sky launch -c NAME task.yaml` | Launch a cluster or run a task |
 | `sky exec NAME task.yaml` | Run task on existing cluster (skips provisioning) |
-| `sky status` | Show all clusters |
+| `sky status -o json` | Show all clusters |
 | `sky logs NAME` | Stream job logs from a cluster |
 | `sky stop NAME` / `sky start NAME` | Stop/restart to save costs (preserves disk) |
 | `sky down NAME` | Tear down a cluster completely |
-| `sky gpus list` | List available GPU types across clouds |
+| `sky gpus list -o json` | List available GPU types across clouds |
 
 **Managed Jobs** — long-running unattended workloads:
 
 | Command | Description |
 |---------|-------------|
 | `sky jobs launch task.yaml` | Launch a managed job (auto lifecycle + recovery) |
-| `sky jobs queue` | Show all managed jobs and their status |
+| `sky jobs queue -o json` | Show all managed jobs and their status |
 | `sky jobs logs JOB_ID` | Stream logs from a managed job |
 | `sky jobs cancel JOB_ID` | Cancel a managed job |
 
@@ -211,6 +231,10 @@ resources:
 # Launch and run a task
 sky launch -c mycluster task.yaml
 
+# Launch with autostop at launch time (preferred: saves cost, no follow-up command needed)
+sky launch -c mycluster task.yaml -i 30        # stop after 30 min idle
+sky launch -c mycluster task.yaml -i 30 --down # tear down after 30 min idle
+
 # Override or pass environment variables via CLI
 sky launch -c mycluster task.yaml --env MODEL_NAME=llama3 --env BATCH_SIZE=64
 
@@ -220,11 +244,9 @@ sky exec mycluster another_task.yaml
 # Run an inline command
 sky exec mycluster -- python train.py --epochs 10
 
-# Set autostop (stop after 30 min idle, preserving disk)
-sky autostop mycluster -i 30
-
-# Set autodown (tear down after 30 min idle)
-sky autostop mycluster -i 30 --down
+# Set autostop after launch (use if you forgot to set -i at launch time)
+sky autostop mycluster -i 30        # stop after 30 min idle, preserving disk (can restart with sky start)
+sky autostop mycluster -i 30 --down # tear down after 30 min idle (disk is deleted, cannot restart)
 
 # Stop to save costs, restart later
 sky stop mycluster
@@ -254,7 +276,7 @@ run: |
 sky jobs launch managed-job.yaml
 
 # Check status
-sky jobs queue
+sky jobs queue -o json
 
 # Stream logs
 sky jobs logs <job_id>
@@ -319,7 +341,7 @@ sky serve down my-llm
      sky jobs launch sweep.yaml --env LR=$lr --name sweep-lr-$lr
    done
    ```
-3. Monitor with `sky jobs queue`
+3. Monitor with `sky jobs queue -o json`
 
 ### Model Serving Deployment
 1. Write serve YAML with `service:` section
@@ -333,7 +355,7 @@ When using SkyPilot programmatically, follow this loop:
 
 1. **Validate**: `sky launch --dryrun task.yaml` (check resource availability/cost)
 2. **Launch**: `sky launch -c mycluster task.yaml`
-3. **Monitor**: `sky status` and `sky queue mycluster`
+3. **Monitor**: `sky status -o json` and `sky queue mycluster -o json`
 4. **Debug**: `sky logs mycluster` (stream logs) or `ssh mycluster` (interactive)
 5. **Iterate**: `sky exec mycluster updated_task.yaml` (run on existing cluster)
 6. **Cleanup**: `sky down mycluster`
@@ -348,6 +370,7 @@ When using SkyPilot programmatically, follow this loop:
 | Hardcoding `infra: aws` without user asking | Limits availability and increases cost | Only set `infra:` when user explicitly requests a cloud |
 | Not using `envs:` for configurable values | Hard to reuse or override from CLI | Use `envs:` in YAML + `--env KEY=VAL` for parameterization |
 | Running `sky launch` without `-c <name>` | Creates randomly-named cluster, hard to reference | Always name clusters with `-c` |
+| Parsing table output from status commands | Table formatting is for humans, fragile to parse | Use `-o json` for structured output |
 | Using deprecated `cloud:`/`region:`/`zone:` fields | Deprecated in favor of `infra:` | Use `infra: aws/us-east-1` instead |
 
 ## Common Issues Quick Reference
@@ -361,7 +384,7 @@ When using SkyPilot programmatically, follow this loop:
 | Preemption/quota | Use `sky jobs launch` for automatic recovery and lifecycle management |
 | Port not accessible | Ensure `ports:` is set in resources and security groups allow traffic |
 | File sync slow | Use cloud bucket mounts instead of `workdir` for large datasets |
-| Credentials error | Run `sky check` and follow instructions per cloud |
+| Credentials error | Run `sky check -o json` and inspect which clouds are disabled |
 
 ## References
 

@@ -106,6 +106,11 @@ logger = sky_logging.init_logger(__name__)
 
 hinted_for_server_install_version_mismatch = False
 _upgrade_hint_shown = False
+# Cached from the latest health check response. Used to determine whether
+# to include client user hash in usage reports and request env vars.
+basic_auth_enabled: bool = False
+# Cached client user hash (machine-local identity), computed once.
+client_user_hash: Optional[str] = None
 
 crypt_ctx = passlib_context.CryptContext([
     'bcrypt', 'sha256_crypt', 'sha512_crypt', 'des_crypt', 'apr_md5_crypt',
@@ -532,8 +537,15 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
         version_on_disk = result.get('version_on_disk')
         commit = result.get('commit')
         user = result.get('user')
-        basic_auth_enabled = result.get('basic_auth_enabled')
         latest_version = result.get('latest_version')
+        # Cache basic_auth_enabled and set client user hash on the
+        # client-side usage singleton.
+        global basic_auth_enabled, client_user_hash
+        basic_auth_enabled = bool(result.get('basic_auth_enabled'))
+        if basic_auth_enabled:
+            if client_user_hash is None:
+                client_user_hash = common_utils.generate_user_hash()
+            usage_lib.messages.usage.client_user_hash = client_user_hash
         server_info = ApiServerInfo(status=ApiServerStatus(server_status),
                                     api_version=api_version,
                                     version=version,

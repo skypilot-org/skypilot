@@ -9,6 +9,10 @@ Installation
 Install SkyPilot
 ----------------
 
+.. tip::
+
+   To use SkyPilot with AI agent (Claude Code, Codex, etc.), install :ref:`SkyPilot Skill <skill>` to give your agent full SkyPilot expertise.
+
 SkyPilot supports installation with ``uv`` or ``pip``.
 
 .. tab-set::

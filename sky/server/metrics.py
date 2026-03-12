@@ -5,7 +5,7 @@ import multiprocessing
 import os
 import threading
 import time
-from typing import List
+from typing import List, Optional
 
 import fastapi
 from prometheus_client import core as prom_core
@@ -94,6 +94,76 @@ try:
 except ValueError:
     pass
 
+# Cache TTL shared by all custom collectors.
+_COLLECTOR_CACHE_TTL_SECONDS = _BURN_RATE_UPDATE_INTERVAL_SECONDS
+
+
+class ManagedJobsCollector:
+    """Collector for managed job state metrics.
+
+    Queries the managed jobs DB to produce real-time gauges for
+    job status counts.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
+        self._cached_status_counts: dict = {}
+
+    def _refresh(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import state as managed_job_state
+        self._cached_status_counts = (managed_job_state.get_status_counts())
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_count',
+            'Current count of managed job tasks by status',
+            labels=['status'])
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._refresh()
+                    self._last_scrape_time = now
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('Failed to collect managed jobs metrics')
+            status_counts = self._cached_status_counts
+
+        status_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_count',
+            'Current count of managed job tasks by status',
+            labels=['status'])
+        for status, count in status_counts.items():
+            status_metric.add_metric([status], count)
+        yield status_metric
+
+
+_MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
+
+
+def maybe_register_managed_jobs_collector():
+    """Register the managed jobs collector if in consolidation mode.
+
+    Only consolidation mode has the managed jobs DB co-located with the
+    API server. In remote SSH/gRPC modes the DB lives on the controller
+    cluster and is not directly accessible.
+    """
+    global _MANAGED_JOBS_COLLECTOR
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    _MANAGED_JOBS_COLLECTOR = ManagedJobsCollector()
+    try:
+        prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
+    except ValueError:
+        pass
+
+
 metrics_app = fastapi.FastAPI()
 
 
@@ -107,12 +177,23 @@ def metrics() -> fastapi.Response:
         registry = prom.CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         registry.register(_BURN_RATE_COLLECTOR)
+        if _MANAGED_JOBS_COLLECTOR is not None:
+            registry.register(_MANAGED_JOBS_COLLECTOR)
         data = generate_latest(registry)
     else:
         data = generate_latest()
     return fastapi.Response(content=data,
                             media_type=prom.CONTENT_TYPE_LATEST,
                             headers={'Cache-Control': 'no-cache'})
+
+
+# Per-context timeout for metrics collection. Must be shorter than the
+# Prometheus scrape_timeout (default 10s in our Helm chart) so that the
+# endpoint responds promptly even when one remote cluster is unreachable.
+# Without this, a single hanging port-forward (e.g. 30s httpx timeout)
+# blocks the entire /gpu-metrics response, causing Prometheus to mark the
+# scrape target as down.
+_PER_CONTEXT_TIMEOUT_SECONDS = 8
 
 
 @metrics_app.get('/gpu-metrics')
@@ -126,8 +207,11 @@ async def gpu_metrics() -> fastapi.Response:
         context for context in contexts if context != 'in-cluster'
     ]
     tasks = [
-        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
-        for context in remote_contexts
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_context(context),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for context in remote_contexts
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
