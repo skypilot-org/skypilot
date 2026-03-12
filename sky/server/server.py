@@ -1448,7 +1448,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         status=responses.UploadStatus.COMPLETED.value)
 
 
-@app.get('/upload_v2/blob')
+@app.post('/upload_v2/blob')
 async def check_blob_exists(request: fastapi.Request, user_hash: str,
                             blob_id: str) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
@@ -1487,6 +1487,10 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     blobs_dir = mount_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
     blob_path = blobs_dir / f'{upload_id}.zip'
+
+    if blob_path.exists():
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.COMPLETED.value)
 
     # Per-blob filelock to prevent concurrent uploads of the same blob.
     locks_dir = blobs_dir / '.locks'

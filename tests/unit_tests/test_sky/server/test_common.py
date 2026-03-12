@@ -1,11 +1,13 @@
 """Unit tests for the SkyPilot API server common module."""
 from http.cookiejar import Cookie
 from http.cookiejar import MozillaCookieJar
+import os
 import pathlib
 import sys
 import tempfile
 import time
 from unittest import mock
+import zipfile
 
 import pytest
 import requests
@@ -513,3 +515,108 @@ run: echo "hello world"
     # Verify the dag was created successfully
     assert dag is not None
     assert len(dag.tasks) == 1
+
+
+# --- Tests for is_relative_to ---
+
+
+def test_is_relative_to_child():
+    """Child path returns True."""
+    parent = pathlib.Path('/a/b')
+    child = pathlib.Path('/a/b/c/d')
+    assert common.is_relative_to(child, parent) is True
+
+
+def test_is_relative_to_same():
+    """Same path returns True."""
+    path = pathlib.Path('/a/b')
+    assert common.is_relative_to(path, path) is True
+
+
+def test_is_relative_to_outside():
+    """Outside path returns False."""
+    parent = pathlib.Path('/a/b')
+    outside = pathlib.Path('/a/c')
+    assert common.is_relative_to(outside, parent) is False
+
+
+# --- Tests for unzip_to_dir ---
+
+
+def test_unzip_normal(tmp_path):
+    """A zip with a regular file and a directory extracts correctly."""
+    zip_path = tmp_path / 'test.zip'
+    target_dir = tmp_path / 'out'
+    target_dir.mkdir()
+
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        zf.writestr('subdir/', '')
+        zf.writestr('subdir/hello.txt', 'world')
+
+    common.unzip_to_dir(zip_path, target_dir)
+
+    assert (target_dir / 'subdir').is_dir()
+    assert (target_dir / 'subdir' / 'hello.txt').read_text() == 'world'
+
+
+def test_unzip_symlink(tmp_path):
+    """A zip containing a relative symlink is extracted correctly."""
+    zip_path = tmp_path / 'test.zip'
+    target_dir = tmp_path / 'out'
+    target_dir.mkdir()
+
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        zf.writestr('real.txt', 'content')
+        info = zipfile.ZipInfo('link.txt')
+        info.external_attr = 0xA << 28  # symlink
+        zf.writestr(info, 'real.txt')
+
+    common.unzip_to_dir(zip_path, target_dir)
+
+    link = target_dir / 'link.txt'
+    assert link.is_symlink()
+    assert os.readlink(str(link)) == 'real.txt'
+    assert link.read_text() == 'content'
+
+
+def test_unzip_zip_slip(tmp_path):
+    """A zip member with ../ in its name raises ValueError (zip-slip)."""
+    zip_path = tmp_path / 'evil.zip'
+    target_dir = tmp_path / 'out'
+    target_dir.mkdir()
+
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        zf.writestr('../evil.txt', 'gotcha')
+
+    with pytest.raises(ValueError, match='outside target directory'):
+        common.unzip_to_dir(zip_path, target_dir)
+
+
+def test_unzip_absolute_symlink_target(tmp_path):
+    """A symlink with an absolute target raises AssertionError."""
+    zip_path = tmp_path / 'evil.zip'
+    target_dir = tmp_path / 'out'
+    target_dir.mkdir()
+
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        info = zipfile.ZipInfo('link.txt')
+        info.external_attr = 0xA << 28
+        zf.writestr(info, '/etc/passwd')
+
+    with pytest.raises(AssertionError):
+        common.unzip_to_dir(zip_path, target_dir)
+
+
+def test_unzip_symlink_escaping(tmp_path):
+    """A symlink targeting ../../etc/passwd raises ValueError."""
+    zip_path = tmp_path / 'evil.zip'
+    target_dir = tmp_path / 'out'
+    target_dir.mkdir()
+
+    with zipfile.ZipFile(zip_path, 'w') as zf:
+        info = zipfile.ZipInfo('link.txt')
+        info.external_attr = 0xA << 28
+        zf.writestr(info, '../../etc/passwd')
+
+    with pytest.raises(ValueError, match='not in userspace'):
+        common.unzip_to_dir(zip_path, target_dir)

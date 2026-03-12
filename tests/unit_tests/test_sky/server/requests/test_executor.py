@@ -3,10 +3,12 @@ import asyncio
 import concurrent.futures
 import functools
 import os
+import pathlib
 import queue as queue_lib
 import time
 from typing import List
 from unittest import mock
+import zipfile
 
 import pytest
 
@@ -642,3 +644,70 @@ async def test_request_worker_retry_execution_retryable_error(
     assert len(submit_calls) == 1, (
         f'Expected submit_until_success to be called once, got {len(submit_calls)} calls'
     )
+
+
+def test_extract_blob_valid(tmp_path, monkeypatch):
+    """Test that _extract_blob_for_request extracts a valid zip blob."""
+    blob_id = 'a' * 64
+    user_hash = 'testuser'
+    request_id = 'test-request-123'
+
+    # Set up directory structure under tmp_path
+    blobs_dir = tmp_path / user_hash / 'file_mounts' / 'blobs'
+    blobs_dir.mkdir(parents=True)
+
+    # Create a real zip file containing a test file
+    blob_path = blobs_dir / f'{blob_id}.zip'
+    with zipfile.ZipFile(blob_path, 'w') as zf:
+        zf.writestr('hello.txt', 'hello world')
+
+    # Monkeypatch API_SERVER_CLIENT_DIR to point to tmp_path
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        pathlib.Path(tmp_path))
+
+    request_body = payloads.RequestBody(
+        env_vars={constants.USER_ID_ENV_VAR: user_hash},
+        file_mounts_blob_id=blob_id,
+    )
+
+    result = executor._extract_blob_for_request(request_body, request_id)
+
+    # Verify the extraction directory was created and files were extracted
+    result_path = pathlib.Path(result)
+    assert result_path.exists()
+    assert (result_path / 'hello.txt').exists()
+    assert (result_path / 'hello.txt').read_text() == 'hello world'
+
+    # Verify the path is under the expected exec directory
+    expected_dir = (tmp_path / user_hash / 'file_mounts' / 'exec' / request_id)
+    assert result_path == expected_dir
+
+
+def test_extract_blob_invalid_id(tmp_path, monkeypatch):
+    """Test that _extract_blob_for_request raises ValueError for invalid blob IDs."""
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        pathlib.Path(tmp_path))
+
+    request_body = payloads.RequestBody(
+        env_vars={constants.USER_ID_ENV_VAR: 'testuser'},
+        file_mounts_blob_id='not-a-hash',
+    )
+
+    with pytest.raises(ValueError, match='Invalid file_mounts_blob_id'):
+        executor._extract_blob_for_request(request_body, 'test-request')
+
+
+def test_extract_blob_missing_file(tmp_path, monkeypatch):
+    """Test that _extract_blob_for_request raises FileNotFoundError when blob is missing."""
+    blob_id = 'b' * 64
+
+    monkeypatch.setattr('sky.server.common.API_SERVER_CLIENT_DIR',
+                        pathlib.Path(tmp_path))
+
+    request_body = payloads.RequestBody(
+        env_vars={constants.USER_ID_ENV_VAR: 'testuser'},
+        file_mounts_blob_id=blob_id,
+    )
+
+    with pytest.raises(FileNotFoundError, match='garbage collected'):
+        executor._extract_blob_for_request(request_body, 'test-request')
