@@ -26,7 +26,7 @@ import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Tuple, Type)
+                    Set, Tuple, Type)
 import uuid
 import zipfile
 
@@ -1285,12 +1285,28 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
+async def _prepare_client_mount_dir(user_hash: str,
+                                    request: fastapi.Request) -> pathlib.Path:
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
+
+    client_file_mounts_dir = (
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+        'file_mounts')
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
+    return client_file_mounts_dir
+
+
 async def _receive_and_assemble_chunks(
+    base_dir: pathlib.Path,
+    zip_name: str,
     request: fastapi.Request,
-    chunk_dir: pathlib.Path,
-    assembled_zip_path: pathlib.Path,
     chunk_index: int,
     total_chunks: int,
+    unzip: bool,
 ) -> Optional[payloads.UploadZipFileResponse]:
     """Receive chunks and assemble them into a zip file."""
     # Field _body would be set if the request body has been received, fail fast
@@ -1302,7 +1318,7 @@ async def _receive_and_assemble_chunks(
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-
+    # TODO(SKY-1271): We need to double check security of uploading zip file.
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -1313,8 +1329,9 @@ async def _receive_and_assemble_chunks(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
     if total_chunks == 1:
-        zip_file_path = assembled_zip_path
+        zip_file_path = base_dir / f'{zip_name}.zip'
     else:
+        chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
@@ -1337,15 +1354,19 @@ async def _receive_and_assemble_chunks(
             detail=('Error uploading zip file: '
                     f'{common_utils.format_exception(e)}'))
 
+    def get_missing_chunks(total_chunks: int) -> Set[str]:
+        return set(f'part{i}' for i in range(total_chunks)) - set(
+            p.name for p in chunk_dir.glob('part*'))
+
     if total_chunks > 1:
         zip_file_path.rename(zip_file_path.with_suffix(''))
-        missing_chunks = (set(f'part{i}' for i in range(total_chunks)) -
-                          set(p.name for p in chunk_dir.glob('part*')))
+        missing_chunks = get_missing_chunks(total_chunks)
         if missing_chunks:
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        async with aiofiles.open(assembled_zip_path, 'wb') as zip_file:
+        zip_file_path = base_dir / f'{zip_name}.zip'
+        async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
                 async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
                     while True:
@@ -1355,7 +1376,11 @@ async def _receive_and_assemble_chunks(
                         if not data:
                             break
                         await zip_file.write(data)
-
+    logger.info(f'Uploaded zip file: {zip_file_path}')
+    if unzip:
+        await unzip_file(zip_file_path, base_dir)
+    if total_chunks > 1:
+        await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return None
 
 
@@ -1383,18 +1408,6 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     upload_ids_to_cleanup[(upload_id,
                            user_hash)] = (datetime.datetime.now() +
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
-    # For anonymous access, use the user hash from client
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        # Otherwise, the authenticated identity should be used.
-        user_id = request.state.auth_user.id
-
-    # TODO(SKY-1271): We need to double check security of uploading zip file.
-    client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-        'file_mounts')
-    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
-
     # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
     # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
     if not re.match(
@@ -1403,22 +1416,20 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         raise ValueError(
             f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
 
-    chunk_dir = client_file_mounts_dir / upload_id
-    zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
-    result = await _receive_and_assemble_chunks(request, chunk_dir,
-                                                zip_file_path, chunk_index,
-                                                total_chunks)
+    base_dir = await _prepare_client_mount_dir(user_hash, request)
+    result = await _receive_and_assemble_chunks(base_dir=base_dir,
+                                                zip_name=upload_id,
+                                                request=request,
+                                                chunk_index=chunk_index,
+                                                total_chunks=total_chunks,
+                                                unzip=True)
     if result is not None:
         return result
-    logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
-    if total_chunks > 1:
-        await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
 
-@app.get('/upload_v2')
+@app.get('/upload_v2/blob')
 async def check_blob_exists(request: fastapi.Request, user_hash: str,
                             blob_id: str) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
@@ -1431,7 +1442,8 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     blob_path = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
                  'file_mounts' / 'blobs' / f'{blob_id}.zip')
     if blob_path.exists():
-        blob_path.touch()  # Refresh mtime to prevent GC race
+        # Refresh mtime to claim a longer lifetime of the blob cache
+        blob_path.touch()
         return {'exists': True}
     return {'exists': False}
 
@@ -1449,31 +1461,31 @@ async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
     if not re.match(r'^[0-9a-f]{64}$', blob_id):
         raise fastapi.HTTPException(status_code=400,
                                     detail=f'Invalid blob_id: {blob_id}')
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        user_id = request.state.auth_user.id
-    client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-        'file_mounts')
-    blobs_dir = client_file_mounts_dir / 'blobs'
+    mount_dir = await _prepare_client_mount_dir(user_hash, request)
+    blobs_dir = mount_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
     blob_path = blobs_dir / f'{blob_id}.zip'
-
     # If blob already exists (race with another upload), return immediately.
     if blob_path.exists():
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
-
+    # For /upload_v2, we use staging directory to avoid corruption of the blob:
+    # - In /upload, each upload is a separate path (upload id), thus a broken
+    #   upload will not affect other operations.
+    # - In /upload_v2, we share the uploaded blob via hash, thus we need to
+    #   ensure the final blob (blobs/{blob_id}.zip) is atomic.
     staging_dir = blobs_dir / '.staging' / blob_id
-    assembled_zip = staging_dir / 'assembled.zip'
-    result = await _receive_and_assemble_chunks(request, staging_dir,
-                                                assembled_zip, chunk_index,
-                                                total_chunks)
+    staging_zip = staging_dir / 'staging.zip'
+    result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                zip_name='staging',
+                                                request=request,
+                                                chunk_index=chunk_index,
+                                                total_chunks=total_chunks,
+                                                unzip=False)
     if result is not None:
         return result
-
-    # Move assembled zip to final blob path (atomic on same filesystem).
-    assembled_zip.rename(blob_path)
+    # Move the staging zip to final blob path (atomic on same filesystem).
+    staging_zip.rename(blob_path)
     logger.info(f'Uploaded blob: {blob_path}')
     # Clean staging dir.
     await asyncio.to_thread(shutil.rmtree, str(staging_dir), True)

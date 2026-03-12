@@ -218,14 +218,7 @@ def iter_zip_entries(
     items: List[str],
     relative_to_items: bool = False,
 ) -> Iterator[Tuple[str, str, ZipEntryKind]]:
-    """Iterate over file-tree entries that would be included in a zip.
-
-    Yields (archive_name, file_path, kind) tuples in walk order, applying
-    gitignore/skyignore exclusions and skipping sockets.
-
-    For symlinks, file_path is the symlink path itself (caller reads the
-    target via os.readlink).  For directories, file_path is the dir path.
-    """
+    """Iterate over file-tree entries that would be included in a zip."""
 
     def _get_archive_name(file_path: str, item_path: str) -> str:
         if relative_to_items:
