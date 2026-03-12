@@ -1200,8 +1200,8 @@ def test_jobs_launch_and_logs(generic_cloud: str):
                     queue_request_id))
             # queue_v2 returns {'jobs': [...], ...}
             jobs_list = queue_response.get(
-                'jobs', queue_response) if isinstance(
-                    queue_response, dict) else queue_response
+                'jobs', queue_response) if isinstance(queue_response,
+                                                      dict) else queue_response
             job_exist = False
             for job in jobs_list:
                 if job['job_id'] == job_id:
