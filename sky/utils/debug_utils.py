@@ -525,8 +525,7 @@ def _dump_server_info(dump_dir: str,
     # Add config info
     try:
         server_info['jobs_controller_consolidation_mode'] = (
-            skypilot_config.get_nested(
-                ('jobs', 'controller', 'consolidation_mode'), False))
+            managed_job_utils.is_consolidation_mode())
         server_info['config'] = debug_dump_helpers.redact_config(
             dict(skypilot_config.get_server_config()))
     except Exception as e:  # pylint: disable=broad-except
