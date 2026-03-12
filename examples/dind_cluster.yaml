@@ -1,0 +1,50 @@
+resources:
+  cpus: 2+
+  infra: kubernetes
+
+num_nodes: 1
+
+setup: |
+  # Install docker-cli
+  sudo install -m 0755 -d /etc/apt/keyrings
+  sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+  sudo chmod a+r /etc/apt/keyrings/docker.asc
+  echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+  sudo apt-get update && sudo apt-get install -y docker-ce-cli
+  docker info
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - name: ray-node
+            env:
+              - name: DOCKER_HOST
+                value: "unix:///var/run/dind/docker.sock"
+            volumeMounts:
+              - name: docker-sock-dir
+                mountPath: /var/run/dind
+          - name: dind
+            image: docker:dind
+            securityContext:
+              privileged: true
+            env:
+              - name: DOCKER_TLS_CERTDIR
+                value: ""
+            args:
+              - "--host=unix:///var/run/dind/docker.sock"
+              - "--group=1000"
+            volumeMounts:
+              - name: docker-sock-dir
+                mountPath: /var/run/dind
+              - name: dind-storage
+                mountPath: /var/lib/docker
+        volumes:
+          - name: docker-sock-dir
+            emptyDir: {}
+          - name: dind-storage
+            emptyDir: {}
