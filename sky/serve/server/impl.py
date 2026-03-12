@@ -723,9 +723,16 @@ def down(
     if isinstance(service_names, str):
         service_names = [service_names]
     controller_type = controller_utils.get_controller_for_pool(pool)
-    handle = backend_utils.is_controller_accessible(
-        controller=controller_type,
-        stopped_message=f'All {noun}s should have terminated.')
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=f'All {noun}s should have terminated.')
+    except exceptions.ClusterNotUpError:
+        if not purge:
+            raise
+        # Controller is gone but --purge was specified. We'll clean up
+        # database records directly without contacting the controller.
+        handle = None
 
     service_names_str = ','.join(service_names)
     if sum([bool(service_names), all]) != 1:
@@ -737,42 +744,81 @@ def down(
 
     service_names = None if all else service_names
 
-    try:
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        use_legacy = not handle.is_grpc_enabled_with_flag
+    if handle is not None:
+        try:
+            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            use_legacy = not handle.is_grpc_enabled_with_flag
 
-        if not use_legacy:
-            try:
-                stdout = serve_rpc_utils.RpcRunner.terminate_services(
-                    handle, service_names, purge, pool)
-            except exceptions.SkyletMethodNotImplementedError:
-                use_legacy = True
+            if not use_legacy:
+                try:
+                    stdout = serve_rpc_utils.RpcRunner.terminate_services(
+                        handle, service_names, purge, pool)
+                except exceptions.SkyletMethodNotImplementedError:
+                    use_legacy = True
 
-        if use_legacy:
-            backend = backend_utils.get_backend_from_handle(handle)
-            assert isinstance(backend, backends.CloudVmRayBackend)
-            code = serve_utils.ServeCodeGen.terminate_services(
-                service_names, purge, pool)
+            if use_legacy:
+                backend = backend_utils.get_backend_from_handle(handle)
+                assert isinstance(backend, backends.CloudVmRayBackend)
+                code = serve_utils.ServeCodeGen.terminate_services(
+                    service_names, purge, pool)
 
-            returncode, stdout, _ = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True,
-                                                        stream_logs=False)
+                returncode, stdout, _ = backend.run_on_head(
+                    handle, code, require_outputs=True, stream_logs=False)
 
-            subprocess_utils.handle_returncode(returncode, code,
-                                               f'Failed to terminate {noun}',
-                                               stdout)
-    except exceptions.FetchClusterInfoError as e:
-        raise RuntimeError(
-            'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {controller_type.value.cluster_name}` and try '
-            'again.') from e
-    except exceptions.CommandError as e:
-        raise RuntimeError(e.error_msg) from e
-    except grpc.RpcError as e:
-        raise RuntimeError(f'{e.details()} ({e.code()})') from e
-    except grpc.FutureTimeoutError as e:
-        raise RuntimeError('gRPC timed out') from e
+                subprocess_utils.handle_returncode(
+                    returncode, code, f'Failed to terminate {noun}', stdout)
+        except exceptions.FetchClusterInfoError as e:
+            raise RuntimeError(
+                'Failed to fetch controller IP. Please refresh controller '
+                f'status by `sky status -r '
+                f'{controller_type.value.cluster_name}` and try again.') from e
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+        except grpc.RpcError as e:
+            raise RuntimeError(f'{e.details()} ({e.code()})') from e
+        except grpc.FutureTimeoutError as e:
+            raise RuntimeError('gRPC timed out') from e
+    else:
+        # purge with unreachable controller: clean up what we can from
+        # the API server side. The serve_state DB (pool records) lives on
+        # the controller which is gone, so we can only clean up the
+        # managed_job_state DB (job records) which lives on the API server.
+        # Pool worker clusters may be leaked.
+        messages: List[str] = []
+        if pool:
+            # Mark nonterminal jobs associated with the specified pools
+            # as FAILED_CONTROLLER so they don't block future operations.
+            # Import here to avoid circular imports at module level.
+            # pylint: disable-next=import-outside-toplevel
+            from sky.jobs import state as managed_job_state
+            pool_names_to_purge = service_names if service_names else []
+            for pool_name in pool_names_to_purge:
+                nonterminal_job_ids = (
+                    managed_job_state.get_nonterminal_job_ids_by_pool(pool_name)
+                )
+                for job_id in nonterminal_job_ids:
+                    managed_job_state.set_failed(
+                        job_id,
+                        task_id=None,
+                        failure_type=managed_job_state.ManagedJobStatus.
+                        FAILED_CONTROLLER,
+                        failure_reason=('Pool force-deleted with --purge while '
+                                        'job was in non-terminal state.'),
+                    )
+                if nonterminal_job_ids:
+                    ids_str = ', '.join(str(j) for j in nonterminal_job_ids)
+                    messages.append(
+                        f'Marked {len(nonterminal_job_ids)} nonterminal '
+                        f'job(s) in pool {pool_name!r} as '
+                        f'FAILED_CONTROLLER: {ids_str}')
+        messages.append(
+            f'{colorama.Fore.YELLOW}Jobs controller is not accessible. '
+            f'Forced cleanup of SkyPilot database records only. '
+            f'Cloud resources (VMs, etc.) may not be terminated and could '
+            f'continue incurring charges. Please verify in your cloud '
+            f'console that all resources have been cleaned up.'
+            f'{colorama.Style.RESET_ALL}')
+        stdout = '\n'.join(messages)
 
     logger.info(stdout)
 
