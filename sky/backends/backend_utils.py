@@ -973,6 +973,10 @@ def write_cluster_config(
             'user': common_utils.get_cleaned_username(
                 os.environ.get(constants.USER_ENV_VAR, '')),
             'workspace': skypilot_config.get_active_workspace(),
+            # The original username before cleaning, used in pod
+            # annotations where character restrictions don't apply.
+            'original_user': (os.environ.get(constants.USER_ENV_VAR, '') or
+                              common_utils.get_current_user_name()),
 
             # Networking configs
             'use_internal_ips': skypilot_config.get_effective_region_config(
