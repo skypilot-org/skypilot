@@ -35,6 +35,7 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
+import filelock
 import jwt as pyjwt
 import starlette.middleware.base
 import uvloop
@@ -589,6 +590,23 @@ async def cleanup_unreferenced_blobs():
                     logger.info(f'GC: removing unreferenced blob '
                                 f'{blob.name} for user {user_dir.name}')
                     blob.unlink(missing_ok=True)
+            # Clean up lock files for blobs that no longer exist.
+            locks_dir = blobs_dir / '.locks'
+            if locks_dir.exists():
+                for lock_file in locks_dir.glob('*.lock'):
+                    blob_id = lock_file.stem
+                    if not (blobs_dir / f'{blob_id}.zip').exists():
+                        lock_file.unlink(missing_ok=True)
+            # Clean up stale staging directories from interrupted uploads.
+            staging_base = blobs_dir / '.staging'
+            if staging_base.exists():
+                for staging in staging_base.iterdir():
+                    if staging.is_dir():
+                        try:
+                            if staging.stat().st_mtime < grace_cutoff:
+                                shutil.rmtree(staging, ignore_errors=True)
+                        except FileNotFoundError:
+                            pass
 
     while True:
         await asyncio.sleep(3600)  # Run every hour
@@ -1469,30 +1487,40 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     blobs_dir = mount_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
     blob_path = blobs_dir / f'{upload_id}.zip'
-    # If blob already exists (race with another upload), return immediately.
-    if blob_path.exists():
-        return payloads.UploadZipFileResponse(
-            status=responses.UploadStatus.COMPLETED.value)
-    # For /upload_v2, we use staging directory to avoid corruption of the blob:
-    # - In /upload, each upload is a separate path (upload id), thus a broken
-    #   upload will not affect other operations.
-    # - In /upload_v2, we share the uploaded blob via hash, thus we need to
-    #   ensure the final blob (blobs/{blob_id}.zip) is atomic.
-    staging_dir = blobs_dir / '.staging' / upload_id
-    staging_zip = staging_dir / 'staging.zip'
-    result = await _receive_and_assemble_chunks(base_dir=staging_dir,
-                                                zip_name='staging',
-                                                request=request,
-                                                chunk_index=chunk_index,
-                                                total_chunks=total_chunks,
-                                                unzip=False)
-    if result is not None:
-        return result
-    # Move the staging zip to final blob path (atomic on same filesystem).
-    staging_zip.rename(blob_path)
-    logger.info(f'Uploaded blob: {blob_path}')
-    # Clean staging dir.
-    await asyncio.to_thread(shutil.rmtree, str(staging_dir), True)
+
+    # Per-blob filelock to prevent concurrent uploads of the same blob.
+    locks_dir = blobs_dir / '.locks'
+    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
+    lock = filelock.AsyncFileLock(str(locks_dir / f'{upload_id}.lock'))
+
+    async with lock:
+        # Re-check after acquiring the lock: another upload may have
+        # completed while we were waiting.
+        if blob_path.exists():
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.COMPLETED.value)
+        # For /upload_v2, we use staging directory to avoid corruption of
+        # the blob:
+        # - In /upload, each upload is a separate path (upload id), thus a
+        #   broken upload will not affect other operations.
+        # - In /upload_v2, we share the uploaded blob via hash, thus we
+        #   need to ensure the final blob (blobs/{blob_id}.zip) is atomic.
+        staging_dir = blobs_dir / '.staging' / upload_id
+        staging_zip = staging_dir / 'staging.zip'
+        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                    zip_name='staging',
+                                                    request=request,
+                                                    chunk_index=chunk_index,
+                                                    total_chunks=total_chunks,
+                                                    unzip=False)
+        if result is not None:
+            return result
+        # Move the staging zip to final blob path (atomic on same
+        # filesystem).
+        staging_zip.rename(blob_path)
+        logger.info(f'Uploaded blob: {blob_path}')
+        # Clean staging dir.
+        await asyncio.to_thread(shutil.rmtree, str(staging_dir), True)
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
