@@ -294,7 +294,9 @@ def mock_job_table_one_job(monkeypatch):
             'jobs': [job_data],
             'total': 1,
             'total_no_filter': 1,
-            'status_counts': {'RUNNING': 1},
+            'status_counts': {
+                'RUNNING': 1
+            },
         }), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_job_table)
