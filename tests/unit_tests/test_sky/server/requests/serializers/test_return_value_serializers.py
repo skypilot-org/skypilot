@@ -220,8 +220,8 @@ class TestSerializeKubernetesNodeInfo:
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )
-    def test_remote_version_below_25_removes_is_ready(self, mock_get_version):
-        """Test that is_ready is removed when remote_api_version < 25."""
+    def test_remote_version_below_28_keeps_is_ready(self, mock_get_version):
+        """Test that is_ready is kept when remote_api_version >= 24 (< 28)."""
         mock_get_version.return_value = 24
         data = {
             'node_info_dict': {
@@ -239,9 +239,9 @@ class TestSerializeKubernetesNodeInfo:
         }
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
-        # is_ready should be removed
-        assert 'is_ready' not in parsed['node_info_dict']['node1']
-        assert 'is_ready' not in parsed['node_info_dict']['node2']
+        # is_ready should be preserved (< 25 stripping was removed)
+        assert parsed['node_info_dict']['node1']['is_ready'] is True
+        assert parsed['node_info_dict']['node2']['is_ready'] is False
         # Other fields should remain
         assert parsed['node_info_dict']['node1']['name'] == 'node1'
         assert parsed['node_info_dict']['node1']['other_field'] == 'value'
@@ -253,7 +253,7 @@ class TestSerializeKubernetesNodeInfo:
     )
     def test_node_without_is_ready_field(self, mock_get_version):
         """Test that nodes without is_ready field are handled gracefully."""
-        mock_get_version.return_value = 20
+        mock_get_version.return_value = 24
         data = {
             'node_info_dict': {
                 'node1': {
@@ -269,7 +269,7 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
         assert 'is_ready' not in parsed['node_info_dict']['node1']
-        assert 'is_ready' not in parsed['node_info_dict']['node2']
+        assert parsed['node_info_dict']['node2']['is_ready'] is True
 
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
@@ -373,10 +373,10 @@ class TestSerializeKubernetesNodeInfo:
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )
     def test_combined_version_compatibility_old_client(self, mock_get_version):
-        """Test combined version compatibility for old clients (API version < 25).
+        """Test combined version compatibility for API version 24 clients.
 
-        Old clients should not see any of the newer fields: is_ready,
-        cpu_count, memory_gb, cpu_free, memory_free_gb, is_cordoned, taints.
+        Version 24 clients should see is_ready and resource fields but not
+        is_cordoned or taints (added in version 28).
         """
         mock_get_version.return_value = 24
         data = {
@@ -397,12 +397,13 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
         node = parsed['node_info_dict']['node1']
-        # All newer fields should be removed
-        assert 'is_ready' not in node
-        assert 'cpu_count' not in node
-        assert 'memory_gb' not in node
-        assert 'cpu_free' not in node
-        assert 'memory_free_gb' not in node
+        # is_ready and resource fields should be preserved
+        assert node['is_ready'] is True
+        assert node['cpu_count'] == 8
+        assert node['memory_gb'] == 32.0
+        assert node['cpu_free'] == 4
+        assert node['memory_free_gb'] == 16.0
+        # is_cordoned and taints should be removed (added in version 28)
         assert 'is_cordoned' not in node
         assert 'taints' not in node
         # Basic fields should remain
@@ -415,8 +416,8 @@ class TestSerializeKubernetesNodeInfo:
     def test_combined_version_compatibility_version_25(self, mock_get_version):
         """Test combined version compatibility for API version 25 clients.
 
-        Version 25 clients should see is_ready but not cpu_count, memory_gb,
-        cpu_free, memory_free_gb, is_cordoned, taints.
+        Version 25 clients should see is_ready and resource fields but not
+        is_cordoned or taints (added in version 28).
         """
         mock_get_version.return_value = 25
         data = {
@@ -436,14 +437,13 @@ class TestSerializeKubernetesNodeInfo:
         result = return_value_serializers.serialize_kubernetes_node_info(data)
         parsed = json.loads(result)
         node = parsed['node_info_dict']['node1']
-        # is_ready should be preserved
+        # is_ready and resource fields should be preserved
         assert node['is_ready'] is True
-        # Resource fields should be removed
-        assert 'cpu_count' not in node
-        assert 'memory_gb' not in node
-        assert 'cpu_free' not in node
-        assert 'memory_free_gb' not in node
-        # Cordon/taint fields should be removed
+        assert node['cpu_count'] == 8
+        assert node['memory_gb'] == 32.0
+        assert node['cpu_free'] == 4
+        assert node['memory_free_gb'] == 16.0
+        # Cordon/taint fields should be removed (added in version 28)
         assert 'is_cordoned' not in node
         assert 'taints' not in node
 
