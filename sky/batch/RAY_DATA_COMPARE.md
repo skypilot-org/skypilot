@@ -2,6 +2,17 @@
 
 This guide maps Ray Data's I/O APIs to Sky Batch equivalents for users familiar with Ray Data.
 
+## Why Sky Batch over Ray Data?
+
+Sky Batch offers similar ease of use with additional benefits:
+
+| Feature | Sky Batch | Ray Data |
+|---------|-----------|----------|
+| Cluster management | Automatic provisioning | Manual Ray cluster setup |
+| Multi-cloud / multi-cluster | Scale across AWS, GCP, Azure, and multiple k8s clusters | Single Ray cluster |
+| Spot instance | Multi-region, improved availability & reduced cost | Single-region, limited capacity |
+| Cost optimization | Automatic cloud selection | Fixed to one cloud/cluster |
+
 ## Reading Data
 
 ### Ray Data
@@ -285,15 +296,3 @@ ds.map(generate_images, pool_name="diffusion-pool", batch_size=4,
            sky.batch.JsonOutput("s3://bucket/manifest.jsonl", column=["prompt"]),
        ])
 ```
-
-## Why Sky Batch over Ray Data?
-
-Sky Batch offers similar ease of use with additional benefits:
-
-| Feature | Sky Batch | Ray Data |
-|---------|-----------|----------|
-| Cluster management | Automatic provisioning | Manual Ray cluster setup |
-| Multi-cloud | Scale across AWS, GCP, Azure | Single cluster |
-| Multi-cluster | Distribute across multiple k8s clusters | Single cluster |
-| Spot instance | Multi-region, improved availability & reduced cost | Single-region, limited capacity |
-| Cost optimization | Automatic cloud selection | Fixed to one cloud/cluster |
