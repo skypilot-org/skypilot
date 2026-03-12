@@ -26,7 +26,7 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
-STORAGE_ONLY_CLOUDS = ('Cloudflare', 'CoreWeave', 'VastData')
+STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME)
 
 logger = sky_logging.init_logger(__name__)
 
@@ -37,7 +37,7 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
         [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-        [cloudflare.NAME, coreweave.NAME, vastdata.NAME])
+        list(STORAGE_ONLY_CLOUDS))
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -111,7 +111,7 @@ def check_capabilities(
 
     def get_all_clouds() -> Tuple[str, ...]:
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-                     [cloudflare.NAME, coreweave.NAME, vastdata.NAME])
+                     list(STORAGE_ONLY_CLOUDS))
 
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
