@@ -1164,7 +1164,6 @@ def queue_v2(
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     user_hashes: Optional[List[Optional[str]]] = None
-    show_jobs_without_user_hash = False
     if not all_users:
         user_hashes = [common_utils.get_user_hash()]
     elif user_match is not None:
@@ -1199,7 +1198,7 @@ def queue_v2(
                     statuses=statuses) if statuses is not None else None,
                 fields=managed_jobsv1_pb2.Fields(
                     fields=fields) if fields is not None else None,
-                show_jobs_without_user_hash=show_jobs_without_user_hash,
+                show_jobs_without_user_hash=False,
                 sort_by=sort_by,
                 sort_order=sort_order,
             )

@@ -7,7 +7,7 @@ server:
 kube-state-metrics:
   enabled: true
   metricLabelsAllowlist:
-    - pods=[skypilot-cluster,skypilot-cluster-name]
+    - pods=[skypilot-cluster-name]
 prometheus-node-exporter:
   enabled: false
 prometheus-pushgateway:

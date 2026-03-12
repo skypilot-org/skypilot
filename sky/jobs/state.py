@@ -445,8 +445,7 @@ class ManagedJobStatus(enum.Enum):
         protobuf_to_enum = {
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_UNSPECIFIED: None,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING: cls.PENDING,
-            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED:
-                cls.STARTING,
+            managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED: cls.STARTING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING: cls.STARTING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING: cls.RUNNING,
             managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUCCEEDED: cls.SUCCEEDED,
