@@ -3,6 +3,7 @@
 import contextlib
 import logging
 import os
+import threading
 from typing import Optional
 
 from alembic import command as alembic_command
@@ -15,6 +16,15 @@ from sky import sky_logging
 from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
+
+# Global lock to serialize all Alembic upgrade operations within a process.
+# Alembic's EnvironmentContext installs/removes proxy attributes in the
+# module-level globals of ``alembic.context``, which is **not** thread-safe.
+# If two threads run ``alembic_command.upgrade()`` concurrently, the second
+# call overwrites the proxy entries set by the first, and the first call's
+# ``__exit__`` then fails with ``KeyError`` when it tries to clean up.
+# A process-wide threading lock prevents this.
+_ALEMBIC_UPGRADE_LOCK = threading.Lock()
 
 DB_INIT_LOCK_TIMEOUT_SECONDS = 10
 
@@ -158,4 +168,10 @@ def safe_alembic_upgrade(engine: sqlalchemy.engine.Engine,
             # process upgraded it while we were waiting for the lock
             if needs_upgrade(engine, section, target_revision,
                              alembic_ini_path):
-                alembic_command.upgrade(alembic_config, target_revision)
+                # Serialize alembic upgrades within this process.
+                # Alembic's context proxy uses module-level globals
+                # that are not thread-safe; concurrent upgrades from
+                # different threads corrupt the proxy and crash.
+                with _ALEMBIC_UPGRADE_LOCK:
+                    alembic_command.upgrade(alembic_config,
+                                           target_revision)
