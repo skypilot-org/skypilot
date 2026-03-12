@@ -570,6 +570,8 @@ async def cleanup_unreferenced_blobs():
 
     def _do_cleanup():
         clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        # Get all blob_id referenced by active requests.
+        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
         if not clients_dir.exists():
             return
         for user_dir in clients_dir.iterdir():
@@ -578,9 +580,6 @@ async def cleanup_unreferenced_blobs():
             blobs_dir = user_dir / 'file_mounts' / 'blobs'
             if not blobs_dir.exists():
                 continue
-            # Get all blob_id referenced by active requests.
-            active_blob_ids = requests_lib.get_active_file_mounts_blob_ids(
-                user_dir.name)
             # Delete unreferenced blobs older than grace period.
             grace_cutoff = time.time() - 3600  # 1 hour grace
             for blob in blobs_dir.glob('*.zip'):

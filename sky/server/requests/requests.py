@@ -1051,18 +1051,17 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
 
 
 @init_db
-def get_active_file_mounts_blob_ids(user_id: str) -> set:
-    """Get file_mounts_blob_ids referenced by active requests for a user."""
+def get_active_file_mounts_blob_ids() -> set:
+    """Get file_mounts_blob_ids referenced by active requests."""
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
         cursor.execute(
             f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
             f'FROM {REQUEST_TABLE} '
-            f'WHERE {COL_USER_ID} = ? '
-            f'AND status IN (?, ?) '
+            f'WHERE status IN (?, ?) '
             f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
-            (user_id, RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
+            (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
         return {row[0] for row in cursor.fetchall()}
 
 

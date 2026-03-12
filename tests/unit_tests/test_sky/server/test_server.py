@@ -485,9 +485,9 @@ async def test_cleanup_blobs_no_blobs_dir(tmp_path):
         with pytest.raises(asyncio.CancelledError):
             await server.cleanup_unreferenced_blobs()
 
-    # get_active_file_mounts_blob_ids should never be called because
-    # there is no blobs directory.
-    mock_get.assert_not_called()
+    # get_active_file_mounts_blob_ids is called unconditionally, but
+    # no blobs are deleted because there is no blobs directory.
+    mock_get.assert_called_once()
 
 
 @pytest.mark.asyncio

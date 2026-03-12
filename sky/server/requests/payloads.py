@@ -150,9 +150,7 @@ class RequestBody(BasePayload):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
-    # Blob ID for uploaded file mounts (content-addressed). When set, the
-    # server stores uploads as blobs/{blob_id}.zip and extracts them at
-    # execution time rather than at upload time.
+    # Blob ID for uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
 
     def __init__(self, **data):
