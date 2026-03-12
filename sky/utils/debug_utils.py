@@ -33,8 +33,16 @@ from sky.utils import debug_dump_helpers
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 from sky.utils import tempstore
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _full_traceback() -> str:
+    """Capture the full traceback, bypassing any tracebacklimit."""
+    with ux_utils.enable_traceback():
+        return traceback.format_exc()
+
 
 # Persistent location for debug dumps
 DEBUG_DUMP_DIR = '~/.sky/debug_dumps'
@@ -184,7 +192,7 @@ def _get_requests_from_clusters(debug_dump_context: DebugDumpContext) -> None:
                 'component': 'cross_link',
                 'resource': f'requests_from_cluster/{cluster_name}',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
 
 
@@ -218,7 +226,7 @@ def _get_requests_from_managed_jobs(
             'component': 'cross_link',
             'resource': 'managed_job_details',
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': _full_traceback()
         })
 
     try:
@@ -283,7 +291,7 @@ def _get_requests_from_managed_jobs(
             'component': 'cross_link',
             'resource': 'requests_from_managed_jobs',
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': _full_traceback()
         })
 
 
@@ -309,7 +317,7 @@ def _get_clusters_from_requests(debug_dump_context: DebugDumpContext) -> None:
                 'component': 'cross_link',
                 'resource': f'clusters_from_request/{request_id}',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
 
 
@@ -370,7 +378,7 @@ def _get_managed_jobs_from_requests(
                 'component': 'cross_link',
                 'resource': f'managed_jobs_from_request/{request_id}',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
 
 
@@ -414,7 +422,7 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             'component': 'recent_context',
             'resource': 'requests',
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': _full_traceback()
         })
 
     # Get recent clusters
@@ -442,7 +450,7 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             'component': 'recent_context',
             'resource': 'clusters',
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': _full_traceback()
         })
 
     # Get recent managed jobs via queue_v2 (handles remote controllers
@@ -472,7 +480,7 @@ def _populate_recent_context(debug_dump_context: DebugDumpContext,
             'component': 'recent_context',
             'resource': 'managed_jobs',
             'error': str(e),
-            'traceback': traceback.format_exc()
+            'traceback': _full_traceback()
         })
 
     logger.debug(f'Found {len(debug_dump_context["request_ids"])} requests, '
@@ -528,7 +536,7 @@ def _dump_server_info(dump_dir: str,
                 'component': 'server_info',
                 'resource': 'config',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
 
     # Add all SKYPILOT_*/SKY_* environment variables, redacting sensitive ones
@@ -549,7 +557,7 @@ def _dump_server_info(dump_dir: str,
                 'component': 'server_info',
                 'resource': 'cloud_status',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
 
     server_info_path = os.path.join(dump_dir, 'server_info.json')
@@ -661,7 +669,7 @@ def _dump_request_id_info(
                     'component': 'requests',
                     'resource': request_id,
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
         # Copy request log file
@@ -682,7 +690,7 @@ def _dump_request_id_info(
                     'component': 'requests',
                     'resource': f'{request_id}/log',
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
         # Copy debug log file (only exists when
@@ -702,7 +710,7 @@ def _dump_request_id_info(
                     'component': 'requests',
                     'resource': f'{request_id}/request_debug.log',
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
     logger.debug('Exiting _dump_request_id_info')
@@ -749,7 +757,7 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'component': 'clusters',
                     'resource': cluster_name,
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
         # Get cluster events
@@ -774,7 +782,7 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'component': 'clusters',
                     'resource': f'{cluster_name}/events',
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
         # Get associated requests
@@ -803,7 +811,7 @@ def _dump_cluster_info(cluster_names: Set[str],
                     'component': 'clusters',
                     'resource': f'{cluster_name}/associated_requests',
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
     logger.debug('Exiting _dump_cluster_info')
@@ -853,7 +861,7 @@ def _dump_managed_job_queue_info(
                 'component': 'managed_jobs',
                 'resource': 'queue_v2_batch',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
         return
 
@@ -914,7 +922,7 @@ def _collect_controller_debug_data(
                 'component': 'managed_jobs',
                 'resource': 'controller_access',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
         return
 
@@ -941,7 +949,7 @@ def _collect_controller_debug_data(
                 'component': 'managed_jobs',
                 'resource': 'controller_manifest',
                 'error': str(e),
-                'traceback': traceback.format_exc()
+                'traceback': _full_traceback()
             })
         return
 
@@ -1014,7 +1022,7 @@ def _collect_controller_debug_data(
                                 'component': 'managed_jobs',
                                 'resource': f'rsync/{relative_path}',
                                 'error': str(e),
-                                'traceback': traceback.format_exc()
+                                'traceback': _full_traceback()
                             })
 
             subprocess_utils.run_in_parallel(_rsync_file, file_path_entries)
@@ -1025,7 +1033,7 @@ def _collect_controller_debug_data(
                     'component': 'managed_jobs',
                     'resource': 'controller_rsync',
                     'error': str(e),
-                    'traceback': traceback.format_exc()
+                    'traceback': _full_traceback()
                 })
 
     # Propagate controller-side errors

@@ -810,6 +810,12 @@ def event_callback_func(
 # ======== user functions ========
 
 
+def _full_traceback() -> str:
+    """Capture the full traceback, bypassing any tracebacklimit."""
+    with ux_utils.enable_traceback():
+        return traceback.format_exc()
+
+
 def collect_debug_dump_manifest(job_ids: List[int]) -> Dict[str, Any]:
     """Collect a debug dump manifest from the controller.
 
@@ -865,7 +871,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'component': 'managed_jobs',
             'resource': f'{job_id}/controller_log',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
     # 2. Job info from DB (inline — small data)
@@ -886,7 +892,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'component': 'managed_jobs',
             'resource': f'{job_id}/job_info',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
     # 3. Job events from DB (inline — small data)
@@ -914,7 +920,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'component': 'managed_jobs',
             'resource': f'{job_id}/events',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
     # 4. Job run logs (FILE — needs rsync)
@@ -933,7 +939,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'component': 'managed_jobs',
             'resource': f'{job_id}/run_logs',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
     # 5. Cluster info and events (inline — DB data)
@@ -956,7 +962,7 @@ def _collect_job_debug_manifest(job_id: int, inline_data: List[Dict[str, str]],
             'component': 'managed_jobs',
             'resource': f'{job_id}/cluster_info',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
 
@@ -993,7 +999,7 @@ def _collect_cluster_debug_manifest(cluster_name: str, job_prefix: str,
             'component': 'managed_jobs',
             'resource': f'{cluster_name}/cluster_info',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
 
@@ -1016,7 +1022,7 @@ def _collect_controller_system_log_paths(file_paths: List[Dict[str, str]],
             'component': 'managed_jobs',
             'resource': 'controller_system/logs',
             'error': str(e),
-            'traceback': traceback.format_exc(),
+            'traceback': _full_traceback(),
         })
 
 
