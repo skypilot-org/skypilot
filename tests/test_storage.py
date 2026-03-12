@@ -325,10 +325,10 @@ class TestStorageFromYamlWithMountCachedConfig:
 class TestFileMountType:
     """Tests for FileMountType and resolve_mount_cached_config."""
 
-    def test_model_checkpoint_r_type_values(self):
-        """MODEL_CHECKPOINT_R: read_only, chunk streams, chunk size."""
+    def test_model_checkpoint_ro_type_values(self):
+        """MODEL_CHECKPOINT_RO: read_only, chunk streams, chunk size."""
         config = storage_lib.merge_mount_cached_config(
-            storage_lib.FileMountType.MODEL_CHECKPOINT_R)
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'
         assert config.read_only is True
@@ -357,7 +357,7 @@ class TestFileMountType:
         """Overriding one field shouldn't clear other type fields."""
         overrides = storage_lib.MountCachedConfig(buffer_size='128M')
         config = storage_lib.merge_mount_cached_config(
-            storage_lib.FileMountType.MODEL_CHECKPOINT_R, overrides=overrides)
+            storage_lib.FileMountType.MODEL_CHECKPOINT_RO, overrides=overrides)
         assert config.buffer_size == '128M'
         assert config.vfs_read_chunk_streams == 16
         assert config.vfs_read_chunk_size == '32M'
@@ -365,8 +365,8 @@ class TestFileMountType:
 
     def test_type_enum_case_insensitive(self):
         """FileMountType enum constructable from uppercase string."""
-        assert (storage_lib.FileMountType('MODEL_CHECKPOINT_R') ==
-                storage_lib.FileMountType.MODEL_CHECKPOINT_R)
+        assert (storage_lib.FileMountType('MODEL_CHECKPOINT_RO') ==
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
 
 
 class TestStorageFromYamlWithFileMountType:
@@ -377,11 +377,11 @@ class TestStorageFromYamlWithFileMountType:
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'type': 'MODEL_CHECKPOINT_R',
+            'type': 'MODEL_CHECKPOINT_RO',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         assert (storage_obj.file_mount_type ==
-                storage_lib.FileMountType.MODEL_CHECKPOINT_R)
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
         # No explicit overrides
         assert storage_obj.mount_cached_config is None
         # Resolution produces the type config
@@ -417,17 +417,17 @@ class TestStorageFromYamlWithFileMountType:
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'type': 'model_checkpoint_r',
+            'type': 'model_checkpoint_ro',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         assert (storage_obj.file_mount_type ==
-                storage_lib.FileMountType.MODEL_CHECKPOINT_R)
+                storage_lib.FileMountType.MODEL_CHECKPOINT_RO)
 
     def test_type_without_mount_cached_mode_fails(self):
         yaml_config = {
             'name': 'test-bucket',
             'store': 's3',
-            'type': 'MODEL_CHECKPOINT_R',
+            'type': 'MODEL_CHECKPOINT_RO',
         }
         with pytest.raises(exceptions.StorageSpecError):
             storage_lib.Storage.from_yaml_config(yaml_config)
@@ -464,11 +464,11 @@ class TestStorageFromYamlWithFileMountType:
             'name': 'test-bucket',
             'store': 's3',
             'mode': 'MOUNT_CACHED',
-            'type': 'MODEL_CHECKPOINT_R',
+            'type': 'MODEL_CHECKPOINT_RO',
         }
         storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
         serialized = storage_obj.to_yaml_config()
-        assert serialized['type'] == 'MODEL_CHECKPOINT_R'
+        assert serialized['type'] == 'MODEL_CHECKPOINT_RO'
         # No config.mount_cached since there are no overrides
         assert 'config' not in serialized
 

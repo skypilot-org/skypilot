@@ -327,9 +327,9 @@ class FileMountType(enum.Enum):
     # Read-only access to model weights/checkpoints.
     # Optimized for large sequential reads with 16 parallel chunk streams
     # and 32MB chunk size (benchmarked sweet spot for model loading).
-    MODEL_CHECKPOINT_R = 'MODEL_CHECKPOINT_R'
+    MODEL_CHECKPOINT_RO = 'MODEL_CHECKPOINT_RO'
     # Read-write access to model weights/checkpoints.
-    # Same read optimizations as MODEL_CHECKPOINT_R, plus 8 parallel
+    # Same read optimizations as MODEL_CHECKPOINT_RO, plus 8 parallel
     # transfers for writing sharded checkpoints (one per GPU rank).
     MODEL_CHECKPOINT_RW = 'MODEL_CHECKPOINT_RW'
 
@@ -338,7 +338,7 @@ class FileMountType(enum.Enum):
 # These are the "defaults" that a type provides; any explicit
 # config.mount_cached fields in the YAML override them.
 _MOUNT_CACHED_PRESET_CONFIGS: Dict['FileMountType', Dict[str, Any]] = {
-    FileMountType.MODEL_CHECKPOINT_R: {
+    FileMountType.MODEL_CHECKPOINT_RO: {
         'vfs_read_chunk_streams': 16,
         'vfs_read_chunk_size': '32M',
         'read_only': True,
