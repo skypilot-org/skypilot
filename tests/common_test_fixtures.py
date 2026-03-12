@@ -240,8 +240,18 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
 def mock_job_table_no_job(monkeypatch):
     """Mock job table to return no jobs."""
 
-    def mock_get_job_table(*_, **__):
-        return 0, message_utils.encode_payload([]), ''
+    def mock_get_job_table(*args, **__):
+        # The third argument is the cmd.
+        cmd = args[2]
+        # Return no pools for the serve status.
+        if 'get_service_status_encoded' in cmd:
+            return 0, message_utils.encode_payload([]), ''
+        return 0, message_utils.encode_payload({
+            'jobs': [],
+            'total': 0,
+            'total_no_filter': 0,
+            'status_counts': {},
+        }), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_job_table)
 
@@ -280,7 +290,12 @@ def mock_job_table_one_job(monkeypatch):
             'job_id_on_pool_cluster': None,
             'pool_hash': None,
         }
-        return 0, message_utils.encode_payload([job_data]), ''
+        return 0, message_utils.encode_payload({
+            'jobs': [job_data],
+            'total': 1,
+            'total_no_filter': 1,
+            'status_counts': {'RUNNING': 1},
+        }), ''
 
     monkeypatch.setattr(CloudVmRayBackend, 'run_on_head', mock_get_job_table)
 
