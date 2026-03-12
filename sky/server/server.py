@@ -1461,6 +1461,9 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     if not re.match(r'^[0-9a-f]{64}$', upload_id):
         raise fastapi.HTTPException(
             status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
+    # Here we still isolate the blobs between users, as the upload_id is
+    # provided by the client and we want to be careful about cross-user
+    # blob sharing.
     mount_dir = await _prepare_client_mount_dir(user_hash, request)
     blobs_dir = mount_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
