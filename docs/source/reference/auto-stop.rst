@@ -282,3 +282,61 @@ Common use cases for autostop hooks:
            hook: |
              # Upload the trained model to Hugging Face Hub
              huggingface-cli upload my-org/my-model /workspace/model-output .
+
+.. _auto-stop-preemption-hooks:
+
+Preemption hooks
+~~~~~~~~~~~~~~~~
+
+When using **spot (preemptible) instances**, the autostop hook also runs when
+the cloud provider is about to reclaim the instance.  This gives your hook a
+chance to checkpoint or clean up before the instance dies.
+
+No extra configuration is needed — if you have an autostop hook configured and
+your cluster uses spot instances, SkyPilot will automatically attempt to run the
+same hook script on preemption.
+
+**How it works**
+
+- **AWS**: SkyPilot polls the `EC2 instance metadata service
+  <https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/spot-instance-termination-notices.html>`_
+  every 5 seconds.  AWS provides ~2 minutes of advance warning before reclaiming
+  a spot instance.
+- **GCP / Azure / Kubernetes**: SkyPilot catches the ``SIGTERM`` signal sent by
+  the cloud before termination.  The grace period is typically ~30 seconds.
+
+**Automatic timeout capping**
+
+Because the cloud enforces a hard deadline, SkyPilot automatically caps the hook
+timeout to the available grace period:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Cloud
+     - Grace period
+     - Effective hook timeout
+   * - AWS
+     - ~2 min
+     - ``min(hook_timeout, 110s)``
+   * - GCP
+     - ~30 s
+     - ``min(hook_timeout, 25s)``
+   * - Azure
+     - ~30 s
+     - ``min(hook_timeout, 25s)``
+   * - Kubernetes
+     - ~30 s
+     - ``min(hook_timeout, 25s)``
+
+If the timeout is capped, a warning is logged.  The hook's ``hook_timeout``
+setting still applies for normal autostop (idle timeout) where there is no
+external deadline.
+
+**Recommendations**
+
+- Keep preemption hooks fast — use them for checkpointing, not long operations.
+- On GCP/Azure/Kubernetes the ~25 s budget is tight; prefer a simple ``cp`` or
+  ``aws s3 cp`` over a full ``rsync``.
+- If both the metadata poller (AWS) and ``SIGTERM`` fire, SkyPilot guarantees the
+  hook runs at most once.

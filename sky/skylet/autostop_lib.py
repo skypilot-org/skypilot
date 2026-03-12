@@ -4,6 +4,7 @@ import os
 import pickle
 import shlex
 import subprocess
+import threading
 import time
 import typing
 from typing import List, Optional
@@ -38,6 +39,11 @@ _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
 # starts. This is used for checking whether the cluster is in the process
 # of autostopping for the current machine.
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
+
+# Guard flag to prevent double execution of the preemption hook.
+# Both AWS metadata polling and SIGTERM handler may trigger the hook;
+# this event ensures only the first caller runs it.
+_preemption_hook_triggered = threading.Event()
 
 
 class AutostopWaitFor(enum.Enum):
@@ -231,6 +237,51 @@ def set_last_active_time_to_now() -> None:
     """Sets the last active time to time.time()."""
     logger.debug('Setting last active time.')
     configs.set_config(_AUTOSTOP_LAST_ACTIVE_TIME, str(time.time()))
+
+
+def is_preemption_hook_triggered() -> bool:
+    """Returns whether the preemption hook has already been triggered."""
+    return _preemption_hook_triggered.is_set()
+
+
+def set_preemption_hook_triggered() -> None:
+    """Marks the preemption hook as triggered.
+
+    This should be called before executing the hook so that concurrent
+    callers (SIGTERM handler and AWS metadata polling) can detect that
+    the hook is already running and skip duplicate execution.
+    """
+    _preemption_hook_triggered.set()
+
+
+def get_preemption_grace_seconds(provider_name: str) -> int:
+    """Returns the cloud-specific preemption grace period in seconds.
+
+    Each cloud gives a different amount of advance notice before a spot
+    instance is reclaimed.  The values below reserve a small buffer so
+    that SkyPilot has time to perform its own cleanup after the hook
+    finishes.
+
+    Args:
+        provider_name: Lower-case cloud provider name, e.g. 'aws',
+            'gcp', 'azure', 'kubernetes'.
+
+    Returns:
+        Number of seconds available for the preemption hook to run.
+    """
+    grace_periods = {
+        # AWS gives ~2 min notice; reserve 10s buffer.
+        'aws': 110,
+        # GCP sends a 30s ACPI shutdown signal; reserve 5s buffer.
+        'gcp': 25,
+        # Azure gives ~30s notice; reserve 5s buffer.
+        'azure': 25,
+        # Kubernetes default terminationGracePeriodSeconds is 30s;
+        # reserve 5s buffer.
+        'kubernetes': 25,
+    }
+    # Conservative default for unknown providers.
+    return grace_periods.get(provider_name, 25)
 
 
 def has_active_ssh_sessions() -> bool:

@@ -3,8 +3,11 @@ import math
 import os
 import re
 import subprocess
+import threading
 import time
 import traceback
+import urllib.error
+import urllib.request
 
 import psutil
 
@@ -156,6 +159,75 @@ class UsageHeartbeatReportEvent(SkyletEvent):
 
     def _run(self):
         usage_lib.send_heartbeat(interval_seconds=self.EVENT_INTERVAL_SECONDS)
+
+
+class SpotTerminationEvent(SkyletEvent):
+    """Polls cloud metadata for spot/preemptible termination notices."""
+    EVENT_INTERVAL_SECONDS = 60  # start() launches its own fast thread
+
+    def start(self):
+        # Read cluster YAML to determine cloud provider
+        config_path = os.path.abspath(
+            os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
+        config = yaml_utils.read_yaml(config_path)
+        provider_name = cluster_utils.get_provider_name(config)
+
+        # Only start polling thread on AWS when an autostop hook is configured
+        if provider_name == 'aws':
+            autostop_config = autostop_lib.get_autostop_config()
+            if autostop_config.hook:
+                thread = threading.Thread(target=self._poll_aws_metadata,
+                                          args=(autostop_config, provider_name),
+                                          daemon=True)
+                thread.start()
+                logger.info('Started AWS spot termination polling thread.')
+
+    def _run(self):
+        pass  # All work done in the background thread
+
+    def _poll_aws_metadata(self, autostop_config, provider_name):
+        """Poll AWS metadata endpoint every 5 seconds for termination."""
+        while True:
+            if autostop_lib.is_preemption_hook_triggered():
+                return
+            if self._check_aws_spot_termination():
+                if not autostop_lib.is_preemption_hook_triggered():
+                    autostop_lib.set_preemption_hook_triggered()
+                    grace = autostop_lib.get_preemption_grace_seconds(
+                        provider_name)
+                    capped_timeout = min(autostop_config.hook_timeout, grace)
+                    if capped_timeout < autostop_config.hook_timeout:
+                        logger.warning(
+                            f'Hook timeout capped from '
+                            f'{autostop_config.hook_timeout}s to '
+                            f'{capped_timeout}s due to cloud grace period.')
+                    logger.info('AWS spot termination notice detected. '
+                                'Running preemption hook '
+                                f'(timeout: {capped_timeout}s)...')
+                    autostop_lib.execute_autostop_hook(autostop_config.hook,
+                                                       capped_timeout)
+                return
+            time.sleep(5)
+
+    @staticmethod
+    def _check_aws_spot_termination() -> bool:
+        """Check AWS metadata for spot termination notice."""
+        try:
+            # IMDSv2: get token first
+            token_req = urllib.request.Request(
+                'http://169.254.169.254/latest/api/token',
+                method='PUT',
+                headers={'X-aws-ec2-metadata-token-ttl-seconds': '21600'})
+            token_resp = urllib.request.urlopen(token_req, timeout=2)
+            token = token_resp.read().decode()
+
+            action_req = urllib.request.Request(
+                'http://169.254.169.254/latest/meta-data/spot/instance-action',
+                headers={'X-aws-ec2-metadata-token': token})
+            resp = urllib.request.urlopen(action_req, timeout=2)
+            return resp.status == 200
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+            return False
 
 
 class AutostopEvent(SkyletEvent):
