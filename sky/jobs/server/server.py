@@ -47,23 +47,6 @@ async def launch(request: fastapi.Request,
     )
 
 
-# For backwards compatibility
-# TODO(hailong): Remove before 0.12.0.
-@router.post('/queue')
-async def queue(request: fastapi.Request,
-                jobs_queue_body: payloads.JobsQueueBody) -> None:
-    await executor.schedule_request_async(
-        request_id=request.state.request_id,
-        request_name=request_names.RequestName.JOBS_QUEUE,
-        request_body=jobs_queue_body,
-        func=core.queue,
-        schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
-                       else api_requests.ScheduleType.SHORT),
-        request_cluster_name=common.JOB_CONTROLLER_NAME,
-        auth_user=request.state.auth_user,
-    )
-
-
 @router.post('/queue/v2')
 async def queue_v2(request: fastapi.Request,
                    jobs_queue_body_v2: payloads.JobsQueueV2Body) -> None:

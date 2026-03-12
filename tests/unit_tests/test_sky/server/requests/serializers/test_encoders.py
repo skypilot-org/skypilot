@@ -32,7 +32,6 @@ class TestEncodeStatus:
             autostop=-1,
             to_down=False,
             cluster_hash="abc123",
-            storage_mounts_metadata={},
             cluster_ever_up=True,
             status_updated_at=1234567890,
             user_hash="user123",
@@ -81,7 +80,6 @@ class TestEncodeStatus:
             autostop=-1,
             to_down=False,
             cluster_hash="abc123",
-            storage_mounts_metadata={},
             cluster_ever_up=True,
             status_updated_at=1234567890,
             user_hash="user123",
@@ -103,34 +101,7 @@ class TestEncodeStatus:
 
 
 class TestEncodeJobsQueue:
-    """Test the encode_jobs_queue and encode_jobs_queue_v2 functions."""
-
-    def test_encode_jobs_queue_with_network_fields(self):
-        """Test that encode_jobs_queue encodes jobs with network fields."""
-        from sky.jobs import state as managed_jobs
-
-        # Create a mock job with network fields
-        job = {
-            'job_id': 1,
-            'task_id': 0,
-            'job_name': 'test-job',
-            'task_name': 'test-task',
-            'status': managed_jobs.ManagedJobStatus.RUNNING,
-            'internal_external_ips': [('10.0.0.1', '35.1.2.3')],
-            'internal_services': None,
-        }
-
-        result = encoders.encode_jobs_queue([job])
-
-        assert len(result) == 1
-        encoded_job = result[0]
-        assert encoded_job[
-            'status'] == managed_jobs.ManagedJobStatus.RUNNING.value
-
-        # Network fields should be preserved as-is (JSON serializable)
-        assert encoded_job['internal_external_ips'] == [('10.0.0.1', '35.1.2.3')
-                                                       ]
-        assert encoded_job['internal_services'] is None
+    """Test the encode_jobs_queue_v2 function."""
 
     def test_encode_jobs_queue_v2_with_network_fields(self):
         """Test that encode_jobs_queue_v2 encodes jobs with network fields."""

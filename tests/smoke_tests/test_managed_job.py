@@ -68,7 +68,6 @@ def test_managed_jobs_basic(generic_cloud: str):
                 job_name=f'{name}-1',
                 job_status=[
                     sky.ManagedJobStatus.PENDING,
-                    sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
                     sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
                 ],
                 timeout=60),

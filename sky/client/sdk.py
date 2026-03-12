@@ -687,17 +687,8 @@ def launch(
                     down=down,
                     idle_minutes=idle_minutes_to_autostop,
                     wait_for=wait_for)
-            if resource.autostop_config is not None:
-                # For backward-compatibility, get the final autostop config for
-                # admin policy.
-                # TODO(aylei): remove this after 0.12.0
-                down = resource.autostop_config.down
-                idle_minutes_to_autostop = resource.autostop_config.idle_minutes
-
     request_options = admin_policy.RequestOptions(
         cluster_name=cluster_name,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
         dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,

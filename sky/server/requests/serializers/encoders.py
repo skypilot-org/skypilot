@@ -62,13 +62,6 @@ def encode_status(
     response = []
     for cluster in clusters:
         response_cluster = cluster.model_dump(exclude_none=True)
-        # These default setting is needed because last_use and status_updated_at
-        # used to be not optional.
-        # TODO(syang): remove this after v0.12.0
-        if 'last_use' not in response_cluster:
-            response_cluster['last_use'] = ''
-        if 'status_updated_at' not in response_cluster:
-            response_cluster['status_updated_at'] = 0
         # Ensure labels is always included, defaulting to empty dict if None
         # This is needed because exclude_none=True would exclude None labels
         if 'labels' not in response_cluster or response_cluster.get(
@@ -78,11 +71,6 @@ def encode_status(
         handle = serialize_utils.prepare_handle_for_backwards_compatibility(
             cluster['handle'])
         response_cluster['handle'] = pickle_and_encode(handle)
-        # TODO (syang) We still need to return this field for backwards
-        # compatibility.
-        # Remove this field at or after v0.12.0
-        response_cluster['storage_mounts_metadata'] = pickle_and_encode(
-            None)  # Always returns None.
         response.append(response_cluster)
     return response
 
@@ -139,13 +127,6 @@ def encode_status_kubernetes(
         encoded_unmanaged_clusters.append(encoded_cluster)
     all_jobs = [job.model_dump(by_alias=True) for job in all_jobs]
     return encoded_all_clusters, encoded_unmanaged_clusters, all_jobs, context
-
-
-@register_encoder('jobs.queue')
-def encode_jobs_queue(jobs: List[dict],) -> List[Dict[str, Any]]:
-    for job in jobs:
-        job['status'] = job['status'].value
-    return jobs
 
 
 @register_encoder('jobs.queue_v2')

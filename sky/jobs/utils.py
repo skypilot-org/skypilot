@@ -2231,10 +2231,7 @@ def load_managed_job_queue(
     all_users_map = {user.id: user.name for user in all_users}
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
-        if 'user_hash' in job and job['user_hash'] is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            job['user_name'] = all_users_map.get(job['user_hash'])
+        job['user_name'] = all_users_map.get(job.get('user_hash'))
     return jobs, total, result_type, total_no_filter, status_counts
 
 
@@ -2602,17 +2599,6 @@ def format_job_table(
                 infra_str = task.get('infra')
                 if infra_str is None:
                     cloud = task.get('cloud')
-                    if cloud is None:
-                        # Backward compatibility for old jobs controller without
-                        # cloud info returned, we parse it from the cluster
-                        # resources
-                        # TODO(zhwu): remove this after 0.12.0
-                        cloud = task['cluster_resources'].split('(')[0].split(
-                            'x')[-1]
-                        task['cluster_resources'] = task[
-                            'cluster_resources'].replace(f'{cloud}(',
-                                                         '(').replace(
-                                                             'x ', 'x')
                     region = task['region']
                     zone = task.get('zone')
                     if cloud == '-':
@@ -2669,11 +2655,8 @@ def decode_managed_job_protos(
     for job_proto in job_protos:
         job_dict = _job_proto_to_dict(job_proto)
         user_hash = job_dict.get('user_hash', None)
-        if user_hash is not None:
-            # Skip jobs that do not have user_hash info.
-            # TODO(cooperc): Remove check before 0.12.0.
-            user = user_hash_to_user.get(user_hash, None)
-            job_dict['user_name'] = user.name if user is not None else None
+        user = user_hash_to_user.get(user_hash, None) if user_hash else None
+        job_dict['user_name'] = user.name if user is not None else None
         jobs.append(job_dict)
     return jobs
 
@@ -2792,23 +2775,7 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
-        if managed_job_version < 9:
-            # For backward compatibility, since filtering is not supported
-            # before #6652.
-            # TODO(hailong): Remove compatibility before 0.12.0
-            job_table = utils.dump_managed_job_queue()
-        elif managed_job_version < 10:
-            job_table = utils.dump_managed_job_queue(
-                                skip_finished={skip_finished},
-                                accessible_workspaces={accessible_workspaces!r},
-                                job_ids={job_ids!r},
-                                workspace_match={workspace_match!r},
-                                name_match={name_match!r},
-                                pool_match={pool_match!r},
-                                page={page!r},
-                                limit={limit!r},
-                                user_hashes={user_hashes!r})
-        elif managed_job_version < 12:
+        if managed_job_version < 12:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -2860,17 +2827,7 @@ class ManagedJobCodeGen:
                           graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
+        if managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
         else:
@@ -2892,12 +2849,7 @@ class ManagedJobCodeGen:
                            graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility before 0.12.0
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
+        if managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
         else:
             msg = utils.cancel_job_by_name(
@@ -2993,15 +2945,9 @@ class ManagedJobCodeGen:
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r},
                                     task={task!r})
-        if managed_job_version < 3:
-            # Versions 2 and older did not return a retcode, so we just print
-            # the result.
-            # TODO: Remove compatibility before 0.12.0
-            print(result, flush=True)
-        else:
-            msg, retcode = result
-            print(msg, flush=True)
-            sys.exit(retcode)
+        msg, retcode = result
+        print(msg, flush=True)
+        sys.exit(retcode)
         """)
         return cls._build(code)
 

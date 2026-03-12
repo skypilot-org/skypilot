@@ -160,11 +160,14 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
             # Cluster is running but autostop is not set
             need_autostop = True
 
-        # Check if the user request is setting autostop settings.
+        # Check if the user request is setting autostop settings by looking
+        # at the task's resources autostop config.
         is_setting_autostop = False
-        idle_minutes_to_autostop = request_options.idle_minutes_to_autostop
-        is_setting_autostop = (idle_minutes_to_autostop is not None and
-                               idle_minutes_to_autostop >= 0)
+        for resource in user_request.task.resources:
+            if (resource.autostop_config is not None and
+                    resource.autostop_config.idle_minutes >= 0):
+                is_setting_autostop = True
+                break
 
         # If the cluster requires autostop but the user request is not setting
         # autostop settings, raise an error.

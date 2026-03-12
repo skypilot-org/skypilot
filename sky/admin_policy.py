@@ -29,19 +29,9 @@ class RequestOptions(pydantic.BaseModel):
     Args:
         cluster_name: Name of the cluster to create/reuse. It is None if not
             specified by the user.
-        idle_minutes_to_autostop: Autostop setting requested by a user. The
-            cluster will be set to autostop after this many minutes of idleness.
-        down: If true, use autodown rather than autostop.
         dryrun: Is the request a dryrun?
     """
     cluster_name: Optional[str]
-    # Keep these two fields for backward compatibility. The values are copied
-    # from task.resources.autostop_config, so that legacy admin policy plugins
-    # can still read the correct autostop config from request options before
-    # we drop the compatibility.
-    # TODO(aylei): remove these fields after 0.12.0
-    idle_minutes_to_autostop: Optional[int]
-    down: bool
     dryrun: bool
 
 

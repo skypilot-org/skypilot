@@ -443,10 +443,6 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
             user_hashes: Optional[List[Optional[str]]] = None
             if request.HasField('user_hashes'):
                 user_hashes = list(request.user_hashes.hashes)
-                # For backwards compatibility, we show jobs that do not have a
-                # user_hash. TODO: Remove before 0.12.0.
-                if request.show_jobs_without_user_hash:
-                    user_hashes.append(None)
             statuses = (list(request.statuses.statuses)
                         if request.HasField('statuses') else None)
             fields = (list(request.fields.fields)

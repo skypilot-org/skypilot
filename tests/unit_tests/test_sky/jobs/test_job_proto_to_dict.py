@@ -141,7 +141,7 @@ class TestJobProtoToDict:
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_PENDING,
              managed_job_state.ManagedJobStatus.PENDING),
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_SUBMITTED,
-             managed_job_state.ManagedJobStatus.DEPRECATED_SUBMITTED),
+             managed_job_state.ManagedJobStatus.STARTING),
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_STARTING,
              managed_job_state.ManagedJobStatus.STARTING),
             (managed_jobsv1_pb2.MANAGED_JOB_STATUS_RUNNING,

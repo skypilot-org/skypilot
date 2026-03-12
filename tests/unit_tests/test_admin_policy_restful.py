@@ -42,10 +42,9 @@ def _load_task_and_apply_policy(
     task: sky.Task,
     config_path: str,
     monkeypatch,
-    idle_minutes_to_autostop: Optional[int] = None,
 ) -> Tuple[sky.Dag, config_utils.Config]:
     """Apply admin policy using real SkyPilot patterns.
-    
+
     This function is copied from tests/unit_tests/test_admin_policy.py
     to avoid import path complexity while reusing the same proven pattern.
     """
@@ -57,8 +56,6 @@ def _load_task_and_apply_policy(
         request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
         request_options=admin_policy.RequestOptions(
             cluster_name='test',
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            down=False,
             dryrun=False,
         ))
 
@@ -387,8 +384,6 @@ def test_restful_policy_with_request_options(monkeypatch):
             # Check that RequestOptions were properly included (like real usage)
             assert request.request_options is not None
             assert request.request_options.cluster_name == 'test'
-            assert request.request_options.idle_minutes_to_autostop is None
-            assert request.request_options.down is False
             assert request.request_options.dryrun is False
 
             # Check that we got valid results back

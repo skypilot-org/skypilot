@@ -3,7 +3,6 @@ import enum
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-from sky import exceptions
 from sky import jobs as managed_jobs
 from sky.schemas.api import responses
 from sky.server import common as server_common
@@ -61,19 +60,10 @@ def get_managed_job_queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    try:
-        return typing.cast(
-            server_common.RequestId[
-                Union[List[responses.ManagedJobRecord],
-                      Tuple[List[responses.ManagedJobRecord], int,
-                            Dict[str, int], int]]],
-            managed_jobs.queue_v2(refresh, skip_finished, all_users, job_ids,
-                                  limit, fields)), QueueResultVersion.V2
-    except exceptions.APINotSupportedError:
-        return typing.cast(
-            server_common.RequestId[
-                Union[List[responses.ManagedJobRecord],
-                      Tuple[List[responses.ManagedJobRecord], int,
-                            Dict[str, int], int]]],
-            managed_jobs.queue(refresh, skip_finished, all_users,
-                               job_ids)), QueueResultVersion.V1
+    return typing.cast(
+        server_common.RequestId[
+            Union[List[responses.ManagedJobRecord],
+                  Tuple[List[responses.ManagedJobRecord], int,
+                        Dict[str, int], int]]],
+        managed_jobs.queue_v2(refresh, skip_finished, all_users, job_ids,
+                              limit, fields)), QueueResultVersion.V2

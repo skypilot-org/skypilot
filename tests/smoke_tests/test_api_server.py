@@ -168,7 +168,6 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                     job_name=f'{name}-3',
                     job_status=[
                         sky.ManagedJobStatus.PENDING,
-                        sky.ManagedJobStatus.DEPRECATED_SUBMITTED,
                         sky.ManagedJobStatus.STARTING,
                         sky.ManagedJobStatus.RUNNING
                     ],
