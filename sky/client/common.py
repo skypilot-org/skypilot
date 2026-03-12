@@ -181,8 +181,6 @@ class UploadChunkParams:
     log_file: str
     # The upload endpoint path, e.g. '/upload' or '/upload_v2'.
     endpoint: str = '/upload'
-    # The query parameter name for the upload identifier.
-    id_param_name: str = 'upload_id'
 
 
 def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
@@ -204,7 +202,7 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> str:
                 f'{server_url}{params.endpoint}',
                 params={
                     'user_hash': common_utils.get_user_hash(),
-                    params.id_param_name: params.upload_id,
+                    'upload_id': params.upload_id,
                     'chunk_index': str(params.chunk_index),
                     'total_chunks': str(params.total_chunks),
                 },
@@ -322,8 +320,7 @@ def _chunked_upload(zip_file_path: str,
                     upload_logger: logging.Logger,
                     log_file: str,
                     status_updater,
-                    endpoint: str = '/upload',
-                    id_param_name: str = 'upload_id') -> None:
+                    endpoint: str = '/upload') -> None:
     """Upload a zip file to the API server in chunks.
 
     Shared by both the legacy ``/upload`` and ``/upload_v2`` paths.
@@ -348,8 +345,7 @@ def _chunked_upload(zip_file_path: str,
                                   zip_file_path,
                                   upload_logger,
                                   log_file,
-                                  endpoint=endpoint,
-                                  id_param_name=id_param_name)
+                                  endpoint=endpoint)
                 for chunk_index in range(total_chunks)
             ]
             statuses = subprocess_utils.run_in_parallel(
@@ -459,7 +455,7 @@ def upload_mounts_to_api_server(
                     is_local=True)) as status, _setup_upload_logger(
                         log_file) as upload_logger:
 
-            def do_upload(endpoint: str, uid: str, id_param: str) -> None:
+            def do_upload(endpoint: str, upload_id: str) -> None:
                 status.update(
                     ux_utils.spinner_message(
                         'Uploading files to API server (1/2 - Zipping)',
@@ -472,8 +468,8 @@ def upload_mounts_to_api_server(
                     storage_utils.zip_files_and_folders(upload_list,
                                                         temp_zip_file.name)
                     upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
-                _chunked_upload(temp_zip_file.name, uid, upload_logger,
-                                log_file, status.update, endpoint, id_param)
+                _chunked_upload(temp_zip_file.name, upload_id, upload_logger,
+                                log_file, status.update, endpoint)
                 os.unlink(temp_zip_file.name)
                 upload_logger.info(f'Uploaded files: {upload_list}')
 
@@ -496,10 +492,9 @@ def upload_mounts_to_api_server(
                     upload_logger.info('Blob already exists, skipping upload')
                     logger.info('File mounts unchanged, skipping upload')
                 else:
-                    # Blob not present
-                    do_upload(endpoint='/upload_v2',
-                              uid=file_mounts_blob_id,
-                              id_param='blob_id')
+                    # In v2, we use the blob_id as the upload id to share
+                    # the uploaded blob across requests.
+                    do_upload('/upload_v2', file_mounts_blob_id)
                 logger.info(
                     ux_utils.finishing_message('Files uploaded',
                                                log_file,
@@ -507,7 +502,7 @@ def upload_mounts_to_api_server(
                 return dag, file_mounts_blob_id
 
             # Fall back to /upload for legacy server.
-            do_upload(endpoint='/upload', uid=upload_id, id_param='upload_id')
+            do_upload('/upload', upload_id)
             logger.info(
                 ux_utils.finishing_message('Files uploaded',
                                            log_file,

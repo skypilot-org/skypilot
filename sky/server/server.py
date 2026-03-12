@@ -1449,22 +1449,22 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
 
 
 @app.post('/upload_v2')
-async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
+async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
                       chunk_index: int,
                       total_chunks: int) -> payloads.UploadZipFileResponse:
     """Upload a file mount blob (chunked).
 
-    Unlike /upload, this endpoint stores the assembled zip as a blob
-    (blobs/{blob_id}.zip) without extracting it. Extraction happens at
+    Unlike /upload, this endpoint stores the assembled zip as a shared blob
+    (blobs/{upload_id}.zip) without extracting it. Extraction happens at
     request execution time.
     """
-    if not re.match(r'^[0-9a-f]{64}$', blob_id):
-        raise fastapi.HTTPException(status_code=400,
-                                    detail=f'Invalid blob_id: {blob_id}')
+    if not re.match(r'^[0-9a-f]{64}$', upload_id):
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
     mount_dir = await _prepare_client_mount_dir(user_hash, request)
     blobs_dir = mount_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
-    blob_path = blobs_dir / f'{blob_id}.zip'
+    blob_path = blobs_dir / f'{upload_id}.zip'
     # If blob already exists (race with another upload), return immediately.
     if blob_path.exists():
         return payloads.UploadZipFileResponse(
@@ -1474,7 +1474,7 @@ async def upload_blob(request: fastapi.Request, user_hash: str, blob_id: str,
     #   upload will not affect other operations.
     # - In /upload_v2, we share the uploaded blob via hash, thus we need to
     #   ensure the final blob (blobs/{blob_id}.zip) is atomic.
-    staging_dir = blobs_dir / '.staging' / blob_id
+    staging_dir = blobs_dir / '.staging' / upload_id
     staging_zip = staging_dir / 'staging.zip'
     result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                 zip_name='staging',
