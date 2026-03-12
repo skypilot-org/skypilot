@@ -1193,8 +1193,8 @@ def test_jobs_launch_and_logs(generic_cloud: str):
             job_id = job_ids[0]
             assert handle is not None
             # Check the job status
-            jobs_list = sky.get(sky.jobs.queue_v2(refresh=False,
-                                                  all_users=True))
+            result = sky.get(sky.jobs.queue_v2(refresh=False, all_users=True))
+            jobs_list = result[0] if isinstance(result, tuple) else result
             job_exist = False
             for job in jobs_list:
                 if job['job_id'] == job_id:
