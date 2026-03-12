@@ -208,12 +208,6 @@ class InconsistentHighAvailabilityError(Exception):
     pass
 
 
-class InconsistentConsolidationModeError(Exception):
-    """Raised when the consolidation mode property in the user config
-    is inconsistent with the actual cluster."""
-    pass
-
-
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 
@@ -431,6 +425,16 @@ class InvalidClusterNameError(Exception):
     pass
 
 
+class InvalidRecipeNameError(Exception):
+    """Raised when the recipe name is invalid."""
+    pass
+
+
+class RecipeAlreadyExistsError(Exception):
+    """Raised when attempting to create a recipe with an existing name."""
+    pass
+
+
 class CloudUserIdentityError(Exception):
     """Raised when the cloud identity is invalid."""
     pass
@@ -637,6 +641,11 @@ class PermissionDeniedError(Exception):
     pass
 
 
+class VolumeNotReadyError(Exception):
+    """Raised when a volume is not ready."""
+    pass
+
+
 class VolumeNotFoundError(Exception):
     """Raised when a volume is not found."""
     pass
@@ -649,7 +658,14 @@ class VolumeTopologyConflictError(Exception):
 
 class ServerTemporarilyUnavailableError(Exception):
     """Raised when the server is temporarily unavailable."""
-    pass
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+    def __str__(self):
+        return ('SkyPilot API server is temporarily unavailable: '
+                f'{self.message}. Please try again later.')
 
 
 class RestfulPolicyError(Exception):
@@ -685,4 +701,9 @@ class ClientError(Exception):
 
     If a request encounters a ClientError, it will not be retried to the server.
     """
+    pass
+
+
+class ConcurrentWorkerExhaustedError(Exception):
+    """Raised when the concurrent worker is exhausted."""
     pass

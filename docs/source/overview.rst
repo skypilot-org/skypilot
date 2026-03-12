@@ -5,7 +5,7 @@ Overview
 ========================
 
 SkyPilot combines your cloud infra --- Kubernetes
-clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool, which is optimized for running AI workloads.
+clusters, Slurm clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool, which is optimized for running AI workloads.
 
 .. image:: images/skypilot-abstractions-long-2.png
     :width: 90%
@@ -207,7 +207,7 @@ See :ref:`sky-serve` to get started.
 Bring your own compute
 -------------------------------------------------------------------
 
-SkyPilot easily connects to your existing infra---Kubernetes clusters, clouds, or on-prem machines---using each infra's native authentication
+SkyPilot easily connects to your existing infra---Kubernetes clusters, Slurm clusters, clouds, or on-prem machines---using each infra's native authentication
 (kubeconfig, cloud credentials, SSH).
 
 .. _concept-kubernetes-clusters:
@@ -260,6 +260,16 @@ Example usage:
 
 See :ref:`kubernetes-overview`.
 
+
+.. _concept-slurm-clusters:
+
+Slurm clusters
+~~~~~~~~~~~~~~~~~~~~~
+
+You can run SkyPilot tasks on existing Slurm clusters by connecting to their login nodes via SSH.
+SkyPilot allows you to manage multiple Slurm clusters through a single interface.
+
+See :ref:`slurm-overview` and :ref:`slurm-getting-started` for details.
 
 .. _concept-cloud-vms:
 
@@ -401,7 +411,7 @@ Workloads also obtain higher GPU capacity and cost savings.
 Users can specify each workload's search space. It can be as flexible or as specific as desired. Example search spaces that can be specified:
 
 - Use the cheapest and available GPUs out of a set, ``{A10g:8, A10:8, L4:8, A100:8}``
-- Use my Kubernetes cluster or any accessible clouds (pictured above)
+- Use my Kubernetes cluster, Slurm cluster, or any accessible clouds (pictured above)
 - Use either a spot or on-demand H100 GPU
 - Use AWS's five European regions only
 - Use a specific zone, region, or cloud

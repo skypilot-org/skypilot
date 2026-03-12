@@ -1,0 +1,54 @@
+# JobGroup networking smoke test with custom image (no sudo installed)
+# This tests the fix for containers running as root but without sudo binary.
+# The image_id is passed as a Jinja variable for parametrized testing.
+---
+name: {{name}}
+execution: parallel
+---
+name: server
+resources:
+  cpus: 2
+  memory: 2GB
+  infra: {{cloud}}
+  # Custom image passed via parametrize - tests images without sudo
+  image_id: {{image_id}}
+run: |
+  echo "Server starting"
+  echo "Running as: $(id)"
+  echo "Has sudo: $(which sudo 2>/dev/null || echo 'NO - expected for custom images')"
+  python3 -m http.server 8080 &
+  SERVER_PID=$!
+  sleep 60
+  kill $SERVER_PID 2>/dev/null || true
+  echo "Server done"
+---
+name: client
+resources:
+  cpus: 2
+  memory: 2GB
+  infra: {{cloud}}
+  # Custom image passed via parametrize - tests images without sudo
+  image_id: {{image_id}}
+run: |
+  echo "Client starting"
+  echo "Running as: $(id)"
+  echo "Has sudo: $(which sudo 2>/dev/null || echo 'NO - expected for custom images')"
+  sleep 10
+  SERVER_HOST="server-0.${SKYPILOT_JOBGROUP_NAME}"
+  echo "Testing connection to $SERVER_HOST"
+
+  # First verify /etc/hosts was updated (DNS updater worked without sudo)
+  echo "Checking /etc/hosts entries:"
+  grep -E "SkyPilot|server-0|client-0" /etc/hosts || echo "No JobGroup entries yet"
+
+  # Try to connect to server using Python (available in all test images)
+  for i in $(seq 1 10); do
+    if python3 -c "import urllib.request; urllib.request.urlopen('http://$SERVER_HOST:8080/', timeout=5)" 2>/dev/null; then
+      echo "SUCCESS: Connected to server on custom image without sudo"
+      exit 0
+    fi
+    echo "Attempt $i failed, retrying..."
+    sleep 3
+  done
+  echo "FAILED: Could not connect to server"
+  exit 1

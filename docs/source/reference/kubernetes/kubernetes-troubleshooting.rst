@@ -5,7 +5,7 @@ Kubernetes Troubleshooting
 
 If you're unable to run SkyPilot tasks on your Kubernetes cluster, this guide will help you debug common issues.
 
-If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
+If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <https://github.com/skypilot-org/skypilot>`_.
 
 .. _kubernetes-troubleshooting-basic:
 
@@ -36,7 +36,7 @@ Step A1 - Can you create pods and services?
 
 As a sanity check, we will now try creating a simple pod running a HTTP server and a service to verify that your cluster and it's networking is functional.
 
-We will use the SkyPilot default image :code:`us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
+We will use the SkyPilot default image :code:`us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest` to verify that the image can be pulled from the registry.
 
 .. code-block:: bash
 
@@ -175,7 +175,7 @@ Run :code:`sky check` to verify that SkyPilot can see your GPUs.
     # Should show `Kubernetes: Enabled` and should not print any warnings about GPU support.
 
     # List the available GPUs in your cluster
-    $ sky show-gpus --infra k8s
+    $ sky gpus list --infra k8s
 
 Step B4 - Try launching a dummy GPU task
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -184,7 +184,7 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 
 .. code-block:: bash
 
-    # Replace the GPU type from the sky show-gpus output in the task launch command
+    # Replace the GPU type from the sky gpus list output in the task launch command
     $ sky launch -y -c mygpucluster --infra k8s --gpu <gpu-type>:1 -- "nvidia-smi"
 
     # Task should run and print the nvidia-smi output to the console

@@ -34,13 +34,13 @@ Create a GKE cluster
 
         **CLI:** 
         
-        Add ``--enable-workload-identity`` flag to ``gcloud container clusters create`` command as shown:
+        Add ``--workload-pool`` flag to ``gcloud container clusters create`` command as shown:
 
         .. code-block:: bash
 
             gcloud container clusters create <cluster-name> \
                 ...
-                --enable-workload-identity
+                --workload-pool=<project-id>.svc.id.goog
 
         **Web Console:**
 

@@ -1,0 +1,13 @@
+config:
+  azure:
+    remote_identity: LOCAL_CREDENTIALS
+
+run: |
+  echo "Testing remote_identity with LOCAL_CREDENTIALS"
+  # Check that Azure credentials were uploaded
+  if [ -f ~/.azure/azureProfile.json ]; then
+    echo "SUCCESS: ~/.azure/azureProfile.json exists as expected with LOCAL_CREDENTIALS"
+  else
+    echo "ERROR: ~/.azure/azureProfile.json should exist with LOCAL_CREDENTIALS"
+    exit 1
+  fi

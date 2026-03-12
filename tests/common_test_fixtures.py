@@ -8,6 +8,7 @@ import unittest
 import uuid
 
 import boto3
+import click.testing
 import fastapi
 from fastapi import testclient
 import pandas as pd
@@ -17,6 +18,7 @@ import requests
 import sky
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.catalog import vsphere_catalog
 from sky.provision import common as provision_common
@@ -42,7 +44,6 @@ logger = sky_logging.init_logger("sky.pytest")
 
 @pytest.fixture
 def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
-    from sky import skypilot_config
     region = 'us-east-2'
     if skypilot_config.loaded():
         ssh_proxy_command = skypilot_config.get_nested(
@@ -54,7 +55,8 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.fixture
 def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
-                         mock_stream_utils, mock_redirect_log_file) -> None:
+                         mock_stream_utils, mock_redirect_log_file,
+                         mock_execute_in_coroutine) -> None:
     """Fixture to mock HTTP requests using FastAPI's TestClient."""
     # This fixture automatically replaces `requests.get` and `requests.post`
     # with mocked versions that route requests through a FastAPI TestClient.
@@ -170,14 +172,6 @@ def check_quota_available_mock(*_, **__):
     return True
 
 
-def mock_redirect_output(*_, **__):
-    return (None, None)
-
-
-def mock_restore_output(*_, **__):
-    return None
-
-
 @pytest.fixture
 def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
@@ -205,7 +199,8 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
         list_empty_reservations)
 
     # Kubernetes mocks
-    monkeypatch.setattr('sky.adaptors.kubernetes._load_config', dummy_function)
+    monkeypatch.setattr('sky.adaptors.kubernetes._get_api_client',
+                        dummy_function)
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
         get_kubernetes_label_formatter)
@@ -417,11 +412,36 @@ def mock_queue(monkeypatch):
 
 
 @pytest.fixture
+def mock_execute_in_coroutine(monkeypatch):
+
+    class MockCoroutineTask:
+
+        def cancel(self):
+            return
+
+    def mock_execute_in_coroutine(*args, **kwargs):
+        return MockCoroutineTask()
+
+    monkeypatch.setattr(
+        'sky.server.requests.executor.execute_request_in_coroutine',
+        mock_execute_in_coroutine)
+
+
+@pytest.fixture
 def mock_redirect_log_file(monkeypatch):
-    monkeypatch.setattr('sky.server.requests.executor._redirect_output',
-                        mock_redirect_output)
-    monkeypatch.setattr('sky.server.requests.executor._restore_output',
-                        mock_restore_output)
+    # Click's CliRunner replaces sys.stdout/stderr with _NamedTextIOWrapper objects
+    # that don't support fileno(). We patch these wrapper objects to add fileno() support.
+    original_init = click.testing._NamedTextIOWrapper.__init__
+
+    def patched_wrapper_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        if hasattr(self, 'name') and 'stdout' in str(self.name):
+            self.fileno = lambda: 1
+        else:
+            self.fileno = lambda: 2
+
+    monkeypatch.setattr(click.testing._NamedTextIOWrapper, '__init__',
+                        patched_wrapper_init)
 
 
 @pytest.fixture
@@ -607,8 +627,44 @@ def skyignore_dir():
         yield temp_dir
 
 
+def _safe_reload_config():
+    """Safely reload config, handling cases where config file doesn't exist.
+
+    Some tests set SKYPILOT_CONFIG env var to a temp file that may be deleted
+    before other tests run. This function handles that case gracefully.
+    """
+    # If SKYPILOT_CONFIG points to a non-existent file, temporarily unset it
+    env_var_name = 'SKYPILOT_CONFIG'
+    original_value = os.environ.get(env_var_name)
+    if original_value and not os.path.exists(original_value):
+        del os.environ[env_var_name]
+        try:
+            skypilot_config.reload_config()
+        finally:
+            # Restore the original value (even though file doesn't exist)
+            # in case the test that set it is still running
+            os.environ[env_var_name] = original_value
+    else:
+        skypilot_config.reload_config()
+
+
 @pytest.fixture(autouse=True)
 def reset_global_state():
     """Reset global state before each test."""
     annotations.is_on_api_server = True
+    # Clear global caches that can leak state between tests.
+    # These caches can be polluted by tests that modify the config file
+    # (e.g., test_api_login sets api_server.endpoint to a test URL).
+    server_common.get_server_url.cache_clear()
+    server_common.is_api_server_local.cache_clear()
+    server_common.get_dashboard_url.cache_clear()
+    # Reload config from default paths to reset any in-memory config changes
+    # from previous tests that might have modified the config.
+    _safe_reload_config()
     yield
+    # Clear again after the test to prevent pollution to subsequent tests
+    server_common.get_server_url.cache_clear()
+    server_common.is_api_server_local.cache_clear()
+    server_common.get_dashboard_url.cache_clear()
+    # Reload config again to reset any changes made by this test
+    _safe_reload_config()

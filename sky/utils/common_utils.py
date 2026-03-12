@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import base64
 import ctypes
 import difflib
 import enum
@@ -8,10 +9,12 @@ import gc
 import getpass
 import hashlib
 import inspect
+import json
 import os
 import platform
 import random
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -29,6 +32,7 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
+from sky.utils import context
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -188,6 +192,35 @@ def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
                 f'{valid_regex}')
 
 
+def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
+    """Errors out on invalid recipe names.
+
+    Recipe names must:
+    - Start with a letter
+    - Contain only letters, numbers, and dashes (no underscores or dots)
+    - End with a letter or number
+    - Be at most constants.RECIPE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidRecipeNameError: If the recipe name is invalid.
+    """
+    if recipe_name is None:
+        return
+    if len(recipe_name) > constants.RECIPE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is too long; '
+                f'maximum length is {constants.RECIPE_NAME_MAX_LENGTH} '
+                f'characters, got {len(recipe_name)}')
+    valid_regex = constants.RECIPE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, recipe_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidRecipeNameError(
+                f'Recipe name "{recipe_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers, and dashes).')
+
+
 def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
@@ -265,13 +298,16 @@ def get_global_job_id(job_timestamp: str,
 
 class Backoff:
     """Exponential backoff with jittering."""
-    MULTIPLIER = 1.6
     JITTER = 0.4
 
-    def __init__(self, initial_backoff: float = 5, max_backoff_factor: int = 5):
+    def __init__(self,
+                 initial_backoff: float = 5,
+                 max_backoff_factor: int = 5,
+                 multiplier: float = 1.6):
         self._initial = True
         self._backoff = 0.0
         self._initial_backoff = initial_backoff
+        self._multiplier = multiplier
         self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
@@ -283,18 +319,18 @@ class Backoff:
             self._initial = False
             self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
-            self._backoff = min(self._backoff * self.MULTIPLIER,
+            self._backoff = min(self._backoff * self._multiplier,
                                 self._max_backoff)
         self._backoff += random.uniform(-self.JITTER * self._backoff,
                                         self.JITTER * self._backoff)
         return self._backoff
 
 
-_current_command: Optional[str] = None
-_current_client_entrypoint: Optional[str] = None
-_using_remote_api_server: Optional[bool] = None
-_current_user: Optional['models.User'] = None
-_current_request_id: Optional[str] = None
+_CLIENT_COMMAND_KEY = 'client_command'
+_CLIENT_ENTRYPOINT_KEY = 'client_entrypoint'
+_USING_REMOTE_API_SERVER_KEY = 'using_remote_api_server'
+_USER_KEY = 'user'
+_REQUEST_ID_KEY = 'request_id'
 
 
 def set_request_context(client_entrypoint: Optional[str],
@@ -306,22 +342,21 @@ def set_request_context(client_entrypoint: Optional[str],
     This is useful when we are on the SkyPilot API server side and we have a
     client entrypoint and command from the client.
     """
-    global _current_command
-    global _current_client_entrypoint
-    global _using_remote_api_server
-    global _current_user
-    global _current_request_id
-    _current_command = client_command
-    _current_client_entrypoint = client_entrypoint
-    _using_remote_api_server = using_remote_api_server
-    _current_user = user
-    _current_request_id = request_id
+    # This function will be called in process executor and coroutine executor.
+    # context.set_context_var ensures the context is safe in both cases.
+    context.set_context_var(_CLIENT_ENTRYPOINT_KEY, client_entrypoint)
+    context.set_context_var(_CLIENT_COMMAND_KEY, client_command)
+    context.set_context_var(_USING_REMOTE_API_SERVER_KEY,
+                            using_remote_api_server)
+    context.set_context_var(_USER_KEY, user)
+    context.set_context_var(_REQUEST_ID_KEY, request_id)
 
 
 def get_current_request_id() -> str:
     """Returns the current request id."""
-    if _current_request_id is not None:
-        return _current_request_id
+    value = context.get_context_var('request_id')
+    if value is not None:
+        return value
     return 'dummy-request-id'
 
 
@@ -331,30 +366,43 @@ def get_current_command() -> str:
     Normally uses get_pretty_entry_point(), but will use the client command on
     the server side.
     """
-    if _current_command is not None:
-        return _current_command
-
+    value = context.get_context_var(_CLIENT_COMMAND_KEY)
+    if value is not None:
+        return value
     return get_pretty_entrypoint_cmd()
 
 
 def get_current_user() -> 'models.User':
-    """Returns the current user."""
-    if _current_user is not None:
-        return _current_user
+    """Returns the user in current server session."""
+    value = context.get_context_var(_USER_KEY)
+    if value is not None:
+        return value
     return models.User.get_current_user()
 
 
 def get_current_user_name() -> str:
-    """Returns the current user name."""
+    """Returns the user name in current server session."""
     name = get_current_user().name
+    assert name is not None
+    return name
+
+
+def get_local_user_name() -> str:
+    """Returns the user name in local environment.
+
+    This is for backward compatibility where anonymous access is implicitly
+    allowed when no authentication method at server-side is configured and
+    the username from client environment variable will be used to identify the
+    user.
+    """
+    name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
     assert name is not None
     return name
 
 
 def set_current_user(user: 'models.User'):
     """Sets the current user."""
-    global _current_user
-    _current_user = user
+    context.set_context_var('user', user)
 
 
 def get_current_client_entrypoint(server_entrypoint: str) -> str:
@@ -363,8 +411,9 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     Gets the client entrypoint from the context, if it is not set, returns the
     server entrypoint.
     """
-    if _current_client_entrypoint is not None:
-        return _current_client_entrypoint
+    value = context.get_context_var(_CLIENT_ENTRYPOINT_KEY)
+    if value is not None:
+        return value
     return server_entrypoint
 
 
@@ -373,8 +422,9 @@ def get_using_remote_api_server() -> bool:
     if os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR) is not None:
         return os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR,
                          '').lower() in ('true', '1')
-    if _using_remote_api_server is not None:
-        return _using_remote_api_server
+    value = context.get_context_var(_USING_REMOTE_API_SERVER_KEY)
+    if value is not None:
+        return value
     # This gets the right status for the local client.
     # TODO(zhwu): This is to prevent circular import. We should refactor this.
     # pylint: disable=import-outside-toplevel
@@ -399,7 +449,7 @@ def get_pretty_entrypoint_cmd() -> str:
     # Redact sensitive values from secrets arguments
     argv = _redact_secrets_values(argv)
 
-    return ' '.join(argv)
+    return shlex.join(argv)
 
 
 def read_last_n_lines(file_path: str,
@@ -705,7 +755,7 @@ def remove_file_if_exists(path: Optional[str]):
 
 def is_wsl() -> bool:
     """Detect if running under Windows Subsystem for Linux (WSL)."""
-    return 'microsoft' in platform.uname()[3].lower()
+    return 'microsoft' in platform.uname().release.lower()
 
 
 def find_free_port(start_port: int) -> int:
@@ -721,7 +771,8 @@ def find_free_port(start_port: int) -> int:
             try:
                 s.bind(('', port))
                 return port
-            except OSError:
+            except OSError as e:
+                logger.debug(f'Error binding port {port}: {e}')
                 pass
     raise OSError('No free ports available.')
 
@@ -1112,7 +1163,7 @@ def release_memory():
         gc.collect()
         if sys.platform.startswith('linux'):
             # Will fail on musl (alpine), but at least it works on our
-            # offical docker images.
+            # official docker images.
             libc = ctypes.CDLL('libc.so.6')
             return libc.malloc_trim(0)
         return 0
@@ -1120,3 +1171,104 @@ def release_memory():
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0
+
+
+def base64_url_encode(data: bytes) -> str:
+    """Base64url encode data without padding.
+
+    Uses URL-safe alphabet (- and _ instead of + and /) and strips padding
+    to avoid URL encoding issues with = characters.
+    """
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+
+def compute_code_challenge(code_verifier: str) -> str:
+    """Compute a code_challenge from code_verifier using SHA256.
+
+    Used in the CLI login flow for CSRF protection. The CLI generates a
+    random code_verifier, computes the challenge, and sends the challenge
+    to the server. Later, the CLI proves it initiated the request by
+    providing the original verifier which the server hashes to verify.
+    """
+    digest = hashlib.sha256(code_verifier.encode('utf-8')).digest()
+    return base64_url_encode(digest)
+
+
+def merge_node_names_lineage(
+        existing_json: Optional[str],
+        current_names: Optional[List[str]]) -> Optional[str]:
+    """Merge current node names into the existing node name lineage.
+
+    The node_names column stores a JSON list of lists. Each inner list
+    represents one node (head first, then workers) and contains the
+    lineage of names that have been assigned to that node over time
+    (e.g. across recovery events). Each inner list is capped at
+    constants.MAX_NODE_NAME_LINEAGE entries.
+
+    Args:
+        existing_json: JSON string of list-of-lists from the DB, or None.
+        current_names: List of current node names (head first), or None.
+
+    Returns:
+        JSON string of list-of-lists with lineage updated, or None.
+    """
+    if current_names is None:
+        return existing_json
+
+    existing: List[List[str]] = []
+    if existing_json is not None:
+        try:
+            parsed = json.loads(existing_json)
+            if isinstance(parsed, list):
+                existing = parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    result: List[List[str]] = []
+    for i, name in enumerate(current_names):
+        if i < len(existing) and isinstance(existing[i], list):
+            lineage = list(existing[i])
+            # Only append if name is valid and different from last entry
+            if name and (not lineage or lineage[-1] != name):
+                lineage.append(name)
+            # Cap at max lineage length
+            if len(lineage) > constants.MAX_NODE_NAME_LINEAGE:
+                lineage = lineage[-constants.MAX_NODE_NAME_LINEAGE:]
+        else:
+            lineage = [name] if name else []
+        result.append(lineage)
+
+    return json.dumps(result) if result else None
+
+
+def get_display_node_names(node_names_json: Optional[str]) -> Optional[str]:
+    """Extract display node names from the lineage JSON.
+
+    Takes the last entry from each inner list (the most recent name for
+    each node) and returns them as a comma-separated string.
+
+    Args:
+        node_names_json: JSON string of list-of-lists, or None.
+
+    Returns:
+        Comma-separated string of current node names, or None.
+    """
+    if node_names_json is None:
+        return None
+
+    try:
+        lineage = json.loads(node_names_json)
+        if not isinstance(lineage, list):
+            # Backward compat: might be old comma-separated format
+            return node_names_json
+        names = []
+        for node_lineage in lineage:
+            if isinstance(node_lineage, list) and node_lineage:
+                names.append(node_lineage[-1])
+            elif isinstance(node_lineage, str):
+                # Backward compat: flat list of strings
+                names.append(node_lineage)
+        return ','.join(names) if names else None
+    except (json.JSONDecodeError, TypeError):
+        # Backward compat: return as-is if not valid JSON
+        return node_names_json

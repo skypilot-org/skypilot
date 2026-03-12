@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/router';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getConfig, updateConfig } from '@/data/connectors/workspaces';
@@ -9,12 +8,15 @@ import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
 import { CircularProgress } from '@mui/material';
 import { SaveIcon } from 'lucide-react';
 import yaml from 'js-yaml';
-import { VersionDisplay } from '@/components/elements/version-display';
+import {
+  VersionDisplay,
+  NewVersionAvailable,
+} from '@/components/elements/version-display';
 import { apiClient } from '@/data/connectors/client';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 export function Config() {
-  const router = useRouter();
   const [editableConfig, setEditableConfig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -133,10 +135,6 @@ export function Config() {
     }
   };
 
-  const handleCancel = () => {
-    router.push('/workspaces');
-  };
-
   const handleReset = () => {
     loadConfig();
   };
@@ -199,7 +197,11 @@ export function Config() {
               View API Server Metrics
             </button>
           )}
-          <VersionDisplay />
+          <NewVersionAvailable />
+          <PluginSlot
+            name="settings.version-display"
+            fallback={<VersionDisplay />}
+          />
         </div>
       </div>
 
@@ -300,9 +302,6 @@ export function Config() {
           </div>
 
           <div className="flex justify-end space-x-3 pt-3">
-            <Button variant="outline" onClick={handleCancel} disabled={saving}>
-              Cancel
-            </Button>
             <Button
               onClick={handleSave}
               disabled={loading || saving}

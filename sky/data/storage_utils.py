@@ -209,7 +209,21 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 def zip_files_and_folders(items: List[str],
                           output_file: Union[str, pathlib.Path],
                           log_file: Optional[TextIO] = None,
-                          relative_to_items: bool = False):
+                          relative_to_items: bool = False,
+                          compression: int = zipfile.ZIP_DEFLATED,
+                          compresslevel: Optional[int] = None):
+    """Zip files and folders.
+
+    Args:
+        items: List of file/folder paths to include in the zip.
+        output_file: Path to the output zip file.
+        log_file: Optional file to log progress to.
+        relative_to_items: If True, paths in zip are relative to items.
+        compression: Compression method (default: ZIP_DEFLATED for good
+            compression with universal compatibility).
+        compresslevel: Compression level (1-9 for DEFLATED). None uses
+            the default (6).
+    """
 
     def _get_archive_name(file_path: str, item_path: str) -> str:
         """Get the archive name for a file based on the relative parameters."""
@@ -239,7 +253,10 @@ def zip_files_and_folders(items: List[str],
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
                                 message='Duplicate name:')
-        with zipfile.ZipFile(output_file, 'w') as zipf:
+        with zipfile.ZipFile(output_file,
+                             'w',
+                             compression=compression,
+                             compresslevel=compresslevel) as zipf:
             for item in items:
                 item = os.path.expanduser(item)
                 if not os.path.isfile(item) and not os.path.isdir(item):
@@ -251,6 +268,15 @@ def zip_files_and_folders(items: List[str],
                     archive_name = _get_archive_name(item, item)
                     zipf.write(item, archive_name)
                 elif os.path.isdir(item):
+                    # Include root dir
+                    archive_name = _get_archive_name(item, item)
+                    # If it's a symlink, store it as a symlink
+                    if os.path.islink(item):
+                        _store_symlink(zipf, item, archive_name, is_dir=True)
+                    else:
+                        zipf.write(item, archive_name)
+
+                    # Include dir contents recursively
                     excluded_files = set([
                         os.path.join(item, f.rstrip('/'))
                         for f in get_excluded_files(item)

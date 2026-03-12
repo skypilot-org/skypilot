@@ -1,17 +1,29 @@
 'use client';
 
 import React from 'react';
+import ReactDOM from 'react-dom/client';
+import * as ReactDOMAll from 'react-dom';
 import dynamic from 'next/dynamic';
 import PropTypes from 'prop-types';
 import '@/app/globals.css';
 import { useEffect } from 'react';
 import { BASE_PATH } from '@/data/connectors/constants';
 import { TourProvider } from '@/hooks/useTour';
+import { PluginProvider } from '@/plugins/PluginProvider';
+import { VersionProvider } from '@/components/elements/version-display';
 
 const Layout = dynamic(
   () => import('@/components/elements/layout').then((mod) => mod.Layout),
   { ssr: false }
 );
+
+// Expose React and ReactDOM to window for plugins to use.
+// We merge react-dom/client (createRoot, hydrateRoot) with react-dom
+// (createPortal, flushSync, etc.) so plugins have access to all exports.
+if (typeof window !== 'undefined') {
+  window.React = React;
+  window.ReactDOM = { ...ReactDOMAll, ...ReactDOM };
+}
 
 function App({ Component, pageProps }) {
   useEffect(() => {
@@ -22,11 +34,15 @@ function App({ Component, pageProps }) {
   }, []);
 
   return (
-    <TourProvider>
-      <Layout highlighted={pageProps.highlighted}>
-        <Component {...pageProps} />
-      </Layout>
-    </TourProvider>
+    <PluginProvider>
+      <VersionProvider>
+        <TourProvider>
+          <Layout highlighted={pageProps.highlighted}>
+            <Component {...pageProps} />
+          </Layout>
+        </TourProvider>
+      </VersionProvider>
+    </PluginProvider>
   );
 }
 

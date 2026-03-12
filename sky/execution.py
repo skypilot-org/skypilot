@@ -4,18 +4,22 @@ See `Stage` for a Task's life cycle.
 """
 import enum
 import logging
+import time
 import typing
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import colorama
 
 from sky import admin_policy
 from sky import backends
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.server.requests import request_names
 from sky.skylet import autostop_lib
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -31,6 +35,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -111,13 +116,14 @@ def _execute(
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
-    detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
+    *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
+    _request_name: request_names.AdminPolicyRequestName,
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
@@ -156,8 +162,6 @@ def _execute(
         job itself. You can safely ctrl-c to detach from logging, and it will
         not interrupt the setup process. To see the logs again after detaching,
         use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
-      detach_run: If True, as soon as a job is submitted, return from this
-        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -174,6 +178,13 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+    if _request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH:
+        if _is_launched_by_jobs_controller:
+            _request_name = (
+                request_names.AdminPolicyRequestName.JOBS_LAUNCH_CLUSTER)
+        elif _is_launched_by_sky_serve_controller:
+            _request_name = (
+                request_names.AdminPolicyRequestName.SERVE_LAUNCH_REPLICA)
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
     for task in dag.tasks:
         for resource in task.resources:
@@ -189,6 +200,7 @@ def _execute(
                 idle_minutes_to_autostop = resource.autostop_config.idle_minutes
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
+            request_name=_request_name,
             request_options=admin_policy.RequestOptions(
                 cluster_name=cluster_name,
                 idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -216,7 +228,6 @@ def _execute(
             stages=stages,
             cluster_name=cluster_name,
             detach_setup=detach_setup,
-            detach_run=detach_run,
             no_setup=no_setup,
             clone_disk_from=clone_disk_from,
             skip_unnecessary_provisioning=skip_unnecessary_provisioning,
@@ -238,7 +249,6 @@ def _execute_dag(
     stages: Optional[List[Stage]],
     cluster_name: Optional[str],
     detach_setup: bool,
-    detach_run: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
     skip_unnecessary_provisioning: bool,
@@ -320,12 +330,16 @@ def _execute_dag(
         idle_minutes_to_autostop: Optional[int] = None
         down = False
         wait_for: Optional[autostop_lib.AutostopWaitFor] = None
+        hook: Optional[str] = None
+        hook_timeout: Optional[int] = None
         if resource_autostop_config is not None:
             if resource_autostop_config.enabled:
                 idle_minutes_to_autostop = (
                     resource_autostop_config.idle_minutes)
                 down = resource_autostop_config.down
                 wait_for = resource_autostop_config.wait_for
+                hook = resource_autostop_config.hook
+                hook_timeout = resource_autostop_config.hook_timeout
             else:
                 # Autostop is explicitly disabled, so cancel it if it's
                 # already set.
@@ -400,6 +414,26 @@ def _execute_dag(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
+    # Note on race vs. lock: OPTIMIZE typically runs outside the per-cluster
+    # lock. After the backend acquires the lock and refreshes state, the
+    # original "do we need to optimize?" decision may be stale (e.g., the
+    # cluster just got terminated). To compensate without moving the optimizer
+    # into the backend, we inject a small planner the backend can call under
+    # the lock only when no reusable snapshot and no caller plan exist.
+    planner: Optional[Callable[['sky.Task'], 'resources_lib.Resources']] = None
+    if isinstance(backend,
+                  backends.CloudVmRayBackend) and Stage.OPTIMIZE in stages:
+
+        def _planner(_t: 'sky.Task'):
+            new_dag = optimizer.Optimizer.optimize(dag,
+                                                   minimize=optimize_target,
+                                                   quiet=_quiet_optimizer)
+            new_task = new_dag.tasks[0]
+            assert new_task.best_resources is not None, new_task
+            return new_task.best_resources.assert_launchable()
+
+        planner = _planner
+
     backend.register_info(
         dag=dag,
         optimize_target=optimize_target,
@@ -408,7 +442,8 @@ def _execute_dag(
         # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported,
-        is_managed=is_managed)
+        is_managed=is_managed,
+        planner=planner)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -450,7 +485,9 @@ def _execute_dag(
                     cluster_name, status_lib.ClusterStatus.INIT,
                     'Syncing files to cluster',
                     global_user_state.ClusterEventType.STATUS_CHANGE)
-            backend.sync_workdir(handle, task.workdir, task.envs_and_secrets)
+            envs_and_secrets = task_lib.get_plaintext_envs_and_secrets(
+                task.envs_and_secrets)
+            backend.sync_workdir(handle, task.workdir, envs_and_secrets)
 
         if do_file_mounts:
             if cluster_name is not None:
@@ -479,16 +516,18 @@ def _execute_dag(
             if idle_minutes_to_autostop is not None:
                 assert isinstance(backend, backends.CloudVmRayBackend)
                 assert isinstance(handle, backends.CloudVmRayResourceHandle)
-                backend.set_autostop(handle, idle_minutes_to_autostop, wait_for,
-                                     down)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     wait_for,
+                                     down,
+                                     hook=hook,
+                                     hook_timeout=hook_timeout)
 
+        job_id = None
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun)
+                job_id = backend.execute(handle, task, dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
@@ -521,12 +560,15 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    *,  #keyword only separator
     # Internal only:
     # pylint: disable=invalid-name
     _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
+    _request_name: request_names.AdminPolicyRequestName = request_names.
+    AdminPolicyRequestName.CLUSTER_LAUNCH,
     job_logger: logging.Logger = logger,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -623,10 +665,36 @@ def launch(
     handle = None
     stages = None
     skip_unnecessary_provisioning = False
-    # Check if cluster exists and we are doing fast provisioning
-    if fast and cluster_name is not None:
+
+    # Check for AUTOSTOPPING and wait with spinner (applies to all modes)
+    cluster_status = None
+    maybe_handle = None
+    if cluster_name is not None:
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            # Use spinner to show progress while waiting
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(
+                        f'Waiting for autostop to complete on {cluster_name!r}')
+            ):
+                while cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+                    time.sleep(
+                        backend_utils.CLUSTER_STATUS_CACHE_DURATION_SECONDS)
+                    cluster_status, maybe_handle = (
+                        backend_utils.refresh_cluster_status_handle(
+                            cluster_name))
+            # Log final status after spinner completes
+            logger.info(
+                f'Autostop completed. Cluster status: '
+                f'{cluster_status.value if cluster_status else "TERMINATED"}')
+
+    # Check if cluster exists and we are doing fast provisioning
+    if fast and cluster_name is not None:
+        # Reuse cluster_status/maybe_handle if already fetched
+        if cluster_status is None:
+            cluster_status, maybe_handle = (
+                backend_utils.refresh_cluster_status_handle(cluster_name))
         if cluster_status == status_lib.ClusterStatus.INIT:
             # If the cluster is INIT, it may be provisioning. We want to prevent
             # concurrent calls from queueing up many sequential reprovision
@@ -685,7 +753,6 @@ def launch(
         stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
-        detach_run=True,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
@@ -694,7 +761,12 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _request_name=_request_name,
         job_logger=job_logger)
+
+
+# needed for backward compatibility. Remove by v0.12.0
+cluster_launch = launch
 
 
 @usage_lib.entrypoint
@@ -763,6 +835,17 @@ def exec(  # pylint: disable=redefined-builtin
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
 
+    # Check if cluster is autostopping - reject exec on autostopping clusters
+    if not dryrun:
+        cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+            cluster_name)
+        if cluster_status == status_lib.ClusterStatus.AUTOSTOPPING:
+            raise exceptions.ClusterNotUpError(
+                f'Cannot execute on cluster {cluster_name!r}: cluster is '
+                'autostopping. Please wait for autostop to complete, then use '
+                f'`sky start {cluster_name}` to restart.',
+                cluster_status=cluster_status)
+
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='executing tasks',
@@ -780,6 +863,6 @@ def exec(  # pylint: disable=redefined-builtin
             Stage.EXEC,
         ],
         cluster_name=cluster_name,
-        detach_run=True,
         job_logger=job_logger,
+        _request_name=request_names.AdminPolicyRequestName.CLUSTER_EXEC,
     )

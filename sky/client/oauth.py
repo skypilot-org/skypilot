@@ -5,7 +5,7 @@ import threading
 import time
 from typing import Dict, Optional
 
-AUTH_TIMEOUT = 300  # 5 minutes
+from sky.server import constants as server_constants
 
 
 class _AuthCallbackHandler(BaseHTTPRequestHandler):
@@ -44,10 +44,12 @@ class _AuthCallbackHandler(BaseHTTPRequestHandler):
         pass
 
 
-def start_local_auth_server(port: int,
-                            token_store: Dict[str, Optional[str]],
-                            remote_endpoint: str,
-                            timeout: int = AUTH_TIMEOUT) -> HTTPServer:
+def start_local_auth_server(
+        port: int,
+        token_store: Dict[str, Optional[str]],
+        remote_endpoint: str,
+        timeout: int = server_constants.AUTH_SESSION_TIMEOUT_SECONDS
+) -> HTTPServer:
     """Start a local HTTP server to handle OAuth callback.
 
     Args:

@@ -1,15 +1,18 @@
+import re
 from unittest import mock
 
+import click
 from click import testing as cli_testing
+import pytest
 import requests
 
 from sky import clouds
+from sky import exceptions
 from sky import models
 from sky import server
 from sky.client.cli import command
 from sky.schemas.api import responses
 from sky.utils import status_lib
-from sky.utils import ux_utils
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
@@ -241,69 +244,69 @@ def mock_api_server_calls(monkeypatch):
 
 class TestWithNoCloudEnabled:
 
-    def test_show_gpus(self, monkeypatch):
-        """Tests `sky show-gpus` can be invoked (but not correctness).
+    def test_gpus_list(self, monkeypatch):
+        """Tests `sky gpus list` can be invoked (but not correctness).
 
         Tests below correspond to the following terminal commands, in order:
 
-        -> sky show-gpus
-        -> sky show-gpus --all
-        -> sky show-gpus V100:4
-        -> sky show-gpus :4
-        -> sky show-gpus V100:0
-        -> sky show-gpus V100:-2
-        -> sky show-gpus --cloud aws --region us-west-1
-        -> sky show-gpus --cloud lambda
-        -> sky show-gpus --cloud lambda --all
-        -> sky show-gpus V100:4 --cloud lambda
-        -> sky show-gpus V100:4 --cloud lambda --all
+        -> sky gpus list
+        -> sky gpus list --all
+        -> sky gpus list V100:4
+        -> sky gpus list :4
+        -> sky gpus list V100:0
+        -> sky gpus list V100:-2
+        -> sky gpus list --cloud aws --region us-west-1
+        -> sky gpus list --cloud lambda
+        -> sky gpus list --cloud lambda --all
+        -> sky gpus list V100:4 --cloud lambda
+        -> sky gpus list V100:4 --cloud lambda --all
         """
         mock_api_server_calls(monkeypatch)
 
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.show_gpus, [])
+        result = cli_runner.invoke(command.gpus_list, [])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['--all'])
+        result = cli_runner.invoke(command.gpus_list, ['--all'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['V100:4'])
+        result = cli_runner.invoke(command.gpus_list, ['V100:4'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, [':4'])
+        result = cli_runner.invoke(command.gpus_list, [':4'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus, ['V100:0'])
+        result = cli_runner.invoke(command.gpus_list, ['V100:0'])
         assert isinstance(result.exception, SystemExit)
 
-        result = cli_runner.invoke(command.show_gpus, ['V100:-2'])
+        result = cli_runner.invoke(command.gpus_list, ['V100:-2'])
         assert isinstance(result.exception, SystemExit)
 
-        result = cli_runner.invoke(command.show_gpus,
+        result = cli_runner.invoke(command.gpus_list,
                                    ['--cloud', 'aws', '--region', 'us-west-1'])
         assert not result.exit_code
 
-        result = cli_runner.invoke(command.show_gpus,
+        result = cli_runner.invoke(command.gpus_list,
                                    ['--infra', 'aws/us-west-1'])
         assert not result.exit_code
 
         for cloud in CLOUDS_TO_TEST:
-            result = cli_runner.invoke(command.show_gpus, ['--infra', cloud])
+            result = cli_runner.invoke(command.gpus_list, ['--infra', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['--cloud', cloud, '--all'])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['V100', '--cloud', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['V100:4', '--cloud', cloud])
             assert not result.exit_code
 
-            result = cli_runner.invoke(command.show_gpus,
+            result = cli_runner.invoke(command.gpus_list,
                                        ['V100:4', '--cloud', cloud, '--all'])
             assert isinstance(result.exception, SystemExit)
 
@@ -370,6 +373,7 @@ class TestHelperFunctions:
         # Mock cluster records that would be returned by stream_and_get
         mock_handle = mock.MagicMock()
         mock_handle.cluster_name = 'test-cluster'
+        mock_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
         mock_handle.cached_external_ips = ['1.2.3.4']
         mock_handle.cached_external_ssh_ports = [22]
         mock_handle.docker_user = None
@@ -416,10 +420,11 @@ class TestHelperFunctions:
         records = command._get_cluster_records_and_set_ssh_config(
             ['test-cluster'])
         assert records == mock_records
-        mock_add_cluster.assert_called_once_with('test-cluster', ['1.2.3.4'], {
-            'ssh_user': 'ubuntu',
-            'ssh_private_key': '/path/to/key.pem'
-        }, [22], None, 'ubuntu')
+        mock_add_cluster.assert_called_once_with(
+            'test-cluster', 'test-cluster-abcdef', ['1.2.3.4'], {
+                'ssh_user': 'ubuntu',
+                'ssh_private_key': '/path/to/key.pem'
+            }, [22], None, 'ubuntu')
         # Shouldn't remove anything because all clusters provided are in the returned records
         mock_remove_cluster.assert_not_called()
 
@@ -453,6 +458,7 @@ class TestHelperFunctions:
         # Test case 4: Test with a cluster that is using kubernetes
         mock_k8s_handle = mock.MagicMock()
         mock_k8s_handle.cluster_name = 'test-cluster'
+        mock_k8s_handle.cluster_name_on_cloud = 'test-cluster-abcdef'
         mock_k8s_handle.cached_external_ips = ['1.2.3.4']
         mock_k8s_handle.cached_external_ssh_ports = [22]
         mock_k8s_handle.docker_user = None
@@ -477,21 +483,22 @@ class TestHelperFunctions:
         mock_add_cluster.assert_called_once()
         added_cluster_args = mock_add_cluster.call_args
         assert added_cluster_args[0][0] == 'test-cluster'
-        assert added_cluster_args[0][1] == ['1.2.3.4']
+        assert added_cluster_args[0][1] == 'test-cluster-abcdef'
+        assert added_cluster_args[0][2] == ['1.2.3.4']
         # proxy command should be set, but is dependent on the server url, so we don't check the exact value
-        assert added_cluster_args[0][2].get('ssh_proxy_command') is not None
-        assert server_url in added_cluster_args[0][2].get('ssh_proxy_command')
-        assert added_cluster_args[0][2].get(
+        assert added_cluster_args[0][3].get('ssh_proxy_command') is not None
+        assert server_url in added_cluster_args[0][3].get('ssh_proxy_command')
+        assert added_cluster_args[0][3].get(
             'ssh_private_key') == '/path/to/key.pem'
-        assert added_cluster_args[0][2].get('ssh_user') == 'ubuntu'
-        assert added_cluster_args[0][3] == [22]
-        assert added_cluster_args[0][4] is None
-        assert added_cluster_args[0][5] == 'ubuntu'
+        assert added_cluster_args[0][3].get('ssh_user') == 'ubuntu'
+        assert added_cluster_args[0][4] == [22]
+        assert added_cluster_args[0][5] is None
+        assert added_cluster_args[0][6] == 'ubuntu'
         mock_remove_cluster.assert_not_called()
 
     def test_list_to_str_float_formatting(self):
         """Test that _list_to_str formats whole number floats as integers.
-        
+
         Regression test for GitHub issue #6484 where requestable quantities
         were shown as '1.0, 2.0, 4.0, 8.0' instead of '1, 2, 4, 8'.
         """
@@ -530,9 +537,9 @@ class TestHelperFunctions:
         assert _list_to_str([1.0]) == '1'
         assert _list_to_str([1.5]) == '1.5'
 
-    def test_show_gpus_k8s_float_formatting(self, monkeypatch):
-        """Integration test for sky show-gpus --infra k8s output formatting.
-        
+    def test_gpus_list_k8s_float_formatting(self, monkeypatch):
+        """Integration test for sky gpus list --infra k8s output formatting.
+
         Regression test for GitHub issue #6484 to ensure that requestable quantities
         are displayed as integers (1, 2, 4, 8) instead of floats (1.0, 2.0, 4.0, 8.0).
         """
@@ -586,7 +593,7 @@ class TestHelperFunctions:
 
         # Run the command
         cli_runner = cli_testing.CliRunner()
-        result = cli_runner.invoke(command.show_gpus, ['--infra', 'k8s'])
+        result = cli_runner.invoke(command.gpus_list, ['--infra', 'k8s'])
 
         # Check that command succeeded
         assert result.exit_code == 0, f"Command failed with output: {result.output}"
@@ -596,3 +603,203 @@ class TestHelperFunctions:
         assert '1, 2, 4, 8' in output, f"Expected '1, 2, 4, 8' in output, got: {output}"
         # Ensure it doesn't contain the problematic float format
         assert '1.0, 2.0, 4.0, 8.0' not in output, f"Found float format in output: {output}"
+
+    def test_env_secret_file_merger_comprehensive(self):
+        """"""
+        cli = [('hello', 'world'), ('one', 'two')]
+        env_file = {
+            'hello': 'notthis',
+            'something': 'different',
+            'secret': 'notsosecure'
+        }
+        secret_file = {'secret': 'supersecret', 'secret2': 'verysecret'}
+
+        final_envs = command._merge_cli_and_file_vars(
+            [None, env_file, None, secret_file], cli)
+        final_envs = dict(final_envs)
+        assert final_envs['hello'] == 'world'
+        assert final_envs['one'] == 'two'
+        assert final_envs['something'] == 'different'
+        assert final_envs['secret'] == 'supersecret'
+        assert final_envs['secret2'] == 'verysecret'
+
+    def test_env_secret_file_merger_one_file(self):
+        """Test with only file contents provided."""
+        env_file = {'key1': 'value1', 'key2': 'value2'}
+
+        final_envs = command._merge_cli_and_file_vars([env_file], [])
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'value1'
+        assert final_envs['key2'] == 'value2'
+        assert len(final_envs) == 2
+
+    def test_env_secret_file_merger_cli_only(self):
+        """Test with only CLI args provided."""
+        cli = [('key1', 'value1'), ('key2', 'value2')]
+
+        final_envs = command._merge_cli_and_file_vars([], cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'value1'
+        assert final_envs['key2'] == 'value2'
+        assert len(final_envs) == 2
+
+    def test_env_secret_file_merger_duplicate_keys_in_cli(self):
+        """Test that later CLI args override earlier ones for same key."""
+        # While we don't expect users to pass in the same keys into the
+        # cli command, the last key will technically be preferred.
+        cli = [('key1', 'first'), ('key1', 'second'), ('key1', 'third')]
+
+        final_envs = command._merge_cli_and_file_vars([], cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'third'
+        assert len(final_envs) == 1
+
+    def test_env_secret_file_merger_all_none_env_dicts(self):
+        """Test with all None env_dicts."""
+        cli = [('key1', 'value1')]
+
+        final_envs = command._merge_cli_and_file_vars([None, None, None], cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key1'] == 'value1'
+        assert len(final_envs) == 1
+
+    def test_env_secret_file_merger_empty_inputs(self):
+        """Test with completely empty inputs."""
+        final_envs = command._merge_cli_and_file_vars([], [])
+        assert final_envs == []
+
+        final_envs = command._merge_cli_and_file_vars([{}, {}], [])
+        assert final_envs == []
+
+    def test_env_dict_priority_order(self):
+        """Test that higher index env_dicts override lower index ones."""
+        env_dict1 = {'key': 'first', 'unique1': 'value1'}
+        env_dict2 = {'key': 'second', 'unique2': 'value2'}
+        env_dict3 = {'key': 'third', 'unique3': 'value3'}
+
+        final_envs = command._merge_cli_and_file_vars(
+            [env_dict1, env_dict2, env_dict3], [])
+        final_envs = dict(final_envs)
+
+        assert final_envs['key'] == 'third'
+        assert final_envs['unique1'] == 'value1'
+        assert final_envs['unique2'] == 'value2'
+        assert final_envs['unique3'] == 'value3'
+
+    def test_cli_overrides_all_dicts(self):
+        """Test that CLI args override all env_dicts regardless of position."""
+        env_dict1 = {'key': 'dict1'}
+        env_dict2 = {'key': 'dict2'}
+        cli = [('key', 'cli_value')]
+
+        final_envs = command._merge_cli_and_file_vars([env_dict1, env_dict2],
+                                                      cli)
+        final_envs = dict(final_envs)
+
+        assert final_envs['key'] == 'cli_value'
+
+
+def strip_ansi(s: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", s)
+
+
+class DummyCloudError(exceptions.CloudError):
+
+    def __init__(self):
+        super().__init__(
+            message="Request error UNAUTHENTICATED: Invalid token",
+            cloud_provider="nebius",
+            error_type="RequestError",
+        )
+
+
+@pytest.mark.parametrize("mode", ["down", "stop", "autostop"])
+def test_batch_continues_on_errors_helper(monkeypatch, capsys, mode):
+    monkeypatch.setenv("RICH_FORCE_TERMINAL", "1")
+    monkeypatch.setenv("RICH_PROGRESS_NO_CLEAR", "1")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("COLUMNS", "100")
+
+    names = ["sky-ok-1", "sky-nebius-fail", "sky-ok-2"]
+
+    def fake_down(name, purge=False, graceful=False, graceful_timeout=None):
+        if name == "sky-nebius-fail":
+            raise DummyCloudError()
+
+    def fake_stop(name, purge=False, graceful=False, graceful_timeout=None):
+        return fake_down(name, purge=purge)
+
+    def fake_autostop(name, idle_minutes, wait_for, down):
+        return fake_down(name)
+
+    monkeypatch.setattr(command, '_async_call_or_wait',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(command.sdk, "down", fake_down)
+    monkeypatch.setattr(command.sdk, "stop", fake_stop)
+    monkeypatch.setattr(command.sdk, "autostop", fake_autostop)
+
+    monkeypatch.setattr(command,
+                        "_get_cluster_records_and_set_ssh_config",
+                        lambda clusters=None, all_users=False: [{
+                            "name": n,
+                            "status": None
+                        } for n in (clusters or names)])
+
+    class FakeControllers:
+
+        @staticmethod
+        def from_name(name, expect_exact_match):
+            return None
+
+    monkeypatch.setattr(command, "controller_utils",
+                        type("X", (), {"Controllers": FakeControllers}))
+
+    kwargs = dict(
+        names=names,
+        apply_to_all=False,
+        all_users=False,
+        down=(mode == "down"),
+        no_confirm=True,
+        purge=False,
+        idle_minutes_to_autostop=(10 if mode == "autostop" else None),
+        wait_for=None,
+        async_call=False,
+    )
+
+    monkeypatch.setattr(
+        command.sdk, "get", lambda *args, **kwargs: [{
+            "name": n,
+            "status": None
+        } for n in names])
+
+    command._down_or_stop_clusters(**kwargs)
+
+    captured = capsys.readouterr()
+
+    out_raw = (captured.out + captured.err).replace("\r", "\n")
+    out = strip_ansi(out_raw)
+
+    assert re.search(r"nebius.*UNAUTHENTICATED", out, re.I)
+    assert "Summary:" in out
+    assert "✗ Failed: sky-nebius-fail" in out
+    assert "Failed:" in out
+
+    if mode == "down":
+        assert "Terminating cluster sky-ok-1...done" in out
+        assert "Terminating cluster sky-ok-2...done" in out
+    elif mode == "stop":
+        assert "Stopping cluster sky-ok-1...done" in out
+        assert "Stopping cluster sky-ok-2...done" in out
+    else:  # autostop
+        assert "Scheduling autostop on cluster 'sky-ok-1'...done" in out
+        assert "Scheduling autostop on cluster 'sky-ok-2'...done" in out
+
+    assert "✓ Succeeded:" in out
+    summary_line = next(line for line in out.splitlines()
+                        if line.strip().startswith("✓ Succeeded:"))
+    succ_list = [n.strip() for n in summary_line.split(":", 1)[1].split(",")]
+    assert set(succ_list) == {"sky-ok-1", "sky-ok-2"}

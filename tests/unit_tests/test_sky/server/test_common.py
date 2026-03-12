@@ -109,16 +109,16 @@ def test_check_server_healthy_or_start_rechecks_status(
     mock_filelock.return_value.__enter__.return_value = None
     mock_filelock.return_value.__exit__.return_value = None
 
-    with mock.patch.object(
-            common.get_api_server_status,
-            'cache_clear',
-            wraps=common.get_api_server_status.cache_clear) as mock_cache_clear:
+    with mock.patch.object(common.get_api_server_status_response,
+                           'cache_clear',
+                           wraps=common.get_api_server_status_response.
+                           cache_clear) as mock_cache_clear:
         common.check_server_healthy_or_start_fn()
 
     assert mock_cache_clear.call_count == 1
     assert mock_make_request.call_count == 2
     mock_start_server.assert_not_called()
-    common.get_api_server_status.cache_clear()
+    common.get_api_server_status_response.cache_clear()
 
 
 @mock.patch('sky.server.common.get_api_server_status')
@@ -267,11 +267,12 @@ def test_get_dashboard_url():
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(
         server_url='https://user:pass@example.com:8080'
-    ) == 'https://example.com:8080/dashboard'
+    ) == 'https://user:pass@example.com:8080/dashboard'
     """Test get_dashboard_url with URL containing username."""
     common.get_server_url.cache_clear()
-    assert common.get_dashboard_url(server_url='https://user@example.com:8080'
-                                   ) == 'https://example.com:8080/dashboard'
+    assert common.get_dashboard_url(
+        server_url='https://user@example.com:8080'
+    ) == 'https://user@example.com:8080/dashboard'
     """Test get_dashboard_url with host parameter."""
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(server_url='http://custom-host:8080'
@@ -280,7 +281,7 @@ def test_get_dashboard_url():
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(
         server_url='https://user:pass@example.com:8080/api/v1'
-    ) == 'https://example.com:8080/api/v1/dashboard'
+    ) == 'https://user:pass@example.com:8080/api/v1/dashboard'
     """Test get_dashboard_url without port."""
     common.get_server_url.cache_clear()
     assert common.get_dashboard_url(

@@ -1,20 +1,70 @@
 """Internal server daemons that run in the background."""
+import atexit
 import dataclasses
 import os
+import shutil
+import sys
 import time
+import typing
 from typing import Callable
 
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.server import constants as server_constants
+from sky.server.requests import request_names
+from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
+from sky.utils import locks
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import pathlib
+else:
+    pathlib = adaptors_common.LazyImport('pathlib')
+
 logger = sky_logging.init_logger(__name__)
+
+
+def _rotate_daemon_log(log_path: str) -> None:
+    """Rotate the daemon log if it exceeds the size threshold.
+
+    Uses the copytruncate pattern: copy current log to a backup file,
+    then truncate the original. This keeps one backup for external log
+    collectors and debugging.
+
+    The threshold is configurable via api_server.daemon_log_max_bytes in
+    ~/.sky/config.yaml, defaulting to DAEMON_LOG_MAX_BYTES.
+    """
+    try:
+        max_bytes = skypilot_config.get_nested(
+            ('api_server', 'daemon_log_max_bytes'),
+            server_constants.DEFAULT_DAEMON_LOG_MAX_BYTES)
+        if max_bytes <= 0:
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = sys.stdout.fileno()
+        if os.fstat(fd).st_size < max_bytes:
+            return
+        # Copy current log to backup before truncating.
+        backup_path = log_path + '.1'
+        shutil.copy2(log_path, backup_path)
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+    except Exception:  # pylint: disable=broad-except
+        # Never crash the daemon on rotation failure.
+        pass
+
+
+# Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
+# Each executor process imports this module during executor_initializer(),
+# so this captures the user's original env setting.
+_user_disabled_usage_collection = env_options.Options.DISABLE_LOGGING.get()
 
 
 def _default_should_skip():
@@ -26,7 +76,7 @@ class InternalRequestDaemon:
     """Internal daemon that runs an event in the background."""
 
     id: str
-    name: str
+    name: request_names.RequestName
     event_fn: Callable[[], None]
     default_log_level: str = 'INFO'
     should_skip: Callable[[], bool] = _default_should_skip
@@ -38,9 +88,11 @@ class InternalRequestDaemon:
         try:
             # Refresh config within the while loop.
             # Since this is a long running daemon,
-            # reload_config_for_new_request()
+            # reload_for_new_request()
             # is not called in between the event runs.
-            skypilot_config.safe_reload_config()
+            # We don't need to grab the lock here because each of the daemons
+            # run in their own process and thus have their own request context.
+            skypilot_config.reload_config()
             # Get the configured log level for the daemon inside the event loop
             # in case the log level changes after the API server is started.
             level_str = skypilot_config.get_nested(
@@ -62,6 +114,10 @@ class InternalRequestDaemon:
         # sent multiple times.
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
+        log_path = os.path.join(
+            os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX),
+            self.id + '.log')
+
         level = self.refresh_log_level()
         while True:
             try:
@@ -70,15 +126,6 @@ class InternalRequestDaemon:
                     sky_logging.reload_logger()
                     level = self.refresh_log_level()
                     self.event_fn()
-                # Clear request level cache after each run to avoid
-                # using too much memory.
-                annotations.clear_request_level_cache()
-                timeline.save_timeline()
-                # Kill all children processes related to this request.
-                # Each executor handles a single request, so we can safely
-                # kill all children processes related to this request.
-                subprocess_utils.kill_children_processes()
-                common_utils.release_memory()
             except Exception:  # pylint: disable=broad-except
                 # It is OK to fail to run the event, as the event is not
                 # critical, but we should log the error.
@@ -88,6 +135,17 @@ class InternalRequestDaemon:
                     f'{server_constants.DAEMON_RESTART_INTERVAL_SECONDS} '
                     'seconds...')
                 time.sleep(server_constants.DAEMON_RESTART_INTERVAL_SECONDS)
+            finally:
+                # Clear request level cache after each run to avoid
+                # using too much memory.
+                annotations.clear_request_level_cache()
+                timeline.save_timeline()
+                # Kill all children processes related to this request.
+                # Each executor handles a single request, so we can safely
+                # kill all children processes related to this request.
+                subprocess_utils.kill_children_processes()
+                common_utils.release_memory()
+                _rotate_daemon_log(log_path)
 
 
 def refresh_cluster_status_event():
@@ -123,14 +181,69 @@ def refresh_volume_status_event():
     time.sleep(server_constants.VOLUME_REFRESH_DAEMON_INTERVAL_SECONDS)
 
 
+_managed_job_consolidation_mode_lock = None
+
+
+# Attempt to gracefully release the lock when the process exits.
+# If this fails, it's okay, the lock will be released when the process dies.
+def _release_managed_job_consolidation_mode_lock() -> None:
+    global _managed_job_consolidation_mode_lock
+    if _managed_job_consolidation_mode_lock is not None:
+        _managed_job_consolidation_mode_lock.release()
+        _managed_job_consolidation_mode_lock = None
+
+
+atexit.register(_release_managed_job_consolidation_mode_lock)
+
+
 def managed_job_status_refresh_event():
     """Refresh the managed job status for controller consolidation mode."""
     # pylint: disable=import-outside-toplevel
+    from sky.jobs import constants as managed_job_constants
     from sky.jobs import utils as managed_job_utils
 
-    # We run the recovery logic before starting the event loop as those two are
-    # conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for details.
-    managed_job_utils.ha_recovery_for_consolidation_mode()
+    global _managed_job_consolidation_mode_lock
+    if _managed_job_consolidation_mode_lock is None:
+        _managed_job_consolidation_mode_lock = locks.get_lock(
+            managed_job_constants.CONSOLIDATION_MODE_LOCK_ID)
+
+    # Touch the signal file here to avoid conflict with
+    # update_managed_jobs_statuses. Although we run
+    # ha_recovery_for_consolidation_mode before checking the job statuses
+    # (events.ManagedJobEvent), update_managed_jobs_statuses is also called in
+    # cancel_jobs_by_id.
+    # We also need to make sure that new controllers are not started until we
+    # acquire the consolidation mode lock, since if we have controllers on both
+    # the new and old API server during a rolling update, calling
+    # update_managed_jobs_statuses on the old API server could lead to
+    # FAILED_CONTROLLER.
+    signal_file = pathlib.Path(
+        constants.PERSISTENT_RUN_RESTARTING_SIGNAL_FILE).expanduser()
+    try:
+        signal_file.touch()
+
+        # Make sure the lock is acquired for this process before proceeding to
+        # do recovery. This will block if another API server is still running,
+        # but should proceed once it is terminated and releases the lock.
+        if not _managed_job_consolidation_mode_lock.is_locked():
+            logger.info('Acquiring the consolidation mode lock: '
+                        f'{_managed_job_consolidation_mode_lock}')
+            _managed_job_consolidation_mode_lock.acquire()
+            logger.info('Lock acquired!')
+        # We don't explicitly release the lock until the process exits.
+        # Even if _release_managed_job_consolidation_mode_lock is not called,
+        # the lock should be released when the process dies (either due to the
+        # advisory file lock being released or the postgres session dying).
+
+        # We run the recovery logic before checking the job statuses as those
+        # two are conflicting. Check PERSISTENT_RUN_RESTARTING_SIGNAL_FILE for
+        # details.
+        managed_job_utils.ha_recovery_for_consolidation_mode()
+    finally:
+        # Now, we should be sure that this is the only API server, we have
+        # started the new controllers and unclaimed all the jobs, and we are
+        # ready to update the job statuses.
+        signal_file.unlink()
 
     # After recovery, we start the event loop.
     from sky.skylet import events
@@ -188,34 +301,77 @@ def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
 
 
+def server_heartbeat_event():
+    """Periodically send server-side plugin metrics to Loki."""
+    # pylint: disable=import-outside-toplevel
+    from sky.usage import usage_lib
+
+    # Skip if no plugins registered providers (check inside event_fn, not
+    # should_skip, because providers register in executor processes via
+    # plugin install(), not in the main process where should_skip runs),
+    # or if the user explicitly disabled usage collection.
+    if (not usage_lib.ServerHeartbeatMessage.has_providers() or
+            _user_disabled_usage_collection):
+        time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
+        return
+
+    # _send_to_loki checks DISABLE_LOGGING, but run_event() sets it to '1'
+    # to prevent usage messages from daemons. We temporarily unset it here
+    # because the server heartbeat's purpose IS to send to Loki.
+    disable_key = env_options.Options.DISABLE_LOGGING.env_key
+    original_val = os.environ.pop(disable_key, None)
+    try:
+        usage_lib.send_server_heartbeat()
+        logger.info('Server heartbeat sent')
+    finally:
+        if original_val is not None:
+            os.environ[disable_key] = original_val
+    time.sleep(server_constants.SERVER_HEARTBEAT_INTERVAL_SECONDS)
+
+
 # Register the events to run in the background.
 INTERNAL_REQUEST_DAEMONS = [
     # This status refresh daemon can cause the autostopp'ed/autodown'ed cluster
     # set to updated status automatically, without showing users the hint of
     # cluster being stopped or down when `sky status -r` is called.
-    InternalRequestDaemon(id='skypilot-status-refresh-daemon',
-                          name='status-refresh',
-                          event_fn=refresh_cluster_status_event,
-                          default_log_level='DEBUG'),
+    InternalRequestDaemon(
+        id='skypilot-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_STATUS_REFRESH,
+        event_fn=refresh_cluster_status_event,
+        default_log_level='DEBUG'),
     # Volume status refresh daemon to update the volume status periodically.
-    InternalRequestDaemon(id='skypilot-volume-status-refresh-daemon',
-                          name='volume-refresh',
-                          event_fn=refresh_volume_status_event),
+    InternalRequestDaemon(
+        id='skypilot-volume-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_VOLUME_REFRESH,
+        event_fn=refresh_volume_status_event),
     InternalRequestDaemon(id='managed-job-status-refresh-daemon',
-                          name='managed-job-status-refresh',
+                          name=request_names.RequestName.
+                          REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH,
                           event_fn=managed_job_status_refresh_event,
                           should_skip=should_skip_managed_job_status_refresh),
-    InternalRequestDaemon(id='sky-serve-status-refresh-daemon',
-                          name='sky-serve-status-refresh',
-                          event_fn=sky_serve_status_refresh_event,
-                          should_skip=should_skip_sky_serve_status_refresh),
-    InternalRequestDaemon(id='pool-status-refresh-daemon',
-                          name='pool-status-refresh',
-                          event_fn=pool_status_refresh_event,
-                          should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(
+        id='sky-serve-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH,
+        event_fn=sky_serve_status_refresh_event,
+        should_skip=should_skip_sky_serve_status_refresh),
+    InternalRequestDaemon(
+        id='pool-status-refresh-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_POOL_STATUS_REFRESH,
+        event_fn=pool_status_refresh_event,
+        should_skip=should_skip_pool_status_refresh),
+    InternalRequestDaemon(
+        id='server-heartbeat-daemon',
+        name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
+        event_fn=server_heartbeat_event),
 ]
+
+HIDDEN_REQUEST_NAMES = [
+    request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
+]
+
+_DAEMON_IDS = set(d.id for d in INTERNAL_REQUEST_DAEMONS)
 
 
 def is_daemon_request_id(request_id: str) -> bool:
     """Returns whether a specific request_id is an internal daemon."""
-    return any([d.id == request_id for d in INTERNAL_REQUEST_DAEMONS])
+    return request_id in _DAEMON_IDS

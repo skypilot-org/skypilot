@@ -8,7 +8,7 @@ spec:
   restartPolicy: Never
   containers:
   - name: skygputest
-    image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot-gpu:latest
+    image: us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot-gpu:latest
     command: ["nvidia-smi"]
     resources:
       limits:

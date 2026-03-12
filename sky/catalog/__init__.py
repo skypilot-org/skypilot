@@ -127,12 +127,9 @@ def list_accelerator_realtime(
     case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
     """Lists all accelerators offered by Sky with their realtime availability.
-
     Realtime availability is the total number of accelerators in the cluster
     and number of accelerators available at the time of the call.
-
     Used for fixed size cluster settings, such as Kubernetes.
-
     Returns:
         A tuple of three dictionaries mapping canonical accelerator names to:
         - A list of available counts. (e.g., [1, 2, 4])
@@ -153,7 +150,7 @@ def list_accelerator_realtime(
     for gpu, items in qtys_map.items():
         for item in items:
             accelerator_counts[gpu].append(item.accelerator_count)
-        accelerator_counts[gpu] = sorted(accelerator_counts[gpu])
+        accelerator_counts[gpu] = sorted(set(accelerator_counts[gpu]))
     return (accelerator_counts, total_accelerators_capacity,
             total_accelerators_available)
 
@@ -221,6 +218,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               memory: Optional[str] = None,
                               disk_tier: Optional[
                                   resources_utils.DiskTier] = None,
+                              local_disk: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
@@ -236,7 +234,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     the given CPU and memory requirement.
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
-                               memory, disk_tier, region, zone)
+                               memory, disk_tier, local_disk, region, zone)
 
 
 def get_accelerators_from_instance_type(
@@ -254,12 +252,21 @@ def get_arch_from_instance_type(instance_type: str,
                                instance_type)
 
 
+def get_local_disk_from_instance_type(instance_type: str,
+                                      clouds: CloudFilter = None
+                                     ) -> Optional[str]:
+    """Returns the local disk spec (normalized) from an instance type."""
+    return _map_clouds_catalog(clouds, 'get_local_disk_from_instance_type',
+                               instance_type)
+
+
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: Union[int, float],
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
+    local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
@@ -271,7 +278,7 @@ def get_instance_type_for_accelerator(
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
                                acc_name, acc_count, cpus, memory, use_spot,
-                               region, zone)
+                               local_disk, region, zone)
 
 
 def get_accelerator_hourly_cost(
@@ -338,6 +345,7 @@ def get_common_gpus() -> List[str]:
         'H200',
         'L4',
         'L40S',
+        'RTX5090',
         'T4',
         'V100',
         'V100-32GB',
@@ -349,7 +357,7 @@ def get_tpus() -> List[str]:
     # TODO(wei-lin): refactor below hard-coded list.
     # There are many TPU configurations available, we show the some smallest
     # ones for each generation, and people should find larger ones with
-    # sky show-gpus tpu.
+    # sky gpus list tpu.
     return [
         'tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
         'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8', 'tpu-v5p-8',

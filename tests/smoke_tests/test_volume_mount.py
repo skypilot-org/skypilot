@@ -29,6 +29,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 
+@pytest.mark.skip(reason='We are having trouble getting TPUs in GCP.')
 @pytest.mark.gcp
 def test_volume_mount_tpu():
     name = smoke_tests_utils.get_cluster_name()
@@ -51,6 +52,7 @@ def test_volume_mount_tpu():
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.skip(reason='We are having trouble getting TPUs in GCP.')
 @pytest.mark.gcp
 def test_volume_mount_tpu_container():
     name = smoke_tests_utils.get_cluster_name()

@@ -1,5 +1,6 @@
 """Unit tests for `sky check` output formatting from sky/check.py."""
 import re
+from unittest import mock
 
 from click import testing as cli_testing
 import pytest
@@ -7,7 +8,9 @@ import pytest
 from sky import clouds as sky_clouds
 import sky.check as sky_check
 from sky.client.cli import command
+from sky.clouds import cloud as sky_cloud
 from sky.clouds.cloud import CloudCapability
+from sky.utils import config_utils
 
 
 def strip_ansi(s: str) -> str:
@@ -263,6 +266,8 @@ def _mock_k8s_env(monkeypatch,
         'default': {},
         'ws1': {}
     })
+    monkeypatch.setattr('sky.workspaces.core.get_accessible_workspace_names',
+                        lambda: {'default', 'ws1'})
 
     # Avoid touching real user state
     monkeypatch.setattr('sky.global_user_state.get_cached_enabled_clouds',
@@ -321,27 +326,262 @@ def test_check_capabilities_k8s_workspace_override(monkeypatch, capsys):
     )
     out = strip_ansi(capsys.readouterr().out)
 
+    # Helper to extract a workspace section from the output, bounded by the
+    # next "Checking enabled infra" header (or end of string). This makes the
+    # test independent of workspace processing order.
+    def _get_workspace_section(output, ws_name):
+        marker = f"Enabled infra for workspace: '{ws_name}'"
+        assert marker in output, f'{marker!r} not found in output'
+        start = output.index(marker)
+        # Find the next workspace boundary after this section
+        next_check = output.find('Checking enabled infra for workspace:',
+                                 start + len(marker))
+        end = next_check if next_check != -1 else len(output)
+        return output[start:end]
+
     # default workspace section should include ctx-a and ctx-b only
-    assert "Enabled infra for workspace: 'default'" in out
-    start = out.index("Enabled infra for workspace: 'default'")
-    # Bound the section to before the next workspace's "Checking" header
-    try:
-        end = out.index("Checking enabled infra for workspace: 'ws1'", start)
-    except ValueError:
-        end = len(out)
-    default_section = out[start:end]
+    default_section = _get_workspace_section(out, 'default')
     assert 'Kubernetes [compute]' in default_section
     assert 'ctx-a' in default_section
     assert 'ctx-b' in default_section
     assert 'ctx-c' not in default_section
 
     # ws1 workspace section should include ctx-c only
-    assert "Enabled infra for workspace: 'ws1'" in out
-    start = out.index("Enabled infra for workspace: 'ws1'")
-    # Bound to end of string
-    end = len(out)
-    ws1_section = out[start:end]
+    ws1_section = _get_workspace_section(out, 'ws1')
     assert 'Kubernetes [compute]' in ws1_section
     assert 'ctx-c' in ws1_section
     assert 'ctx-a' not in ws1_section
     assert 'ctx-b' not in ws1_section
+
+
+def test_workspace_cloud_capabilities():
+    """Test getting the capabilities for a cloud in a workspace."""
+    test_config = config_utils.Config({
+        'aws': {
+            'capabilities': [CloudCapability.COMPUTE]
+        },
+        'workspaces': {
+            'workspace1': {
+                'aws': {
+                    'capabilities': [CloudCapability.STORAGE]
+                }
+            },
+            'workspace2': {
+                'gcp': {
+                    'capabilities': [CloudCapability.COMPUTE]
+                }
+            },
+        }
+    })
+    with mock.patch('sky.skypilot_config._get_loaded_config',
+                    return_value=test_config):
+        # use global config
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'default', 'aws')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+        # use workspace config, overridden not merged.
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace1', 'aws')
+        assert capabilities == [CloudCapability.STORAGE]
+
+        # use global config since workspace config is not specified
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace2', 'aws')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+        # use global config since workspace config is not specified
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace3', 'aws')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+        # no config specified for this cloud in default workspace
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'default', 'gcp')
+        assert capabilities == None
+
+        # no config specified for this cloud in workspace nor global config
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace1', 'gcp')
+        assert capabilities == None
+
+        # use workspace config
+        capabilities = sky_check._get_workspace_cloud_capabilities(
+            'workspace2', 'gcp')
+        assert capabilities == [CloudCapability.COMPUTE]
+
+
+def test_enabled_capabilities_detection():
+    """Test detecting enabled capabilities from cloud credentials
+    in check_capabilities."""
+    with mock.patch('sky.skypilot_config._get_loaded_config',
+                    return_value=config_utils.Config()):
+        # test all capabilities enabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default'][
+                    'AWS'] == sky_cloud.ALL_CAPABILITIES
+
+        # test compute capability enabled, storage capability disabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(True, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default']['AWS'] == [
+                    CloudCapability.COMPUTE
+                ]
+
+        # test compute capability disabled, storage capability enabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(False, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(True, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert capabilities_result['default']['AWS'] == [
+                    CloudCapability.STORAGE
+                ]
+
+        # test both capabilities disabled
+        with (mock.patch('sky.clouds.aws.AWS._check_compute_credentials',
+                         return_value=(False, None))):
+            with (mock.patch('sky.clouds.aws.AWS._check_storage_credentials',
+                             return_value=(False, None))):
+                capabilities_result = sky_check.check_capabilities(
+                    quiet=False,
+                    verbose=False,
+                    clouds=('aws',),
+                    capabilities=sky_cloud.ALL_CAPABILITIES,
+                    workspace=None,
+                )
+                assert 'AWS' not in capabilities_result['default']
+
+
+# ============ JSON Output Tests ============
+
+
+class TestCheckJsonOutput:
+    """Tests for `sky check -o json` output format."""
+
+    def test_cli_check_json_output_structure(self, monkeypatch):
+        """Test that -o json produces valid JSON with expected structure."""
+        import json
+
+        mock_result = {
+            'default': {
+                'AWS': ['compute', 'storage'],
+                'GCP': ['compute', 'storage'],
+            },
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert 'default' in parsed
+        assert parsed['default']['AWS'] == ['compute', 'storage']
+        assert parsed['default']['GCP'] == ['compute', 'storage']
+
+    def test_cli_check_json_output_multiple_workspaces(self, monkeypatch):
+        """Test that JSON output includes multiple workspaces."""
+        import json
+
+        mock_result = {
+            'default': {
+                'AWS': ['compute', 'storage'],
+                'GCP': ['compute', 'storage'],
+            },
+            'staging': {
+                'Kubernetes': ['compute'],
+            },
+        }
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert parsed['default']['AWS'] == ['compute', 'storage']
+        assert parsed['staging']['Kubernetes'] == ['compute']
+
+    def test_cli_check_json_no_table_output(self, monkeypatch):
+        """Test that -o json suppresses table output."""
+        mock_result = {'default': {'AWS': ['compute', 'storage']}}
+
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: mock_result)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'json'])
+
+        assert result.exit_code == 0
+        # Should not contain the API server line
+        assert 'Using SkyPilot API server' not in result.output
+
+    def test_cli_check_default_output_still_works(self, monkeypatch):
+        """Test that default output (no -o flag) still works as before."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, [])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout
+
+    def test_cli_check_table_output_explicit(self, monkeypatch):
+        """Test that -o table produces normal output."""
+        monkeypatch.setattr('sky.client.sdk.check',
+                            lambda *args, **kwargs: 'req-1')
+        monkeypatch.setattr('sky.client.sdk.stream_and_get',
+                            lambda *args, **kwargs: None)
+
+        server_url = 'http://localhost:12345'
+        monkeypatch.setattr('sky.server.common.get_server_url',
+                            lambda: server_url)
+
+        runner = cli_testing.CliRunner()
+        result = runner.invoke(command.check, ['-o', 'table'])
+
+        assert result.exit_code == 0
+        assert f'Using SkyPilot API server: {server_url}' in result.stdout

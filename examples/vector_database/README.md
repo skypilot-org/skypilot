@@ -72,6 +72,8 @@ Processing files: 100%|██████████| 12/12 [00:05<00:00,  2.04
 
 To serve the constructed database, you expose an API endpoint that other applications (or your local client) can call to perform semantic search. Querying allows you to confirm that your database is working and retrieve semantic matches for a given text query. You can integrate this endpoint into larger applications (like an image search engine or recommendation system).
 
+### Option 1: Launch with CLI
+
 To serve the constructed database: 
 ```
 sky launch -c vecdb_serve serve_vectordb.yaml
@@ -80,8 +82,7 @@ which runs the hosted vector database service. Alternatively, you can run
 ```
 sky serve up serve_vectordb.yaml -n vectordb
 ```
-This will deploy your vector database as a service on a cloud instance and allow you to interact with it via a public endpoint. Sky Serve facilitates automatic health checks and scaling of the service.
-
+This deploys your vector database as a service on a cloud instance and allows you to interact with it via a public endpoint. Sky Serve facilitates automatic health checks and scaling of the service.
 
 To query the constructed database, 
 
@@ -97,6 +98,20 @@ sky serve status vectordb --endpoint
 ```
 
 to get the endpoint address of the service. 
+
+### Option 2: Launch with SDK
+
+To serve the constructed database: 
+```
+python3 serve_vectordb.py
+```
+which runs the hosted vector database service. Alternatively, you can run 
+```
+python3 serve_vectordb.py --serve
+```
+This deploys your vector database as a service on a cloud instance and allows you to interact with it via a public endpoint. Sky Serve facilitates automatic health checks and scaling of the service.
+
+Use endpoint address of the service printed by the above script to query the constructed database. 
 
 <p align="center">
 <img src="https://i.imgur.com/KONQ4wd.png" alt="Image Search Website" style="width: 70%;">

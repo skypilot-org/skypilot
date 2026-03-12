@@ -3,6 +3,7 @@
 Simple script to inject test cluster history without cleanup for manual verification.
 """
 
+import argparse
 import os
 import sys
 
@@ -14,28 +15,47 @@ from scale_test_utils import TestScale
 
 def main():
     """Inject test cluster history without cleanup."""
-    recent_count = 5
-    old_count = 5
+    parser = argparse.ArgumentParser(
+        description='Inject test cluster history for manual verification')
+    parser.add_argument(
+        '--terminated-cluster',
+        type=str,
+        default='scale-test-terminated',
+        help=
+        'Name of the terminated cluster to use as template (default: scale-test-terminated)'
+    )
+    parser.add_argument(
+        '--recent-count',
+        type=int,
+        default=5,
+        help='Number of recent terminated clusters to inject (default: 5)')
+    parser.add_argument(
+        '--old-count',
+        type=int,
+        default=5,
+        help='Number of old terminated clusters to inject (default: 5)')
+
+    args = parser.parse_args()
 
     print(
-        f"Injecting {recent_count + old_count} test cluster history entries (no cleanup)..."
+        f"Injecting {args.recent_count + args.old_count} test cluster history entries (no cleanup)..."
     )
-    print(f"  - {recent_count} recent (within 10 days)")
-    print(f"  - {old_count} older (15-30 days ago)")
+    print(f"  - {args.recent_count} recent (within 10 days)")
+    print(f"  - {args.old_count} older (15-30 days ago)")
     print("=" * 60)
 
     # Create test instance
     test = TestScale()
     test.initialize(
         active_cluster_name='scale-test-active',
-        terminated_cluster_name='scale-test-terminated',
+        terminated_cluster_name=args.terminated_cluster,
         managed_job_id=1  # Not used
     )
 
     try:
         # Inject cluster history
-        injected = test.inject_cluster_history(recent_count=recent_count,
-                                               old_count=old_count)
+        injected = test.inject_cluster_history(recent_count=args.recent_count,
+                                               old_count=args.old_count)
         print(f"\nSuccessfully injected {injected} cluster history entries!")
         print(f"Total cluster hashes tracked: {len(test.test_cluster_hashes)}")
 

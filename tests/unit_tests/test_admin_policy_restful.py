@@ -19,6 +19,7 @@ import tempfile
 import threading
 import time
 from typing import Optional, Tuple
+from unittest import mock
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -28,7 +29,9 @@ import uvicorn
 
 import sky
 from sky import admin_policy
+from sky import models
 from sky import skypilot_config
+from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -51,6 +54,7 @@ def _load_task_and_apply_policy(
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
         request_options=admin_policy.RequestOptions(
             cluster_name='test',
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -143,10 +147,24 @@ async def apply_policy(request: Request) -> JSONResponse:
 
 
 class PolicyServer:
-    """Test policy server that runs in a background thread with automatic port assignment."""
+    """Test policy server that runs in a background thread with automatic port assignment.
+
+    Uses pre-bound sockets to avoid TOCTOU port races when multiple xdist
+    workers start servers concurrently.
+    """
 
     def __init__(self, port=None):
-        self.port = port or common_utils.find_free_port(50000)
+        if port is not None:
+            self.port = port
+            self._socket = None
+        else:
+            # Bind immediately to avoid port races between xdist workers.
+            # Passing the bound socket to uvicorn eliminates the window
+            # between find_free_port() and server.run().
+            self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._socket.bind(('127.0.0.1', 0))
+            self.port = self._socket.getsockname()[1]
         self.server = None
         self.thread = None
         self._started = False
@@ -167,9 +185,19 @@ class PolicyServer:
             access_log=False)
         self.server = uvicorn.Server(config)
 
+        # If we pre-bound a socket, pass it to uvicorn so it doesn't
+        # try to bind a new one (which could race with other workers).
+        bound_socket = self._socket
+
         def run_server():
             try:
-                self.server.run()
+                if bound_socket is not None:
+                    self.server.run(sockets=[bound_socket])
+                else:
+                    self.server.run()
+            except SystemExit:
+                # uvicorn calls sys.exit(1) on startup failure
+                pass
             except Exception:
                 # Ignore errors during shutdown
                 pass
@@ -369,6 +397,44 @@ def test_restful_policy_with_request_options(monkeypatch):
             assert config is not None
         finally:
             os.unlink(config_path)
+
+
+def test_restful_policy_with_user(monkeypatch):
+    """Test RESTful admin policy receiving user information."""
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        with PolicyServer() as server:
+            ImageIdInspectorPolicy.received_requests.clear()
+
+            # Create a test task
+            task = create_test_task()
+
+            # Create temporary config and apply policy using existing function
+            with tempfile.NamedTemporaryFile(mode='w',
+                                             suffix='.yaml',
+                                             delete=False) as f:
+                f.write(f'admin_policy: http://127.0.0.1:{server.port}\n')
+                config_path = f.name
+
+            try:
+                dag, config = _load_task_and_apply_policy(
+                    task, config_path, monkeypatch)
+
+                # Verify the policy was called with proper request structure
+                assert len(ImageIdInspectorPolicy.received_requests) == 1
+                request = ImageIdInspectorPolicy.received_requests[0]
+
+                # Check that user information was properly included
+                assert request.user is not None
+                assert request.user.id == '123'
+                assert request.user.name == 'test'
+
+                # Check that we got valid results back
+                assert dag is not None
+                assert len(dag.tasks) == 1
+                assert config is not None
+            finally:
+                os.unlink(config_path)
 
 
 def test_restful_policy_basic_functionality(monkeypatch):

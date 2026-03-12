@@ -1,0 +1,1 @@
+../../generated-examples/kimi-k2-thinking.md

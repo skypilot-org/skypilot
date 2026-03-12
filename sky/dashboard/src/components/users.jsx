@@ -20,7 +20,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import { getUsers } from '@/data/connectors/users';
+import { getUsers, getServiceAccountTokens } from '@/data/connectors/users';
 import { getClusters } from '@/data/connectors/clusters';
 import { getManagedJobs } from '@/data/connectors/jobs';
 import dashboardCache from '@/lib/cache';
@@ -31,6 +31,7 @@ import {
   CustomTooltip,
   TimestampWithTooltip,
   CustomTooltip as Tooltip,
+  LastUpdatedTimestamp,
 } from '@/components/utils';
 import {
   RotateCwIcon,
@@ -48,6 +49,7 @@ import {
 } from 'lucide-react';
 import { Layout } from '@/components/elements/layout';
 import { useMobile } from '@/hooks/useMobile';
+import { useSidebar } from '@/components/elements/sidebar';
 import { Card } from '@/components/ui/card';
 import { apiClient } from '@/data/connectors/client';
 import {
@@ -59,6 +61,106 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { ErrorDisplay } from '@/components/elements/ErrorDisplay';
+import { PluginSlot } from '@/plugins/PluginSlot';
+import { statusGroups } from '@/components/jobs';
+import {
+  FilterDropdown,
+  Filters,
+  updateURLParams as sharedUpdateURLParams,
+  updateFiltersByURLParams as sharedUpdateFiltersByURLParams,
+  filterData,
+} from '@/components/shared/FilterSystem';
+
+const ACTIVE_JOB_STATUSES = new Set(statusGroups.active);
+
+// Define filter options for the filter dropdown
+const PROPERTY_OPTIONS = [
+  {
+    label: 'Name',
+    value: 'name',
+  },
+  {
+    label: 'GPU',
+    value: 'gpu type', // Match valueList key
+  },
+  {
+    label: 'Infra',
+    value: 'infra',
+  },
+  {
+    label: 'User ID',
+    value: 'user id', // Match valueList key
+  },
+  {
+    label: 'Role',
+    value: 'role',
+  },
+];
+
+// Helper function to get GPU count with validation
+const getGPUCount = (accelerators, source) => {
+  if (!accelerators) return 0;
+
+  let parsed = accelerators;
+
+  // Handle string format (from clusters): "{'V100': 4}"
+  if (typeof accelerators === 'string') {
+    try {
+      const jsonStr = accelerators.replace(/'/g, '"').replace(/None/g, 'null');
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      console.error('Failed to parse accelerators string:', accelerators, e);
+      return 0;
+    }
+  }
+
+  // Validate and extract GPU count
+  if (typeof parsed === 'object' && parsed !== null) {
+    const entries = Object.entries(parsed);
+
+    if (entries.length === 0) {
+      return 0;
+    }
+
+    if (entries.length > 1) {
+      console.warn(
+        `${source} has ${entries.length} accelerator entries:`,
+        parsed
+      );
+    }
+
+    // Return the first (and ideally only) GPU count
+    return Number(entries[0][1]) || 0;
+  }
+
+  return 0;
+};
+
+// Helper function to fetch clusters and managed jobs data with independent error handling
+// Uses Promise.allSettled so one failure doesn't affect the other
+const fetchClustersAndJobs = async () => {
+  const [clustersResult, jobsResult] = await Promise.allSettled([
+    dashboardCache.get(getClusters),
+    // Use shared cache key (no field filtering) - preloader uses same args
+    dashboardCache.get(getManagedJobs, [
+      { allUsers: true, skipFinished: true },
+    ]),
+  ]);
+
+  const clustersData =
+    (clustersResult.status === 'fulfilled' && clustersResult.value) || [];
+  const jobsResponse = (jobsResult.status === 'fulfilled' &&
+    jobsResult.value) || { jobs: [] };
+
+  if (clustersResult.status === 'rejected') {
+    console.error('Error fetching clusters:', clustersResult.reason);
+  }
+  if (jobsResult.status === 'rejected') {
+    console.error('Error fetching managed jobs:', jobsResult.reason);
+  }
+
+  return { clustersData, jobsResponse };
+};
 
 // Helper functions for username parsing
 const parseUsername = (username, userId) => {
@@ -145,6 +247,7 @@ const SuccessDisplay = ({ message, onDismiss }) => {
 
 export function Users() {
   const router = useRouter();
+  const { userEmail } = useSidebar();
   const [loading, setLoading] = useState(false);
   const refreshDataRef = useRef(null);
   const isMobile = useMobile();
@@ -180,6 +283,13 @@ export function Users() {
   const [createSuccess, setCreateSuccess] = useState(null);
   const [createError, setCreateError] = useState(null);
   const [basicAuthEnabled, setBasicAuthEnabled] = useState(undefined);
+  const [serviceAccountTokenEnabled, setServiceAccountTokenEnabled] =
+    useState(undefined);
+  const [ingressBasicAuthEnabled, setIngressBasicAuthEnabled] =
+    useState(undefined);
+  const [externalProxyAuthEnabled, setExternalProxyAuthEnabled] =
+    useState(undefined);
+  const [healthCheckLoading, setHealthCheckLoading] = useState(true);
   const [activeMainTab, setActiveMainTab] = useState('users');
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
@@ -188,31 +298,131 @@ export function Users() {
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [serviceAccountSearchQuery, setServiceAccountSearchQuery] =
     useState('');
+  const [filters, setFilters] = useState([]);
+  const [valueList, setValueList] = useState({
+    name: [],
+    'user id': [],
+    role: [],
+    'gpu type': [],
+    infra: [],
+  });
+  const [lastFetchedTime, setLastFetchedTime] = useState(null);
+
+  // Initialize deduplicateUsers from URL parameter
+  const getInitialDeduplicateUsers = () => {
+    if (typeof window !== 'undefined' && router.isReady) {
+      const deduplicateParam = router.query.deduplicate;
+      // If parameter is explicitly set, use it; otherwise default to true
+      if (deduplicateParam !== undefined) {
+        return deduplicateParam === 'true';
+      }
+    }
+    return true; // Default to deduplicated view
+  };
+
+  const [deduplicateUsers, setDeduplicateUsers] = useState(
+    getInitialDeduplicateUsers
+  );
+
+  // Sync deduplicateUsers state with URL parameter
+  useEffect(() => {
+    if (router.isReady) {
+      const deduplicateParam = router.query.deduplicate;
+
+      // If URL has no deduplicate parameter, set it to the default
+      // Default to false for SSO (userEmail exists), true for non-SSO
+      if (deduplicateParam === undefined) {
+        const defaultValue = !userEmail; // false for SSO, true for non-SSO
+        updateDeduplicateURL(defaultValue);
+      } else {
+        const expectedState = deduplicateParam === 'true';
+        if (deduplicateUsers !== expectedState) {
+          setDeduplicateUsers(expectedState);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.deduplicate, userEmail]);
+
+  // Helper function to update deduplicate in URL
+  const updateDeduplicateURL = (deduplicateValue) => {
+    const query = { ...router.query };
+    query.deduplicate = deduplicateValue.toString();
+
+    // Use replace to avoid adding to browser history
+    router.replace(
+      {
+        pathname: router.pathname,
+        query,
+      },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  // Helper function to update URL query parameters for filters
+  const updateURLParams = (filters) => {
+    sharedUpdateURLParams(router, filters);
+  };
+
+  // Create property map for filter URL parameters
+  const propertyMap = new Map([
+    ['name', 'Name'],
+    ['user id', 'User ID'], // Note: lowercase with space to match URL encoding
+    ['role', 'Role'],
+    ['gpu type', 'GPU'], // Note: lowercase with space to match URL encoding
+    ['infra', 'Infra'],
+  ]);
+
+  // Initialize filters from URL parameters
+  useEffect(() => {
+    if (router.isReady && activeMainTab === 'users') {
+      const urlFilters = sharedUpdateFiltersByURLParams(router, propertyMap);
+      if (urlFilters.length > 0) {
+        setFilters(urlFilters);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, activeMainTab]);
 
   // Handle URL parameters for tab selection
   useEffect(() => {
     if (router.isReady) {
       const tab = router.query.tab;
-      if (tab === 'service-accounts') {
+      if (tab === 'service-accounts' && serviceAccountTokenEnabled) {
         setActiveMainTab('service-accounts');
+      } else if (tab && tab !== 'users') {
+        setActiveMainTab(tab); // plugin-managed tab
       } else {
         setActiveMainTab('users');
       }
     }
-  }, [router.isReady, router.query.tab]);
+  }, [router.isReady, router.query.tab, serviceAccountTokenEnabled]);
 
   useEffect(() => {
     async function fetchHealth() {
+      setHealthCheckLoading(true);
       try {
         const resp = await apiClient.get('/api/health');
         if (resp.ok) {
           const data = await resp.json();
           setBasicAuthEnabled(!!data.basic_auth_enabled);
+          setServiceAccountTokenEnabled(!!data.service_account_token_enabled);
+          setIngressBasicAuthEnabled(!!data.ingress_basic_auth_enabled);
+          setExternalProxyAuthEnabled(!!data.external_proxy_auth_enabled);
         } else {
           setBasicAuthEnabled(false);
+          setServiceAccountTokenEnabled(false);
+          setIngressBasicAuthEnabled(false);
+          setExternalProxyAuthEnabled(false);
         }
       } catch {
         setBasicAuthEnabled(false);
+        setServiceAccountTokenEnabled(false);
+        setIngressBasicAuthEnabled(false);
+        setExternalProxyAuthEnabled(false);
+      } finally {
+        setHealthCheckLoading(false);
       }
     }
     fetchHealth();
@@ -281,12 +491,33 @@ export function Users() {
   const handleRefresh = () => {
     dashboardCache.invalidate(getUsers);
     dashboardCache.invalidate(getClusters);
-    dashboardCache.invalidate(getManagedJobs, [{ allUsers: true }]);
+    dashboardCache.invalidate(getManagedJobs, [
+      { allUsers: true, skipFinished: true },
+    ]);
 
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
   };
+
+  // Effect for keyboard shortcut (Cmd+R / Ctrl+R) to trigger in-page refresh
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Check for Cmd+R (Mac) or Ctrl+R (Windows/Linux)
+      if ((event.metaKey || event.ctrlKey) && event.key === 'r') {
+        event.preventDefault(); // Prevent browser refresh
+        event.stopPropagation(); // Stop event from bubbling
+        handleRefresh(); // Trigger our in-page refresh
+      }
+    };
+
+    // Use capture: true to intercept the event before browser handles it
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
 
   const handleCreateUser = async () => {
     if (!newUser.username || !newUser.password) {
@@ -463,6 +694,28 @@ export function Users() {
     setResetPassword('');
   };
 
+  // Show loading while fetching health check
+  const handleTabChange = useCallback(
+    (tab) => {
+      setActiveMainTab(tab);
+      if (tab === 'users') {
+        router.push('/users', undefined, { shallow: true });
+      } else {
+        router.push(`/users?tab=${tab}`, undefined, { shallow: true });
+      }
+    },
+    [router]
+  );
+
+  if (healthCheckLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading...</span>
+      </div>
+    );
+  }
+
   return (
     <>
       {/* Main Tabs with Controls */}
@@ -474,28 +727,27 @@ export function Users() {
                 ? 'text-sky-blue border-sky-500'
                 : 'text-gray-500 hover:text-gray-700 border-transparent'
             }`}
-            onClick={() => {
-              setActiveMainTab('users');
-              router.push('/users', undefined, { shallow: true });
-            }}
+            onClick={() => handleTabChange('users')}
           >
             Users
           </button>
-          <button
-            className={`leading-none pb-2 px-2 border-b-2 ${
-              activeMainTab === 'service-accounts'
-                ? 'text-sky-blue border-sky-500'
-                : 'text-gray-500 hover:text-gray-700 border-transparent'
-            }`}
-            onClick={() => {
-              setActiveMainTab('service-accounts');
-              router.push('/users?tab=service-accounts', undefined, {
-                shallow: true,
-              });
-            }}
-          >
-            Service Accounts
-          </button>
+          {serviceAccountTokenEnabled && (
+            <button
+              className={`leading-none mr-6 pb-2 px-2 border-b-2 ${
+                activeMainTab === 'service-accounts'
+                  ? 'text-sky-blue border-sky-500'
+                  : 'text-gray-500 hover:text-gray-700 border-transparent'
+              }`}
+              onClick={() => handleTabChange('service-accounts')}
+            >
+              Service Accounts
+            </button>
+          )}
+          <PluginSlot
+            name="users.tabs"
+            context={{ activeTab: activeMainTab, onTabChange: handleTabChange }}
+            wrapperClassName="contents"
+          />
         </div>
 
         <div className="flex items-center">
@@ -537,6 +789,12 @@ export function Users() {
               </button>
             )}
 
+          {!loading && lastFetchedTime && (
+            <LastUpdatedTimestamp
+              timestamp={lastFetchedTime}
+              className="mr-2"
+            />
+          )}
           <button
             onClick={handleRefresh}
             disabled={loading}
@@ -548,63 +806,96 @@ export function Users() {
         </div>
       </div>
 
-      {/* Search and Create Service Account Row */}
+      {/* Filter/Search and Create Service Account Row */}
       <div className="flex items-center justify-between mb-4">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder={
-              activeMainTab === 'users'
-                ? 'Search users by name, email, or role'
-                : 'Search by service account name, or created by'
-            }
-            value={
-              activeMainTab === 'users'
-                ? userSearchQuery
-                : serviceAccountSearchQuery
-            }
-            onChange={(e) => {
-              if (activeMainTab === 'users') {
-                setUserSearchQuery(e.target.value);
-              } else {
+        {activeMainTab === 'users' ? (
+          <div className="w-full sm:w-auto max-w-md">
+            <FilterDropdown
+              propertyList={PROPERTY_OPTIONS}
+              valueList={valueList}
+              setFilters={setFilters}
+              updateURLParams={updateURLParams}
+              placeholder="Filter users"
+            />
+          </div>
+        ) : activeMainTab === 'service-accounts' ? (
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="text"
+              placeholder="Search by service account name, or created by"
+              value={serviceAccountSearchQuery}
+              onChange={(e) => {
                 setServiceAccountSearchQuery(e.target.value);
-              }
-            }}
-            className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
-          />
-          {((activeMainTab === 'users' && userSearchQuery) ||
-            (activeMainTab === 'service-accounts' &&
-              serviceAccountSearchQuery)) && (
-            <button
-              onClick={() => {
-                if (activeMainTab === 'users') {
-                  setUserSearchQuery('');
-                } else {
-                  setServiceAccountSearchQuery('');
-                }
               }}
-              className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              title="Clear search"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+              className="h-8 w-full px-3 pr-8 text-sm border border-gray-300 rounded-md focus:ring-1 focus:ring-sky-500 focus:border-sky-500 outline-none"
+            />
+            {serviceAccountSearchQuery && (
+              <button
+                onClick={() => {
+                  setServiceAccountSearchQuery('');
+                }}
+                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Clear search"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+        ) : (
+          <PluginSlot
+            name="users.tab-filter"
+            context={{ activeTab: activeMainTab }}
+            wrapperClassName="contents"
+          />
+        )}
+
+        {/* Deduplicate Users Toggle - only show on users tab when NOT using SSO/OAuth2 */}
+        {activeMainTab === 'users' && !userEmail && (
+          <label className="flex items-center cursor-pointer ml-4">
+            <input
+              type="checkbox"
+              checked={deduplicateUsers}
+              onChange={(e) => {
+                const newValue = e.target.checked;
+                setDeduplicateUsers(newValue);
+                updateDeduplicateURL(newValue);
+              }}
+              className="sr-only"
+            />
+            <div
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                deduplicateUsers ? 'bg-sky-600' : 'bg-gray-300'
+              }`}
+            >
+              <span
+                className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                  deduplicateUsers ? 'translate-x-5' : 'translate-x-1'
+                }`}
+              />
+            </div>
+            <span className="ml-2 text-sm text-gray-700">
+              Deduplicate users
+            </span>
+          </label>
+        )}
+
+        {/* Plugin actions slot for users tab */}
+        {activeMainTab === 'users' && <PluginSlot name="users.actions" />}
 
         {/* Create Service Account Button for Service Accounts Tab */}
-        {activeMainTab === 'service-accounts' && (
+        {activeMainTab === 'service-accounts' && serviceAccountTokenEnabled && (
           <button
             onClick={() => {
               checkPermissionAndAct(
@@ -622,6 +913,15 @@ export function Users() {
           </button>
         )}
       </div>
+
+      {/* Display Active Filters - only for users tab */}
+      {activeMainTab === 'users' && (
+        <Filters
+          filters={filters}
+          setFilters={setFilters}
+          updateURLParams={updateURLParams}
+        />
+      )}
 
       {/* Error/Success messages positioned at top right, below navigation bar */}
       <div className="fixed top-20 right-4 z-[9999] max-w-md">
@@ -646,27 +946,38 @@ export function Users() {
           onResetPassword={handleResetPasswordClick}
           onDeleteUser={handleDeleteUserClick}
           basicAuthEnabled={basicAuthEnabled}
+          ingressBasicAuthEnabled={ingressBasicAuthEnabled}
+          externalProxyAuthEnabled={externalProxyAuthEnabled}
           currentUserRole={userRoleCache?.role}
           currentUserId={userRoleCache?.id}
-          searchQuery={userSearchQuery}
-          setSearchQuery={setUserSearchQuery}
+          filters={filters}
+          setValueList={setValueList}
+          deduplicateUsers={deduplicateUsers}
+          setLastFetchedTime={setLastFetchedTime}
         />
+      ) : activeMainTab === 'service-accounts' ? (
+        serviceAccountTokenEnabled && (
+          <ServiceAccountTokensView
+            checkPermissionAndAct={checkPermissionAndAct}
+            userRoleCache={userRoleCache}
+            setCreateSuccess={setCreateSuccess}
+            setCreateError={setCreateError}
+            showCreateDialog={showCreateDialog}
+            setShowCreateDialog={setShowCreateDialog}
+            showRotateDialog={showRotateDialog}
+            setShowRotateDialog={setShowRotateDialog}
+            tokenToRotate={tokenToRotate}
+            setTokenToRotate={setTokenToRotate}
+            rotating={rotating}
+            setRotating={setRotating}
+            searchQuery={serviceAccountSearchQuery}
+            setSearchQuery={setServiceAccountSearchQuery}
+          />
+        )
       ) : (
-        <ServiceAccountTokensView
-          checkPermissionAndAct={checkPermissionAndAct}
-          userRoleCache={userRoleCache}
-          setCreateSuccess={setCreateSuccess}
-          setCreateError={setCreateError}
-          showCreateDialog={showCreateDialog}
-          setShowCreateDialog={setShowCreateDialog}
-          showRotateDialog={showRotateDialog}
-          setShowRotateDialog={setShowRotateDialog}
-          tokenToRotate={tokenToRotate}
-          setTokenToRotate={setTokenToRotate}
-          rotating={rotating}
-          setRotating={setRotating}
-          searchQuery={serviceAccountSearchQuery}
-          setSearchQuery={setServiceAccountSearchQuery}
+        <PluginSlot
+          name="users.tab-content"
+          context={{ activeTab: activeMainTab }}
         />
       )}
 
@@ -1066,10 +1377,14 @@ function UsersTable({
   onResetPassword,
   onDeleteUser,
   basicAuthEnabled,
+  ingressBasicAuthEnabled,
+  externalProxyAuthEnabled,
   currentUserRole,
   currentUserId,
-  searchQuery,
-  setSearchQuery,
+  filters,
+  setValueList,
+  deduplicateUsers,
+  setLastFetchedTime,
 }) {
   const [usersWithCounts, setUsersWithCounts] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -1081,10 +1396,16 @@ function UsersTable({
   const [editingUserId, setEditingUserId] = useState(null);
   const [currentEditingRole, setCurrentEditingRole] = useState('');
 
+  // Lookup dictionary for GPU type and infra filtering
+  // Structure: infra -> gpuType -> userId -> { clusterCount, jobCount, gpuCount }
+  const [combinedLookup, setCombinedLookup] = useState({});
+  const [lookupsReady, setLookupsReady] = useState(false);
+
   const fetchDataAndProcess = useCallback(
     async (showLoading = false) => {
       if (setLoading && showLoading) setLoading(true);
       if (showLoading) setIsLoading(true);
+      setLookupsReady(false); // Reset lookups state when starting to fetch
       try {
         // Step 1: Load users first and show them immediately
         const usersData = await dashboardCache.get(getUsers);
@@ -1096,6 +1417,7 @@ function UsersTable({
           fullEmailID: getFullEmailID(user.username, user.userId),
           clusterCount: -1, // Use -1 as loading indicator
           jobCount: -1, // Use -1 as loading indicator
+          gpuCount: -1, // Use -1 as loading indicator
         }));
 
         setUsersWithCounts(initialProcessedUsers);
@@ -1106,28 +1428,259 @@ function UsersTable({
         if (showLoading) setIsLoading(false);
 
         // Step 2: Load clusters and jobs in background and update counts
-        const [clustersData, managedJobsResponse] = await Promise.all([
-          dashboardCache.get(getClusters),
-          dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-        ]);
+        const { clustersData, jobsResponse } = await fetchClustersAndJobs();
 
-        const jobsData = managedJobsResponse.jobs || [];
+        const jobsData = jobsResponse.jobs || [];
 
-        // Update users with actual counts
+        // Build combined lookup dictionary for GPU type and infra filtering
+        // Structure: userId -> infra -> gpuType -> { clusterCount, jobCount, gpuCount }
+        //            userId -> infra -> "Total" -> { clusterCount, jobCount, gpuCount }
+        //            userId -> "Total" -> gpuType -> { clusterCount, jobCount, gpuCount }
+        const newCombinedLookup = {};
+
+        // Helper to extract GPU type from accelerators
+        const extractGPUType = (accelerators) => {
+          if (!accelerators) return null;
+
+          let parsed = accelerators;
+          if (typeof accelerators === 'string') {
+            try {
+              const jsonStr = accelerators
+                .replace(/'/g, '"')
+                .replace(/None/g, 'null');
+              parsed = JSON.parse(jsonStr);
+            } catch (e) {
+              return null;
+            }
+          }
+
+          if (typeof parsed === 'object' && parsed !== null) {
+            const entries = Object.entries(parsed);
+            if (entries.length > 0) {
+              return entries[0][0]; // Return GPU type (the key)
+            }
+          }
+          return null;
+        };
+
+        // Helper to update combined lookup
+        const updateCombinedLookup = (
+          userId,
+          infra,
+          gpuType,
+          clusterDelta,
+          jobDelta,
+          gpuDelta
+        ) => {
+          if (!userId || !infra) return;
+
+          // Initialize user structure
+          if (!newCombinedLookup[userId]) {
+            newCombinedLookup[userId] = {};
+          }
+
+          // Initialize infra structure
+          if (!newCombinedLookup[userId][infra]) {
+            newCombinedLookup[userId][infra] = {};
+          }
+
+          // Initialize cross-infra "Total" structure
+          if (!newCombinedLookup[userId]['Total']) {
+            newCombinedLookup[userId]['Total'] = {};
+          }
+
+          // Update infra -> "Total" (all resources in this infra)
+          if (!newCombinedLookup[userId][infra]['Total']) {
+            newCombinedLookup[userId][infra]['Total'] = {
+              clusterCount: 0,
+              jobCount: 0,
+              gpuCount: 0,
+            };
+          }
+          newCombinedLookup[userId][infra]['Total'].clusterCount +=
+            clusterDelta;
+          newCombinedLookup[userId][infra]['Total'].jobCount += jobDelta;
+          newCombinedLookup[userId][infra]['Total'].gpuCount += gpuDelta;
+
+          // Update infra -> gpuType (specific GPU type in this infra) if gpuType exists
+          if (gpuType) {
+            if (!newCombinedLookup[userId][infra][gpuType]) {
+              newCombinedLookup[userId][infra][gpuType] = {
+                clusterCount: 0,
+                jobCount: 0,
+                gpuCount: 0,
+              };
+            }
+            newCombinedLookup[userId][infra][gpuType].clusterCount +=
+              clusterDelta;
+            newCombinedLookup[userId][infra][gpuType].jobCount += jobDelta;
+            newCombinedLookup[userId][infra][gpuType].gpuCount += gpuDelta;
+
+            // Update "Total" -> gpuType (cross-infra aggregates for this GPU type)
+            if (!newCombinedLookup[userId]['Total'][gpuType]) {
+              newCombinedLookup[userId]['Total'][gpuType] = {
+                clusterCount: 0,
+                jobCount: 0,
+                gpuCount: 0,
+              };
+            }
+            newCombinedLookup[userId]['Total'][gpuType].clusterCount +=
+              clusterDelta;
+            newCombinedLookup[userId]['Total'][gpuType].jobCount += jobDelta;
+            newCombinedLookup[userId]['Total'][gpuType].gpuCount += gpuDelta;
+          }
+        };
+
+        // Process clusters to build lookup
+        for (const cluster of clustersData || []) {
+          const userId = cluster.user_hash;
+          if (!userId) continue;
+
+          const gpuType = extractGPUType(cluster.gpus);
+          const infra = cluster.infra;
+
+          // Count GPUs (only from active clusters)
+          let gpuCount = 0;
+          if (cluster.status !== 'STOPPED' && cluster.status !== 'TERMINATED') {
+            const gpuCountPerNode = getGPUCount(
+              cluster.gpus,
+              `Cluster ${cluster.cluster}`
+            );
+            // Multiply by number of nodes to get total GPU count
+            const numNodes = cluster.num_nodes || 1;
+            gpuCount = gpuCountPerNode * numNodes;
+          }
+
+          updateCombinedLookup(userId, infra, gpuType, 1, 0, gpuCount);
+        }
+
+        // Helper to extract num_nodes from cluster_resources_full (e.g., "3x(...)")
+        const extractNumNodes = (clusterResourcesFull) => {
+          if (
+            !clusterResourcesFull ||
+            typeof clusterResourcesFull !== 'string'
+          ) {
+            return 1;
+          }
+          const match = clusterResourcesFull.match(/^(\d+)x/);
+          return match ? parseInt(match[1], 10) : 1;
+        };
+
+        // Process jobs to build lookup
+        for (const job of jobsData || []) {
+          if (!ACTIVE_JOB_STATUSES.has(job.status)) continue;
+
+          const userId = job.user_hash;
+          if (!userId) continue;
+
+          const gpuType = extractGPUType(job.accelerators);
+          const infra = job.infra;
+          const gpuCountPerNode = getGPUCount(
+            job.accelerators,
+            `Job ${job.job_id}`
+          );
+
+          // Multiply by number of nodes to get total GPU count
+          const numNodes = extractNumNodes(job.resources_str_full);
+          const gpuCount = gpuCountPerNode * numNodes;
+
+          updateCombinedLookup(userId, infra, gpuType, 0, 1, gpuCount);
+        }
+
+        // Store the lookup dictionary
+        setCombinedLookup(newCombinedLookup);
+        setLookupsReady(true); // Mark lookups as ready
+
+        // Update users with actual counts (without filter applied)
         const finalProcessedUsers = (usersData || []).map((user) => {
-          const userClusters = (clustersData || []).filter(
-            (c) => c.user_hash === user.userId
-          );
-          const userJobs = (jobsData || []).filter(
-            (j) => j.user_hash === user.userId
-          );
+          let clusterCount = 0;
+          let clusterGPUCount = 0;
+          let jobCount = 0;
+          let jobGPUCount = 0;
+
+          // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
+          for (const cluster of clustersData || []) {
+            if (cluster.user_hash === user.userId) {
+              clusterCount++;
+              // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+              if (
+                cluster.status !== 'STOPPED' &&
+                cluster.status !== 'TERMINATED'
+              ) {
+                const gpuCountPerNode = getGPUCount(
+                  cluster.gpus,
+                  `Cluster ${cluster.cluster}`
+                );
+                // Multiply by number of nodes to get total GPU count
+                const numNodes = cluster.num_nodes || 1;
+                clusterGPUCount += gpuCountPerNode * numNodes;
+              }
+            }
+          }
+
+          // Count active jobs and sum GPUs in one pass
+          for (const job of jobsData || []) {
+            if (
+              job.user_hash === user.userId &&
+              ACTIVE_JOB_STATUSES.has(job.status)
+            ) {
+              jobCount++;
+              const gpuCountPerNode = getGPUCount(
+                job.accelerators,
+                `Job ${job.job_id}`
+              );
+              // Multiply by number of nodes to get total GPU count
+              const numNodes = extractNumNodes(job.resources_str_full);
+              jobGPUCount += gpuCountPerNode * numNodes;
+            }
+          }
+
           return {
             ...user,
             usernameDisplay: parseUsername(user.username, user.userId),
             fullEmailID: getFullEmailID(user.username, user.userId),
-            clusterCount: userClusters.length,
-            jobCount: userJobs.length,
+            clusterCount,
+            jobCount,
+            gpuCount: clusterGPUCount + jobGPUCount,
           };
+        });
+
+        // Collect unique GPU types and infra values for filter dropdowns
+        const infras = new Set();
+        const gpuTypes = new Set();
+
+        for (const userLookup of Object.values(newCombinedLookup)) {
+          // Collect infras (skip "Total" key)
+          for (const infra of Object.keys(userLookup)) {
+            if (infra !== 'Total') {
+              infras.add(infra);
+            }
+          }
+          // Collect GPU types from cross-infra "Total"
+          if (userLookup['Total']) {
+            for (const gpuType of Object.keys(userLookup['Total'])) {
+              gpuTypes.add(gpuType);
+            }
+          }
+        }
+
+        // Update valueList for filter autocomplete
+        const names = new Set();
+        const userIds = new Set();
+        const roles = new Set();
+
+        finalProcessedUsers.forEach((user) => {
+          if (user.usernameDisplay) names.add(user.usernameDisplay);
+          if (user.userId) userIds.add(user.userId);
+          if (user.role) roles.add(user.role);
+        });
+
+        setValueList({
+          name: Array.from(names).sort(),
+          'user id': Array.from(userIds).sort(),
+          role: Array.from(roles).sort(),
+          'gpu type': Array.from(gpuTypes).sort(),
+          infra: Array.from(infras).sort(),
         });
 
         setUsersWithCounts(finalProcessedUsers);
@@ -1137,9 +1690,12 @@ function UsersTable({
         setHasInitiallyLoaded(true);
         if (setLoading && showLoading) setLoading(false);
         if (showLoading) setIsLoading(false);
+      } finally {
+        if (setLastFetchedTime) setLastFetchedTime(new Date());
       }
     },
-    [setLoading]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [setLoading, setLastFetchedTime]
   );
 
   useEffect(() => {
@@ -1163,7 +1719,9 @@ function UsersTable({
     initializeData();
 
     const interval = setInterval(() => {
-      fetchDataAndProcess(false); // Don't show loading on background refresh
+      if (window.document.visibilityState === 'visible') {
+        fetchDataAndProcess(false); // Don't show loading on background refresh
+      }
     }, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchDataAndProcess, refreshInterval]);
@@ -1171,18 +1729,259 @@ function UsersTable({
   const filteredAndSortedUsers = useMemo(() => {
     let filtered = usersWithCounts;
 
-    if (searchQuery?.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = usersWithCounts.filter(
-        (user) =>
-          user.usernameDisplay?.toLowerCase().includes(query) ||
-          user.fullEmailID?.toLowerCase().includes(query) ||
-          user.role?.toLowerCase().includes(query)
+    // Separate GPU type and infra filters from standard filters
+    // Note: filter.property contains the label (e.g., "GPU", "Infra"), not the value
+    const standardFilters = filters.filter(
+      (f) => f.property !== 'GPU' && f.property !== 'Infra'
+    );
+    const gpuTypeFilters = filters.filter((f) => f.property === 'GPU');
+    const infraFilters = filters.filter((f) => f.property === 'Infra');
+
+    // Apply standard filters using the shared filter system
+    if (standardFilters.length > 0) {
+      filtered = filterData(
+        usersWithCounts.map((user) => ({
+          ...user,
+          name: user.usernameDisplay,
+          'user id': user.userId, // Note: space to match "User ID" -> "user id" from toLowerCase()
+        })),
+        standardFilters
       );
     }
 
+    // Helper to get counts from lookup for a user given filter criteria
+    // gpuTypeFilters and infraFilters are arrays - we OR within same type, AND across types
+    const getFilteredCounts = (
+      userId,
+      gpuTypeFilterValues,
+      infraFilterValues
+    ) => {
+      let clusterCount = 0;
+      let jobCount = 0;
+      let gpuCount = 0;
+
+      const userLookup = combinedLookup[userId];
+      if (!userLookup) {
+        return { clusterCount: 0, jobCount: 0, gpuCount: 0 };
+      }
+
+      // Normalize filter values to lowercase
+      const normalizedGpuTypes = gpuTypeFilterValues.map((v) =>
+        v.toLowerCase()
+      );
+      const normalizedInfras = infraFilterValues.map((v) => v.toLowerCase());
+
+      const hasGpuTypeFilters = normalizedGpuTypes.length > 0;
+      const hasInfraFilters = normalizedInfras.length > 0;
+
+      // Case 1: Both GPU and Infra filters (AND between types, OR within types)
+      if (hasGpuTypeFilters && hasInfraFilters) {
+        for (const infraFilter of normalizedInfras) {
+          for (const [infra, gpuTypeMap] of Object.entries(userLookup)) {
+            if (infra === 'Total') continue;
+            if (infra.toLowerCase() !== infraFilter) continue;
+
+            for (const gpuTypeFilter of normalizedGpuTypes) {
+              for (const [gpuType, counts] of Object.entries(gpuTypeMap)) {
+                if (gpuType === 'Total') continue;
+                if (gpuType.toLowerCase() === gpuTypeFilter) {
+                  clusterCount += counts.clusterCount;
+                  jobCount += counts.jobCount;
+                  gpuCount += counts.gpuCount;
+                }
+              }
+            }
+          }
+        }
+      }
+      // Case 2: Infra only
+      else if (hasInfraFilters) {
+        for (const infraFilter of normalizedInfras) {
+          for (const [infra, gpuTypeMap] of Object.entries(userLookup)) {
+            if (infra === 'Total') continue;
+            if (infra.toLowerCase() === infraFilter && gpuTypeMap['Total']) {
+              const counts = gpuTypeMap['Total'];
+              clusterCount += counts.clusterCount;
+              jobCount += counts.jobCount;
+              gpuCount += counts.gpuCount;
+            }
+          }
+        }
+      }
+      // Case 3: GPU type only
+      else if (hasGpuTypeFilters) {
+        if (userLookup['Total']) {
+          for (const gpuTypeFilter of normalizedGpuTypes) {
+            for (const [gpuType, counts] of Object.entries(
+              userLookup['Total']
+            )) {
+              if (gpuType.toLowerCase() === gpuTypeFilter) {
+                clusterCount += counts.clusterCount;
+                jobCount += counts.jobCount;
+                gpuCount += counts.gpuCount;
+              }
+            }
+          }
+        }
+      }
+
+      return { clusterCount, jobCount, gpuCount };
+    };
+
+    // Apply GPU type and infra filters
+    const hasGpuTypeFilter = gpuTypeFilters.length > 0;
+    const hasInfraFilter = infraFilters.length > 0;
+
+    if (hasGpuTypeFilter || hasInfraFilter) {
+      // Extract filter values - support multiple filters of same type (OR logic)
+      const gpuTypeFilterValues = gpuTypeFilters
+        .map((f) => f.value)
+        .filter(Boolean);
+      const infraFilterValues = infraFilters
+        .map((f) => f.value)
+        .filter(Boolean);
+
+      // Normalize to lowercase for matching
+      const normalizedGpuTypes = gpuTypeFilterValues.map((v) =>
+        v.toLowerCase()
+      );
+      const normalizedInfras = infraFilterValues.map((v) => v.toLowerCase());
+
+      // Filter users: check if they have ANY resources matching the filters
+      filtered = filtered.filter((user) => {
+        const userLookup = combinedLookup[user.userId];
+        if (!userLookup) return false;
+
+        // Case 1: Both GPU and Infra filters
+        if (hasGpuTypeFilter && hasInfraFilter) {
+          for (const infraFilter of normalizedInfras) {
+            for (const [infra, gpuTypeMap] of Object.entries(userLookup)) {
+              if (infra === 'Total') continue;
+              if (infra.toLowerCase() !== infraFilter) continue;
+
+              for (const gpuTypeFilter of normalizedGpuTypes) {
+                for (const gpuType of Object.keys(gpuTypeMap)) {
+                  if (gpuType === 'Total') continue;
+                  if (gpuType.toLowerCase() === gpuTypeFilter) {
+                    return true;
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Case 2: Infra only
+        else if (hasInfraFilter) {
+          for (const infraFilter of normalizedInfras) {
+            for (const infra of Object.keys(userLookup)) {
+              if (infra === 'Total') continue;
+              if (infra.toLowerCase() === infraFilter) {
+                return true;
+              }
+            }
+          }
+        }
+        // Case 3: GPU type only
+        else if (hasGpuTypeFilter) {
+          if (userLookup['Total']) {
+            for (const gpuTypeFilter of normalizedGpuTypes) {
+              for (const gpuType of Object.keys(userLookup['Total'])) {
+                if (gpuType.toLowerCase() === gpuTypeFilter) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+
+        return false;
+      });
+
+      // Update counts for filtered users
+      filtered = filtered.map((user) => {
+        const filteredCounts = getFilteredCounts(
+          user.userId,
+          gpuTypeFilterValues,
+          infraFilterValues
+        );
+
+        return {
+          ...user,
+          clusterCount: filteredCounts.clusterCount,
+          jobCount: filteredCounts.jobCount,
+          gpuCount: filteredCounts.gpuCount,
+        };
+      });
+    }
+
+    // Deduplicate by username if toggle is enabled
+    if (deduplicateUsers) {
+      const deduped = {};
+      filtered.forEach((user) => {
+        const name = user.usernameDisplay;
+        if (!deduped[name]) {
+          // Initialize with first user
+          deduped[name] = {
+            ...user,
+            // Track all userIds for this username
+            userIds: [user.userId],
+            // Track counts that will be summed
+            clusterCount: user.clusterCount,
+            jobCount: user.jobCount,
+            gpuCount: user.gpuCount,
+            // Track the oldest created_at
+            created_at: user.created_at,
+          };
+        } else {
+          // Merge with existing entry
+          deduped[name].userIds.push(user.userId);
+
+          // Sum cluster counts (handle loading state smartly)
+          if (user.clusterCount !== -1) {
+            // If current user has a valid count
+            if (deduped[name].clusterCount === -1) {
+              // Replace loading state with actual count
+              deduped[name].clusterCount = user.clusterCount;
+            } else {
+              // Add to existing valid count
+              deduped[name].clusterCount += user.clusterCount;
+            }
+          }
+          // If user.clusterCount === -1 and deduped already has valid count, keep existing
+
+          // Sum job counts (same logic)
+          if (user.jobCount !== -1) {
+            if (deduped[name].jobCount === -1) {
+              deduped[name].jobCount = user.jobCount;
+            } else {
+              deduped[name].jobCount += user.jobCount;
+            }
+          }
+
+          // Sum GPU counts (same logic)
+          if (user.gpuCount !== -1) {
+            if (deduped[name].gpuCount === -1) {
+              deduped[name].gpuCount = user.gpuCount;
+            } else {
+              deduped[name].gpuCount += user.gpuCount;
+            }
+          }
+
+          // Keep the oldest created_at
+          if (
+            user.created_at &&
+            (!deduped[name].created_at ||
+              user.created_at < deduped[name].created_at)
+          ) {
+            deduped[name].created_at = user.created_at;
+          }
+        }
+      });
+      filtered = Object.values(deduped);
+    }
+
     return sortData(filtered, sortConfig.key, sortConfig.direction);
-  }, [usersWithCounts, sortConfig, searchQuery]);
+  }, [usersWithCounts, sortConfig, filters, deduplicateUsers, combinedLookup]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -1256,17 +2055,30 @@ function UsersTable({
     );
   }
 
+  // Check if we're still loading lookups for GPU/Infra filters
+  const hasGpuOrInfraFilters = filters.some(
+    (f) => f.property === 'GPU' || f.property === 'Infra'
+  );
+  if (hasGpuOrInfraFilters && !lookupsReady) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <CircularProgress />
+        <span className="ml-2 text-gray-500">Loading filtered data...</span>
+      </div>
+    );
+  }
+
   if (!filteredAndSortedUsers || filteredAndSortedUsers.length === 0) {
     return (
       <div className="text-center py-12">
         <p className="text-lg font-semibold text-gray-500">
-          {searchQuery?.trim()
-            ? 'No users match your search.'
+          {filters.length > 0
+            ? 'No users match your filters.'
             : 'No users found.'}
         </p>
         <p className="text-sm text-gray-400 mt-1">
-          {searchQuery?.trim()
-            ? 'Try adjusting your search terms.'
+          {filters.length > 0
+            ? 'Try adjusting your filter criteria.'
             : 'There are currently no users to display.'}
         </p>
       </div>
@@ -1285,23 +2097,43 @@ function UsersTable({
               >
                 Name{getSortDirection('usernameDisplay')}
               </TableHead>
-              <TableHead
-                onClick={() => requestSort('fullEmailID')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                User ID{getSortDirection('fullEmailID')}
-              </TableHead>
-              <TableHead
-                onClick={() => requestSort('role')}
-                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
-              >
-                Role{getSortDirection('role')}
-              </TableHead>
+              {!deduplicateUsers && (
+                <TableHead
+                  onClick={() => requestSort('fullEmailID')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  User ID{getSortDirection('fullEmailID')}
+                </TableHead>
+              )}
+              {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                <TableHead
+                  onClick={() => requestSort('role')}
+                  className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                >
+                  Role{getSortDirection('role')}
+                </TableHead>
+              )}
+              {!deduplicateUsers &&
+                !ingressBasicAuthEnabled &&
+                !externalProxyAuthEnabled && (
+                  <TableHead
+                    onClick={() => requestSort('userType')}
+                    className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+                  >
+                    Type{getSortDirection('userType')}
+                  </TableHead>
+                )}
               <TableHead
                 onClick={() => requestSort('created_at')}
                 className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
               >
                 Joined{getSortDirection('created_at')}
+              </TableHead>
+              <TableHead
+                onClick={() => requestSort('gpuCount')}
+                className="sortable whitespace-nowrap cursor-pointer hover:bg-gray-50 w-1/6"
+              >
+                GPUs{getSortDirection('gpuCount')}
               </TableHead>
               <TableHead
                 onClick={() => requestSort('clusterCount')}
@@ -1315,170 +2147,229 @@ function UsersTable({
               >
                 Jobs{getSortDirection('jobCount')}
               </TableHead>
-              {/* Show Actions column if basicAuthEnabled */}
-              {(basicAuthEnabled || currentUserRole === 'admin') && (
-                <TableHead className="whitespace-nowrap w-1/7">
-                  Actions
-                </TableHead>
-              )}
+              {/* Show Actions column if basicAuthEnabled and not deduplicating */}
+              {!deduplicateUsers &&
+                (basicAuthEnabled || currentUserRole === 'admin') && (
+                  <TableHead className="whitespace-nowrap w-1/7">
+                    Actions
+                  </TableHead>
+                )}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredAndSortedUsers.map((user) => (
-              <TableRow key={user.userId}>
-                <TableCell className="truncate" title={user.username}>
-                  {user.usernameDisplay}
-                </TableCell>
-                <TableCell className="truncate" title={user.fullEmailID}>
-                  {user.fullEmailID}
-                </TableCell>
-                <TableCell className="truncate" title={user.role}>
-                  <div className="flex items-center gap-2">
-                    {editingUserId === user.userId ? (
-                      <>
-                        <select
-                          value={currentEditingRole}
-                          onChange={(e) =>
-                            setCurrentEditingRole(e.target.value)
-                          }
-                          className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
-                        >
-                          <option value="admin">Admin</option>
-                          <option value="user">User</option>
-                        </select>
-                        <button
-                          onClick={() => handleSaveEdit(user.userId)}
-                          className="text-green-600 hover:text-green-800 p-1"
-                          title="Save"
-                        >
-                          <CheckIcon className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={handleCancelEdit}
-                          className="text-gray-500 hover:text-gray-700 p-1"
-                          title="Cancel"
-                        >
-                          <XIcon className="h-4 w-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="capitalize">{user.role}</span>
-                        {/* Only show edit role button if admin */}
-                        {currentUserRole === 'admin' && (
-                          <button
-                            onClick={() =>
-                              handleEditClick(user.userId, user.role)
-                            }
-                            className="text-blue-600 hover:text-blue-700 p-1"
-                            title="Edit role"
-                          >
-                            <PenIcon className="h-3 w-3" />
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell className="truncate">
-                  {user.created_at ? (
-                    <TimestampWithTooltip
-                      date={new Date(user.created_at * 1000)}
-                    />
-                  ) : (
-                    '-'
-                  )}
-                </TableCell>
-                <TableCell>
-                  {user.clusterCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                      <CircularProgress size={10} className="mr-1" />
-                      Loading...
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/clusters?user=${encodeURIComponent(user.userId)}`}
-                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                        user.clusterCount > 0
-                          ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                      }`}
-                      title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                    >
-                      {user.clusterCount}
-                    </Link>
-                  )}
-                </TableCell>
-                <TableCell>
-                  {user.jobCount === -1 ? (
-                    <span className="px-2 py-0.5 bg-gray-100 text-gray-400 rounded text-xs font-medium flex items-center">
-                      <CircularProgress size={10} className="mr-1" />
-                      Loading...
-                    </span>
-                  ) : (
-                    <Link
-                      href={`/jobs?user=${encodeURIComponent(user.userId)}`}
-                      className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
-                        user.jobCount > 0
-                          ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
-                          : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
-                      }`}
-                      title={`View ${user.jobCount} job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
-                    >
-                      {user.jobCount}
-                    </Link>
-                  )}
-                </TableCell>
-                {/* Actions cell logic */}
-                {(basicAuthEnabled || currentUserRole === 'admin') && (
-                  <TableCell className="relative">
-                    <div className="flex items-center gap-2">
-                      {/* Reset password icon: admin can reset any, user can only reset self (basic auth only) */}
-                      {basicAuthEnabled && (
-                        <button
-                          onClick={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? async () => {
-                                  onResetPassword(user);
-                                }
-                              : undefined
-                          }
-                          className={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? 'text-blue-600 hover:text-blue-700 p-1'
-                              : 'text-gray-300 cursor-not-allowed p-1'
-                          }
-                          title={
-                            currentUserRole === 'admin' ||
-                            user.userId === currentUserId
-                              ? 'Reset Password'
-                              : 'You can only reset your own password'
-                          }
-                          disabled={
-                            currentUserRole !== 'admin' &&
-                            user.userId !== currentUserId
-                          }
-                        >
-                          <KeyRoundIcon className="h-4 w-4" />
-                        </button>
-                      )}
-                      {/* Delete button - only show for admin */}
-                      {currentUserRole === 'admin' && (
-                        <button
-                          onClick={() => onDeleteUser(user)}
-                          className="text-red-600 hover:text-red-700 p-1"
-                          title="Delete User"
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </button>
-                      )}
-                    </div>
+            {filteredAndSortedUsers.map((user) => {
+              const isSystemUser = user.userType === 'system';
+              const isBasicUser = user.userType === 'basic';
+              const canResetPassword =
+                isBasicUser &&
+                (currentUserRole === 'admin' || user.userId === currentUserId);
+              return (
+                <TableRow key={user.userId}>
+                  <TableCell className="truncate" title={user.username}>
+                    {user.usernameDisplay}
                   </TableCell>
-                )}
-              </TableRow>
-            ))}
+                  {!deduplicateUsers && (
+                    <TableCell className="truncate" title={user.fullEmailID}>
+                      {user.fullEmailID}
+                    </TableCell>
+                  )}
+                  {!deduplicateUsers && !ingressBasicAuthEnabled && (
+                    <TableCell className="truncate" title={user.role}>
+                      <div className="flex items-center gap-2">
+                        {editingUserId === user.userId ? (
+                          <>
+                            <select
+                              value={currentEditingRole}
+                              onChange={(e) =>
+                                setCurrentEditingRole(e.target.value)
+                              }
+                              className="block w-auto p-1 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-sky-blue focus:border-sky-blue sm:text-sm"
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="user">User</option>
+                            </select>
+                            <button
+                              onClick={() => handleSaveEdit(user.userId)}
+                              className="text-green-600 hover:text-green-800 p-1"
+                              title="Save"
+                            >
+                              <CheckIcon className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={handleCancelEdit}
+                              className="text-gray-500 hover:text-gray-700 p-1"
+                              title="Cancel"
+                            >
+                              <XIcon className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <span className="capitalize">{user.role}</span>
+                            {/* Only show edit role button if admin and not a system user */}
+                            {currentUserRole === 'admin' && (
+                              <button
+                                onClick={
+                                  !isSystemUser
+                                    ? () =>
+                                        handleEditClick(user.userId, user.role)
+                                    : undefined
+                                }
+                                className={
+                                  !isSystemUser
+                                    ? 'text-blue-600 hover:text-blue-700 p-1'
+                                    : 'text-gray-300 cursor-not-allowed p-1'
+                                }
+                                title={
+                                  !isSystemUser
+                                    ? 'Edit role'
+                                    : 'Cannot edit role for system users'
+                                }
+                                disabled={isSystemUser}
+                              >
+                                <PenIcon className="h-3 w-3" />
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </TableCell>
+                  )}
+                  {!deduplicateUsers &&
+                    !ingressBasicAuthEnabled &&
+                    !externalProxyAuthEnabled && (
+                      <TableCell className="truncate" title={user.userType}>
+                        <span className="capitalize">
+                          {user.userType === 'sso' ? 'SSO' : user.userType}
+                        </span>
+                      </TableCell>
+                    )}
+                  <TableCell className="truncate">
+                    {user.created_at ? (
+                      <TimestampWithTooltip
+                        date={new Date(user.created_at * 1000)}
+                      />
+                    ) : (
+                      '-'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.gpuCount === -1 ? (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <CircularProgress size={12} />
+                      </span>
+                    ) : (
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          user.gpuCount > 0
+                            ? 'bg-purple-100 text-purple-600'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        title={`Total GPUs: ${user.gpuCount}`}
+                      >
+                        {user.gpuCount}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.clusterCount === -1 ? (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <CircularProgress size={12} />
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                          user.clusterCount > 0
+                            ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={`View ${user.clusterCount} cluster${user.clusterCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                      >
+                        {user.clusterCount}
+                      </Link>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {user.jobCount === -1 ? (
+                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs font-medium">
+                        <CircularProgress size={12} />
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(user.username)}`}
+                        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
+                          user.jobCount > 0
+                            ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
+                        }`}
+                        title={`View ${user.jobCount} active job${user.jobCount !== 1 ? 's' : ''} for ${user.usernameDisplay}`}
+                      >
+                        {user.jobCount}
+                      </Link>
+                    )}
+                  </TableCell>
+                  {/* Actions cell logic - hide when deduplicating */}
+                  {!deduplicateUsers &&
+                    (basicAuthEnabled || currentUserRole === 'admin') && (
+                      <TableCell className="relative">
+                        <div className="flex items-center gap-2">
+                          {/* Reset password icon: admin can reset any basic user, user can only reset self (basic auth only) */}
+                          {basicAuthEnabled && (
+                            <button
+                              onClick={
+                                canResetPassword
+                                  ? async () => {
+                                      onResetPassword(user);
+                                    }
+                                  : undefined
+                              }
+                              className={
+                                canResetPassword
+                                  ? 'text-blue-600 hover:text-blue-700 p-1'
+                                  : 'text-gray-300 cursor-not-allowed p-1'
+                              }
+                              title={
+                                !isBasicUser
+                                  ? 'Password reset only available for basic auth users'
+                                  : canResetPassword
+                                    ? 'Reset Password'
+                                    : 'You can only reset your own password'
+                              }
+                              disabled={!canResetPassword}
+                            >
+                              <KeyRoundIcon className="h-4 w-4" />
+                            </button>
+                          )}
+                          {/* Delete button - only show for admin, disabled for system users */}
+                          {currentUserRole === 'admin' && (
+                            <button
+                              onClick={
+                                !isSystemUser
+                                  ? () => onDeleteUser(user)
+                                  : undefined
+                              }
+                              className={
+                                !isSystemUser
+                                  ? 'text-red-600 hover:text-red-700 p-1'
+                                  : 'text-gray-300 cursor-not-allowed p-1'
+                              }
+                              title={
+                                !isSystemUser
+                                  ? 'Delete User'
+                                  : 'Cannot delete system users'
+                              }
+                              disabled={isSystemUser}
+                            >
+                              <Trash2Icon className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </TableCell>
+                    )}
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -1497,8 +2388,11 @@ UsersTable.propTypes = {
   onResetPassword: PropTypes.func.isRequired,
   onDeleteUser: PropTypes.func.isRequired,
   basicAuthEnabled: PropTypes.bool,
+  ingressBasicAuthEnabled: PropTypes.bool,
+  externalProxyAuthEnabled: PropTypes.bool,
   currentUserRole: PropTypes.string,
   currentUserId: PropTypes.string,
+  setLastFetchedTime: PropTypes.func,
 };
 
 // Service Account Tokens Management Component
@@ -1544,51 +2438,67 @@ function ServiceAccountTokensView({
   const [tokensWithCounts, setTokensWithCounts] = useState([]);
 
   // Fetch tokens and related data
-  const fetchTokensAndCounts = async () => {
+  const fetchTokensAndCounts = async (forceRefresh = false) => {
     try {
       setLoading(true);
 
-      // Step 1: Fetch service account tokens
-      const tokensResponse = await apiClient.get(
-        '/users/service-account-tokens'
-      );
-      if (!tokensResponse.ok) {
-        console.error('Failed to fetch tokens');
-        setTokens([]);
-        setTokensWithCounts([]);
-        return;
+      // Invalidate cache if force refresh requested (after mutations)
+      if (forceRefresh) {
+        dashboardCache.invalidate(getServiceAccountTokens);
       }
 
-      const tokensData = await tokensResponse.json();
+      // Step 1: Fetch service account tokens (using cache)
+      const tokensData = await dashboardCache.get(getServiceAccountTokens);
       setTokens(tokensData || []);
 
       // Step 2: Fetch clusters and jobs data in parallel
-      const [clustersResponse, jobsResponse] = await Promise.all([
-        dashboardCache.get(getClusters),
-        dashboardCache.get(getManagedJobs, [{ allUsers: true }]),
-      ]);
-
-      const clustersData = clustersResponse || [];
+      const { clustersData, jobsResponse } = await fetchClustersAndJobs();
       const jobsData = jobsResponse?.jobs || [];
 
       // Step 3: Calculate counts for each service account
       const enhancedTokens = (tokensData || []).map((token) => {
         const serviceAccountId = token.service_account_user_id;
+        let clusterCount = 0;
+        let clusterGPUCount = 0;
+        let jobCount = 0;
+        let jobGPUCount = 0;
 
-        // Count clusters owned by this service account
-        const serviceAccountClusters = clustersData.filter(
-          (cluster) => cluster.user_hash === serviceAccountId
-        );
+        // Count clusters and sum GPUs in one pass (exclude STOPPED and TERMINATED clusters from GPU count)
+        for (const cluster of clustersData) {
+          if (cluster.user_hash === serviceAccountId) {
+            clusterCount++;
+            // Only count GPUs from active clusters (exclude STOPPED and TERMINATED)
+            if (
+              cluster.status !== 'STOPPED' &&
+              cluster.status !== 'TERMINATED'
+            ) {
+              clusterGPUCount += getGPUCount(
+                cluster.gpus,
+                `Cluster ${cluster.cluster}`
+              );
+            }
+          }
+        }
 
-        // Count jobs owned by this service account
-        const serviceAccountJobs = jobsData.filter(
-          (job) => job.user_hash === serviceAccountId
-        );
+        // Count active jobs and sum GPUs in one pass
+        for (const job of jobsData) {
+          if (
+            job.user_hash === serviceAccountId &&
+            ACTIVE_JOB_STATUSES.has(job.status)
+          ) {
+            jobCount++;
+            jobGPUCount += getGPUCount(
+              job.accelerators,
+              `Job ${job.job_name || job.job_id}`
+            );
+          }
+        }
 
         return {
           ...token,
-          clusterCount: serviceAccountClusters.length,
-          jobCount: serviceAccountJobs.length,
+          clusterCount,
+          jobCount,
+          gpuCount: clusterGPUCount + jobGPUCount,
           // Extract primary role
           primaryRole:
             token.service_account_roles &&
@@ -1648,7 +2558,7 @@ function ServiceAccountTokensView({
       }
 
       setCreateSuccess('Service account role updated successfully!');
-      await fetchTokensAndCounts(); // Refresh data
+      await fetchTokensAndCounts(true); // Refresh data (force refresh after mutation)
       handleCancelEdit(); // Exit edit mode
     } catch (error) {
       console.error('Failed to update service account role:', error);
@@ -1693,7 +2603,7 @@ function ServiceAccountTokensView({
         const data = await response.json();
         setCreatedTokenInDialog(data.token);
         setNewToken({ token_name: '', expires_in_days: 30 });
-        await fetchTokensAndCounts();
+        await fetchTokensAndCounts(true); // Force refresh after creation
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to create token');
@@ -1726,7 +2636,7 @@ function ServiceAccountTokensView({
         setShowDeleteDialog(false);
         setTokenToDelete(null);
         setDeleteError(null);
-        await fetchTokensAndCounts();
+        await fetchTokensAndCounts(true); // Force refresh after deletion
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to delete service account');
@@ -1762,7 +2672,7 @@ function ServiceAccountTokensView({
       if (response.ok) {
         const data = await response.json();
         setRotatedTokenInDialog(data.token);
-        await fetchTokensAndCounts();
+        await fetchTokensAndCounts(true); // Force refresh after rotation
       } else {
         const errorData = await response.json();
         throw new Error(errorData.detail || 'Failed to rotate token');
@@ -1824,6 +2734,7 @@ function ServiceAccountTokensView({
                   <TableHead>Role</TableHead>
                   <TableHead>Clusters</TableHead>
                   <TableHead>Jobs</TableHead>
+                  <TableHead>GPUs</TableHead>
                   <TableHead>Created</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
@@ -1903,7 +2814,7 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <Link
-                        href={`/clusters?user=${encodeURIComponent(token.service_account_user_id)}`}
+                        href={`/clusters?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
                         className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                           token.clusterCount > 0
                             ? 'bg-blue-100 text-blue-600 hover:bg-blue-200 hover:text-blue-700'
@@ -1916,16 +2827,28 @@ function ServiceAccountTokensView({
                     </TableCell>
                     <TableCell>
                       <Link
-                        href={`/jobs?user=${encodeURIComponent(token.service_account_user_id)}`}
+                        href={`/jobs?property=user&operator=%3A&value=${encodeURIComponent(token.service_account_name)}`}
                         className={`px-2 py-0.5 rounded text-xs font-medium transition-colors duration-200 cursor-pointer inline-block ${
                           token.jobCount > 0
                             ? 'bg-green-100 text-green-600 hover:bg-green-200 hover:text-green-700'
                             : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700'
                         }`}
-                        title={`View ${token.jobCount} job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
+                        title={`View ${token.jobCount} active job${token.jobCount !== 1 ? 's' : ''} for ${token.token_name}`}
                       >
                         {token.jobCount}
                       </Link>
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          token.gpuCount > 0
+                            ? 'bg-purple-100 text-purple-600'
+                            : 'bg-gray-100 text-gray-500'
+                        }`}
+                        title={`Total GPUs: ${token.gpuCount}`}
+                      >
+                        {token.gpuCount}
+                      </span>
                     </TableCell>
                     <TableCell className="truncate">
                       {token.created_at ? (
@@ -2096,7 +3019,7 @@ function ServiceAccountTokensView({
                     placeholder="e.g., 30"
                     min="0"
                     max="365"
-                    value={newToken.expires_in_days || ''}
+                    value={newToken.expires_in_days ?? ''}
                     onChange={(e) =>
                       setNewToken({
                         ...newToken,

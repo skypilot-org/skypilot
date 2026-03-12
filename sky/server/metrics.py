@@ -5,9 +5,10 @@ import multiprocessing
 import os
 import threading
 import time
-from typing import List
+from typing import List, Optional
 
 import fastapi
+from prometheus_client import core as prom_core
 from prometheus_client import generate_latest
 from prometheus_client import multiprocess
 import prometheus_client as prom
@@ -16,27 +17,183 @@ import starlette.middleware.base
 import uvicorn
 
 from sky import core
+from sky import global_user_state
 from sky import sky_logging
 from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_BURN_RATE_UPDATE_INTERVAL_SECONDS = 30
+_COST_TIME_HORIZON_SECONDS = 3600
+
+
+class BurnRateCollector:
+    """Collector for SkyPilot cluster burn rate metrics.
+    This collector calculates the total hourly burn rate (in USD) of all
+    active clusters. It caches the result for _BURN_RATE_UPDATE_INTERVAL_SECONDS
+    to avoid frequent database queries.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cached_total = 0.0
+        self._cache_ttl = _BURN_RATE_UPDATE_INTERVAL_SECONDS
+
+    def _compute_total(self) -> float:
+        total = 0.0
+        clusters = global_user_state.get_clusters()
+        for cluster in clusters:
+            status = cluster.get('status')
+            status_name = getattr(status, 'name', status)
+            if status_name != 'UP':
+                continue
+
+            handle = cluster.get('handle')
+            if handle is None or not getattr(handle, 'launched_resources',
+                                             None):
+                continue
+
+            # instance_type_to_hourly_cost + accelerators_to_hourly_cost.
+            total += handle.launched_resources.get_cost(
+                _COST_TIME_HORIZON_SECONDS)
+        return total
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_apiserver_total_burn_rate_dollars',
+            'Total estimated hourly spend across all active clusters (USD/hr)',
+            labels=['type'],
+        )
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._cached_total = self._compute_total()
+                    self._last_scrape_time = now
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('Failed to compute burn rate')
+                    self._last_scrape_time = now
+            val = self._cached_total
+
+        metric = prom_core.GaugeMetricFamily(
+            'sky_apiserver_total_burn_rate_dollars',
+            'Total estimated hourly spend across all active clusters (USD/hr)',
+            labels=['type'],
+        )
+        metric.add_metric(['local_clusters'], val)
+        yield metric
+
+
+_BURN_RATE_COLLECTOR = BurnRateCollector()
+
+try:
+    prom.REGISTRY.register(_BURN_RATE_COLLECTOR)  # for non-multiprocess
+except ValueError:
+    pass
+
+# Cache TTL shared by all custom collectors.
+_COLLECTOR_CACHE_TTL_SECONDS = _BURN_RATE_UPDATE_INTERVAL_SECONDS
+
+
+class ManagedJobsCollector:
+    """Collector for managed job state metrics.
+
+    Queries the managed jobs DB to produce real-time gauges for
+    job status counts.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._last_scrape_time = 0.0
+        self._cache_ttl = _COLLECTOR_CACHE_TTL_SECONDS
+        self._cached_status_counts: dict = {}
+
+    def _refresh(self):
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs import state as managed_job_state
+        self._cached_status_counts = (managed_job_state.get_status_counts())
+
+    def describe(self):
+        yield prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_count',
+            'Current count of managed job tasks by status',
+            labels=['status'])
+
+    def collect(self):
+        now = time.time()
+        with self._lock:
+            if now - self._last_scrape_time >= self._cache_ttl:
+                try:
+                    self._refresh()
+                    self._last_scrape_time = now
+                except Exception:  # pylint: disable=broad-except
+                    logger.exception('Failed to collect managed jobs metrics')
+            status_counts = self._cached_status_counts
+
+        status_metric = prom_core.GaugeMetricFamily(
+            'sky_managed_jobs_count',
+            'Current count of managed job tasks by status',
+            labels=['status'])
+        for status, count in status_counts.items():
+            status_metric.add_metric([status], count)
+        yield status_metric
+
+
+_MANAGED_JOBS_COLLECTOR: Optional[ManagedJobsCollector] = None
+
+
+def maybe_register_managed_jobs_collector():
+    """Register the managed jobs collector if in consolidation mode.
+
+    Only consolidation mode has the managed jobs DB co-located with the
+    API server. In remote SSH/gRPC modes the DB lives on the controller
+    cluster and is not directly accessible.
+    """
+    global _MANAGED_JOBS_COLLECTOR
+    # pylint: disable=import-outside-toplevel
+    from sky.jobs import utils as managed_job_utils
+    if not managed_job_utils.is_consolidation_mode():
+        return
+    _MANAGED_JOBS_COLLECTOR = ManagedJobsCollector()
+    try:
+        prom.REGISTRY.register(_MANAGED_JOBS_COLLECTOR)
+    except ValueError:
+        pass
+
+
 metrics_app = fastapi.FastAPI()
 
 
+# Serve /metrics in dedicated thread to avoid blocking the event loop
+# of metrics server.
 @metrics_app.get('/metrics')
-async def metrics() -> fastapi.Response:
+def metrics() -> fastapi.Response:
     """Expose aggregated Prometheus metrics from all worker processes."""
     if os.environ.get('PROMETHEUS_MULTIPROC_DIR'):
         # In multiprocess mode, we need to collect metrics from all processes.
         registry = prom.CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
+        registry.register(_BURN_RATE_COLLECTOR)
+        if _MANAGED_JOBS_COLLECTOR is not None:
+            registry.register(_MANAGED_JOBS_COLLECTOR)
         data = generate_latest(registry)
     else:
         data = generate_latest()
     return fastapi.Response(content=data,
                             media_type=prom.CONTENT_TYPE_LATEST,
                             headers={'Cache-Control': 'no-cache'})
+
+
+# Per-context timeout for metrics collection. Must be shorter than the
+# Prometheus scrape_timeout (default 10s in our Helm chart) so that the
+# endpoint responds promptly even when one remote cluster is unreachable.
+# Without this, a single hanging port-forward (e.g. 30s httpx timeout)
+# blocks the entire /gpu-metrics response, causing Prometheus to mark the
+# scrape target as down.
+_PER_CONTEXT_TIMEOUT_SECONDS = 8
 
 
 @metrics_app.get('/gpu-metrics')
@@ -46,10 +203,15 @@ async def gpu_metrics() -> fastapi.Response:
     all_metrics: List[str] = []
     successful_contexts = 0
 
+    remote_contexts = [
+        context for context in contexts if context != 'in-cluster'
+    ]
     tasks = [
-        asyncio.create_task(metrics_utils.get_metrics_for_context(context))
-        for context in contexts
-        if context != 'in-cluster'
+        asyncio.create_task(
+            asyncio.wait_for(
+                metrics_utils.get_metrics_for_context(context),
+                timeout=_PER_CONTEXT_TIMEOUT_SECONDS,
+            )) for context in remote_contexts
     ]
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -57,7 +219,8 @@ async def gpu_metrics() -> fastapi.Response:
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             logger.error(
-                f'Failed to get metrics for context {contexts[i]}: {result}')
+                f'Failed to get metrics for context {remote_contexts[i]}: '
+                f'{result}')
         elif isinstance(result, BaseException):
             # Avoid changing behavior for non-Exception BaseExceptions
             # like KeyboardInterrupt/SystemExit: re-raise them.
@@ -97,6 +260,17 @@ def _is_streaming_api(path: str) -> bool:
     return path.endswith('/logs') or path.endswith('/api/stream')
 
 
+def _get_user_label(request: fastapi.Request) -> str:
+    """Extract user label from request for metrics.
+
+    Returns the authenticated user's name if available, otherwise 'anonymous'.
+    """
+    auth_user = getattr(request.state, 'auth_user', None)
+    if auth_user is not None and auth_user.name:
+        return auth_user.name
+    return 'anonymous'
+
+
 class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to collect Prometheus metrics for HTTP requests."""
 
@@ -120,6 +294,10 @@ class PrometheusMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         finally:
             metrics_utils.SKY_APISERVER_REQUESTS_TOTAL.labels(
                 path=path, method=method, status=status_code_group).inc()
+            # Record per-user metrics
+            user = _get_user_label(request)
+            metrics_utils.SKY_APISERVER_REQUESTS_BY_USER_TOTAL.labels(
+                user=user, method=method, status=status_code_group).inc()
             if not streaming:
                 duration = time.time() - start_time
                 metrics_utils.SKY_APISERVER_REQUEST_DURATION_SECONDS.labels(

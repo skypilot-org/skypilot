@@ -1,4 +1,5 @@
 """Utilities for processing GPU metrics from Kubernetes clusters."""
+import asyncio
 import contextlib
 import functools
 import os
@@ -11,8 +12,9 @@ from typing import List, Optional, Tuple
 import httpx
 import prometheus_client as prom
 
+from sky import sky_logging
 from sky.skylet import constants
-from sky.utils import context_utils
+from sky.utils import common_utils
 
 _SELECT_TIMEOUT = 1
 _SELECT_BUFFER_SIZE = 4096
@@ -35,6 +37,8 @@ _MEM_BUCKETS = [
     float('inf'),
 ]
 
+logger = sky_logging.init_logger(__name__)
+
 # Whether the metrics are enabled, cannot be changed at runtime.
 METRICS_ENABLED = os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED,
                                  'false').lower() == 'true'
@@ -44,15 +48,33 @@ SKY_APISERVER_CODE_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_code_duration_seconds',
     'Time spent processing code',
     ['name', 'group'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             60.0, 120.0, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
 )
 
 # Total number of API server requests, grouped by path, method, and status.
+# TODO(kevinzwang): Panels that only need method/status grouping should migrate
+# to SKY_APISERVER_REQUESTS_BY_USER_TOTAL (aggregated across users). Remove
+# this metric after v0.14.0 if all consumers have migrated.
 SKY_APISERVER_REQUESTS_TOTAL = prom.Counter(
     'sky_apiserver_requests_total',
     'Total number of API server requests',
     ['path', 'method', 'status'],
+)
+
+# Total number of API server requests per user.
+# This is a separate metric to avoid high cardinality in the primary metric.
+SKY_APISERVER_REQUESTS_BY_USER_TOTAL = prom.Counter(
+    'sky_apiserver_requests_by_user_total',
+    'Total number of API server requests per user',
+    ['user', 'method', 'status'],
 )
 
 # Time spent processing API server requests, grouped by path, method, and
@@ -61,16 +83,30 @@ SKY_APISERVER_REQUEST_DURATION_SECONDS = prom.Histogram(
     'sky_apiserver_request_duration_seconds',
     'Time spent processing API server requests',
     ['path', 'method', 'status'],
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 20.0, 30.0,
-             60.0, 120.0, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
 )
 
 SKY_APISERVER_EVENT_LOOP_LAG_SECONDS = prom.Histogram(
     'sky_apiserver_event_loop_lag_seconds',
     'Scheduling delay of the server event loop',
     ['pid'],
-    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 20.0,
-             60.0, float('inf')),
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
 )
 
 SKY_APISERVER_WEBSOCKET_CONNECTIONS = prom.Gauge(
@@ -117,6 +153,72 @@ SKY_APISERVER_REQUEST_RSS_INCR_BYTES = prom.Histogram(
     'sky_apiserver_request_rss_incr_bytes',
     'RSS increment after requests', ['name'],
     buckets=_MEM_BUCKETS)
+
+SKY_APISERVER_WEBSOCKET_SSH_LATENCY_SECONDS = prom.Histogram(
+    'sky_apiserver_websocket_ssh_latency_seconds',
+    ('Time taken for ssh message to go from client to API server and back'
+     'to the client. This does not include: latency to reach the pod, '
+     'overhead from sending through the k8s port-forward tunnel, or '
+     'ssh server lag on the destination pod.'),
+    ['pid'],
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.125, 0.15, 0.25,
+             0.35, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 2.75, 3, 3.5, 4, 4.5,
+             5, 7.5, 10.0, 12.5, 15.0, 17.5, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0,
+             50.0, 55.0, 60.0, 80.0, 120.0, 140.0, 160.0, 180.0, 200.0, 220.0,
+             240.0, 260.0, 280.0, 300.0, 320.0, 340.0, 360.0, 380.0, 400.0,
+             420.0, 440.0, 460.0, 480.0, 500.0, 520.0, 540.0, 560.0, 580.0,
+             600.0, 620.0, 640.0, 660.0, 680.0, 700.0, 720.0, 740.0, 760.0,
+             780.0, 800.0, 820.0, 840.0, 860.0, 880.0, 900.0, 920.0, 940.0,
+             960.0, 980.0, 1000.0, float('inf')),
+)
+
+SKY_APISERVER_LONG_EXECUTORS = prom.Gauge(
+    'sky_apiserver_long_executors',
+    'Total number of long-running request executors in the API server',
+)
+
+SKY_APISERVER_SHORT_EXECUTORS = prom.Gauge(
+    'sky_apiserver_short_executors',
+    'Total number of short-running request executors in the API server',
+)
+
+# --- Managed Jobs Metrics ---
+
+# Per-controller-process gauges (consolidation mode only).
+# These are updated in ControllerManager.monitor_loop().
+SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT = prom.Gauge(
+    'sky_managed_jobs_controller_starting_count',
+    'Number of jobs currently launching on this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT = prom.Gauge(
+    'sky_managed_jobs_controller_running_count',
+    'Number of running job tasks on this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS = prom.Gauge(
+    'sky_managed_jobs_controller_max_jobs',
+    'Computed max jobs for this controller process',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
+
+# Static limit gauge, set in ControllerManager.monitor_loop() alongside
+# other per-controller metrics so it stays current if config hot-reload
+# is supported in the future.
+# Uses pid label + liveall so only controller processes that explicitly call
+# .labels(pid=...).set() produce a value, avoiding phantom 0.0 entries from
+# API server worker processes that merely import this module.
+SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER = prom.Gauge(
+    'sky_managed_jobs_limit_launches_per_worker',
+    'Max concurrent launches per worker',
+    ['pid'],
+    multiprocess_mode='liveall',
+)
 
 
 @contextlib.contextmanager
@@ -175,7 +277,10 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     Raises:
         RuntimeError: If port forward fails to start
     """
-    start_port_forward_timeout = 10  # 10 second timeout
+    # Must be well under the per-context timeout in
+    # metrics.py (_PER_CONTEXT_TIMEOUT_SECONDS) to leave
+    # time for the HTTP request and cleanup.
+    start_port_forward_timeout = 5
     terminate_port_forward_timeout = 5  # 5 second timeout
 
     # Use ':service_port' to let kubectl choose the local port
@@ -185,38 +290,55 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     ]
 
     env = os.environ.copy()
-    if 'KUBECONFIG' not in env:
-        env['KUBECONFIG'] = os.path.expanduser('~/.kube/config')
+    # Use SkyPilot's kubeconfig discovery which respects KUBECONFIG env var
+    # (set by credential manager plugin) and falls back to ~/.kube/config.
+    # Always set explicitly so subprocess gets the resolved paths even if
+    # env var was modified after os.environ was last copied.
+    # Import lazily to avoid circular import (metrics -> provision -> clouds
+    # -> metrics).
+    # pylint: disable=import-outside-toplevel
+    from sky.adaptors import kubernetes as kubernetes_adaptors
+    from sky.provision.kubernetes import utils as kubernetes_utils
+    kubeconfig_paths = kubernetes_utils.get_kubeconfig_paths()
+    env['KUBECONFIG'] = kubernetes_adaptors.ENV_KUBECONFIG_PATH_SEPARATOR.join(
+        kubeconfig_paths)
 
-    # start the port forward process
-    port_forward_process = subprocess.Popen(cmd,
-                                            stdout=subprocess.PIPE,
-                                            stderr=subprocess.STDOUT,
-                                            text=True,
-                                            env=env)
-
+    port_forward_process = None
+    port_forward_exit = False
     local_port = None
-    start_time = time.time()
+    poller = None
+    fd = None
 
-    buffer = ''
-    # wait for the port forward to start and extract the local port
-    while time.time() - start_time < start_port_forward_timeout:
-        if port_forward_process.poll() is not None:
-            # port forward process has terminated
-            if port_forward_process.returncode != 0:
-                raise RuntimeError(
-                    f'Port forward failed for service {service} in namespace '
-                    f'{namespace} on context {context}')
-            break
+    try:
+        # start the port forward process
+        port_forward_process = subprocess.Popen(cmd,
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.STDOUT,
+                                                text=True,
+                                                env=env)
 
-        # read output line by line to find the local port
-        if port_forward_process.stdout:
-            # Wait up to 1s for data to be available without blocking
-            r, _, _ = select.select([port_forward_process.stdout], [], [],
-                                    _SELECT_TIMEOUT)
-            if r:
+        # Use poll() instead of select() to avoid FD_SETSIZE limit
+        poller = select.poll()
+        assert port_forward_process.stdout is not None
+        fd = port_forward_process.stdout.fileno()
+        poller.register(fd, select.POLLIN)
+
+        start_time = time.time()
+        buffer = ''
+        # wait for the port forward to start and extract the local port
+        while time.time() - start_time < start_port_forward_timeout:
+            if port_forward_process.poll() is not None:
+                # port forward process has terminated
+                if port_forward_process.returncode != 0:
+                    port_forward_exit = True
+                break
+
+            # Wait up to 1000ms for data to be available without blocking
+            # poll() takes timeout in milliseconds
+            events = poller.poll(_SELECT_TIMEOUT * 1000)
+
+            if events:
                 # Read available bytes from the FD without blocking
-                fd = port_forward_process.stdout.fileno()
                 raw = os.read(fd, _SELECT_BUFFER_SIZE)
                 chunk = raw.decode(errors='ignore')
                 buffer += chunk
@@ -225,16 +347,28 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
                     local_port = int(match.group(1))
                     break
 
-        # sleep for 100ms to avoid busy-waiting
-        time.sleep(0.1)
-
+            # sleep for 100ms to avoid busy-waiting
+            time.sleep(0.1)
+    except BaseException:  # pylint: disable=broad-exception-caught
+        if port_forward_process:
+            stop_svc_port_forward(port_forward_process,
+                                  timeout=terminate_port_forward_timeout)
+        raise
+    finally:
+        if poller is not None and fd is not None:
+            try:
+                poller.unregister(fd)
+            except (OSError, ValueError):
+                # FD may already be unregistered or invalid
+                pass
+    if port_forward_exit:
+        raise RuntimeError(f'Port forward failed for service {service} in '
+                           f'namespace {namespace} on context {context}')
     if local_port is None:
         try:
-            port_forward_process.terminate()
-            port_forward_process.wait(timeout=terminate_port_forward_timeout)
-        except subprocess.TimeoutExpired:
-            port_forward_process.kill()
-            port_forward_process.wait()
+            if port_forward_process:
+                stop_svc_port_forward(port_forward_process,
+                                      timeout=terminate_port_forward_timeout)
         finally:
             raise RuntimeError(
                 f'Failed to extract local port for service {service} in '
@@ -243,14 +377,15 @@ def start_svc_port_forward(context: str, namespace: str, service: str,
     return port_forward_process, local_port
 
 
-def stop_svc_port_forward(port_forward_process: subprocess.Popen) -> None:
+def stop_svc_port_forward(port_forward_process: subprocess.Popen,
+                          timeout: int = 5) -> None:
     """Stops a port forward to a service in a Kubernetes cluster.
     Args:
         port_forward_process: The subprocess.Popen process to terminate
     """
     try:
         port_forward_process.terminate()
-        port_forward_process.wait(timeout=5)
+        port_forward_process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         port_forward_process.kill()
         port_forward_process.wait()
@@ -283,7 +418,7 @@ async def send_metrics_request_with_port_forward(
     port_forward_process = None
     try:
         # Start port forward
-        port_forward_process, local_port = await context_utils.to_thread(
+        port_forward_process, local_port = await asyncio.to_thread(
             start_svc_port_forward, context, namespace, service, service_port)
 
         # Build endpoint URL
@@ -301,11 +436,17 @@ async def send_metrics_request_with_port_forward(
             response.raise_for_status()
             return response.text
 
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error(f'Failed to send metrics request with port forward: '
+                     f'{common_utils.format_exception(e)}')
+        raise
     finally:
-        # Always clean up port forward
+        # Clean up port forward synchronously to guarantee cleanup
+        # even if the task is cancelled by asyncio.wait_for().
+        # Using await here would risk CancelledError preventing
+        # cleanup.
         if port_forward_process:
-            await context_utils.to_thread(stop_svc_port_forward,
-                                          port_forward_process)
+            stop_svc_port_forward(port_forward_process)
 
 
 async def add_cluster_name_label(metrics_text: str, context: str) -> str:

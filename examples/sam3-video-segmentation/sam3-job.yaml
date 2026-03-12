@@ -1,0 +1,50 @@
+# Job configuration for SAM3 video segmentation.
+# Processes a chunk of videos based on SKYPILOT_JOB_RANK.
+#
+# Usage (requires a pool to be created first with sam3-pool.yaml):
+#
+#  sky jobs launch --pool sam3-pool --num-jobs 10 --secret HF_TOKEN sam3-job.yaml
+#
+# Each job processes a subset of videos based on its rank.
+
+name: sam3-segmentation-job
+
+resources:
+  accelerators: L40S:1
+
+secrets:
+  HF_TOKEN: null
+
+run: |
+  source .venv/bin/activate
+  echo "Job rank: ${SKYPILOT_JOB_RANK}/${SKYPILOT_NUM_JOBS}"
+
+  # Get list of all videos
+  VIDEO_DIR=/outputs/datasets/soccer-videos
+  mapfile -t VIDEOS < <(find ${VIDEO_DIR} -name "*.mp4" | sort)
+  TOTAL_VIDEOS=${#VIDEOS[@]}
+  echo "Total videos: ${TOTAL_VIDEOS}"
+
+  # Calculate start and end indices for this job
+  CHUNK_SIZE=$((TOTAL_VIDEOS / SKYPILOT_NUM_JOBS))
+  REMAINDER=$((TOTAL_VIDEOS % SKYPILOT_NUM_JOBS))
+
+  START_IDX=$((SKYPILOT_JOB_RANK * CHUNK_SIZE))
+  if [ ${SKYPILOT_JOB_RANK} -lt ${REMAINDER} ]; then
+    START_IDX=$((START_IDX + SKYPILOT_JOB_RANK))
+    CHUNK_SIZE=$((CHUNK_SIZE + 1))
+  else
+    START_IDX=$((START_IDX + REMAINDER))
+  fi
+
+  END_IDX=$((START_IDX + CHUNK_SIZE))
+  echo "Processing videos ${START_IDX} to ${END_IDX}"
+
+  # Process each video in this job's chunk
+  for ((i=START_IDX; i<END_IDX; i++)); do
+    video="${VIDEOS[$i]}"
+    echo "Processing: $video"
+    python process_segmentation.py "$video" --max-frames 50 || echo "Failed: $video"
+  done
+
+  echo "Job complete! Results saved to S3 bucket."

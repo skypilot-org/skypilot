@@ -27,3 +27,35 @@ export function sortData(data, accessor, direction) {
     return 0;
   });
 }
+
+/**
+ * Extracts error message from API response, handling nested JSON parsing
+ * @param {Response} fetchedData - The API response object
+ * @returns {Promise<string>} The extracted error message
+ */
+export async function getErrorMessageFromResponse(fetchedData) {
+  let errorMessage = fetchedData.statusText;
+
+  if (fetchedData.status === 500) {
+    try {
+      const data = await fetchedData.json();
+      if (data.detail && data.detail.error) {
+        try {
+          const error = JSON.parse(data.detail.error);
+          errorMessage = error.message || String(data.detail.error);
+        } catch (jsonError) {
+          console.error(
+            'Error parsing JSON from data.detail.error:',
+            jsonError
+          );
+          errorMessage = String(data.detail.error);
+        }
+      }
+    } catch (parseError) {
+      console.error('Error parsing response JSON:', parseError);
+      errorMessage = String(parseError);
+    }
+  }
+
+  return errorMessage;
+}

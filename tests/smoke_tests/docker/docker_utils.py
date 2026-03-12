@@ -97,6 +97,7 @@ def create_and_setup_new_container(target_container_name: str,
     if is_inside_docker():
         # Run the new container directly
         run_cmd = (f'docker run -d '
+                   f'--cpus=4 '
                    f'--name {target_container_name} '
                    f'-p {api_server_host_port}:{api_server_container_port} '
                    f'-p {metrics_host_port}:{metrics_container_port} '

@@ -1,0 +1,20 @@
+resources:
+  infra: kubernetes
+
+run: |
+  echo "Hello, World!" > /mnt/data/hello.txt
+  ls -lart /mnt/data
+
+config:
+  kubernetes:
+    pod_config:
+      spec:
+        containers:
+          - volumeMounts:
+              - mountPath: /mnt/data
+                name: sharedfs
+        volumes:
+          - name: sharedfs
+            hostPath:
+              path: /does/not/exist
+              type: Directory

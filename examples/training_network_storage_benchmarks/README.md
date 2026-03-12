@@ -8,7 +8,7 @@ Please edit the yamls as you like.
 
 To run disk tests, run `sky launch e2e_disk.yaml -c e2e_disk --env HF_TOKEN="YOUR TOKEN"`
 
-Requirements for disk benchmark, 2 s3 buckets (one for mount and one for mount cached) and 1 pvc (Check out [volumnes](https://docs.skypilot.co/en/stable/reference/volumes.html))
+Requirements for disk benchmark, 2 s3 buckets (one for mount and one for mount cached) and 1 pvc (Check out [volumes](https://docs.skypilot.co/en/stable/reference/volumes.html))
 
 Expected output, something like:
 

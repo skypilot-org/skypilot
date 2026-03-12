@@ -14,8 +14,11 @@ import requests
 
 import sky
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import versions
+from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -45,6 +48,15 @@ def task():
     return sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
 
 
+@pytest.fixture
+def add_volumes_policy_cls(add_example_policy_paths):
+    """Fixture to provide AddVolumesPolicy class after path setup."""
+    # Import here because example_policy is not on sys.path until
+    # add_example_policy_paths fixture adds it.
+    from example_policy.skypilot_policy import AddVolumesPolicy
+    return AddVolumesPolicy
+
+
 def _load_task(task: sky.Task, config_path: str) -> sky.Task:
     os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
     importlib.reload(skypilot_config)
@@ -60,6 +72,7 @@ def _load_task_and_apply_policy(
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
         request_options=sky.admin_policy.RequestOptions(
             cluster_name='test',
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -99,10 +112,28 @@ def test_use_spot_for_all_gpus_policy(add_example_policy_paths, task):
 
 def test_add_labels_policy(add_example_policy_paths, task):
     task = _load_task(task, os.path.join(POLICY_PATH, 'add_labels.yaml'))
-    with admin_policy_utils.apply_and_use_config_in_current_request(task):
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH):
         assert 'app' in skypilot_config.get_nested(
             ('kubernetes', 'custom_metadata', 'labels'),
             {}), ('label should be set')
+
+
+def test_add_labels_conditional_policy(add_example_policy_paths, task):
+    task = _load_task(task,
+                      os.path.join(POLICY_PATH, 'add_labels_conditional.yaml'))
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH):
+        assert 'app' in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should be set')
+    with admin_policy_utils.apply_and_use_config_in_current_request(
+            task, request_name=request_names.AdminPolicyRequestName.VALIDATE):
+        assert 'app' not in skypilot_config.get_nested(
+            ('kubernetes', 'custom_metadata', 'labels'),
+            {}), ('label should not be set for validate request')
 
 
 def test_reject_all_policy(add_example_policy_paths, task):
@@ -214,7 +245,10 @@ def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
             None) == ['kind-skypilot', 'kind-skypilot2'
                      ], 'Kubernetes allowed contexts should be updated'
 
-        with admin_policy_utils.apply_and_use_config_in_current_request(dag):
+        with admin_policy_utils.apply_and_use_config_in_current_request(
+                dag,
+                request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+        ):
             assert skypilot_config.get_nested(
                 ('kubernetes', 'allowed_contexts'),
                 None) == ['kind-skypilot', 'kind-skypilot2'
@@ -246,7 +280,7 @@ def test_set_max_autostop_idle_minutes_policy(add_example_policy_paths, task):
     dag, _ = _load_task_and_apply_policy(
         task, os.path.join(POLICY_PATH, 'set_max_autostop_idle_minutes.yaml'))
 
-    resources = dag.tasks[0].resources
+    resources = list(dag.tasks[0].resources)
 
     assert resources[0].autostop_config is not None
     assert resources[0].autostop_config.enabled is True
@@ -264,9 +298,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.run = None
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the credentials file is mounted
@@ -288,9 +324,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         original_run_cmd = 'echo "hello world"'
         fresh_task.run = original_run_cmd
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the gcloud auth command is prepended
@@ -308,9 +346,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ, env_without_creds, clear=True):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         original_run_cmd = fresh_task.run
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that the entire gcloud directory is mounted
@@ -325,9 +365,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.file_mounts = {'/existing/mount': '/local/path'}
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mutated_request = policy.apply(user_request)
 
         # Check that both existing and new mounts are present
@@ -340,9 +382,11 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=False)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=False)
         # Should reject the request if it is not applied at client-side
         with pytest.raises(RuntimeError,
                            match='Policy UseLocalGcpCredentialsPolicy was not '
@@ -352,12 +396,15 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
     with mock.patch.dict(os.environ,
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=True)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=True)
         mr = policy.apply(user_request)
         mutated_user_request = sky.UserRequest(
             task=mr.task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
             skypilot_config=mr.skypilot_config,
             at_client_side=False)
         # Server accept the request if it is applied at client-side
@@ -368,15 +415,200 @@ def test_use_local_gcp_credentials_policy(add_example_policy_paths, task):
                          {'GOOGLE_APPLICATION_CREDENTIALS': test_creds_path}):
         fresh_task = sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml'))
         fresh_task.envs['SKYPILOT_LOCAL_GCP_CREDENTIALS_SET'] = 'v0'
-        user_request = sky.UserRequest(task=fresh_task,
-                                       skypilot_config=None,
-                                       at_client_side=False)
+        user_request = sky.UserRequest(
+            task=fresh_task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=None,
+            at_client_side=False)
         # Should reject the request due to version mismatch
         with pytest.raises(RuntimeError,
                            match='Policy UseLocalGcpCredentialsPolicy at v0 '
                            'was applied at client-side but the server '
                            'requires v1 to be applied'):
             policy.apply(user_request)
+
+
+def test_user_request_encode_decode(task):
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        user_request = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=False,
+            user=models.User(id='123', name='test'))
+        encoded_request = user_request.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert repr(decoded_request.task) == repr(task)
+        assert decoded_request.skypilot_config == sky.Config()
+        assert decoded_request.at_client_side == False
+        assert decoded_request.user == models.User(id='123', name='test')
+        assert decoded_request.request_name == request_names.AdminPolicyRequestName.CLUSTER_LAUNCH
+
+
+def test_user_request_encode_decode_with_client_version(task):
+    """Test that client version fields are correctly serialized and
+    deserialized."""
+    with mock.patch('sky.utils.common_utils.get_current_user',
+                    return_value=models.User(id='123', name='test')):
+        user_request = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=False,
+            user=models.User(id='123', name='test'),
+            client_api_version=31,
+            client_version='1.0.0')
+        encoded_request = user_request.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert decoded_request.client_api_version == 31
+        assert decoded_request.client_version == '1.0.0'
+
+        # Test with None values (simulating client-side or old clients)
+        user_request_no_version = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=True,
+            user=None,
+            client_api_version=None,
+            client_version=None)
+        encoded_request = user_request_no_version.encode()
+        decoded_request = sky.UserRequest.decode(encoded_request)
+        assert decoded_request.client_api_version is None
+        assert decoded_request.client_version is None
+
+
+def test_apply_passes_client_version_from_contextvars(add_example_policy_paths,
+                                                      task):
+    """Test that admin_policy_utils.apply() passes client version info from
+    contextvars to the UserRequest."""
+    # Create a simple policy that captures the UserRequest
+    captured_requests = []
+
+    class CaptureVersionPolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    # Set version info in contextvars (simulating what middleware does)
+    versions.set_remote_api_version(31)
+    versions.set_remote_version('1.0.0')
+
+    try:
+        with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                        return_value=CaptureVersionPolicy()):
+            with mock.patch('sky.utils.common_utils.get_current_user',
+                            return_value=models.User(id='123', name='test')):
+                os.environ[
+                    skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+                        POLICY_PATH, 'add_labels.yaml')
+                importlib.reload(skypilot_config)
+
+                admin_policy_utils.apply(task,
+                                         request_name=request_names.
+                                         AdminPolicyRequestName.CLUSTER_LAUNCH,
+                                         at_client_side=False)
+
+        assert len(captured_requests) == 1
+        assert captured_requests[0].client_api_version == 31
+        assert captured_requests[0].client_version == '1.0.0'
+    finally:
+        # Clean up contextvars
+        versions.set_remote_api_version(None)
+        versions.set_remote_version('unknown')
+
+
+def test_apply_no_client_version_at_client_side(add_example_policy_paths, task):
+    """Test that client version is None when at_client_side=True."""
+    captured_requests = []
+
+    class CaptureVersionPolicy(sky.AdminPolicy):
+
+        @classmethod
+        def validate_and_mutate(cls, user_request):
+            captured_requests.append(user_request)
+            return sky.MutatedUserRequest(user_request.task,
+                                          user_request.skypilot_config)
+
+    # Even if contextvars are set, client version should be None for
+    # client-side
+    versions.set_remote_api_version(31)
+    versions.set_remote_version('1.0.0')
+
+    try:
+        with mock.patch('sky.utils.admin_policy_utils._get_policy_impl',
+                        return_value=CaptureVersionPolicy()):
+            os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = os.path.join(
+                POLICY_PATH, 'add_labels.yaml')
+            importlib.reload(skypilot_config)
+
+            admin_policy_utils.apply(task,
+                                     request_name=request_names.
+                                     AdminPolicyRequestName.CLUSTER_LAUNCH,
+                                     at_client_side=True)
+
+        assert len(captured_requests) == 1
+        assert captured_requests[0].client_api_version is None
+        assert captured_requests[0].client_version is None
+    finally:
+        # Clean up contextvars
+        versions.set_remote_api_version(None)
+        versions.set_remote_version('unknown')
+
+
+def test_reject_old_clients_policy(add_example_policy_paths, task):
+    """Test RejectOldClientsPolicy rejects old clients."""
+    from example_policy.skypilot_policy import RejectOldClientsPolicy
+
+    policy = RejectOldClientsPolicy()
+
+    # Test that old API version is rejected
+    user_request = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        client_api_version=20,  # Below MIN_REQUIRED_API_VERSION (25)
+        client_version='0.5.0')
+    with pytest.raises(RuntimeError, match='Client API version 20'):
+        policy.apply(user_request)
+
+    # Test that None client_api_version is rejected (very old clients)
+    user_request_no_version = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        client_api_version=None,
+        client_version=None)
+    with pytest.raises(RuntimeError, match='Client version information is not'):
+        policy.apply(user_request_no_version)
+
+    # Test that new API version is accepted
+    user_request_new = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        client_api_version=30,  # Above MIN_REQUIRED_API_VERSION (25)
+        client_version='1.0.0')
+    result = policy.apply(user_request_new)
+    assert result.task is not None
+
+    # Test that client-side application is allowed (no version check)
+    user_request_client_side = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=True,
+        client_api_version=None,
+        client_version=None)
+    result = policy.apply(user_request_client_side)
+    assert result.task is not None
 
 
 def test_restful_policy(add_example_policy_paths, task):
@@ -523,3 +755,111 @@ def test_restful_policy_server(add_example_policy_paths, task):
         with pytest.raises(exceptions.UserRequestRejectedByPolicy,
                            match='Reject all policy'):
             _load_task_and_apply_policy(task, temp_file.name)
+
+
+def test_add_volumes_policy(add_example_policy_paths, task):
+    """Test AddVolumesPolicy using the standard integration path.
+
+    This test uses _load_task_and_apply_policy to test the complete admin
+    policy integration, matching the pattern used by other tests like
+    test_use_spot_for_all_gpus_policy.
+    """
+    dag, _ = _load_task_and_apply_policy(
+        task, os.path.join(POLICY_PATH, 'add_volumes.yaml'))
+    assert dag.tasks[0].volumes['/mnt/data0'] == 'pvc0'
+
+
+def test_add_volumes_policy_server_side(add_volumes_policy_cls, task):
+    """Test AddVolumesPolicy server-side execution.
+
+    This test verifies that the AddVolumesPolicy correctly adds volumes
+    when executed on the server side (at_client_side=False).
+    """
+    policy = add_volumes_policy_cls()
+    user_request = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        user=models.User(id='test-user-id', name='test-user'))
+
+    mutated_request = policy.apply(user_request)
+
+    assert mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
+    assert len(mutated_request.task.volumes) == 1
+
+
+def test_add_volumes_policy_skips_controller_task_server_side(
+        add_volumes_policy_cls, task):
+    """Test that AddVolumesPolicy skips controller tasks on server side.
+
+    Controller tasks (managed job/serve controllers) should not have volumes
+    added to avoid mounting organization volumes on job controllers.
+    """
+    with mock.patch.object(task, 'is_controller_task', return_value=True):
+        policy = add_volumes_policy_cls()
+        user_request = sky.UserRequest(
+            task=task,
+            request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+            skypilot_config=sky.Config(),
+            at_client_side=False,
+            user=models.User(id='test-user-id', name='test-user'))
+
+        mutated_request = policy.apply(user_request)
+
+        assert len(mutated_request.task.volumes) == 0
+
+
+def test_add_volumes_policy_with_existing_volumes_server_side(
+        add_volumes_policy_cls, task):
+    """Test AddVolumesPolicy behavior when task already has volumes.
+
+    The set_volumes method should overwrite existing volumes as designed.
+    """
+    task.set_volumes({'/mnt/existing': 'existing-volume'})
+
+    policy = add_volumes_policy_cls()
+    user_request = sky.UserRequest(
+        task=task,
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        user=models.User(id='test-user-id', name='test-user'))
+
+    mutated_request = policy.apply(user_request)
+
+    assert mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
+    assert '/mnt/existing' not in mutated_request.task.volumes
+    assert len(mutated_request.task.volumes) == 1
+
+
+def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
+                                                       task):
+    """Test consistency between server-side and client-side execution.
+
+    The AddVolumesPolicy should produce the same volume configuration
+    whether executed on client side or server side.
+    """
+    policy = add_volumes_policy_cls()
+
+    client_user_request = sky.UserRequest(
+        task=sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml')),
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=True)
+
+    client_mutated_request = policy.apply(client_user_request)
+
+    server_user_request = sky.UserRequest(
+        task=sky.Task.from_yaml(os.path.join(POLICY_PATH, 'task.yaml')),
+        request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+        skypilot_config=sky.Config(),
+        at_client_side=False,
+        user=models.User(id='test-user-id', name='test-user'))
+
+    server_mutated_request = policy.apply(server_user_request)
+
+    assert (client_mutated_request.task.volumes ==
+            server_mutated_request.task.volumes)
+    assert client_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'
+    assert server_mutated_request.task.volumes['/mnt/data0'] == 'pvc0'

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sky import sky_logging
 from sky.adaptors import kubernetes
 from sky.provision import common
+from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
@@ -48,12 +49,14 @@ def _open_ports_using_loadbalancer(
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
     context = kubernetes_utils.get_context_from_config(provider_config)
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
+
     content = network_utils.fill_loadbalancer_template(
-        namespace=provider_config.get('namespace', 'default'),
+        namespace=namespace,
         context=context,
         service_name=service_name,
         ports=ports,
-        selector_key='skypilot-cluster',
+        selector_key=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
         selector_value=cluster_name_on_cloud,
     )
 
@@ -103,11 +106,11 @@ def _open_ports_using_ingress(
     # To avoid this, we change ingress creation into one object containing
     # multiple rules.
     content = network_utils.fill_ingress_template(
-        namespace=provider_config.get('namespace', 'default'),
+        namespace=namespace,
         context=context,
         service_details=service_details,
         ingress_name=f'{cluster_name_on_cloud}-skypilot-ingress',
-        selector_key='skypilot-cluster',
+        selector_key=provision_constants.TAG_SKYPILOT_CLUSTER_NAME,
         selector_value=cluster_name_on_cloud,
     )
 
@@ -165,9 +168,10 @@ def _cleanup_ports_for_loadbalancer(
     # TODO(aylei): test coverage
     context = provider_config.get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     network_utils.delete_namespaced_service(
         context=context,
-        namespace=provider_config.get('namespace', 'default'),
+        namespace=namespace,
         service_name=service_name,
     )
 
@@ -180,19 +184,19 @@ def _cleanup_ports_for_ingress(
     # Delete services for each port
     context = provider_config.get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
+    namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     for port in ports:
         service_name = f'{cluster_name_on_cloud}--skypilot-svc--{port}'
         network_utils.delete_namespaced_service(
             context=context,
-            namespace=provider_config.get('namespace',
-                                          kubernetes_utils.DEFAULT_NAMESPACE),
+            namespace=namespace,
             service_name=service_name,
         )
 
     # Delete the single ingress used for all ports
     ingress_name = f'{cluster_name_on_cloud}-skypilot-ingress'
     network_utils.delete_namespaced_ingress(
-        namespace=kubernetes_utils.get_namespace_from_config(provider_config),
+        namespace=namespace,
         context=kubernetes_utils.get_context_from_config(provider_config),
         ingress_name=ingress_name,
     )

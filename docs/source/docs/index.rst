@@ -1,5 +1,5 @@
-Welcome to SkyPilot!
-====================
+SkyPilot: Run AI on Any Infrastructure
+======================================
 
 .. image:: /_static/SkyPilot_wide_dark.svg
   :width: 50%
@@ -14,10 +14,6 @@ Welcome to SkyPilot!
 
 .. raw:: html
 
-   <p style="text-align:center">
-   <strong>Simplify & scale any AI infrastructure</strong>
-   </p>
-
    <p></p>
 
    <p style="text-align:center">
@@ -31,6 +27,9 @@ SkyPilot is a system to run, manage, and scale AI workloads on any AI infrastruc
 SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 **Infra teams** get a unified control plane to manage any AI compute — with advanced scheduling, scaling, and orchestration.
 
+..  Abstractions image source: https://drive.google.com/file/d/1egDS0xHXFUbUKS_63RyqYQLaZxmrSLZQ/view?usp=sharing
+..  To update: edit the .key, export to PDF, open in Photoshop, crop, save as PNG.
+
 .. image:: ../images/skypilot-abstractions-long-2.png
     :width: 90%
     :align: center
@@ -43,12 +42,12 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 .. grid:: 1 1 1 1
     :gutter: 3
 
-
     .. grid-item-card::
         :link: https://demo.skypilot.co/dashboard/
         :text-align: center
 
         🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
+
 
 Why SkyPilot
 ----------------------
@@ -67,7 +66,7 @@ SkyPilot **makes Kubernetes easy for AI & Infra teams**:
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
-- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
+- One interface to use reserved GPUs, Kubernetes clusters, Slurm clusters, or 20+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
 - :ref:`Team deployment <sky-api-server>` and resource sharing
 
@@ -209,9 +208,8 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
-Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
-Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
-VMware vSphere.
+Current supported infra: Kubernetes, Slurm, AWS, GCP, Azure, OCI, Nebius, Lambda Cloud, RunPod, Fluidstack,
+Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere, Seeweb, Prime Intellect.
 
 .. raw:: html
 
@@ -284,6 +282,7 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
+   Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
 
@@ -303,9 +302,12 @@ Read the research:
    :caption: Jobs
 
    ../examples/managed-jobs
+   Checkpointing and Recovery <../examples/checkpointing>
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
    Model Training Guide <../reference/training-guide>
+   Using a Pool of Workers <../examples/pools>
+   Job Groups <../examples/job-groups>
 
 .. toctree::
    :hidden:
@@ -321,6 +323,7 @@ Read the research:
    :caption: Infra Choices
 
    ../reference/kubernetes/index
+   ../reference/slurm/index
    Using Existing Machines <../reservations/existing-machines>
    ../reservations/reservations
    Using Cloud VMs <../compute/cloud-vm>
@@ -342,6 +345,9 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   SkyPilot Recipes <../reference/recipes>
+   Migrating from Slurm <../reference/slurm-migration>
+   External Links <../running-jobs/external-links>
    ../reference/async
    ../running-jobs/environment-variables
    Docker Containers <../examples/docker-containers>
@@ -360,6 +366,7 @@ Read the research:
    ../cloud-setup/cloud-permissions/index
    Admin Policies <../cloud-setup/policy>
    External Logging Storage <../cloud-setup/external-logging>
+   Airgapped Environments <../cloud-setup/airgap>
 
 .. toctree::
    :hidden:
@@ -372,4 +379,3 @@ Read the research:
    ../reference/config
    SkyPilot Internals <../reference/architecture/internals>
    ../developers/index
-

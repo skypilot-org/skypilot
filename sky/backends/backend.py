@@ -126,7 +126,6 @@ class Backend(Generic[_ResourceHandleType]):
     def execute(self,
                 handle: _ResourceHandleType,
                 task: 'task_lib.Task',
-                detach_run: bool,
                 dryrun: bool = False) -> Optional[int]:
         """Execute the task on the cluster.
 
@@ -137,7 +136,7 @@ class Backend(Generic[_ResourceHandleType]):
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
         with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
-            return self._execute(handle, task, detach_run, dryrun)
+            return self._execute(handle, task, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -197,7 +196,6 @@ class Backend(Generic[_ResourceHandleType]):
     def _execute(self,
                  handle: _ResourceHandleType,
                  task: 'task_lib.Task',
-                 detach_run: bool,
                  dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 

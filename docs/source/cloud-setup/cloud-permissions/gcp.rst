@@ -546,3 +546,47 @@ An alternative to setting up cloud NAT for instances that need to access the pub
       use_internal_ips: true
       vpc_name: my-vpc-name
       force_enable_external_ips: true
+
+
+Using multiple GCP projects
+----------------------------------
+
+Admins can isolate different teams to use separate GCP projects. This enables fine-grained resource tracking, billing separation, and access control per team.
+For more information on configuring workspaces, see `Workspaces <https://docs.skypilot.co/en/latest/admin/workspaces.html>`__.
+
+Prerequisites
+~~~~~~~~~~~~~
+
+The service account must have access to all GCP projects intended to be used. To grant the service account access to additional projects:
+
+1. Follow the :ref:`instructions <gcp-service-account-creation>` to create a service account with the appropriate roles/permissions.
+2. In the GCP Console, switch to the project you want to grant your service account to using the project dropdown at the top of the page, or use ``Cmd/Ctrl + O``.
+3. Navigate to the `IAM & Admin console <https://console.cloud.google.com/iam-admin/iam>`__ and click on the **IAM** tab.
+4. Click **GRANT ACCESS** at the top of the table:
+
+   - In the **Add principals** field, enter your service account email (e.g., ``my-service-account@main-project.iam.gserviceaccount.com``).
+   - In the **Assign roles** section, select the appropriate roles (see :ref:`Setting permissions <cloud-permissions-gcp>` for recommended roles).
+   - Click **SAVE**.
+
+5. Repeat steps 2-4 for each additional project you want to enable.
+
+Configuring workspaces with different projects
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Once the service account has access to all the projects, configure the workspaces in the :ref:`SkyPilot config file <config-yaml>` to use different ``project_id`` values:
+
+.. code-block:: yaml
+
+    workspaces:
+      team-a:
+        gcp:
+          project_id: main-project-id
+      team-b:
+        gcp:
+          project_id: secondary-project-id
+
+You can then launch resources in a specific workspace:
+
+.. code-block:: console
+
+    $ sky launch --config active_workspace=team-a --infra gcp

@@ -1,0 +1,1 @@
+../../generated-examples/pools_batch_inference.md

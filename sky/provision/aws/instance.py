@@ -630,9 +630,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     region = provider_config['region']
     ec2 = _default_ec2_resource(region)
@@ -744,6 +745,7 @@ def terminate_instances(
 
         # Make this multithreaded: modify all instances' SGs in parallel.
         def modify_instance_sg(instance):
+            assert default_sg is not None  # Type narrowing for mypy
             instance.modify_attribute(Groups=[default_sg.id])
             logger.debug(f'Instance {instance.id} modified to use default SG:'
                          f'{default_sg.id} for quick deletion.')
@@ -1015,15 +1017,19 @@ def get_cluster_info(
 
     instances = {}
     for inst in running_instances:
-        tags = [(t['Key'], t['Value']) for t in inst.tags]
+        tags = [(t['Key'], t['Value']) for t in inst.tags] if inst.tags else []
         # sort tags by key to support deterministic unit test stubbing
         tags.sort(key=lambda x: x[0])
+        tags_dict = dict(tags)
+        # Get instance name from Name tag for dashboard display
+        instance_name = tags_dict.get('Name')
         instances[inst.id] = [
             common.InstanceInfo(
                 instance_id=inst.id,
                 internal_ip=inst.private_ip_address,
                 external_ip=inst.public_ip_address,
-                tags=dict(tags),
+                tags=tags_dict,
+                node_name=instance_name,
             )
         ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))

@@ -4,7 +4,7 @@
 import re
 import subprocess
 import time
-from typing import List
+from typing import List, Union
 
 from sky import sky_logging
 from sky.adaptors import vsphere as vsphere_adaptor
@@ -15,7 +15,8 @@ DISPLAY_CONTROLLER_CLASS_ID_PREFIXES = ['03']
 VMWARE_VIRTUAL_DISPLAY_CONTROLLER_IDS = ['0000:00:0f.0']
 
 
-def get_objs_by_names(content, vimtype: type, names: List[str]):
+def get_objs_by_names(content, vimtype: Union[type, List[type]],
+                      names: List[str]):
     """    Get the vsphere managed object associated with a given text name
     """
     # Create a set for the names for faster lookups

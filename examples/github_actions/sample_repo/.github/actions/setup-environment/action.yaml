@@ -1,0 +1,22 @@
+name: "Setup Environment"
+description: "Set up the environment for CI"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        version: "latest"
+        python-version: "3.10"
+    - name: Install dependencies
+      shell: bash
+      run: |
+        # Export environment variables
+        echo "VIRTUAL_ENV=$(pwd)/.venv" >> $GITHUB_ENV
+        echo "$(pwd)/.venv/bin" >> $GITHUB_PATH
+        echo "UV_NO_SYNC=1" >> $GITHUB_ENV
+        echo "UV_HTTP_TIMEOUT=120" >> $GITHUB_ENV
+
+        uv venv --seed
+        uv pip install skypilot

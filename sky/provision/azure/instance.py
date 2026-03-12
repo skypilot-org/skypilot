@@ -214,7 +214,7 @@ def _create_network_interface(
             location=provider_config['location'],
             public_ip_allocation_method='Static',
             public_ip_address_version='IPv4',
-            sku=network.PublicIPAddressSku(name='Basic', tier='Regional'))
+            sku=network.PublicIPAddressSku(name='Standard', tier='Regional'))
         ip_poller = network_client.public_ip_addresses.begin_create_or_update(
             resource_group_name=provider_config['resource_group'],
             public_ip_address_name=f'{vm_name}-ip',
@@ -623,6 +623,8 @@ def get_cluster_info(
                 internal_ip=internal_ip,
                 external_ip=external_ip,
                 tags=inst.tags,
+                # Azure VM name is the instance_id
+                node_name=inst.name,
             )
         ]
     instances = dict(sorted(instances.items(), key=lambda x: x[0]))
@@ -957,9 +959,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, cluster_name_on_cloud
 
     subscription_id = provider_config['subscription_id']
