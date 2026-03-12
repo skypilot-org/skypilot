@@ -1447,7 +1447,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         status=responses.UploadStatus.COMPLETED.value)
 
 
-@app.post('/upload_v2/blob')
+@app.get('/upload_v2/blob')
 async def check_blob_exists(request: fastapi.Request, user_hash: str,
                             blob_id: str) -> Dict[str, bool]:
     """Check if a file mount blob already exists."""
