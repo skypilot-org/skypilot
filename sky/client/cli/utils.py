@@ -61,9 +61,8 @@ def get_managed_job_queue(
         RuntimeError: if failed to get the managed jobs with ssh.
     """
     return typing.cast(
-        server_common.RequestId[
-            Union[List[responses.ManagedJobRecord],
-                  Tuple[List[responses.ManagedJobRecord], int,
-                        Dict[str, int], int]]],
-        managed_jobs.queue_v2(refresh, skip_finished, all_users, job_ids,
-                              limit, fields)), QueueResultVersion.V2
+        server_common.RequestId[Union[List[responses.ManagedJobRecord],
+                                      Tuple[List[responses.ManagedJobRecord],
+                                            int, Dict[str, int], int]]],
+        managed_jobs.queue_v2(refresh, skip_finished, all_users, job_ids, limit,
+                              fields)), QueueResultVersion.V2

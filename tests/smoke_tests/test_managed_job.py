@@ -67,8 +67,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-1',
                 job_status=[
-                    sky.ManagedJobStatus.PENDING,
-                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
+                    sky.ManagedJobStatus.PENDING, sky.ManagedJobStatus.STARTING,
+                    sky.ManagedJobStatus.RUNNING
                 ],
                 timeout=60),
             smoke_tests_utils.

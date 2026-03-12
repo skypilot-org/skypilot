@@ -687,9 +687,8 @@ def launch(
                     down=down,
                     idle_minutes=idle_minutes_to_autostop,
                     wait_for=wait_for)
-    request_options = admin_policy.RequestOptions(
-        cluster_name=cluster_name,
-        dryrun=dryrun)
+    request_options = admin_policy.RequestOptions(cluster_name=cluster_name,
+                                                  dryrun=dryrun)
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
