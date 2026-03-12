@@ -178,11 +178,6 @@ class RequestBody(BasePayload):
 
         This converts the request body into kwargs for the underlying SkyPilot
         backend's function.
-
-        Args:
-            **extra: Additional keyword arguments passed from the executor,
-                e.g. extraction_dir for content-addressed blob extraction.
-                Subclasses may consume these; unknown extras are ignored.
         """
         kwargs = self.model_dump()
         kwargs.pop('env_vars')
@@ -303,7 +298,7 @@ class LaunchBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            extraction_dir=extra.get('extraction_dir'))
+            file_mounts_dir=extra.get('file_mounts_dir'))
 
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
@@ -334,7 +329,7 @@ class ExecBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=True,
-            extraction_dir=extra.get('extraction_dir'))
+            file_mounts_dir=extra.get('file_mounts_dir'))
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
@@ -573,7 +568,7 @@ class JobsLaunchBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            extraction_dir=extra.get('extraction_dir'))
+            file_mounts_dir=extra.get('file_mounts_dir'))
         return kwargs
 
 
@@ -656,7 +651,7 @@ class ServeUpBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            extraction_dir=extra.get('extraction_dir'))
+            file_mounts_dir=extra.get('file_mounts_dir'))
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -676,7 +671,7 @@ class ServeUpdateBody(RequestBody):
             self.task,
             self.env_vars,
             workdir_only=False,
-            extraction_dir=extra.get('extraction_dir'))
+            file_mounts_dir=extra.get('file_mounts_dir'))
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -815,7 +810,7 @@ class JobsPoolApplyBody(RequestBody):
                 self.task,
                 self.env_vars,
                 workdir_only=False,
-                extraction_dir=extra.get('extraction_dir'))
+                file_mounts_dir=extra.get('file_mounts_dir'))
             assert len(
                 dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                   'a pool.', dag)

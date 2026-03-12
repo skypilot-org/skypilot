@@ -941,7 +941,7 @@ def process_mounts_in_task_on_api_server(
         task: str,
         env_vars: Dict[str, str],
         workdir_only: bool,
-        extraction_dir: Optional[str] = None) -> 'dag_lib.Dag':
+        file_mounts_dir: Optional[str] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -955,10 +955,8 @@ def process_mounts_in_task_on_api_server(
         env_vars: The environment variables of the task.
         workdir_only: Whether to only translate the workdir, which is used for
             `exec`, as it does not need other files/folders in file_mounts.
-        extraction_dir: If set, resolve file mount paths relative to this
-            directory instead of the default client_file_mounts_dir. Used
-            with content-addressed blob uploads where files are extracted
-            to a per-request directory.
+        file_mounts_dir: If set, resolve file mount paths relative to this
+            directory instead of the default client_file_mounts_dir.
 
     Returns:
         The translated task as a single-task dag.
@@ -982,9 +980,8 @@ def process_mounts_in_task_on_api_server(
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
-    # When extraction_dir is set (content-addressed blob upload), resolve
-    # file mount paths relative to the per-request extraction directory.
-    file_mounts_base = (pathlib.Path(extraction_dir) if extraction_dir
+    # Use the private file mounts directory, if provided.
+    file_mounts_base = (pathlib.Path(file_mounts_dir) if file_mounts_dir
                         is not None else client_file_mounts_dir)
     file_mounts_base.mkdir(parents=True, exist_ok=True)
 
