@@ -1329,6 +1329,7 @@ async def _receive_and_assemble_chunks(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
     if total_chunks == 1:
+        await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = base_dir / f'{zip_name}.zip'
     else:
         chunk_dir = base_dir / zip_name
