@@ -82,7 +82,7 @@ clusters on Kubernetes:
                - name: docker-sock-dir
                  mountPath: /var/run/dind
            - name: dind
-             image: docker:dind
+             image: docker:29.3-dind
              securityContext:
                privileged: true
              env:
