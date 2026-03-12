@@ -107,7 +107,7 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
-    down: bool = False,
+    down: bool = False,  # pylint: disable=unused-argument
     stream_logs: bool = True,
     handle: Optional[backends.ResourceHandle] = None,
     backend: Optional[backends.Backend] = None,
@@ -116,7 +116,7 @@ def _execute(
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
+    idle_minutes_to_autostop: Optional[int] = None,  # pylint: disable=unused-argument
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,

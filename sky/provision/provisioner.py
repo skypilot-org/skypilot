@@ -30,7 +30,6 @@ from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.provision import volume as provision_volume
 from sky.skylet import constants
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
