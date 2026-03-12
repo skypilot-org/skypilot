@@ -2775,19 +2775,7 @@ class ManagedJobCodeGen:
         _fields = {fields!r}
         if managed_job_version < 15 and _fields is not None:
             _fields = [f for f in _fields if f != 'is_primary_in_job_group']
-        if managed_job_version < 12:
-            job_table = utils.dump_managed_job_queue(
-                                skip_finished={skip_finished},
-                                accessible_workspaces={accessible_workspaces!r},
-                                job_ids={job_ids!r},
-                                workspace_match={workspace_match!r},
-                                name_match={name_match!r},
-                                pool_match={pool_match!r},
-                                page={page!r},
-                                limit={limit!r},
-                                user_hashes={user_hashes!r},
-                                statuses={statuses!r})
-        elif managed_job_version < 14:
+        if managed_job_version < 14:
             job_table = utils.dump_managed_job_queue(
                                 skip_finished={skip_finished},
                                 accessible_workspaces={accessible_workspaces!r},
@@ -2933,11 +2921,7 @@ class ManagedJobCodeGen:
                     tail: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
-        if managed_job_version < 6:
-            # Versions before 6 did not support tail parameter
-            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
-                                    follow={follow}, controller={controller})
-        elif managed_job_version < 15:
+        if managed_job_version < 15:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
@@ -2966,20 +2950,17 @@ class ManagedJobCodeGen:
                      if managed_job_dag.execution else DEFAULT_EXECUTION.value)
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            set_job_info_kwargs = {{'workspace': {workspace!r}}}
-            if managed_job_version < 4:
-                set_job_info_kwargs = {{}}
-            if managed_job_version >= 5:
-                set_job_info_kwargs['entrypoint'] = {entrypoint!r}
-            if managed_job_version >= 8:
-                from sky.serve import serve_state
-                pool_hash = None
-                if {pool!r} != None:
-                    pool_hash = serve_state.get_service_hash({pool!r})
-                set_job_info_kwargs['pool'] = {pool!r}
-                set_job_info_kwargs['pool_hash'] = pool_hash
-            if managed_job_version >= 11:
-                set_job_info_kwargs['user_hash'] = {user_hash!r}
+            from sky.serve import serve_state
+            pool_hash = None
+            if {pool!r} != None:
+                pool_hash = serve_state.get_service_hash({pool!r})
+            set_job_info_kwargs = {{
+                'workspace': {workspace!r},
+                'entrypoint': {entrypoint!r},
+                'pool': {pool!r},
+                'pool_hash': pool_hash,
+                'user_hash': {user_hash!r},
+            }}
             if managed_job_version >= 15:
                 set_job_info_kwargs['execution'] = {execution!r}
             managed_job_state.set_job_info(
@@ -2996,10 +2977,7 @@ class ManagedJobCodeGen:
                     managed_job_dag.primary_tasks is None or
                     task.name in managed_job_dag.primary_tasks)
             code += textwrap.dedent(f"""\
-                if managed_job_version < 7:
-                    managed_job_state.set_pending({job_id}, {task_id},
-                                    {task.name!r}, {resources_str!r})
-                elif managed_job_version < 15:
+                if managed_job_version < 15:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r},
                                     {task.metadata_json!r})
