@@ -121,6 +121,7 @@ class Mithril(clouds.Cloud):
         local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        use_spot: bool = False,
     ) -> Optional[str]:
         return catalog.get_default_instance_type(
             cpus=cpus,
@@ -129,6 +130,7 @@ class Mithril(clouds.Cloud):
             local_disk=local_disk,
             region=region,
             zone=zone,
+            use_spot=use_spot,
             clouds='mithril',
         )
 
@@ -202,6 +204,7 @@ class Mithril(clouds.Cloud):
                 local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone,
+                use_spot=resources.use_spot,
             )
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)

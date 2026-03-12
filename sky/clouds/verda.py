@@ -181,6 +181,7 @@ class Verda(clouds.Cloud):
         local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        use_spot: bool = False,
     ) -> Optional[str]:
         """Returns the default instance type for Verda."""
         return catalog.get_default_instance_type(
@@ -190,6 +191,7 @@ class Verda(clouds.Cloud):
             local_disk=local_disk,
             region=region,
             zone=zone,
+            use_spot=use_spot,
             clouds='verda',
         )
 
@@ -295,6 +297,7 @@ class Verda(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 region=resources.region,
                 zone=resources.zone,
+                use_spot=resources.use_spot,
             )
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
