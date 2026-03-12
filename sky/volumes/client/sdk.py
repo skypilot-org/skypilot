@@ -8,7 +8,6 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.schemas.api import responses
 from sky.server import common as server_common
-from sky.server import versions
 from sky.server.requests import payloads
 from sky.usage import usage_lib
 from sky.utils import annotations
@@ -91,7 +90,6 @@ def apply(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-@versions.minimal_api_version(20)
 def validate(volume: volume_lib.Volume) -> None:
     """Validates the volume.
 

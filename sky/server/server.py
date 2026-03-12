@@ -2435,12 +2435,6 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
             #   returned.
             return responses.APIHealthResponse(
                 status=common.ApiServerStatus.HEALTHY,)
-        # TODO(aylei): remove this after min_compatible_api_version >= 14.
-        if client_version < 14:
-            # For Client with API version < 14, the NEEDS_AUTH status is not
-            # honored. Return 401 to trigger the login process.
-            raise fastapi.HTTPException(status_code=401,
-                                        detail='Authentication required')
 
     logger.debug(f'Health endpoint: request.state.auth_user = {user}')
 

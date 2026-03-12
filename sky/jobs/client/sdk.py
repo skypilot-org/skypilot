@@ -71,12 +71,6 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
-    remote_api_version = versions.get_remote_api_version()
-    if (pool is not None and
-        (remote_api_version is None or remote_api_version < 12)):
-        raise click.UsageError('Pools are not supported in your API server. '
-                               'Please upgrade to a newer API server to use '
-                               'pools.')
     if pool is None and num_jobs is not None:
         raise click.UsageError('Cannot specify num_jobs without pool.')
 
@@ -163,7 +157,6 @@ def launch(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(18)
 def queue_v2(
     refresh: bool,
     skip_finished: bool = False,
@@ -374,11 +367,6 @@ def cancel(
         RuntimeError: failed to cancel the job.
     """
     remote_api_version = versions.get_remote_api_version()
-    if (pool is not None and
-        (remote_api_version is None or remote_api_version < 12)):
-        raise click.UsageError('Pools are not supported in your API server. '
-                               'Please upgrade to a newer API server to use '
-                               'pools.')
     if graceful and (remote_api_version is None or remote_api_version < 39):
         logger.warning('`--graceful` is ignored because the server does '
                        'not support it yet.')
@@ -611,7 +599,6 @@ def dashboard() -> None:
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(12)
 def pool_apply(
     task: Optional[Union['sky.Task', 'sky.Dag']],
     pool_name: str,
@@ -622,13 +609,6 @@ def pool_apply(
     _need_confirmation: bool = False
 ) -> server_common.RequestId[None]:
     """Apply a config to a pool."""
-    remote_api_version = versions.get_remote_api_version()
-    if (workers is not None and
-        (remote_api_version is None or remote_api_version < 19)):
-        raise click.UsageError('Updating the number of workers in a pool is '
-                               'not supported in your API server. Please '
-                               'upgrade to a newer API server to use this '
-                               'feature.')
     return impl.apply(task,
                       workers,
                       pool_name,
@@ -639,7 +619,6 @@ def pool_apply(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(12)
 def pool_down(
     pool_names: Optional[Union[str, List[str]]],
     all: bool = False,  # pylint: disable=redefined-builtin
@@ -651,7 +630,6 @@ def pool_down(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(12)
 def pool_status(
     pool_names: Optional[Union[str, List[str]]],
 ) -> server_common.RequestId[List[Dict[str, Any]]]:
@@ -662,7 +640,6 @@ def pool_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-@versions.minimal_api_version(16)
 def pool_tail_logs(pool_name: str,
                    target: Union[str, 'serve_utils.ServiceComponent'],
                    worker_id: Optional[int] = None,
@@ -682,7 +659,6 @@ def pool_tail_logs(pool_name: str,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @rest.retry_transient_errors()
-@versions.minimal_api_version(16)
 def pool_sync_down_logs(pool_name: str,
                         local_dir: str,
                         *,
