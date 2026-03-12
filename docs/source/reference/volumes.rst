@@ -28,10 +28,6 @@ Quickstart
      type: k8s-pvc
      infra: k8s  # or `k8s/context` or `runpod`
      size: 10Gi
-     
-     # Optional: To use an existing PVC on k8s instead of creating a new one, set to `true` and set `name` to the existing PVC name.
-     # use_existing: true
-
 
 2. Create the volume with ``sky volumes apply volume.yaml``:
 
@@ -152,9 +148,6 @@ Persistent volumes are created and managed independently using the ``sky volumes
   infra: k8s  # or k8s/<context>
   size: 10Gi
 
-  # Optional: To use an existing PVC instead of creating a new one, set to `true` and set `name` to the existing PVC name.
-  use_existing: true
-
   # Optional: add labels to the PVC
   labels:
     key: value
@@ -169,6 +162,78 @@ Persistent volumes are created and managed independently using the ``sky volumes
 
   - For multi-node clusters, volumes are mounted to all nodes. You must set ``config.access_mode`` to ``ReadWriteMany`` and use a ``storage_class_name`` that supports this access mode. Otherwise, SkyPilot will fail to launch the cluster.
   - To mount a volume to all clusters or jobs by default, use the admin policy to inject the volume path into the task YAML. See :ref:`add-volumes-policy` for details.
+
+Using existing PVCs
+^^^^^^^^^^^^^^^^^^^
+
+The ``use_existing: true`` option allows you to reference PVCs that already exist in your Kubernetes cluster without creating new ones. This is useful in two scenarios:
+
+**1. User-created PVCs**
+
+If you have an existing PVC created outside SkyPilot, set ``name`` to the exact PVC name:
+
+.. code-block:: yaml
+
+  # Reference an existing PVC by its exact name
+  name: my-existing-pvc  # Must match the exact PVC name in Kubernetes
+  type: k8s-pvc
+  infra: k8s
+  use_existing: true
+
+**2. Migrating volumes across API servers**
+
+When using SkyPilot volumes across different API servers (e.g., switching between local and remote API servers), you can use the same volume YAML without knowing the internal PVC name:
+
+.. code-block:: yaml
+
+  # volume.yaml - works across different API servers
+  name: myvolume
+  type: k8s-pvc
+  infra: k8s
+  use_existing: true
+
+SkyPilot finds the existing PVC by looking up:
+
+1. A PVC with the exact name ``myvolume``
+2. A PVC with the label ``skypilot-name=myvolume`` (for SkyPilot-created PVCs)
+
+This allows you to:
+
+.. code-block:: console
+
+  # On API server A: Create a new volume
+  $ sky volumes apply volume.yaml
+
+  # On API server B: Reference the same PVC
+  $ sky volumes apply volume.yaml
+  # SkyPilot finds the existing PVC by its skypilot-name label
+
+Mounting a subdirectory of a volume
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can mount a specific subdirectory of a persistent volume using the ``sub_path`` option. This maps to Kubernetes' `subPath <https://kubernetes.io/docs/concepts/storage/volumes/#using-subpath>`_ field on the volume mount.
+
+When using ``sub_path``, the volume must be specified using the dict form with the ``name`` key:
+
+.. code-block:: yaml
+
+  # task.yaml
+  resources:
+    infra: kubernetes
+
+  volumes:
+    /mnt/models:
+      name: my-volume
+      sub_path: models/v1  # Only mount the models/v1 subdirectory
+
+  run: |
+    ls /mnt/models  # Contents of my-volume/models/v1
+
+This is useful when a single volume contains multiple datasets or projects and you want to mount only a specific subdirectory to the container.
+
+.. note::
+
+  ``sub_path`` is only supported for persistent volumes (not ephemeral volumes).
 
 .. _ephemeral-volumes:
 

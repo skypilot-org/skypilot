@@ -82,6 +82,8 @@ class Azure(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
+    _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
+
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 

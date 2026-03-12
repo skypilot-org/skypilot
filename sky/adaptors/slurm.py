@@ -3,6 +3,7 @@
 import ipaddress
 import logging
 import re
+import shlex
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from sky.adaptors import common
@@ -449,9 +450,12 @@ class SlurmClient:
         """
 
         cmd = (
-            f'squeue -h --jobs {job_id} -o "%N" | tr \',\' \'\\n\' | '
-            f'while read node; do '
+            # Use scontrol show hostnames to expand both compact Slurm
+            # hostlist notation (e.g. ml-16-node-[001-002]) and
+            # comma-separated nodes into individual node names.
             # TODO(kevin): Use json output for more robust parsing.
+            f'nodelist=$(squeue -h --jobs {job_id} -o "%N"); '
+            f'scontrol show hostnames $nodelist | while read -r node; do '
             f'node_addr=$(scontrol show node=$node | grep NodeAddr= | '
             f'awk -F= \'{{print $2}}\' | awk \'{{print $1}}\'); '
             f'echo "$node $node_addr"; '
@@ -654,15 +658,90 @@ class SlurmClient:
         rc, _, _ = self._run_slurm_cmd(cmd)
         return rc == 0
 
-    def check_homedir_shared_fs(self) -> Optional[str]:
-        """Check the filesystem type of the home directory.
+    def get_env(self) -> Dict[str, str]:
+        """Fetch environment variables from the remote host.
+
+        Returns:
+            Dictionary of environment variable name -> value.
+        """
+        rc, stdout, stderr = self._run_slurm_cmd('env')
+        if rc != 0:
+            logger.warning(f'Failed to fetch remote env: {stderr}')
+            return {}
+        env: Dict[str, str] = {}
+        for line in stdout.splitlines():
+            if '=' in line:
+                key, _, value = line.partition('=')
+                env[key] = value
+        return env
+
+    def get_remote_home_dir(self) -> str:
+        """Returns the remote user's home directory."""
+        return self._runner.get_remote_home_dir()
+
+    def check_file_exists(self, path: str) -> bool:
+        """Check if a file exists on the remote host."""
+        cmd = f'test -f {shlex.quote(path)}'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        if rc not in (0, 1):
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                f'Failed to check for file: {path}',
+                stderr=f'{stdout}\n{stderr}')
+        return rc == 0
+
+    def check_fuse_enabled(self) -> bool:
+        """Check if FUSE is available on the cluster.
+
+        FUSE is required for mounting object stores (e.g., via goofys or
+        rclone). We check for /dev/fuse which is the device node that FUSE
+        requires.
+
+        We first try to check on a compute node via srun, since that is
+        where mounts actually happen. If srun cannot allocate resources
+        (cluster is full, etc.), we fall back to checking the login node.
+
+        Returns:
+            True if FUSE is available, False otherwise.
+        """
+        # Try checking on a compute node first. We use a wrapper that
+        # prints a marker so we can distinguish "command ran and /dev/fuse
+        # is missing" from "srun itself failed to allocate".
+        srun_cmd = ('srun --immediate=10 --time=00:00:30 '
+                    'bash -c \'test -e /dev/fuse '
+                    '&& echo FUSE_OK || echo FUSE_MISSING\'')
+        rc, stdout, _ = self._run_slurm_cmd(srun_cmd)
+        stdout = stdout.strip()
+        if rc == 0 and 'FUSE_OK' in stdout:
+            return True
+        if rc == 0 and 'FUSE_MISSING' in stdout:
+            return False
+
+        # srun failed (no resources, misconfigured, etc.).
+        # Fall back to checking the login node.
+        logger.debug('srun FUSE check failed, falling back to login node')
+        cmd = 'test -e /dev/fuse'
+        rc, _, _ = self._run_slurm_cmd(cmd)
+        return rc == 0
+
+    def check_dir_shared_fs(self, path: str) -> Optional[str]:
+        """Check the filesystem type of a directory.
+
+        Args:
+            path: The directory path to check. Must be an absolute path
+                (no shell variables or ~).
 
         Returns:
             The filesystem type string (e.g., 'nfs', 'ext2/ext3'),
             or None if the check could not be performed.
         """
-        cmd = 'stat -f -c %T ~'
+        cmd = f'stat -f -c %T {shlex.quote(path)}'
         rc, stdout, _ = self._run_slurm_cmd(cmd)
         if rc != 0:
             return None
         return stdout.strip().lower()
+
+    def check_homedir_shared_fs(self) -> Optional[str]:
+        """Check the filesystem type of the home directory."""
+        return self.check_dir_shared_fs('~')

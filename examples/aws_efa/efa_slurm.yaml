@@ -1,0 +1,39 @@
+# This example is used to test the NCCL performance
+# with EFA on AWS HyperPod Slurm clusters.
+name: nccl-efa-slurm
+
+resources:
+  accelerators: A100:8
+
+num_nodes: 2
+
+run: |
+  if [ "${SKYPILOT_NODE_RANK}" == "0" ]; then
+    echo "Head node"
+
+    # Total number of processes, NP should be the total number of GPUs in the cluster
+    NP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+    export NCCL_DEBUG=INFO
+
+    # --mpi=pmix: use PMIx for MPI process management
+    srun --overlap --mpi=pmix \
+      -N $SKYPILOT_NUM_NODES \
+      --ntasks=$NP \
+      --ntasks-per-node=$SKYPILOT_NUM_GPUS_PER_NODE \
+      --gpus-per-node=$SKYPILOT_NUM_GPUS_PER_NODE \
+      --cpu-bind=none \
+      --export=ALL \
+      # NOTE: The test binary path may vary by cluster. Check
+      # /usr/local/cuda/efa/ for available versions.
+      /usr/local/cuda/efa/test-cuda-12.9/all_reduce_perf \
+      -b 8 \
+      -e 2G \
+      -f 2 \
+      -g 1 \
+      -c 5 \
+      -w 5 \
+      -n 100
+  else
+    echo "Worker nodes"
+  fi

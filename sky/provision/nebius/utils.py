@@ -214,6 +214,7 @@ def launch(cluster_name_on_cloud: str,
            user_data: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
+           disk_tier: str,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None) -> str:
@@ -258,6 +259,30 @@ def launch(cluster_name_on_cloud: str,
                 cluster_id = get_or_create_gpu_cluster(cluster_name_on_cloud,
                                                        project_id, fabric)
 
+    def _disk_tier_to_disk_type(disk_tier: str) -> Any:
+        tier2type = {
+            str(resources_utils.DiskTier.HIGH):
+                nebius.compute().DiskSpec.DiskType.NETWORK_SSD_IO_M3,
+            str(resources_utils.DiskTier.MEDIUM):
+                nebius.compute().DiskSpec.DiskType.NETWORK_SSD,
+            str(resources_utils.DiskTier.LOW):
+                nebius.compute().DiskSpec.DiskType.NETWORK_SSD_NON_REPLICATED,
+        }
+        return tier2type[str(disk_tier)]
+
+    # Nebius NETWORK_SSD_IO_M3 (HIGH tier) requires disk sizes to be a
+    # multiple of 93 GiB.
+    actual_disk_size = disk_size
+    if (str(disk_tier) == str(resources_utils.DiskTier.HIGH) or
+            str(disk_tier) == str(resources_utils.DiskTier.LOW)):
+        actual_disk_size = nebius_constants.round_up_disk_size(disk_size)
+        if actual_disk_size != disk_size:
+            logger.warning(
+                f'Nebius HIGH and LOW disk tier requires size to be a multiple '
+                f'of {nebius_constants.NEBIUS_DISK_SIZE_STEP_GIB} GiB. '
+                f'Requested {disk_size} GiB, rounding up to '
+                f'{actual_disk_size} GiB.')
+
     service = nebius.compute().DiskServiceClient(nebius.sdk())
     disk = nebius.sync_call(
         service.create(nebius.compute().CreateDiskRequest(
@@ -268,8 +293,8 @@ def launch(cluster_name_on_cloud: str,
             spec=nebius.compute().DiskSpec(
                 source_image_family=nebius.compute().SourceImageFamily(
                     image_family=image_family),
-                size_gibibytes=disk_size,
-                type=nebius.compute().DiskSpec.DiskType.NETWORK_SSD,
+                size_gibibytes=actual_disk_size,
+                type=_disk_tier_to_disk_type(disk_tier),
             ))))
     disk_id = disk.resource_id
     retry_count = 0

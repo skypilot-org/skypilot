@@ -31,6 +31,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
+    :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -137,6 +138,8 @@ Below is the configuration syntax and some example values. See detailed explanat
         V100: 2.50     # $/accelerator/hr
     :ref:`cluster_configs <config-yaml-slurm-cluster-configs>`:
       mycluster1:
+        workdir: /mnt/lustre/$USER
+        tmpdir: /local_scratch/sky
         pricing:
           cpu: 0.06
 
@@ -186,6 +189,10 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
+    :ref:`remote_identity <config-yaml-azure-remote-identity>`: LOCAL_CREDENTIALS
+    :ref:`vpc_name <config-yaml-azure-vpc-name>`: my-vnet
+    :ref:`use_internal_ips <config-yaml-azure-use-internal-ips>`: true
+    :ref:`ssh_proxy_command <config-yaml-azure-ssh-proxy-command>`: ssh -W %h:%p user@host
 
   :ref:`oci <config-yaml-oci>`:
     region_configs:
@@ -329,6 +336,26 @@ Example:
 
   api_server:
     cluster_debug_event_retention_hours: -1 # Disable all cluster event GC
+
+.. _config-yaml-api-server-daemon-log-max-bytes:
+
+``api_server.daemon_log_max_bytes``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum size (in bytes) of a daemon log file before it is rotated (optional).
+
+Daemon request logs (e.g., for the status refresh daemon) grow unbounded because daemon requests never finish and are not subject to request GC. When a daemon log exceeds this threshold, it is backed up to ``.log.1`` and then truncated. One backup is kept per daemon.
+
+Set to ``0`` to disable truncation.
+
+Default: ``134217728`` (128 MB).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    daemon_log_max_bytes: 268435456 # 256 MB
 
 .. _config-yaml-jobs:
 
@@ -1301,6 +1328,150 @@ Example:
     resource_group_vm: user-resource-group-name
     storage_account: user-storage-account-name
 
+.. _config-yaml-azure-remote-identity:
+
+``azure.remote_identity``
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Identity to use for Azure instances (optional).
+
+Supported values:
+
+1. **LOCAL_CREDENTIALS**:
+   The user's local Azure credential files will be uploaded to instances created by SkyPilot.
+
+2. **SERVICE_ACCOUNT**:
+   SkyPilot will use the auto-created User-Assigned Managed Identity (MSI) on the VM.
+   Local Azure credentials will not be uploaded. Requires
+   ``Microsoft.Authorization/roleAssignments/write`` permission to create the MSI and
+   its role assignment.
+
+3. **NO_UPLOAD**:
+   Do not upload any Azure credentials. The VM will still have the auto-created MSI attached.
+   Requires ``Microsoft.Authorization/roleAssignments/write`` permission (same as
+   SERVICE_ACCOUNT).
+
+.. note::
+
+   ``SERVICE_ACCOUNT`` prevents uploading local Azure credentials to Azure instances only.
+   If you are using other clouds, local Azure credentials may still be uploaded to non-Azure
+   instances (e.g., a GCP instance that needs to access Azure resources).
+   ``NO_UPLOAD`` prevents uploading Azure credentials to any instance, regardless of the cloud.
+
+4. **Custom managed identity name or resource ID**:
+   Specify the name of an existing User-Assigned Managed Identity to use instead of the
+   auto-created one. If a simple name is provided, SkyPilot will look for the identity in
+   the same resource group and subscription. A full Azure resource ID can also be specified.
+   This option does **not** require ``Microsoft.Authorization/roleAssignments/write``
+   permission, since SkyPilot skips MSI and role assignment creation in the ARM template.
+
+   Like AWS, you can use cluster-name pattern matching:
+
+   .. code-block:: yaml
+
+     azure:
+       remote_identity:
+         - my-cluster-*: my-managed-identity-1
+         - sky-serve-controller-*: controller-identity
+         - "*": default-identity
+
+Default: ``LOCAL_CREDENTIALS``.
+
+.. code-block:: yaml
+
+  azure:
+    # Format 1: Use auto-created MSI
+    remote_identity: SERVICE_ACCOUNT
+
+    # Format 2: Specify a custom managed identity by name
+    remote_identity: my-managed-identity
+
+    # Format 3: Specify a full resource ID
+    remote_identity: /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<name>
+
+.. _config-yaml-azure-labels:
+
+``azure.labels``
+~~~~~~~~~~~~~~~~
+
+Custom labels to apply as tags to Azure VM instances (optional). Labels are key-value
+pairs of strings. These are merged with SkyPilot's internal tags on each VM.
+
+Users should guarantee that these key-values are valid Azure tags, otherwise
+errors from the cloud provider will be surfaced.
+
+.. code-block:: yaml
+
+  azure:
+    labels:
+      team: ml-infra
+      environment: production
+
+.. _config-yaml-azure-vpc-name:
+
+``azure.vpc_name``
+~~~~~~~~~~~~~~~~~~
+
+Name of an existing Azure Virtual Network (VNet) to use for the cluster (optional).
+
+When specified, SkyPilot will use the existing VNet and its first subnet instead of
+creating new networking resources. If the subnet has an associated Network Security Group
+(NSG), it will be used; otherwise, SkyPilot will create its own NSG.
+
+This is useful for organizations that require instances to be launched in a pre-configured
+VNet with specific network policies.
+
+.. code-block:: yaml
+
+  azure:
+    vpc_name: my-existing-vnet
+
+.. _config-yaml-azure-use-internal-ips:
+
+``azure.use_internal_ips``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If true, SkyPilot will not create public IP addresses for Azure instances and only use
+private IPs (optional). Requires a network setup that allows SSH access to private IPs
+(e.g., a VPN or ``ssh_proxy_command``).
+
+This flag is typically set together with ``vpc_name`` above and
+``ssh_proxy_command`` below.
+
+Default: ``false``.
+
+.. code-block:: yaml
+
+  azure:
+    use_internal_ips: true
+    ssh_proxy_command: ssh -W %h:%p bastion-host
+
+.. _config-yaml-azure-ssh-proxy-command:
+
+``azure.ssh_proxy_command``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SSH proxy command (optional).
+
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
+
+Format 1:
+  A string; the same proxy command is used for all regions.
+
+Format 2:
+  A dict mapping region name to a string proxy command per region.
+
+.. code-block:: yaml
+
+  azure:
+    # Format 1
+    ssh_proxy_command: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
+
+    # Format 2
+    ssh_proxy_command:
+      eastus: ssh -W %h:%p -p 1234 -o StrictHostKeyChecking=no myself@my.eastus.proxy
+      westus2: ssh -W %h:%p -i ~/.ssh/sky-key -o StrictHostKeyChecking=no azureuser@<jump server public ip>
+
 .. _config-yaml-kubernetes:
 
 ``kubernetes``
@@ -1792,14 +1963,22 @@ Pricing can also be set per-cluster and per-partition using
 
 Per-cluster and per-partition configuration for Slurm (optional).
 
-Currently supports :ref:`pricing <config-yaml-slurm-pricing>` overrides at both
-the cluster and partition level. Pricing at each level is deep-merged with the
-parent level: only the keys you specify are overridden, and unmentioned
-accelerators are inherited.
+Supported fields:
 
-The merge order is::
+- ``workdir``: Base directory on a **shared filesystem** for SkyPilot
+  cluster files (provision scripts, cluster home directories, sbatch logs, etc).
+  Defaults to ``$HOME``. Shell variables like ``$USER`` are expanded on the
+  login node. Use this when ``$HOME`` is not on a shared filesystem.
 
-    cloud-level  <  cluster-level  <  partition-level
+- ``tmpdir``: Per-node temporary storage for the SkyPilot runtime.
+  Defaults to ``/tmp``.
+
+- ``pricing``: :ref:`Pricing <config-yaml-slurm-pricing>` overrides at both
+  the cluster and partition level. Pricing at each level is deep-merged with the
+  parent level: only the keys you specify are overridden, and unmentioned
+  accelerators are inherited. The merge order is::
+
+      cloud-level  <  cluster-level  <  partition-level
 
 Example:
 
@@ -1816,6 +1995,10 @@ Example:
 
     cluster_configs:
       mycluster1:
+        # Use a shared Lustre mount instead of $HOME.
+        workdir: /mnt/lustre/$USER
+        # Use a fast local scratch disk for runtime files.
+        tmpdir: /local_scratch/sky
         # Override cpu rate for this cluster; memory and accelerators
         # are inherited from the cloud-level pricing above.
         pricing:
@@ -1824,6 +2007,7 @@ Example:
             A100: 4.00   # Override A100; V100 inherited
 
       mycluster2:
+        workdir: /home/$USER
         pricing:
           cpu: 0.03
         partition_configs:

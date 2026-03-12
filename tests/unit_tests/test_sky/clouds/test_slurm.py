@@ -56,7 +56,7 @@ class TestCheckInstanceFits:
             ([node_gpu_a10g], '64CPU--256GB--a10g:4', None, True, None),
             # GPU - type not available
             ([node_gpu_a10g
-             ], '64CPU--256GB--h100:4', None, False, 'No GPU nodes found'),
+             ], '64CPU--256GB--h100:4', None, False, 'No GPU nodes matching'),
             # Partition filtering with default partition (*) handling
             ([node_2cpu_8gb_cpus], '1CPU--4GB', 'dev', True, None),
             # Resource exists but in different partition
@@ -391,6 +391,249 @@ def assert_sbatch_matches_snapshot(test_name: str,
             f'Run with UPDATE_SNAPSHOT=1 to update the snapshot.')
 
 
+class TestSbatchOptionsPrecedence:
+    """Test 4-level sbatch_options merge in make_deploy_resources_variables.
+
+    Priority order (lowest to highest):
+      1. ~/.sky/config.yaml  slurm.sbatch_options              (global)
+      2. ~/.sky/config.yaml  slurm.cluster_configs.<c>.sbatch_options (cluster)
+      3. ~/.sky/config.yaml  slurm.cluster_configs.<c>.partition_configs.<p>.sbatch_options (partition)
+      4. Task YAML           config.slurm.sbatch_options        (task-level)
+
+    Uses real config loading by writing to a tmp YAML file and reloading.
+    """
+
+    FAKE_SSH_CONFIG = {
+        'hostname': '10.0.0.1',
+        'port': '22',
+        'user': 'slurm',
+        'identityfile': ['/home/user/.ssh/id_rsa'],
+    }
+
+    def _load_config_and_get_sbatch_options(self,
+                                            tmp_path,
+                                            skypilot_config_dict,
+                                            cluster_config_overrides=None):
+        """Write config to tmp file, reload, and call make_deploy_resources_variables."""
+        from sky import skypilot_config
+        from sky.utils import yaml_utils
+
+        # Write config dict to a tmp YAML file.
+        config_path = tmp_path / 'config.yaml'
+        config_path.write_text(yaml_utils.dump_yaml_str(skypilot_config_dict))
+
+        # Point config loading at our tmp file and reload.
+        saved_global = skypilot_config._GLOBAL_CONFIG_PATH
+        saved_project = skypilot_config._PROJECT_CONFIG_PATH
+        saved_ctx = skypilot_config._global_config_context
+        try:
+            skypilot_config._GLOBAL_CONFIG_PATH = str(config_path)
+            skypilot_config._PROJECT_CONFIG_PATH = str(tmp_path /
+                                                       'nonexistent.yaml')
+            skypilot_config._global_config_context = (
+                skypilot_config.ConfigContext())
+            skypilot_config.reload_config()
+
+            cloud = slurm_cloud.Slurm()
+
+            mock_resources = mock.MagicMock(unsafe=True)
+            mock_resources.zone = 'gpu'
+            mock_resources.instance_type = '4CPU--16GB'
+            mock_resources.assert_launchable.return_value = mock_resources
+            mock_resources.extract_docker_image.return_value = None
+            mock_resources.cluster_config_overrides = (cluster_config_overrides
+                                                       or {})
+
+            region = mock.MagicMock()
+            region.name = 'mycluster'
+            zone_mock = mock.MagicMock()
+            zone_mock.name = 'gpu'
+
+            mock_ssh_config = mock.MagicMock()
+            mock_ssh_config.lookup.return_value = self.FAKE_SSH_CONFIG
+
+            with patch(
+                    'sky.clouds.slurm.slurm_utils.get_slurm_ssh_config',
+                    return_value=mock_ssh_config), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.get_partitions',
+                    return_value=['gpu', 'cpu']), \
+                 patch(
+                    'sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
+                    side_effect=lambda cluster, t, count=1, partition=None: t):
+                deploy_vars = cloud.make_deploy_resources_variables(
+                    resources=mock_resources,
+                    cluster_name=mock.MagicMock(),
+                    region=region,
+                    zones=[zone_mock],
+                    num_nodes=1,
+                )
+            return deploy_vars['sbatch_options']
+        finally:
+            skypilot_config._GLOBAL_CONFIG_PATH = saved_global
+            skypilot_config._PROJECT_CONFIG_PATH = saved_project
+            skypilot_config._global_config_context = saved_ctx
+
+    def test_global_only(self, tmp_path):
+        """Level 1: Only global sbatch_options set."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'research',
+                        'qos': 'normal',
+                    },
+                },
+            })
+        assert result == {'account': 'research', 'qos': 'normal'}
+
+    def test_cluster_overrides_global(self, tmp_path):
+        """Level 2 overrides level 1 for same key; new keys are merged."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'global-account',
+                        'qos': 'normal',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'sbatch_options': {
+                                'account': 'cluster-account',
+                                'constraint': 'skylake',
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {
+            'account': 'cluster-account',
+            'qos': 'normal',
+            'constraint': 'skylake',
+        }
+
+    def test_partition_overrides_cluster_and_global(self, tmp_path):
+        """Level 3 overrides levels 1 and 2 for same key."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path, {
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'global-account',
+                        'qos': 'normal',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'sbatch_options': {
+                                'account': 'cluster-account',
+                            },
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'account': 'partition-account',
+                                        'exclusive': True,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            })
+        assert result == {
+            'account': 'partition-account',
+            'qos': 'normal',
+            'exclusive': True,
+        }
+
+    def test_task_overrides_all(self, tmp_path):
+        """Level 4 (task YAML) overrides all config.yaml levels."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path,
+            skypilot_config_dict={
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'global-account',
+                        'qos': 'normal',
+                    },
+                    'cluster_configs': {
+                        'mycluster': {
+                            'sbatch_options': {
+                                'account': 'cluster-account',
+                            },
+                            'partition_configs': {
+                                'gpu': {
+                                    'sbatch_options': {
+                                        'account': 'partition-account',
+                                        'exclusive': True,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            cluster_config_overrides={
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'task-account',
+                        'nice': 100,
+                    },
+                },
+            },
+        )
+        assert result == {
+            'account': 'task-account',
+            'qos': 'normal',
+            'exclusive': True,
+            'nice': 100,
+        }
+
+    def test_task_only(self, tmp_path):
+        """Level 4 alone, no config.yaml sbatch_options at all."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path,
+            skypilot_config_dict={},
+            cluster_config_overrides={
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'task-only',
+                    },
+                },
+            },
+        )
+        assert result == {'account': 'task-only'}
+
+    def test_no_sbatch_options(self, tmp_path):
+        """No sbatch_options at any level."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path, skypilot_config_dict={})
+        assert result == {}
+
+    def test_task_cluster_specific_override(self, tmp_path):
+        """Task YAML with cluster-specific sbatch_options."""
+        result = self._load_config_and_get_sbatch_options(
+            tmp_path,
+            skypilot_config_dict={
+                'slurm': {
+                    'sbatch_options': {
+                        'account': 'global-account',
+                    },
+                },
+            },
+            cluster_config_overrides={
+                'slurm': {
+                    'cluster_configs': {
+                        'mycluster': {
+                            'sbatch_options': {
+                                'account': 'task-cluster-account',
+                            },
+                        },
+                    },
+                },
+            },
+        )
+        assert result == {'account': 'task-cluster-account'}
+
+
 class TestSlurmProvisionTimeout:
     """Test conditional provision timeout logic in make_deploy_resources_variables.
 
@@ -429,8 +672,8 @@ class TestSlurmProvisionTimeout:
                    return_value=mock_ssh_config), \
              patch('sky.clouds.slurm.slurm_utils.get_partitions',
                    return_value=['default', 'gpu', 'cpu']), \
-             patch('sky.clouds.slurm.slurm_utils.get_gres_gpu_type',
-                   side_effect=lambda cluster, t: t):
+             patch('sky.clouds.slurm.slurm_utils.resolve_gres_gpu_type',
+                   side_effect=lambda cluster, t, count=1, partition=None: t):
             deploy_vars = cloud.make_deploy_resources_variables(
                 resources=mock_resources,
                 cluster_name=mock.MagicMock(),
@@ -808,3 +1051,98 @@ class TestOnPendingMessage:
             msg = 'Launching'
 
         assert msg == expected
+
+
+class TestHelperPathFunctions:
+    """Test path helper functions in sky/provision/slurm/instance.py."""
+
+    @pytest.mark.parametrize('base_dir,job_id,expected', [
+        ('/home/user', '123', '/home/user/.sky_provision/slurm-123.out'),
+        ('/fsx/ubuntu', '456', '/fsx/ubuntu/.sky_provision/slurm-456.out'),
+        ('/home/user', '%j', '/home/user/.sky_provision/slurm-%j.out'),
+    ])
+    def test_sbatch_log_path(self, base_dir, job_id, expected):
+        assert slurm_instance._sbatch_log_path(base_dir, job_id) == expected
+
+    @pytest.mark.parametrize('base_dir,cluster,expected', [
+        ('/home/user', 'my-cluster', '/home/user/.sky_clusters/my-cluster'),
+        ('/fsx/ubuntu', 'test-abc123', '/fsx/ubuntu/.sky_clusters/test-abc123'),
+    ])
+    def test_sky_cluster_home_dir(self, base_dir, cluster, expected):
+        assert slurm_instance._sky_cluster_home_dir(base_dir,
+                                                    cluster) == expected
+
+    @pytest.mark.parametrize('base_dir,cluster,expected', [
+        ('/home/user', 'my-cluster', '/home/user/.sky_provision/my-cluster.sh'),
+        ('~', 'my-cluster', '~/.sky_provision/my-cluster.sh'),
+    ])
+    def test_sbatch_provision_script_path(self, base_dir, cluster, expected):
+        assert slurm_instance._sbatch_provision_script_path(base_dir,
+                                                            cluster) == expected
+
+    @pytest.mark.parametrize('tmpdir,cluster,expected', [
+        (None, 'my-cluster', '/tmp/my-cluster'),
+        ('/scratch/tmp', 'my-cluster', '/scratch/tmp/my-cluster'),
+    ])
+    def test_skypilot_runtime_dir(self, tmpdir, cluster, expected):
+        assert slurm_instance._skypilot_runtime_dir(tmpdir, cluster) == expected
+
+
+class TestGetEnv:
+    """Test SlurmClient.get_env() parsing."""
+
+    def test_parses_env_output(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (
+            0, 'HOME=/home/ubuntu\nUSER=ubuntu\n', '')
+        # Call the real method with the mocked client
+        env = slurm.SlurmClient.get_env(client)
+        assert env == {'HOME': '/home/ubuntu', 'USER': 'ubuntu'}
+
+    def test_handles_values_with_equals(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (0,
+                                              'PATH=/usr/bin:/bin\nFOO=a=b\n',
+                                              '')
+        env = slurm.SlurmClient.get_env(client)
+        assert env['PATH'] == '/usr/bin:/bin'
+        assert env['FOO'] == 'a=b'
+
+    def test_command_failure_returns_empty(self):
+        client = mock.MagicMock(spec=slurm.SlurmClient)
+        client._run_slurm_cmd.return_value = (1, '', 'Connection refused')
+        env = slurm.SlurmClient.get_env(client)
+        assert env == {}
+
+
+class TestExpandPathVars:
+    """Test expand_path_vars with Python-side variable expansion."""
+
+    REMOTE_ENV = {'USER': 'ubuntu', 'HOME': '/home/ubuntu'}
+
+    def test_expands_dollar_var(self):
+        result = slurm_utils.expand_path_vars('/fsx/$USER', self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_expands_braced_var(self):
+        result = slurm_utils.expand_path_vars('/fsx/${USER}', self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_expands_multiple_vars(self):
+        result = slurm_utils.expand_path_vars('$HOME/$USER', self.REMOTE_ENV)
+        assert result == '/home/ubuntu/ubuntu'
+
+    def test_unknown_var_left_unchanged(self):
+        result = slurm_utils.expand_path_vars('/fsx/$UNKNOWN', self.REMOTE_ENV)
+        assert result == '/fsx/$UNKNOWN'
+
+    def test_no_vars_passthrough(self):
+        result = slurm_utils.expand_path_vars('/fsx/ubuntu', self.REMOTE_ENV)
+        assert result == '/fsx/ubuntu'
+
+    def test_injection_not_expanded(self):
+        # Even if someone puts shell metacharacters in config,
+        # they are never sent to a shell — just literal string replacement.
+        result = slurm_utils.expand_path_vars('/home/; rm -rf /',
+                                              self.REMOTE_ENV)
+        assert result == '/home/; rm -rf /'

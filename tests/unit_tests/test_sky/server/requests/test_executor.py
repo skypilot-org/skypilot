@@ -31,7 +31,7 @@ def isolated_database(tmp_path):
 
     with mock.patch('sky.server.constants.API_SERVER_REQUEST_DB_PATH',
                     str(temp_db_path)):
-        with mock.patch('sky.server.requests.requests.REQUEST_LOG_PATH_PREFIX',
+        with mock.patch('sky.server.constants.REQUEST_LOG_PATH_PREFIX',
                         str(temp_log_path)):
             requests_lib._DB = None
             yield
@@ -206,7 +206,7 @@ def _subprocess_initializer(db_path: str, log_path: str, config_path: str):
     from sky.server.requests import requests as requests_lib
 
     server_constants.API_SERVER_REQUEST_DB_PATH = db_path
-    requests_lib.REQUEST_LOG_PATH_PREFIX = log_path
+    server_constants.REQUEST_LOG_PATH_PREFIX = log_path
     requests_lib._DB = None
     skypilot_config._GLOBAL_CONFIG_PATH = config_path
 
@@ -236,7 +236,7 @@ async def test_execute_with_isolated_env_and_config(isolated_database,
         # Get the paths that were set up by the fixtures, as we need to re-apply
         # the same patches in the subprocess created by the BurstableExecutor.
         db_path = server_constants.API_SERVER_REQUEST_DB_PATH
-        log_path_prefix = requests_lib.REQUEST_LOG_PATH_PREFIX
+        log_path_prefix = server_constants.REQUEST_LOG_PATH_PREFIX
 
         proc_executor = process.BurstableExecutor(
             garanteed_workers=5,

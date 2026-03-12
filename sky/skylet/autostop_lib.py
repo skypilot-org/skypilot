@@ -234,22 +234,23 @@ def set_last_active_time_to_now() -> None:
 
 
 def has_active_ssh_sessions() -> bool:
-    """Returns True if there are any active SSH sessions on the node."""
+    """Check if any PTY traces back to sshd in the process tree."""
     try:
-        # /dev/pts is a virtual filesystem that contains the pseudo-terminal
-        # devices. ptmx is the pseudo-terminal multiplexer, which is the
-        # "master" device that creates new pseudo-terminal devices, so we
-        # exclude it from the count.
-        proc = subprocess.run('ls /dev/pts | grep -v ptmx | wc -l',
-                              capture_output=True,
-                              text=True,
-                              check=False,
-                              shell=True)
-        if proc.returncode != 0:
-            logger.warning(f'SSH session check command failed with return code '
-                           f'{proc.returncode}.')
-            return False
-        return int(proc.stdout.strip()) > 0
+        pts_to_pid: dict[str, int] = {}
+        for proc in psutil.process_iter(['pid', 'terminal']):
+            terminal = proc.info['terminal']
+            if terminal and terminal.startswith('/dev/pts/'):
+                pts_to_pid.setdefault(terminal, proc.info['pid'])
+
+        for pid in pts_to_pid.values():
+            try:
+                for parent in psutil.Process(pid).parents():
+                    if parent.name() == 'sshd':
+                        return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        return False
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Error checking active SSH sessions: {e}.')
         return False

@@ -301,12 +301,14 @@ available_node_types:
             {% endif %}
         {% if k8s_kueue_local_queue_name or k8s_enable_gpudirect_tcpx or k8s_enable_gpudirect_tcpxo or k8s_enable_gpudirect_rdma %}
         annotations:
+          skypilot-workspace: {{ workspace }}
           {% if k8s_kueue_local_queue_name %}
           kueue.x-k8s.io/retriable-in-group: "false"
           kueue.x-k8s.io/pod-group-total-count: "{{ num_nodes|string }}"
           {% if k8s_max_run_duration_seconds %}
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}
+          skypilot-user: "{{ original_user }}"
           {% endif %}
         # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
         # Values from google cloud guide
@@ -682,10 +684,17 @@ available_node_types:
                   local delay=1
                   local i
                   for i in $(seq 1 $tries); do
-                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update >> "$log" 2>&1 && { set -e; return 0; }
-                    echo "apt-get update attempt $i/$tries failed; retrying in ${delay}s" >> "$log"
-                    sleep $delay
-                    delay=$((delay * 2))
+                    # apt-get update returns 0 even when sources fail to fetch,
+                    # so we also check output for failure indicators.
+                    local output
+                    output=$(DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update 2>&1)
+                    local rc=$?
+                    echo "$output" >> "$log"
+                    if [ $rc -eq 0 ] && ! echo "$output" | grep -iq "Failed to fetch"; then
+                      set -e; return 0
+                    fi
+                    echo "apt-get update attempt $i/$tries failed" >> "$log"
+                    [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
                   done
                   set -e
                   return 1
@@ -703,8 +712,7 @@ available_node_types:
                     echo "apt-get install failed for: $packages (attempt $i/$tries). Running -f install and retrying..." >> "$log"
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get -f install -y >> "$log" 2>&1 || true
                     DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get clean >> "$log" 2>&1 || true
-                    sleep $delay
-                    delay=$((delay * 2))
+                    [ $i -lt $tries ] && { echo "retrying in ${delay}s" >> "$log"; sleep $delay; delay=$((delay * 2)); }
                   done
                   set -e
                   return 1
@@ -719,78 +727,22 @@ available_node_types:
                   if [ -f /etc/apt/sources.list ] && [ ! -f "$backup_dir/sources.list" ]; then
                     $(prefix_cmd) cp -a /etc/apt/sources.list "$backup_dir/sources.list" || true
                   fi
+                  if [ -f /etc/apt/sources.list.d/ubuntu.sources ] && [ ! -f "$backup_dir/ubuntu.sources" ]; then
+                    $(prefix_cmd) cp -a /etc/apt/sources.list.d/ubuntu.sources "$backup_dir/ubuntu.sources" || true
+                  fi
                 }
                 restore_source() {
                   if [ -f "$backup_dir/sources.list" ]; then
                     $(prefix_cmd) cp -a "$backup_dir/sources.list" /etc/apt/sources.list || true
+                  fi
+                  if [ -f "$backup_dir/ubuntu.sources" ]; then
+                    $(prefix_cmd) cp -a "$backup_dir/ubuntu.sources" /etc/apt/sources.list.d/ubuntu.sources || true
                   fi
                 }
                 update_apt_sources() {
                   local host=$1
                   local apt_file=$2
                   $(prefix_cmd) sed -i -E "s|https?://[a-zA-Z0-9.-]+\.ubuntu\.com/ubuntu|http://$host/ubuntu|g" $apt_file
-                }
-                # Helper: install packages across mirrors with retries
-                apt_install_with_mirrors() {
-                  local required=$1; shift
-                  local packages="$@"
-                  [ -z "$packages" ] && return 0
-                  set +e
-                  # Install packages with default sources first
-                  local log=/tmp/apt-update.log
-                  echo "$(date +%Y-%m-%d\ %H:%M:%S) Installing packages: $packages" >> "$log"
-                  restore_source
-                  apt_update_install_with_retries $packages >> "$log" 2>&1 && { set -e; return 0; }
-                  echo "Install failed with default sources: $packages" >> "$log"
-                  # Detect distro (ubuntu/debian)
-                  local APT_OS="unknown"
-                  if [ -f /etc/os-release ]; then
-                    . /etc/os-release
-                    case "$ID" in
-                      debian) APT_OS="debian" ;;
-                      ubuntu) APT_OS="ubuntu" ;;
-                      *)
-                        if [ -n "$ID_LIKE" ]; then
-                          case " $ID $ID_LIKE " in
-                            *ubuntu*) APT_OS="ubuntu" ;;
-                            *debian*) APT_OS="debian" ;;
-                          esac
-                        fi
-                        ;;
-                    esac
-                  fi
-                  # Build mirror candidates
-                  # deb.debian.org is a CDN endpoint, if one backend goes down,
-                  # the CDN automatically fails over to another mirror,
-                  # so we only retry for ubuntu here.
-                  if [ "$APT_OS" = "ubuntu" ]; then
-                    # Backup current sources once
-                    backup_source
-                    # Selected from https://launchpad.net/ubuntu/+archivemirrors
-                    # and results from apt-select
-                    local MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
-                    for host in $MIRROR_CANDIDATES; do
-                      echo "Trying APT mirror ($APT_OS): $host" >> "$log"
-                      if [ -f /etc/apt/sources.list ]; then
-                        update_apt_sources $host /etc/apt/sources.list
-                      else
-                        echo "Error: /etc/apt/sources.list not found" >> "$log"
-                        break
-                      fi
-                      apt_update_install_with_retries $packages >> "$log" 2>&1 && { set -e; return 0; }
-                      echo "Install failed with mirror ($APT_OS): $host" >> "$log"
-                      # Restore to default sources
-                      restore_source
-                    done
-                  fi
-                  set -e
-                  if [ "$required" = "1" ]; then
-                    echo "Error: required package install failed across all mirrors: $packages" >> "$log"
-                    return 1
-                  else
-                    echo "Optional package install failed across all mirrors: $packages; skipping." >> "$log"
-                    return 0
-                  fi
                 }
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
@@ -816,20 +768,91 @@ available_node_types:
                     fi
                   fi
                 done;
-                if [ ! -z "$INSTALL_FIRST" ]; then
-                  echo "Installing core packages: $INSTALL_FIRST";
-                  apt_install_with_mirrors 1 $INSTALL_FIRST || { echo "Error: core package installation failed." >> /tmp/apt-update.log; exit 1; }
-                fi;
-                # SSH and other packages are not necessary, so we disable set -e
-                set +e
 
-                if [ ! -z "$MISSING_PACKAGES" ]; then
-                  # Install missing packages individually to avoid failure installation breaks the whole install process,
-                  # e.g. fuse3 is not available on some distributions.
-                  echo "Installing missing packages individually: $MISSING_PACKAGES";
-                  for pkg in $MISSING_PACKAGES; do
-                    DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $pkg || echo "Optional package $pkg installation failed, skip.";
-                  done
+                # Detect distro for mirror fallback
+                APT_OS="unknown"
+                if [ -f /etc/os-release ]; then
+                  . /etc/os-release
+                  case "$ID" in
+                    debian) APT_OS="debian" ;;
+                    ubuntu) APT_OS="ubuntu" ;;
+                    *)
+                      if [ -n "$ID_LIKE" ]; then
+                        case " $ID $ID_LIKE " in
+                          *ubuntu*) APT_OS="ubuntu" ;;
+                          *debian*) APT_OS="debian" ;;
+                        esac
+                      fi
+                      ;;
+                  esac
+                fi
+
+                # Build candidate list: default (empty string) first, then mirrors for ubuntu.
+                # deb.debian.org is a CDN endpoint, if one backend goes down,
+                # the CDN automatically fails over to another mirror,
+                # so we only add mirror candidates for ubuntu here.
+                # Selected from https://launchpad.net/ubuntu/+archivemirrors
+                # and results from apt-select
+                MIRROR_CANDIDATES=""
+                if [ "$APT_OS" = "ubuntu" ]; then
+                  MIRROR_CANDIDATES="mirrors.wikimedia.org mirror.umd.edu"
+                fi
+
+                INSTALL_SUCCESS=false
+                backup_source
+                for candidate in "" $MIRROR_CANDIDATES; do
+                  restore_source
+                  if [ -n "$candidate" ]; then
+                    echo "Trying APT mirror ($APT_OS): $candidate" >> /tmp/apt-update.log
+                    found_sources=false
+                    if [ -f /etc/apt/sources.list ]; then
+                      update_apt_sources $candidate /etc/apt/sources.list
+                      found_sources=true
+                    fi
+                    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
+                      update_apt_sources $candidate /etc/apt/sources.list.d/ubuntu.sources
+                      found_sources=true
+                    fi
+                    if [ "$found_sources" = "false" ]; then
+                      echo "Error: no apt sources file found" >> /tmp/apt-update.log
+                      break
+                    fi
+                  fi
+
+                  # Try INSTALL_FIRST (required core packages)
+                  if [ ! -z "$INSTALL_FIRST" ]; then
+                    echo "Installing core packages: $INSTALL_FIRST" >> /tmp/apt-update.log;
+                    apt_update_install_with_retries $INSTALL_FIRST >> /tmp/apt-update.log 2>&1 || {
+                      echo "Install failed with ${candidate:-default sources}: $INSTALL_FIRST" >> /tmp/apt-update.log
+                      continue
+                    }
+                  else
+                    # No core packages to install, but we still need to update the
+                    # package index for MISSING_PACKAGES.
+                    apt_update_with_retries >> /tmp/apt-update.log 2>&1 || {
+                      echo "apt-get update failed with ${candidate:-default sources}" >> /tmp/apt-update.log
+                      continue
+                    }
+                  fi
+
+                  # INSTALL_FIRST succeeded (or was empty) with this source.
+                  # Install MISSING_PACKAGES individually (optional, some may not exist on certain distros).
+                  set +e
+                  if [ ! -z "$MISSING_PACKAGES" ]; then
+                    echo "Installing missing packages individually: $MISSING_PACKAGES" >> /tmp/apt-update.log;
+                    for pkg in $MISSING_PACKAGES; do
+                      apt_install_with_retries $pkg >> /tmp/apt-update.log 2>&1 || echo "Optional package $pkg installation failed, skip." >> /tmp/apt-update.log;
+                    done
+                  fi
+
+                  INSTALL_SUCCESS=true
+                  break
+                done
+                restore_source
+
+                if [ "$INSTALL_SUCCESS" = "false" ] && [ ! -z "$INSTALL_FIRST" ]; then
+                  echo "Error: core package installation failed across all sources." >> /tmp/apt-update.log
+                  exit 1
                 fi;
 
                 {% if k8s_fuse_device_required %}
@@ -985,6 +1008,7 @@ available_node_types:
                   fi;
                 fi;
                 export -p > ~/container_env_var.sh && $(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh
+                touch /tmp/env_setup_complete
                 ) > /tmp/${STEPS[2]}.log 2>&1
                 if [ "$?" -ne "0" ]; then
                   {
@@ -1041,6 +1065,21 @@ available_node_types:
                   sleep 0.1
                 done
               }
+
+              # Wait for all three background setup steps to complete by
+              # polling their completion/failure markers. If any step fails,
+              # exit the container so the pod enters a failed state instead
+              # of hanging indefinitely.
+              STEP_COMPLETE_FILES=(/tmp/apt_ssh_setup_complete /tmp/ray_skypilot_installation_complete /tmp/env_setup_complete)
+              for i in "${!STEPS[@]}"; do
+                until [ -f "${STEP_COMPLETE_FILES[$i]}" ] || [ -f "/tmp/${STEPS[$i]}.failed" ]; do
+                  sleep 1
+                done
+                if [ -f "/tmp/${STEPS[$i]}.failed" ]; then
+                  echo "Error: setup step '${STEPS[$i]}' failed. Pod will exit."
+                  exit 1
+                fi
+              done
 
               {% if high_availability %}
               mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
@@ -1112,7 +1151,11 @@ available_node_types:
               # Set +x to stop printing the commands and their arguments as they are executed.
               set +x
 
-              trap : TERM INT; log_tail || sleep infinity & wait
+              # SIGTERM keep-alive: trap ignores TERM/INT so wait is not interrupted;
+              # log_tail streams task logs; sleep loop keeps the pod alive until killed.
+              trap : TERM INT
+              log_tail &
+              while true; do sleep infinity & wait $!; done
 
           ports:
           - containerPort: 22  # Used for SSH
@@ -1156,6 +1199,9 @@ available_node_types:
           {% for volume_mount in volume_mounts %}
           - name: {{volume_mount.name}}
             mountPath: {{volume_mount.path}}
+            {% if volume_mount.sub_path %}
+            subPath: {{volume_mount.sub_path}}
+            {% endif %}
           {% endfor %}
           resources:
             requests:

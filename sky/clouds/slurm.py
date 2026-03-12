@@ -15,6 +15,7 @@ from sky.provision.slurm import utils as slurm_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -57,6 +58,16 @@ class Slurm(clouds.Cloud):
             'the Pyxis plugin is not installed. Please ask your cluster '
             'administrator to install Pyxis '
             '(https://github.com/NVIDIA/pyxis).',
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
+            'Storage mounting is not supported on this Slurm cluster '
+            'because FUSE is not enabled (/dev/fuse not found). '
+            'Please ask your cluster administrator to enable FUSE.',
+    }
+    # Features that are checked dynamically per cluster (e.g., via SSH).
+    # Used for early exit in _unsupported_features_for_resources().
+    _DYNAMICALLY_CHECKED_FEATURES = {
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE,
+        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
     }
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
@@ -95,12 +106,11 @@ class Slurm(clouds.Cloud):
         region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         unsupported = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
-        # Docker image support requires the Pyxis SPANK plugin.
-        # When region is None, we check all clusters and mark Docker as
-        # supported if ANY cluster has Pyxis. This is intentionally
+        # When region is None, we check all clusters and mark a feature as
+        # supported if ANY cluster supports it. This is intentionally
         # permissive -- per-cluster filtering happens in
         # regions_with_offering(), which calls check_features_are_supported()
-        # with a specific region to filter out non-Pyxis clusters.
+        # with a specific region to filter out unsupported clusters.
         cluster = region if region is not None else resources.region
         if cluster is None:
             clusters = cls.existing_allowed_clusters()
@@ -108,13 +118,22 @@ class Slurm(clouds.Cloud):
             clusters = [cluster]
         for c in clusters:
             try:
+                # Docker image support requires the Pyxis SPANK plugin.
                 if slurm_utils.check_pyxis_enabled(c):
                     unsupported.pop(
                         clouds.CloudImplementationFeatures.DOCKER_IMAGE, None)
-                    break
+                # Storage mounting requires FUSE (/dev/fuse).
+                if slurm_utils.check_fuse_enabled(c):
+                    unsupported.pop(
+                        clouds.CloudImplementationFeatures.STORAGE_MOUNTING,
+                        None)
             except Exception as e:  # pylint: disable=broad-except
-                logger.debug(f'Failed to check Pyxis on cluster {c}: '
+                logger.debug(f'Failed to check cluster features on {c}: '
                              f'{common_utils.format_exception(e)}')
+            # Stop early if all dynamically checked features are resolved.
+            if not any(f in unsupported
+                       for f in cls._DYNAMICALLY_CHECKED_FEATURES):
+                break
         return unsupported
 
     @classmethod
@@ -421,10 +440,20 @@ class Slurm(clouds.Cloud):
         # Optionally populate accelerator information.
         acc_count = s.accelerator_count if s.accelerator_count else 0
         acc_type = s.accelerator_type if s.accelerator_type else None
-        # Resolve the actual GPU type as it appears in the cluster's GRES.
-        # Slurm GRES types are case-sensitive.
+        # Resolve the canonical GPU name to the raw GRES type on the cluster.
+        # Slurm GRES types are case-sensitive and may differ from user-facing
+        # canonical names (e.g. 'H100' -> 'NVIDIA_H100_80GB_HBM3').
         if acc_type:
-            acc_type = slurm_utils.get_gres_gpu_type(cluster, acc_type)
+            try:
+                acc_type = slurm_utils.resolve_gres_gpu_type(
+                    cluster, acc_type, acc_count, partition)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    'Failed to determine the exact GPU GRES type from '
+                    f'the Slurm cluster {cluster!r}. Falling back to '
+                    f'{acc_type!r}. This may cause issues if it is not '
+                    f'the exact GRES name. '
+                    f'Error: {common_utils.format_exception(e)}')
 
         image_id = resources.extract_docker_image()
 
@@ -445,6 +474,28 @@ class Slurm(clouds.Cloud):
                 # have seen Slurm taking minutes to schedule a job, when there
                 # are a lot of pending jobs to be processed.
                 provision_timeout = 2 * 60  # 2 minutes
+
+        # Read sbatch_options with three-level merge:
+        # global < cluster < partition.
+        sbatch_options: Dict[str, Any] = {}
+        for config_keys in [
+            ('slurm', 'sbatch_options'),
+            ('slurm', 'cluster_configs', cluster, 'sbatch_options'),
+            ('slurm', 'cluster_configs', cluster, 'partition_configs',
+             partition, 'sbatch_options'),
+        ]:
+            level_config = skypilot_config.get_nested(config_keys,
+                                                      default_value=None)
+            if level_config is not None:
+                sbatch_options.update(level_config)
+        # Merge task-level config overrides (from `config:` in task YAML).
+        task_sbatch = config_utils.get_cloud_config_value_from_dict(
+            dict_config=resources.cluster_config_overrides,
+            cloud='slurm',
+            region=cluster,
+            keys=('sbatch_options',))
+        if task_sbatch is not None:
+            sbatch_options.update(task_sbatch)
 
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -472,6 +523,7 @@ class Slurm(clouds.Cloud):
             'slurm_cluster_name_env_var':
                 (constants.SKY_CLUSTER_NAME_ENV_VAR_KEY),
             'image_id': image_id,
+            'sbatch_options': sbatch_options,
         }
 
         return deploy_vars
@@ -603,22 +655,56 @@ class Slurm(clouds.Cloud):
                 )
                 info = client.info()
                 logger.debug(f'Slurm cluster {cluster} sinfo: {info}')
-                fs_type = client.check_homedir_shared_fs()
-                if fs_type is not None and fs_type not in cls._SHARED_FS_TYPES:
+                # Check if the working directory is on a shared filesystem.
+                # If workdir is configured, check that path; otherwise
+                # fall back to checking the home directory.
+                workdir = skypilot_config.get_effective_region_config(
+                    cloud='slurm',
+                    region=cluster,
+                    keys=('workdir',),
+                    default_value=None)
+                # Resolve the check path to an absolute path so that
+                # stat (via shlex.quote) gets a literal path with no
+                # shell variables or ~.
+                remote_env = client.get_env()
+                if workdir is not None:
+                    check_path = slurm_utils.expand_path_vars(
+                        workdir, remote_env)
+                else:
+                    check_path = remote_env.get('HOME', '~')
+                fs_type = client.check_dir_shared_fs(check_path)
+                path_label = (f'workdir ({workdir})'
+                              if workdir is not None else 'Home directory (~)')
+                hint = (' Set slurm.cluster_configs.'
+                        f'{cluster}.workdir in '
+                        '~/.sky/config.yaml to a shared '
+                        'filesystem path.')
+                if fs_type is None:
                     ctx2text[cluster] = (
                         f'{colorama.Fore.GREEN}enabled.'
                         f'{colorama.Style.RESET_ALL} '
                         f'{colorama.Fore.LIGHTYELLOW_EX}'
-                        'Warning: Home directory (~) filesystem '
+                        f'Warning: Could not determine filesystem '
+                        f'type for {path_label} ({check_path}). '
+                        'Ensure the working directory is on a shared '
+                        'filesystem (e.g., NFS) visible to all nodes.'
+                        f'{hint}'
+                        f'{colorama.Style.RESET_ALL}')
+                elif fs_type not in cls._SHARED_FS_TYPES:
+                    ctx2text[cluster] = (
+                        f'{colorama.Fore.GREEN}enabled.'
+                        f'{colorama.Style.RESET_ALL} '
+                        f'{colorama.Fore.LIGHTYELLOW_EX}'
+                        f'Warning: {path_label} filesystem '
                         f'type is {fs_type!r}, not a shared '
-                        'filesystem. SkyPilot requires ~ to be '
-                        'on a shared filesystem (e.g., NFS) '
-                        'visible to all nodes. Customizing the '
-                        'home directory will be supported in a '
-                        'future release.'
+                        'filesystem. SkyPilot requires the working '
+                        'directory to be on a shared filesystem '
+                        '(e.g., NFS) visible to all nodes.'
+                        f'{hint}'
                         f'{colorama.Style.RESET_ALL}')
                 else:
-                    ctx2text[cluster] = 'enabled'
+                    ctx2text[cluster] = (f'{colorama.Fore.GREEN}enabled'
+                                         f'{colorama.Style.RESET_ALL}')
                 success = True
             except KeyError as e:
                 key = e.args[0]
