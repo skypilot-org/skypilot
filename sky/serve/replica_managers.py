@@ -1,4 +1,5 @@
 """ReplicaManager: handles the creation and deletion of endpoint replicas."""
+import concurrent.futures
 import dataclasses
 import functools
 from multiprocessing import pool as mp_pool
@@ -491,6 +492,11 @@ class ReplicaInfo:
     def is_ready(self) -> bool:
         return self.status == serve_state.ReplicaStatus.READY
 
+    # Timeout for querying the endpoint URL via cloud API. This prevents
+    # sky serve status from hanging when the cloud API is slow (e.g., K8s
+    # LoadBalancer IP polling can block for 60s per replica).
+    _URL_QUERY_TIMEOUT_SECONDS = 10
+
     @property
     def url(self) -> Optional[str]:
         handle = self.handle()
@@ -503,11 +509,20 @@ class ReplicaInfo:
             # would error out when trying to get the endpoint.
             return None
         replica_port_int = int(self.replica_port)
+        # Use a thread with timeout to avoid blocking callers when the
+        # cloud API is slow (e.g., K8s get_loadbalancer_ip polls for
+        # up to 60s). This prevents sky serve status from hanging when
+        # replicas are still provisioning.
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            endpoint_dict = backend_utils.get_endpoints(handle.cluster_name,
-                                                        replica_port_int)
-        except exceptions.ClusterNotUpError:
+            future = executor.submit(backend_utils.get_endpoints,
+                                     handle.cluster_name, replica_port_int)
+            endpoint_dict = future.result(
+                timeout=self._URL_QUERY_TIMEOUT_SECONDS)
+        except (exceptions.ClusterNotUpError, concurrent.futures.TimeoutError):
             return None
+        finally:
+            executor.shutdown(wait=False)
         endpoint = endpoint_dict.get(replica_port_int, None)
         if not endpoint:
             return None
@@ -531,12 +546,18 @@ class ReplicaInfo:
         cluster_record = global_user_state.get_cluster_from_name(
             self.cluster_name, include_user_info=False, summary_response=True)
         info_dict = {
-            'replica_id': self.replica_id,
-            'name': self.cluster_name,
-            'status': self.status,
-            'version': self.version,
-            'endpoint': self.url if with_url else None,
-            'is_spot': self.is_spot,
+            'replica_id':
+                self.replica_id,
+            'name':
+                self.cluster_name,
+            'status':
+                self.status,
+            'version':
+                self.version,
+            'endpoint':
+                self.url if with_url else None,
+            'is_spot':
+                self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
@@ -1337,8 +1358,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                                             f'_name={info.cluster_name})')
                     probe_futures.append(pool.apply_async(info.probe_pool))
                 else:
+                    # Avoid calling info.url here as it makes an expensive
+                    # cloud API call (e.g., K8s LoadBalancer IP query with
+                    # 60s timeout). The actual URL is fetched inside
+                    # info.probe() which runs in the thread pool.
                     replica_to_probe.append(
-                        f'replica_{info.replica_id}(url={info.url})')
+                        f'replica_{info.replica_id}'
+                        f'(cluster_name={info.cluster_name})')
                     probe_futures.append(
                         pool.apply_async(
                             info.probe,
