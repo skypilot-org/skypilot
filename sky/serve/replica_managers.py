@@ -546,18 +546,12 @@ class ReplicaInfo:
         cluster_record = global_user_state.get_cluster_from_name(
             self.cluster_name, include_user_info=False, summary_response=True)
         info_dict = {
-            'replica_id':
-                self.replica_id,
-            'name':
-                self.cluster_name,
-            'status':
-                self.status,
-            'version':
-                self.version,
-            'endpoint':
-                self.url if with_url else None,
-            'is_spot':
-                self.is_spot,
+            'replica_id': self.replica_id,
+            'name': self.cluster_name,
+            'status': self.status,
+            'version': self.version,
+            'endpoint': self.url if with_url else None,
+            'is_spot': self.is_spot,
             'launched_at': (cluster_record['launched_at']
                             if cluster_record is not None else None),
         }
