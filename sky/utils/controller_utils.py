@@ -17,7 +17,6 @@ from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import cloudflare
 from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
@@ -412,9 +411,11 @@ def _get_cloud_dependencies_installation_commands(
 
         python_packages.update(cloud_python_dependencies)
 
-    if (cloudflare.NAME
-            in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
-        python_packages.update(dependencies.extras_require['cloudflare'])
+    storage_clouds = storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()  # pylint: disable=line-too-long
+
+    for sc in storage_clouds:
+        if sc.lower() in constants.STORAGE_ONLY_CLOUDS:
+            python_packages.update(dependencies.extras_require[sc.lower()])
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))

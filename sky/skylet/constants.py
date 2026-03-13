@@ -695,3 +695,6 @@ SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
 
 # Maximum number of node name entries to keep per node in the lineage.
 MAX_NODE_NAME_LINEAGE = 10
+
+# Clouds that provide storage only (no compute).
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']
