@@ -15,6 +15,8 @@ from typing import Dict, Generator, Iterable, Optional, Tuple
 import uuid
 import zipfile
 
+import filelock
+
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.client import service_account_auth
@@ -54,6 +56,7 @@ _UPLOAD_CHUNK_BYTES = 100 * 1024 * 1024
 
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
+_FILE_UPLOAD_LOCK_DIR = '~/.sky/locks/file_uploads'
 
 # Connection timeout when sending requests to the API server.
 API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS = 5
@@ -397,13 +400,24 @@ def upload_mounts_to_api_server(
         use_v2 = (remote_api_version is not None and
                   remote_api_version >= server_constants.UPLOAD_API_V2_VERSION)
 
+        upload_lock = None
+        # Just an inline context manager to avoid adding another
+        # try..finally block indentation.
+        @contextlib.contextmanager
+        def unlock():
+            try:
+                yield
+            finally:
+                if upload_lock is not None:
+                    upload_lock.release()
+
         logger.info(ux_utils.starting_message('Uploading files to API server'))
         with rich_utils.client_status(
                 ux_utils.spinner_message(
                     'Uploading files to API server (1/2 - Zipping)',
                     log_file,
                     is_local=True)) as status, _setup_upload_logger(
-                        log_file) as upload_logger:
+                        log_file) as upload_logger, unlock():
             with tempfile.NamedTemporaryFile(suffix='.zip',
                                              delete=False) as temp_zip_file:
                 upload_logger.info(
@@ -413,17 +427,25 @@ def upload_mounts_to_api_server(
                 upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
 
             endpoint = '/upload'
-            file_mounts_blob_id = None
+            blob_id = None
             if use_v2:
-                file_mounts_blob_id = _compute_zip_blob_id(temp_zip_file.name)
-                upload_logger.info(f'Computed blob ID: {file_mounts_blob_id}')
+                blob_id = _compute_zip_blob_id(temp_zip_file.name)
+                upload_logger.info(f'Computed blob ID: {blob_id}')
+                lock_dir = os.path.expanduser(_FILE_UPLOAD_LOCK_DIR)
+                os.makedirs(lock_dir, exist_ok=True)
+                # Lock on blob_id to avoid concurrent uploads of the same
+                # blob.
+                lock_path = os.path.join(lock_dir, f'{blob_id}.lock')
+                upload_lock = filelock.FileLock(lock_path)
+                # Will be released in the context manager
+                upload_lock.acquire()
                 # Check existence and skip upload if already present.
                 resp = server_common.make_authenticated_request(
                     'GET',
                     '/upload_v2/blob',
                     params={
                         'user_hash': common_utils.get_user_hash(),
-                        'blob_id': file_mounts_blob_id,
+                        'blob_id': blob_id,
                     })
                 if resp.status_code != 200:
                     raise RuntimeError(f'Failed to check blob existence: '
@@ -437,11 +459,11 @@ def upload_mounts_to_api_server(
                         ux_utils.finishing_message('Files uploaded',
                                                    log_file,
                                                    is_local=True))
-                    return dag, file_mounts_blob_id
+                    return dag, blob_id
                 endpoint = '/upload_v2'
                 # In v2, we use the blob_id as the upload id to share
                 # the uploaded blob across requests.
-                upload_id = file_mounts_blob_id
+                upload_id = blob_id
 
             zip_file_size = os.path.getsize(temp_zip_file.name)
             total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
@@ -487,6 +509,6 @@ def upload_mounts_to_api_server(
                                        log_file,
                                        is_local=True))
         if use_v2:
-            return dag, file_mounts_blob_id
+            return dag, blob_id
 
     return dag, None
