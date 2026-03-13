@@ -277,29 +277,11 @@ def queue(
         The request ID of the queue request.
 
     Request Returns:
-        job_records (List[responses.ManagedJobRecord]): A list of dicts, with each dict
-          containing the information of a job.
-
-          .. code-block:: python
-
-            [
-              {
-                'job_id': (int) job id,
-                'job_name': (str) job name,
-                'resources': (str) resources of the job,
-                'submitted_at': (float) timestamp of submission,
-                'end_at': (float) timestamp of end,
-                'job_duration': (float) duration in seconds,
-                'recovery_count': (int) Number of retries,
-                'status': (sky.jobs.ManagedJobStatus) of the job,
-                'cluster_resources': (str) resources of the cluster,
-                'region': (str) region of the cluster,
-                'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
-                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
-                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
-              }
-            ]
+        job_records (List[responses.ManagedJobRecord]): A list of dicts, with
+          each dict containing the information of a job.
+        total (int): Total number of jobs after filter.
+        status_counts (Dict[str, int]): Status counts after filter.
+        total_no_filter (int): Total number of jobs before filter.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or

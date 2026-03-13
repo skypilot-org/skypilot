@@ -78,7 +78,7 @@ export const statusGroups = {
     'PENDING',
     'RUNNING',
     'RECOVERING',
-    'SUBMITTED',
+    'SUBMITTED', // TODO(dev): Remove in v0.13.0 — status is deprecated.
     'STARTING',
     'CANCELLING',
   ],
@@ -97,7 +97,7 @@ export const statusGroups = {
 const STATUS_PRIORITY = {
   SUCCEEDED: 0,
   PENDING: 1,
-  SUBMITTED: 2,
+  SUBMITTED: 2, // TODO(dev): Remove in v0.13.0 — status is deprecated.
   STARTING: 3,
   RUNNING: 4,
   RECOVERING: 5,

@@ -830,20 +830,20 @@ async def test_endpoint_jobs_launch(monitor, mock_request,
 @pytest.mark.asyncio
 async def test_endpoint_jobs_queue(monitor, mock_request,
                                    mock_schedule_request_async):
-    """Test /jobs/queue endpoint for blocking operations."""
-    print("\n🔍 Testing: /jobs/queue")
+    """Test /jobs/queue/v2 endpoint for blocking operations."""
+    print("\n🔍 Testing: /jobs/queue/v2")
 
     async def test_func():
         try:
             from sky.jobs.server import server as jobs_server
-            body = payloads.JobsQueueBody(env_vars={})
-            await jobs_server.queue(mock_request, body)
+            body = payloads.JobsQueueV2Body(env_vars={})
+            await jobs_server.queue_v2(mock_request, body)
         except:
             pass
 
     result = await run_endpoint_test(test_func, monitor, num_concurrent=30)
     assert not result[
-        'blocking'], "/jobs/queue should not block (uses schedule_request)"
+        'blocking'], "/jobs/queue/v2 should not block (uses schedule_request)"
 
 
 @pytest.mark.asyncio

@@ -107,7 +107,6 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
 def _execute(
     entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
-    down: bool = False,  # pylint: disable=unused-argument
     stream_logs: bool = True,
     handle: Optional[backends.ResourceHandle] = None,
     backend: Optional[backends.Backend] = None,
@@ -116,7 +115,6 @@ def _execute(
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,  # pylint: disable=unused-argument
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     skip_unnecessary_provisioning: bool = False,
@@ -138,11 +136,6 @@ def _execute(
       entrypoint: sky.Task or sky.Dag.
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
-      down: bool; whether to tear down the launched resources after all jobs
-        finish (successfully or abnormally). If idle_minutes_to_autostop is
-        also set, the cluster will be torn down after the specified idle time.
-        Note that if errors occur during provisioning/data syncing/setting up,
-        the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Optional[backends.ResourceHandle]; if provided, execution will
         attempt to use an existing backend cluster handle instead of
@@ -162,8 +155,6 @@ def _execute(
         job itself. You can safely ctrl-c to detach from logging, and it will
         not interrupt the setup process. To see the logs again after detaching,
         use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
-      idle_minutes_to_autostop: int; if provided, the cluster will be set to
-        autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
       clone_disk_from: Optional[str]; if set, clone the disk from the specified
         cluster.
@@ -730,7 +721,6 @@ def launch(
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
-        down=down,
         stream_logs=stream_logs,
         handle=handle,
         backend=backend,
@@ -739,7 +729,6 @@ def launch(
         stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         skip_unnecessary_provisioning=skip_unnecessary_provisioning,
@@ -840,7 +829,6 @@ def exec(  # pylint: disable=redefined-builtin
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
-        down=down,
         stream_logs=stream_logs,
         handle=handle,
         backend=backend,

@@ -392,6 +392,7 @@ function TaskLogsContent({
   setIsLoadingLogs,
   isLoadingLogs,
 }) {
+  // TODO(dev): Remove 'SUBMITTED' in v0.13.0 — status is deprecated.
   const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
   const RECOVERING_STATUSES = ['RECOVERING'];
 

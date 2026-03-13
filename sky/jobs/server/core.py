@@ -1188,8 +1188,6 @@ def queue_v2(
                 pool_match=pool_match,
                 page=page,
                 limit=limit,
-                # Remove None from user_hashes, as the gRPC server uses the
-                # show_jobs_without_user_hash flag instead.
                 user_hashes=managed_jobsv1_pb2.UserHashes(hashes=[
                     user_hash for user_hash in user_hashes
                     if user_hash is not None
@@ -1198,7 +1196,6 @@ def queue_v2(
                     statuses=statuses) if statuses is not None else None,
                 fields=managed_jobsv1_pb2.Fields(
                     fields=fields) if fields is not None else None,
-                show_jobs_without_user_hash=False,
                 sort_by=sort_by,
                 sort_order=sort_order,
             )

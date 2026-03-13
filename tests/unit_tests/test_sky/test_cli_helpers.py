@@ -15,7 +15,6 @@ from sky import jobs as managed_jobs
 from sky.client import sdk as client_sdk
 from sky.client.cli import command
 from sky.client.cli import table_utils
-from sky.client.cli import utils as cli_utils
 from sky.schemas.api import responses
 from sky.server import common as server_common
 from sky.skylet import constants
@@ -69,7 +68,6 @@ def test_handle_jobs_queue_request_success_tuple_response():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
-                    queue_result_version=cli_utils.QueueResultVersion.V2,
                 )
 
     # Verify the result
@@ -86,8 +84,8 @@ def test_handle_jobs_queue_request_success_tuple_response():
     )
 
 
-def test_handle_jobs_queue_request_success_list_response():
-    """Test _handle_jobs_queue_request with list response (legacy API)."""
+def test_handle_jobs_queue_request_success_tuple_response_show_all():
+    """Test _handle_jobs_queue_request with tuple response and show_all."""
     # Create mock managed job records as dicts
     mock_jobs = [
         {
@@ -106,13 +104,16 @@ def test_handle_jobs_queue_request_success_list_response():
 
     # Mock job records using the model
     mock_job_records = [responses.ManagedJobRecord(**job) for job in mock_jobs]
+    status_counts = {}
+    mock_result = (mock_job_records, 3, status_counts, 3)
 
-    request_id = server_common.RequestId[List[responses.ManagedJobRecord]](
-        'test-request-id')
+    request_id = server_common.RequestId[
+        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int],
+              int]]('test-request-id')
 
     with mock.patch.object(client_sdk,
                            'stream_and_get',
-                           return_value=mock_job_records) as mock_stream:
+                           return_value=mock_result) as mock_stream:
         with mock.patch.object(usage_lib.messages.usage, 'set_internal'):
             with mock.patch.object(
                     table_utils, 'format_job_table',
@@ -124,10 +125,9 @@ def test_handle_jobs_queue_request_success_list_response():
                     max_num_jobs_to_show=None,
                     is_called_by_user=True,
                     only_in_progress=False,
-                    queue_result_version=cli_utils.QueueResultVersion.V1,
                 )
 
-    # Verify the result - should count unique job IDs
+    # Verify the result
     assert num_jobs == 3
     assert msg == 'formatted table'
     mock_stream.assert_called_once_with(request_id)
@@ -137,12 +137,12 @@ def test_handle_jobs_queue_request_success_list_response():
         show_all=True,
         show_user=True,
         max_jobs=None,
-        status_counts=None,
+        status_counts=status_counts,
     )
 
 
-def test_handle_jobs_queue_request_success_list_response_with_pool_status():
-    """Test _handle_jobs_queue_request with list response (legacy API)."""
+def test_handle_jobs_queue_request_success_tuple_response_with_pool_status():
+    """Test _handle_jobs_queue_request with tuple response and pool status."""
     # Create mock managed job records as dicts
     mock_jobs = [
         {
@@ -161,6 +161,8 @@ def test_handle_jobs_queue_request_success_list_response_with_pool_status():
 
     # Mock job records using the model
     mock_job_records = [responses.ManagedJobRecord(**job) for job in mock_jobs]
+    status_counts = {}
+    mock_result = (mock_job_records, 3, status_counts, 3)
 
     # Mock pool status records using the model
     mock_pool_statuses = [
@@ -182,15 +184,16 @@ def test_handle_jobs_queue_request_success_list_response_with_pool_status():
         },
     ]
 
-    request_id = server_common.RequestId[List[responses.ManagedJobRecord]](
-        'test-request-id')
+    request_id = server_common.RequestId[
+        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int],
+              int]]('test-request-id')
 
     pool_status_request_id = server_common.RequestId[List[Dict[str, Any]]](
         'test-pool-status-request-id')
 
     with mock.patch.object(client_sdk,
                            'stream_and_get',
-                           side_effect=[mock_job_records,
+                           side_effect=[mock_result,
                                         mock_pool_statuses]) as mock_stream:
         with mock.patch.object(usage_lib.messages.usage, 'set_internal'):
             with mock.patch.object(
@@ -206,7 +209,7 @@ def test_handle_jobs_queue_request_success_list_response_with_pool_status():
                     only_in_progress=False,
                 )
 
-    # Verify the result - should count unique job IDs
+    # Verify the result
     assert num_jobs == 3
     assert msg == 'formatted table'
     mock_stream.assert_has_calls([
@@ -219,7 +222,7 @@ def test_handle_jobs_queue_request_success_list_response_with_pool_status():
         show_all=True,
         show_user=True,
         max_jobs=None,
-        status_counts=None,
+        status_counts=status_counts,
     )
 
 
@@ -431,9 +434,10 @@ def test_handle_jobs_queue_request_sets_internal_when_not_called_by_user():
         'test-request-id')
 
     mock_jobs = [responses.ManagedJobRecord(job_id=1, job_name='test-job')]
+    mock_result = (mock_jobs, 1, {}, 1)
 
     with mock.patch.object(client_sdk, 'stream_and_get',
-                           return_value=mock_jobs):
+                           return_value=mock_result):
         with mock.patch.object(usage_lib.messages.usage,
                                'set_internal') as mock_set_internal:
             with mock.patch.object(table_utils,
@@ -458,9 +462,10 @@ def test_handle_jobs_queue_request_does_not_set_internal_when_called_by_user():
         'test-request-id')
 
     mock_jobs = [responses.ManagedJobRecord(job_id=1, job_name='test-job')]
+    mock_result = (mock_jobs, 1, {}, 1)
 
     with mock.patch.object(client_sdk, 'stream_and_get',
-                           return_value=mock_jobs):
+                           return_value=mock_result):
         with mock.patch.object(usage_lib.messages.usage,
                                'set_internal') as mock_set_internal:
             with mock.patch.object(table_utils,
@@ -533,7 +538,7 @@ def test_handle_jobs_queue_request_counts_terminal_status_correctly():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
-                    queue_result_version=cli_utils.QueueResultVersion.V2,
+
                 )
 
     # Should return the total number of jobs (5) when only_in_progress=False
@@ -594,7 +599,7 @@ def test_handle_jobs_queue_request_only_in_progress_true():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=cli_utils.QueueResultVersion.V2,
+
                 )
 
     # Only RUNNING and PENDING should be counted as in-progress (non-terminal)
@@ -632,7 +637,7 @@ def test_handle_jobs_queue_request_only_in_progress_with_no_status_counts():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=cli_utils.QueueResultVersion.V2,
+
                 )
 
     # Should return 0 when status_counts is None
@@ -683,7 +688,7 @@ def test_handle_jobs_queue_request_only_in_progress_all_terminal():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-                    queue_result_version=cli_utils.QueueResultVersion.V2,
+
                 )
 
     # Should return 0 since all jobs are terminal

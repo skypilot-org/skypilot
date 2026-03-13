@@ -13,15 +13,12 @@ from sky.skylet import constants
 API_VERSION = 46  # debug dump endpoints
 
 # The minimum peer API version that the code should still work with.
-# Notes (dev):
-# - This value is maintained by the CI pipeline, DO NOT EDIT this manually.
-# - Compatibility code for versions lower than this can be safely removed.
+# Compatibility code for versions lower than this can be safely removed.
 # Refer to API_VERSION for more details.
 MIN_COMPATIBLE_API_VERSION = 24
 
 # The semantic version of the minimum compatible API version.
 # Refer to MIN_COMPATIBLE_API_VERSION for more details.
-# Note (dev): DO NOT EDIT this constant manually.
 MIN_COMPATIBLE_VERSION = '0.11.0'
 
 # The HTTP header name for the API version of the sender.

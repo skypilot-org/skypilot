@@ -68,7 +68,7 @@ class TestResourceChecker:
             'job_id': 'job-003',
             'user_hash': 'user456',
             'workspace': 'default',
-            'status': 'SUBMITTED'
+            'status': 'PENDING'
         }, {
             'job_id': 'job-004',
             'workspace': 'default',

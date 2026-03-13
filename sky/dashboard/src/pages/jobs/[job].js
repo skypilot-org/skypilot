@@ -894,7 +894,9 @@ function JobDetailsContent({
     }
   }, []);
 
+  // TODO(dev): Remove 'SUBMITTED' in v0.13.0 — status is deprecated.
   const PENDING_STATUSES = ['PENDING', 'SUBMITTED', 'STARTING'];
+  // TODO(dev): Remove 'SUBMITTED' in v0.13.0 — status is deprecated.
   const PRE_START_STATUSES = ['PENDING', 'SUBMITTED'];
   const RECOVERING_STATUSES = ['RECOVERING'];
 

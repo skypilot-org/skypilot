@@ -109,9 +109,9 @@ def decode_queue(return_value: List[dict],) -> List[responses.ClusterJobRecord]:
     return [responses.ClusterJobRecord.model_validate(job) for job in jobs]
 
 
+# TODO(dev): Remove in v0.13.0 — jobs.queue is deprecated.
 @register_decoders('jobs.queue')
 def decode_jobs_queue(return_value: List[dict],) -> List[Dict[str, Any]]:
-    # To keep backward compatibility with v0.10.2
     return decode_jobs_queue_v2(return_value)
 
 

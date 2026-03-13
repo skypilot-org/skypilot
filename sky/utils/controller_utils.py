@@ -644,6 +644,25 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
+        # Compatibility with the old way of specifying the controller autostop
+        # config. TODO(cooperc): Remove this in v0.13.0.
+        custom_controller_autostop_config = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller', 'autostop'), None)
+        if custom_controller_autostop_config is not None:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Warning: Config value '
+                f'`{controller.value.controller_type}.controller.autostop` '
+                'is deprecated. Please use '
+                f'`{controller.value.controller_type}.controller.resources.'
+                f'autostop` instead.{colorama.Style.RESET_ALL}')
+            # Only set the autostop config if it is not already specified.
+            if controller_resources_config_copied.get('autostop') is None:
+                controller_resources_config_copied['autostop'] = (
+                    custom_controller_autostop_config)
+            else:
+                logger.warning(f'{colorama.Fore.YELLOW}Ignoring the old '
+                               'config, since it is already specified in '
+                               f'resources.{colorama.Style.RESET_ALL}')
     # Set the default autostop config for the controller, if not already
     # specified.
     if controller_resources_config_copied.get('autostop') is None:
