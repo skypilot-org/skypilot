@@ -2805,6 +2805,70 @@ async def complete_api_request(incomplete: str,) -> List[str]:
     return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
+@app.post('/dashboard/dismissed_items/add')
+async def dashboard_dismissed_items_add(
+    request: fastapi.Request,
+    body: payloads.DashboardDismissedItemBody,
+) -> None:
+    """Dismisses an item from the dashboard."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.DASHBOARD_DISMISSED_ADD,
+        request_body=body,
+        func=core.dashboard_dismiss_item,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/dashboard/dismissed_items/remove')
+async def dashboard_dismissed_items_remove(
+    request: fastapi.Request,
+    body: payloads.DashboardDismissedItemBody,
+) -> None:
+    """Restores a dismissed item on the dashboard."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.DASHBOARD_DISMISSED_REMOVE,
+        request_body=body,
+        func=core.dashboard_restore_item,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/dashboard/dismissed_items/get')
+async def dashboard_dismissed_items_get(
+    request: fastapi.Request,
+    body: payloads.DashboardDismissedItemBody,
+) -> None:
+    """Gets all dismissed items of a type for the dashboard."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.DASHBOARD_DISMISSED_GET,
+        request_body=body,
+        func=core.dashboard_get_dismissed_items,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/dashboard/dismissed_items/clear_all')
+async def dashboard_dismissed_items_clear_all(
+    request: fastapi.Request,
+    body: payloads.DashboardDismissedItemBody,
+) -> None:
+    """Clears all dismissed items of a type from the dashboard."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.DASHBOARD_DISMISSED_CLEAR_ALL,
+        request_body=body,
+        func=core.dashboard_clear_dismissed_items,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.

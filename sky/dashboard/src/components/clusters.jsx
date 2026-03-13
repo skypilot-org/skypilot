@@ -39,7 +39,13 @@ import {
 } from '@/data/connectors/clusters';
 import { getWorkspaces } from '@/data/connectors/workspaces';
 import { sortData } from '@/data/utils';
-import { SquareCode, Terminal, RotateCwIcon, Brackets } from 'lucide-react';
+import {
+  SquareCode,
+  Terminal,
+  RotateCwIcon,
+  Brackets,
+  Trash2,
+} from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -48,6 +54,7 @@ import {
 } from '@/components/elements/modals';
 import { StatusBadge } from '@/components/elements/StatusBadge';
 import { useMobile } from '@/hooks/useMobile';
+import { useDismissedItems } from '@/hooks/useDismissedItems';
 import { PluginSlot } from '@/plugins/PluginSlot';
 import { useTableColumns } from '@/plugins/PluginProvider';
 import {
@@ -600,6 +607,14 @@ export function ClusterTable({
     direction: 'ascending',
   });
 
+  // Dismissed items (soft-delete from dashboard view)
+  const {
+    dismissItem: dismissCluster,
+    clearAllDismissed: clearDismissedClusters,
+    filterDismissed: filterDismissedClusters,
+    dismissedCount: dismissedClusterCount,
+  } = useDismissedItems('sky-dismissed-clusters');
+
   // Use the cluster data hook (supports plugin override for server-side pagination)
   const {
     data: hookData,
@@ -736,8 +751,21 @@ export function ClusterTable({
       ? dataToProcess
       : filterData(dataToProcess, filters);
 
-    return sortData(filteredData, sortConfig.key, sortConfig.direction);
-  }, [hookData, allData, sortConfig, filters, isServerPagination]);
+    // Remove dismissed (soft-deleted) items from the display
+    const withoutDismissed = filterDismissedClusters(
+      filteredData,
+      (item) => item.cluster_hash || item.cluster
+    );
+
+    return sortData(withoutDismissed, sortConfig.key, sortConfig.direction);
+  }, [
+    hookData,
+    allData,
+    sortConfig,
+    filters,
+    isServerPagination,
+    filterDismissedClusters,
+  ]);
 
   // Expose refresh to parent component
   React.useEffect(() => {
@@ -1057,14 +1085,32 @@ export function ClusterTable({
       ),
       renderCell: (item) => (
         <TableCell className="text-left md:sticky md:right-0 md:bg-white">
-          {!item.isHistorical && (
-            <Status2Actions
-              cluster={item.cluster}
-              status={item.status}
-              onOpenSSHModal={onOpenSSHModal}
-              onOpenVSCodeModal={onOpenVSCodeModal}
-            />
-          )}
+          <div className="flex items-center space-x-2">
+            {!item.isHistorical && (
+              <Status2Actions
+                cluster={item.cluster}
+                status={item.status}
+                onOpenSSHModal={onOpenSSHModal}
+                onOpenVSCodeModal={onOpenVSCodeModal}
+              />
+            )}
+            {(item.isHistorical || item.status === 'TERMINATED') && (
+              <Tooltip
+                content="Remove from dashboard"
+                className="text-sm text-muted-foreground"
+              >
+                <button
+                  onClick={() =>
+                    dismissCluster(item.cluster_hash || item.cluster)
+                  }
+                  className="text-gray-400 hover:text-red-500 transition-colors"
+                  aria-label="Remove from dashboard"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </Tooltip>
+            )}
+          </div>
         </TableCell>
       ),
     },
@@ -1174,7 +1220,18 @@ export function ClusterTable({
 
       {/* Pagination controls */}
       {displayTotal > 0 && (
-        <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
+        <div className="flex justify-between items-center py-2 px-4 text-sm text-gray-700">
+          <div>
+            {dismissedClusterCount > 0 && (
+              <button
+                onClick={clearDismissedClusters}
+                className="text-gray-500 hover:text-blue-600 text-sm underline"
+              >
+                Show {dismissedClusterCount} hidden
+                {dismissedClusterCount === 1 ? ' cluster' : ' clusters'}
+              </button>
+            )}
+          </div>
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
               <span className="mr-2">Rows per page:</span>
