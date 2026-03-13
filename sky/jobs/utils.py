@@ -1479,11 +1479,11 @@ def stream_logs_by_id(
             # the table before the managed job state is updated by the
             # controller. In this case, we should skip the logging, and wait for
             # the next round of status check.
-            if (handle is None or managed_job_status
-                    != managed_job_state.ManagedJobStatus.RUNNING):
+            if (handle is None or managed_job_status !=
+                    managed_job_state.ManagedJobStatus.RUNNING):
                 status_str = ''
-                if (managed_job_status is not None and managed_job_status
-                        != managed_job_state.ManagedJobStatus.RUNNING):
+                if (managed_job_status is not None and managed_job_status !=
+                        managed_job_state.ManagedJobStatus.RUNNING):
                     status_str = f' (status: {managed_job_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
@@ -1555,9 +1555,8 @@ def stream_logs_by_id(
                             failure detection (JobStatus.FAILED) and controller
                             retry logic.
                             """
-                            return (
-                                status
-                                != managed_job_state.ManagedJobStatus.RUNNING)
+                            return (status !=
+                                    managed_job_state.ManagedJobStatus.RUNNING)
 
                         while not is_managed_job_status_updated(
                                 managed_job_status :=

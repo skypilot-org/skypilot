@@ -1006,8 +1006,8 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         # non-legacy jobs that are not DONE
         condition1 = sqlalchemy.and_(
             job_info_table.c.schedule_state.is_not(None),
-            job_info_table.c.schedule_state
-            != ManagedJobScheduleState.DONE.value)
+            job_info_table.c.schedule_state !=
+            ManagedJobScheduleState.DONE.value)
         # legacy or that are in non-terminal status or
         # DONE jobs that are in non-terminal status
         condition2 = sqlalchemy.and_(
@@ -1915,8 +1915,8 @@ def scheduler_set_done(job_id: int, idempotent: bool = False) -> None:
         updated_count = session.query(job_info_table).filter(
             sqlalchemy.and_(
                 job_info_table.c.spot_job_id == job_id,
-                job_info_table.c.schedule_state
-                != ManagedJobScheduleState.DONE.value,
+                job_info_table.c.schedule_state !=
+                ManagedJobScheduleState.DONE.value,
             )).update({
                 job_info_table.c.schedule_state:
                     ManagedJobScheduleState.DONE.value
@@ -2342,8 +2342,8 @@ async def set_recovering_async(
                 )).values({
                     spot_table.c.status: ManagedJobStatus.RECOVERING.value,
                     spot_table.c.job_duration: sqlalchemy.case(
-                        (spot_table.c.last_recovered_at
-                         >= 0, spot_table.c.job_duration + current_time -
+                        (spot_table.c.last_recovered_at >= 0,
+                         spot_table.c.job_duration + current_time -
                          spot_table.c.last_recovered_at),
                         else_=spot_table.c.job_duration),
                     spot_table.c.last_recovered_at: sqlalchemy.case(
@@ -2620,8 +2620,8 @@ async def scheduler_set_done_async(job_id: int,
             sqlalchemy.update(job_info_table).where(
                 sqlalchemy.and_(
                     job_info_table.c.spot_job_id == job_id,
-                    job_info_table.c.schedule_state
-                    != ManagedJobScheduleState.DONE.value,
+                    job_info_table.c.schedule_state !=
+                    ManagedJobScheduleState.DONE.value,
                 )).values({
                     job_info_table.c.schedule_state:
                         ManagedJobScheduleState.DONE.value
@@ -2677,10 +2677,10 @@ def reset_jobs_for_recovery() -> None:
             job_info_table.c.controller_pid.isnot(None),
             # Schedule state should be alive.
             job_info_table.c.schedule_state.isnot(None),
-            (job_info_table.c.schedule_state
-             != ManagedJobScheduleState.WAITING.value),
-            (job_info_table.c.schedule_state
-             != ManagedJobScheduleState.DONE.value),
+            (job_info_table.c.schedule_state !=
+             ManagedJobScheduleState.WAITING.value),
+            (job_info_table.c.schedule_state !=
+             ManagedJobScheduleState.DONE.value),
         ).update({
             job_info_table.c.controller_pid: None,
             job_info_table.c.controller_pid_started_at: None,

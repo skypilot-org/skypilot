@@ -3917,8 +3917,8 @@ def _show_gpus_impl(
                                   case_sensitive=False,
                                   all_regions=all_regions))
         json_result = {
-            gpu: [item._asdict() for item in items]
-            for gpu, items in result.items()
+            gpu: [item._asdict() for item in items
+                 ] for gpu, items in result.items()
         }
         click.echo(json.dumps(json_result, indent=2))
         return
@@ -5848,9 +5848,9 @@ def jobs_cancel(
       $ sky jobs cancel -p my-pool
     """
     job_id_str = ','.join(map(str, job_ids))
-    if sum(
-        [bool(job_ids), name is not None, pool is not None, all or
-         all_users]) != 1:
+    if sum([
+            bool(job_ids), name is not None, pool is not None, all or all_users
+    ]) != 1:
         arguments = []
         arguments += [f'--job-ids {job_id_str}'] if job_ids else []
         arguments += [f'--name {name}'] if name is not None else []

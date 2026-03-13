@@ -107,9 +107,9 @@ def test_handle_jobs_queue_request_success_tuple_response_show_all():
     status_counts = {}
     mock_result = (mock_job_records, 3, status_counts, 3)
 
-    request_id = server_common.RequestId[
-        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int],
-              int]]('test-request-id')
+    request_id = server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                               int, Dict[str, int],
+                                               int]]('test-request-id')
 
     with mock.patch.object(client_sdk,
                            'stream_and_get',
@@ -184,9 +184,9 @@ def test_handle_jobs_queue_request_success_tuple_response_with_pool_status():
         },
     ]
 
-    request_id = server_common.RequestId[
-        Tuple[List[responses.ManagedJobRecord], int, Dict[str, int],
-              int]]('test-request-id')
+    request_id = server_common.RequestId[Tuple[List[responses.ManagedJobRecord],
+                                               int, Dict[str, int],
+                                               int]]('test-request-id')
 
     pool_status_request_id = server_common.RequestId[List[Dict[str, Any]]](
         'test-pool-status-request-id')
@@ -436,7 +436,8 @@ def test_handle_jobs_queue_request_sets_internal_when_not_called_by_user():
     mock_jobs = [responses.ManagedJobRecord(job_id=1, job_name='test-job')]
     mock_result = (mock_jobs, 1, {}, 1)
 
-    with mock.patch.object(client_sdk, 'stream_and_get',
+    with mock.patch.object(client_sdk,
+                           'stream_and_get',
                            return_value=mock_result):
         with mock.patch.object(usage_lib.messages.usage,
                                'set_internal') as mock_set_internal:
@@ -464,7 +465,8 @@ def test_handle_jobs_queue_request_does_not_set_internal_when_called_by_user():
     mock_jobs = [responses.ManagedJobRecord(job_id=1, job_name='test-job')]
     mock_result = (mock_jobs, 1, {}, 1)
 
-    with mock.patch.object(client_sdk, 'stream_and_get',
+    with mock.patch.object(client_sdk,
+                           'stream_and_get',
                            return_value=mock_result):
         with mock.patch.object(usage_lib.messages.usage,
                                'set_internal') as mock_set_internal:
@@ -538,7 +540,6 @@ def test_handle_jobs_queue_request_counts_terminal_status_correctly():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=False,
-
                 )
 
     # Should return the total number of jobs (5) when only_in_progress=False
@@ -599,7 +600,6 @@ def test_handle_jobs_queue_request_only_in_progress_true():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-
                 )
 
     # Only RUNNING and PENDING should be counted as in-progress (non-terminal)
@@ -637,7 +637,6 @@ def test_handle_jobs_queue_request_only_in_progress_with_no_status_counts():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-
                 )
 
     # Should return 0 when status_counts is None
@@ -688,7 +687,6 @@ def test_handle_jobs_queue_request_only_in_progress_all_terminal():
                     max_num_jobs_to_show=10,
                     is_called_by_user=False,
                     only_in_progress=True,
-
                 )
 
     # Should return 0 since all jobs are terminal
