@@ -17,9 +17,6 @@ from sky import global_user_state
 from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import cloudflare
-from sky.adaptors import coreweave
-from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
