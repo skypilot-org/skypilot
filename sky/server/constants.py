@@ -65,6 +65,12 @@ DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
 # The interval (seconds) for the event to be restarted in the background.
 DAEMON_RESTART_INTERVAL_SECONDS = 20
 
+# How often (seconds) each API server updates its heartbeat in the database.
+SERVER_ALIVE_HEARTBEAT_INTERVAL_SECONDS = 10
+# A server entry is considered stale if no heartbeat within this many seconds.
+# Must be larger than HEARTBEAT_INTERVAL to tolerate transient delays.
+SERVER_ALIVE_STALE_THRESHOLD_SECONDS = 60
+
 # Timeout for CLI authentication sessions (polling-based auth flow).
 # Used by both client (polling timeout) and server (session expiration).
 AUTH_SESSION_TIMEOUT_SECONDS = 300  # 5 minutes

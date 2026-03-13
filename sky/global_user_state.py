@@ -286,6 +286,19 @@ system_config_table = sqlalchemy.Table(
     sqlalchemy.Column('updated_at', sqlalchemy.Integer),
 )
 
+# Table for tracking active API server instances.
+# Used to detect and prevent multiple API servers from sharing the same
+# database, which causes data corruption and job failures.
+api_server_instance_table = sqlalchemy.Table(
+    'api_server_instances',
+    Base.metadata,
+    sqlalchemy.Column('server_id', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('pid', sqlalchemy.Integer),
+    sqlalchemy.Column('hostname', sqlalchemy.Text),
+    sqlalchemy.Column('started_at', sqlalchemy.Float),
+    sqlalchemy.Column('last_heartbeat', sqlalchemy.Float),
+)
+
 
 def _glob_to_similar(glob_pattern):
     """Converts a glob pattern to a PostgreSQL LIKE pattern."""

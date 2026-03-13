@@ -2850,6 +2850,12 @@ if __name__ == '__main__':
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')
+
+    # Check for conflicting API servers sharing the same database.
+    from sky.server import server_liveness
+    logger.info('Checking for conflicting API server instances')
+    server_liveness.check_and_register_server()
+
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
@@ -2901,6 +2907,8 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 managed_job_state.job_event_retention_daemon()))
+        global_tasks.append(
+            background.create_task(server_liveness.heartbeat_daemon()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)
