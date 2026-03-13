@@ -56,7 +56,7 @@ sky api info
 |-----------------|---------|-------------|
 | Server version and status | Server is running and connected | **Bootstrap done.** Skip to user's task. |
 | `No SkyPilot API server is connected` | No server connected | Go to "Start or connect a server" below. |
-| `Could not connect to SkyPilot API server` | Remote server unreachable or auth expired | Tell the user and suggest `sky api login -e <endpoint>` to reconnect. |
+| `Could not connect to SkyPilot API server` | Remote server unreachable or auth expired | Tell the user and suggest `sky api login --relogin -e <endpoint>` to reconnect. |
 | `command not found: sky` | SkyPilot not installed | Go to "Install SkyPilot" below. |
 
 **Install SkyPilot** (only if `sky` command not found):
