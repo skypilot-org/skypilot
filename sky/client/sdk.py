@@ -2679,8 +2679,8 @@ def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
                    f'{colorama.Style.RESET_ALL}')
 
         start_time = time.time()
-        while (token_container['token'] is None and time.time() - start_time
-               < server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
+        while (token_container['token'] is None and time.time() - start_time <
+               server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
             time.sleep(1)
 
         if token_container['token'] is None:

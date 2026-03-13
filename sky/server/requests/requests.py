@@ -71,8 +71,8 @@ class RequestStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
     def __gt__(self, other):
-        return (list(RequestStatus).index(self)
-                > list(RequestStatus).index(other))
+        return (list(RequestStatus).index(self) >
+                list(RequestStatus).index(other))
 
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
