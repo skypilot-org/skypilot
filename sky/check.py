@@ -474,7 +474,7 @@ def get_cloud_credential_file_mounts(
                 file_mounts[remote_path] = os.path.realpath(
                     os.path.expanduser(local_path))
     # Currently, get_cached_enabled_clouds_or_refresh() does not support
-    # storage-only clouds as only clouds with computing instances are 
+    # storage-only clouds as only clouds with computing instances are
     # marked as enabled by skypilot.
     # TODO (kyuds): recognize storage-only clouds as clouds.
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
@@ -556,7 +556,8 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if (verbose and cloud is not cloudflare and cloud is not coreweave and cloud is not vastdata):
+        if (verbose and cloud is not cloudflare and cloud is not coreweave and
+                cloud is not vastdata):
             activated_account = cloud.get_active_user_identity_str()
         if isinstance(
                 cloud_tuple[1],

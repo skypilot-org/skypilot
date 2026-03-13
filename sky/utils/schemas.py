@@ -1789,8 +1789,8 @@ def get_config_schema():
         'type': 'array',
         'items': {
             'type': 'string',
-            'case_insensitive_enum':
-                (list(constants.ALL_CLOUDS) + ['cloudflare', 'coreweave', 'vastdata'])
+            'case_insensitive_enum': (list(constants.ALL_CLOUDS) +
+                                      ['cloudflare', 'coreweave', 'vastdata'])
         }
     }
 
@@ -1898,7 +1898,8 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare', 'coreweave', 'vastdata']
+    allowed_workspace_cloud_names = list(
+        constants.ALL_CLOUDS) + ['cloudflare', 'coreweave', 'vastdata']
     # Create pattern for not supported clouds, i.e.
     # all clouds except aws, gcp, kubernetes, ssh, nebius
     not_supported_clouds = [

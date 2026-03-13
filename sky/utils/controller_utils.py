@@ -414,7 +414,7 @@ def _get_cloud_dependencies_installation_commands(
 
         python_packages.update(cloud_python_dependencies)
 
-    storage_clouds = storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()
+    storage_clouds = storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()  # pylint: disable=line-too-long
 
     if cloudflare.NAME in storage_clouds:
         python_packages.update(dependencies.extras_require['cloudflare'])
