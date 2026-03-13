@@ -75,6 +75,55 @@ def serialize_kubernetes_node_info(return_value: Dict[str, Any]) -> str:
     return orjson.dumps(return_value).decode('utf-8')
 
 
+def _map_autostopping_for_old_clients(status_str: str) -> str:
+    """Map AUTOSTOPPING to UP for clients that predate API version 29.
+
+    Before API version 29, AUTOSTOPPING did not exist and clusters being
+    autostopped appeared as UP. Old clients crash with ValueError if they
+    receive the unknown status string.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and remote_api_version < 29 and
+            status_str == 'AUTOSTOPPING'):
+        return 'UP'
+    return status_str
+
+
+@register_serializer('status')
+def serialize_status(return_value: Any) -> str:
+    """Serialize cluster status with AUTOSTOPPING compat for old clients."""
+    if return_value is not None:
+        for cluster in return_value:
+            cluster['status'] = _map_autostopping_for_old_clients(
+                cluster['status'])
+    return orjson.dumps(return_value).decode('utf-8')
+
+
+@register_serializer('status_kubernetes')
+def serialize_status_kubernetes(return_value: Any) -> str:
+    """Serialize kubernetes status with AUTOSTOPPING compat for old clients."""
+    if return_value is not None:
+        all_clusters, unmanaged_clusters = return_value[0], return_value[1]
+        for cluster in all_clusters:
+            cluster['status'] = _map_autostopping_for_old_clients(
+                cluster['status'])
+        for cluster in unmanaged_clusters:
+            cluster['status'] = _map_autostopping_for_old_clients(
+                cluster['status'])
+    return orjson.dumps(return_value).decode('utf-8')
+
+
+@register_serializer('cost_report')
+def serialize_cost_report(return_value: Any) -> str:
+    """Serialize cost report with AUTOSTOPPING compat for old clients."""
+    if return_value is not None:
+        for cluster_report in return_value:
+            if cluster_report['status'] is not None:
+                cluster_report['status'] = _map_autostopping_for_old_clients(
+                    cluster_report['status'])
+    return orjson.dumps(return_value).decode('utf-8')
+
+
 @register_serializer('realtime_slurm_gpu_availability')
 def serialize_realtime_slurm_gpu_availability(return_value: List[Any]) -> str:
     """Serialize Slurm GPU availability with version compatibility.
