@@ -142,7 +142,7 @@ class Request:
     should_retry: bool = False
     # When the request finished.
     finished_at: Optional[float] = None
-    # Blob ID for uploaded file mounts (content-addressed).
+    # Blob ID of uploaded file mounts
     file_mounts_blob_id: Optional[str] = None
 
     @property

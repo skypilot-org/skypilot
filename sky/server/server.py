@@ -565,8 +565,8 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
-async def cleanup_unreferenced_blobs():
-    """Delete content-addressed blobs not referenced by any active request."""
+async def cleanup_unreferenced_file_mounts():
+    """Delete file mounts not referenced by any active request."""
 
     def _do_cleanup():
         clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
@@ -580,22 +580,19 @@ async def cleanup_unreferenced_blobs():
             blobs_dir = user_dir / 'file_mounts' / 'blobs'
             if not blobs_dir.exists():
                 continue
-            # Delete unreferenced blobs older than grace period.
+            # Delete unreferenced extraction dirs older than grace period.
             grace_cutoff = time.time() - 3600  # 1 hour grace
-            for blob in blobs_dir.glob('*.zip'):
-                blob_id = blob.stem
+            for entry in blobs_dir.iterdir():
+                if not entry.is_dir():
+                    continue
+                if entry.name in ('.locks', '.staging'):
+                    continue
+                blob_id = entry.name
                 if (blob_id not in active_blob_ids and
-                        blob.stat().st_mtime < grace_cutoff):
+                        entry.stat().st_mtime < grace_cutoff):
                     logger.info(f'GC: removing unreferenced blob '
-                                f'{blob.name} for user {user_dir.name}')
-                    blob.unlink(missing_ok=True)
-            # Clean up lock files for blobs that no longer exist.
-            locks_dir = blobs_dir / '.locks'
-            if locks_dir.exists():
-                for lock_file in locks_dir.glob('*.lock'):
-                    blob_id = lock_file.stem
-                    if not (blobs_dir / f'{blob_id}.zip').exists():
-                        lock_file.unlink(missing_ok=True)
+                                f'{blob_id} for user {user_dir.name}')
+                    shutil.rmtree(entry, ignore_errors=True)
             # Clean up stale staging directories from interrupted uploads.
             staging_base = blobs_dir / '.staging'
             if staging_base.exists():
@@ -612,7 +609,7 @@ async def cleanup_unreferenced_blobs():
         try:
             await asyncio.to_thread(_do_cleanup)
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Error in cleanup_unreferenced_blobs: '
+            logger.error(f'Error in cleanup_unreferenced_file_mounts: '
                          f'{common_utils.format_exception(e)}')
 
 
@@ -680,7 +677,6 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             logger.debug(f'Request {event.id} already exists.')
     await schedule_on_boot_check_async()
     asyncio.create_task(cleanup_upload_ids())
-    asyncio.create_task(cleanup_unreferenced_blobs())
     # Start periodic version check task (runs daily)
     asyncio.create_task(version_check.check_versions_periodically())
     if metrics_utils.METRICS_ENABLED:
@@ -779,7 +775,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
             # then the user is attempting path traversal, so deny the request.
             parent = pathlib.Path('/dashboard')
             request_path = pathlib.Path(posixpath.normpath(request.url.path))
-            if not common.is_relative_to(request_path, parent):
+            if not _is_relative_to(request_path, parent):
                 return fastapi.responses.JSONResponse(
                     status_code=403, content={'detail': 'Forbidden'})
         return await call_next(request)
@@ -1323,9 +1319,8 @@ async def _receive_and_assemble_chunks(
     request: fastapi.Request,
     chunk_index: int,
     total_chunks: int,
-    unzip: bool,
 ) -> Optional[payloads.UploadZipFileResponse]:
-    """Receive chunks and assemble them into a zip file."""
+    """Receive chunks, assemble into a zip file, and extract."""
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
     # test.
@@ -1395,13 +1390,13 @@ async def _receive_and_assemble_chunks(
                             break
                         await zip_file.write(data)
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    if unzip:
-        await unzip_file(zip_file_path, base_dir)
+    await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
     return None
 
 
+# TODO(aylei): for backward compatibility, remove after v0.14.0
 @app.post('/upload')
 async def upload_zip_file(request: fastapi.Request, user_hash: str,
                           upload_id: str, chunk_index: int,
@@ -1439,8 +1434,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                                                 zip_name=upload_id,
                                                 request=request,
                                                 chunk_index=chunk_index,
-                                                total_chunks=total_chunks,
-                                                unzip=True)
+                                                total_chunks=total_chunks)
     if result is not None:
         return result
     return payloads.UploadZipFileResponse(
@@ -1457,11 +1451,11 @@ async def check_blob_exists(request: fastapi.Request, user_hash: str,
     user_id = user_hash
     if request.state.auth_user is not None:
         user_id = request.state.auth_user.id
-    blob_path = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-                 'file_mounts' / 'blobs' / f'{blob_id}.zip')
-    if blob_path.exists():
+    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+                'file_mounts' / 'blobs' / blob_id)
+    if blob_dir.is_dir():
         # Refresh mtime to claim a longer lifetime of the blob cache
-        blob_path.touch()
+        os.utime(blob_dir)
         return {'exists': True}
     return {'exists': False}
 
@@ -1472,9 +1466,9 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
                       total_chunks: int) -> payloads.UploadZipFileResponse:
     """Upload a file mount blob (chunked).
 
-    Unlike /upload, this endpoint stores the assembled zip as a shared blob
-    (blobs/{upload_id}.zip) without extracting it. Extraction happens at
-    request execution time.
+    Unlike /upload, this endpoint receives chunks, assembles and extracts
+    into a staging directory, then atomically renames to a shared extraction
+    directory (blobs/{upload_id}/) so all requests can reuse it.
     """
     if not re.match(r'^[0-9a-f]{64}$', upload_id):
         raise fastapi.HTTPException(
@@ -1485,9 +1479,9 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     mount_dir = await _prepare_client_mount_dir(user_hash, request)
     blobs_dir = mount_dir / 'blobs'
     await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
-    blob_path = blobs_dir / f'{upload_id}.zip'
+    target_dir = blobs_dir / upload_id
 
-    if blob_path.exists():
+    if target_dir.exists():
         return payloads.UploadZipFileResponse(
             status=responses.UploadStatus.COMPLETED.value)
 
@@ -1499,33 +1493,35 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     async with lock:
         # Re-check after acquiring the lock: another upload may have
         # completed while we were waiting.
-        if blob_path.exists():
+        if target_dir.exists():
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.COMPLETED.value)
-        # For /upload_v2, we use staging directory to avoid corruption of
-        # the blob:
-        # - In /upload, each upload is a separate path (upload id), thus a
-        #   broken upload will not affect other operations.
-        # - In /upload_v2, we share the uploaded blob via hash, thus we
-        #   need to ensure the final blob (blobs/{blob_id}.zip) is atomic.
+
+        # Receive chunks, assemble, and extract into staging dir.
         staging_dir = blobs_dir / '.staging' / upload_id
-        staging_zip = staging_dir / 'staging.zip'
         result = await _receive_and_assemble_chunks(base_dir=staging_dir,
                                                     zip_name='staging',
                                                     request=request,
                                                     chunk_index=chunk_index,
-                                                    total_chunks=total_chunks,
-                                                    unzip=False)
+                                                    total_chunks=total_chunks)
         if result is not None:
             return result
-        # Move the staging zip to final blob path (atomic on same
-        # filesystem).
-        staging_zip.rename(blob_path)
-        logger.info(f'Uploaded blob: {blob_path}')
-        # Clean staging dir.
-        await asyncio.to_thread(shutil.rmtree, str(staging_dir), True)
+        # Atomic rename of the extracted staging dir to the final
+        # directory (same filesystem).
+        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
+
+
+def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    """Checks if path is a subpath of parent."""
+    try:
+        # We cannot use is_relative_to, as it is only added after 3.9.
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 async def unzip_file(zip_file_path: pathlib.Path,
@@ -1534,7 +1530,56 @@ async def unzip_file(zip_file_path: pathlib.Path,
 
     def _do_unzip() -> None:
         try:
-            common.unzip_to_dir(zip_file_path, client_file_mounts_dir)
+            with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+                for member in zipf.infolist():
+                    # Determine the new path
+                    original_path = os.path.normpath(member.filename)
+                    new_path = client_file_mounts_dir / original_path.lstrip(
+                        '/')
+
+                    # Security check: ensure extracted path stays within target
+                    # directory to prevent Zip Slip attacks (path traversal via
+                    # malicious "../" sequences in archive member names).
+                    resolved_path = new_path.resolve()
+                    if not _is_relative_to(resolved_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(
+                            f'Zip member {member.filename!r} would extract '
+                            'outside target directory. Aborted.')
+
+                    if (member.external_attr >> 28) == 0xA:
+                        # Symlink. Read the target path and create a symlink.
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        target = zipf.read(member).decode()
+                        assert not os.path.isabs(target), target
+                        # Since target is a relative path, we need to check that
+                        # it is under `client_file_mounts_dir` for security.
+                        full_target_path = (new_path.parent / target).resolve()
+                        if not _is_relative_to(full_target_path,
+                                               client_file_mounts_dir):
+                            raise ValueError(
+                                f'Symlink target {target} leads to a '
+                                'file not in userspace. Aborted.')
+
+                        if new_path.exists() or new_path.is_symlink():
+                            new_path.unlink(missing_ok=True)
+                        new_path.symlink_to(
+                            target,
+                            target_is_directory=member.filename.endswith('/'))
+                        continue
+
+                    # Handle directories
+                    if member.filename.endswith('/'):
+                        new_path.mkdir(parents=True, exist_ok=True)
+                        continue
+
+                    # Handle files
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    with zipf.open(member) as member_file, new_path.open(
+                            'wb') as f:
+                        # Use shutil.copyfileobj to copy files in chunks,
+                        # so it does not load the entire file into memory.
+                        shutil.copyfileobj(member_file, f)
         except zipfile.BadZipFile as e:
             logger.error(f'Bad zip file: {zip_file_path}')
             raise fastapi.HTTPException(
@@ -3101,6 +3146,10 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 managed_job_state.job_event_retention_daemon()))
+        # Unreferenced file mounts cleanup is based on database so should
+        # be a singleton task.
+        global_tasks.append(
+            background.create_task(cleanup_unreferenced_file_mounts()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

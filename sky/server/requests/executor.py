@@ -24,8 +24,6 @@ import contextlib
 import multiprocessing
 import os
 import queue as queue_lib
-import re
-import shutil
 import signal
 import sys
 import threading
@@ -410,32 +408,6 @@ def override_request_env_and_config(
         os.environ.update(original_env)
 
 
-def _extract_blob_for_request(request_body: payloads.RequestBody,
-                              request_id: str) -> str:
-    """Extract the uploaded blob to a request-private directory.
-
-    Returns the extraction directory path.
-    """
-    blob_id = request_body.file_mounts_blob_id
-    assert blob_id is not None, 'file_mounts_blob_id is required'
-    if not re.match(r'^[0-9a-f]{64}$', blob_id):
-        raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
-    user_hash = request_body.env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
-    client_dir = (server_common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
-                  user_hash / 'file_mounts')
-    blob_path = client_dir / 'blobs' / f'{blob_id}.zip'
-    file_mounts_dir = client_dir / 'exec' / request_id
-    file_mounts_dir.mkdir(parents=True, exist_ok=True)
-
-    if not blob_path.exists():
-        raise FileNotFoundError(
-            f'Blob not found: {blob_path}. The file mounts blob may have been '
-            'garbage collected before execution started.')
-
-    server_common.unzip_to_dir(blob_path, file_mounts_dir)
-    return str(file_mounts_dir)
-
-
 def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
     raise KeyboardInterrupt
 
@@ -495,7 +467,6 @@ def _request_execution_wrapper(request_id: str,
             original_stderr = None
 
     request_name = None
-    file_mounts_dir = None
     try:
         # As soon as the request is updated with the executor PID, we can
         # receive SIGTERM from cancellation. So, we update the request inside
@@ -540,17 +511,11 @@ def _request_execution_wrapper(request_id: str,
                     config = skypilot_config.to_dict()
                     logger.debug(f'request config: \n'
                                  f'{yaml_utils.dump_yaml_str(dict(config))}')
-                # Extract the file mounts blob and override the client file
-                # mounts directory, if a shared blob is used.
-                if getattr(request_body, 'file_mounts_blob_id', None):
-                    file_mounts_dir = _extract_blob_for_request(
-                        request_body, request_id)
                 (metrics_utils.SKY_APISERVER_PROCESS_EXECUTION_START_TOTAL.
                  labels(request=request_name, pid=pid).inc())
                 with metrics_utils.time_it(name=request_name,
                                            group='request_execution'):
-                    return_value = func(**request_body.to_kwargs(
-                        file_mounts_dir=file_mounts_dir))
+                    return_value = func(**request_body.to_kwargs())
                 f.flush()
     except KeyboardInterrupt:
         logger.info(f'Request {request_id} cancelled by user')
@@ -591,9 +556,6 @@ def _request_execution_wrapper(request_id: str,
         logger.info(f'Request {request_id} finished')
     finally:
         _restore_output()
-        # Clean up per-request extraction dir from content-addressed blobs.
-        if file_mounts_dir is not None:
-            shutil.rmtree(file_mounts_dir, ignore_errors=True)
         try:
             # Capture the peak RSS before GC.
             peak_rss = max(proc.memory_info().rss, metrics_lib.peak_rss_bytes)

@@ -19,7 +19,6 @@ from typing import (Any, Callable, cast, Dict, Generic, Literal, Optional,
                     Tuple, TypeVar, Union)
 from urllib.request import Request
 import uuid
-import zipfile
 
 import cachetools
 import click
@@ -937,11 +936,37 @@ def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
     return cast(Callable[P, T], wrapper)
 
 
+def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
+    """Resolve the shared extraction directory for a blob.
+
+    Returns the extraction directory path. The extraction dir is created
+    at upload time by the server handler (/upload_v2).
+
+    Args:
+        blob_id: The content-addressed blob ID (64-char hex string).
+        user_hash: The user hash for locating the client directory.
+
+    Raises:
+        ValueError: If blob_id is not a valid 64-char hex string.
+        FileNotFoundError: If the blob directory does not exist.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
+    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+                  'file_mounts')
+    extraction_dir = client_dir / 'blobs' / blob_id
+    if not extraction_dir.is_dir():
+        raise FileNotFoundError(
+            f'Blob not found: {extraction_dir}. The file mounts blob may '
+            'have been garbage collected before execution started.')
+    return str(extraction_dir)
+
+
 def process_mounts_in_task_on_api_server(
         task: str,
         env_vars: Dict[str, str],
         workdir_only: bool,
-        file_mounts_dir: Optional[str] = None) -> 'dag_lib.Dag':
+        file_mounts_blob_id: Optional[str] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -955,8 +980,8 @@ def process_mounts_in_task_on_api_server(
         env_vars: The environment variables of the task.
         workdir_only: Whether to only translate the workdir, which is used for
             `exec`, as it does not need other files/folders in file_mounts.
-        file_mounts_dir: If set, resolve file mount paths relative to this
-            directory instead of the default client_file_mounts_dir.
+        file_mounts_blob_id: If set, resolve file mount paths relative to the
+            blob directory instead of the default client_file_mounts_dir.
 
     Returns:
         The translated task as a single-task dag.
@@ -980,9 +1005,12 @@ def process_mounts_in_task_on_api_server(
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Use the private file mounts directory, if provided.
-    file_mounts_base = (pathlib.Path(file_mounts_dir) if file_mounts_dir
-                        is not None else client_file_mounts_dir)
+    # Use the blob directory for file mounts, if a blob ID is provided.
+    if file_mounts_blob_id is not None:
+        file_mounts_base = pathlib.Path(
+            resolve_blob_dir(file_mounts_blob_id, user_hash))
+    else:
+        file_mounts_base = client_file_mounts_dir
     file_mounts_base.mkdir(parents=True, exist_ok=True)
 
     def _get_client_file_mounts_path(
@@ -1111,65 +1139,3 @@ def clear_local_api_server_database() -> None:
             os.remove(f'{db_path}{extension}')
         except FileNotFoundError:
             logger.debug(f'Database file {db_path}{extension} not found.')
-
-
-def is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
-    """Checks if path is a subpath of parent."""
-    try:
-        # We cannot use is_relative_to, as it is only added after 3.9.
-        path.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
-
-def unzip_to_dir(zip_file_path: pathlib.Path, target_dir: pathlib.Path) -> None:
-    """Unzip a file into target_dir with security checks.
-
-    Prevents Zip Slip attacks and validates symlink targets. Does NOT
-    delete the zip file – callers handle cleanup.
-    """
-    with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-        for member in zipf.infolist():
-            # Determine the new path
-            original_path = os.path.normpath(member.filename)
-            new_path = target_dir / original_path.lstrip('/')
-
-            # Security check: ensure extracted path stays within target
-            # directory to prevent Zip Slip attacks (path traversal via
-            # malicious "../" sequences in archive member names).
-            resolved_path = new_path.resolve()
-            if not is_relative_to(resolved_path, target_dir):
-                raise ValueError(
-                    f'Zip member {member.filename!r} would extract '
-                    'outside target directory. Aborted.')
-
-            if (member.external_attr >> 28) == 0xA:
-                # Symlink. Read the target path and create a symlink.
-                new_path.parent.mkdir(parents=True, exist_ok=True)
-                target = zipf.read(member).decode()
-                assert not os.path.isabs(target), target
-                # Since target is a relative path, we need to check that
-                # it is under `target_dir` for security.
-                full_target_path = (new_path.parent / target).resolve()
-                if not is_relative_to(full_target_path, target_dir):
-                    raise ValueError(f'Symlink target {target} leads to a '
-                                     'file not in userspace. Aborted.')
-
-                if new_path.exists() or new_path.is_symlink():
-                    new_path.unlink(missing_ok=True)
-                new_path.symlink_to(
-                    target, target_is_directory=member.filename.endswith('/'))
-                continue
-
-            # Handle directories
-            if member.filename.endswith('/'):
-                new_path.mkdir(parents=True, exist_ok=True)
-                continue
-
-            # Handle files
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            with zipf.open(member) as member_file, new_path.open('wb') as f:
-                # Use shutil.copyfileobj to copy files in chunks,
-                # so it does not load the entire file into memory.
-                shutil.copyfileobj(member_file, f)

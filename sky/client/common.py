@@ -179,7 +179,8 @@ class UploadChunkParams:
     file_path: str
     upload_logger: logging.Logger
     log_file: str
-    # The upload endpoint path, e.g. '/upload' or '/upload_v2'.
+    # For backward compatibility
+    # TODO(aylei): remove this and always use /upload_v2 after 0.14.0
     endpoint: str = '/upload'
 
 
@@ -333,8 +334,8 @@ def upload_mounts_to_api_server(
 
     Returns:
         A tuple of (dag, file_mounts_blob_id). The dag has file_mounts_mapping
-        updated. file_mounts_blob_id is the content-addressed blob ID if
-        /upload_v2 was used, or None if the old /upload path was used.
+        updated. file_mounts_blob_id is the blob ID of file mounts if /upload_v2
+        was used, or None if the old /upload path was used.
     """
 
     if server_common.is_api_server_local():
@@ -391,7 +392,7 @@ def upload_mounts_to_api_server(
         upload_id = f'{upload_id}-{uuid.uuid4().hex[:8]}'
         log_file = os.path.join(FILE_UPLOAD_LOGS_DIR, f'{upload_id}.log')
 
-        # Check if the server supports content-addressed uploads.
+        # Check if the server supports v2 upload API.
         remote_api_version = versions.get_remote_api_version()
         use_v2 = (remote_api_version is not None and
                   remote_api_version >= server_constants.UPLOAD_API_V2_VERSION)

@@ -425,7 +425,7 @@ async def test_launch_endpoint_passes_auth_user():
         assert args[0] == 'launch-request-id'
 
 
-# --- Tests for cleanup_unreferenced_blobs ---
+# --- Tests for cleanup_unreferenced_file_mounts ---
 
 # A deterministic 64-char hex string used as a blob ID in tests.
 _BLOB_HEX = 'a' * 64
@@ -441,11 +441,12 @@ def _make_blobs_dir(tmp_path: pathlib.Path,
 
 def _create_blob(blobs_dir: pathlib.Path, blob_id: str,
                  mtime: float) -> pathlib.Path:
-    """Create a .zip blob file with the given *mtime*."""
-    blob_path = blobs_dir / f'{blob_id}.zip'
-    blob_path.write_bytes(b'fake-zip-content')
-    os.utime(blob_path, (mtime, mtime))
-    return blob_path
+    """Create a blob extraction directory with the given *mtime*."""
+    extraction_dir = blobs_dir / blob_id
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+    (extraction_dir / 'placeholder.txt').write_text('test')
+    os.utime(extraction_dir, (mtime, mtime))
+    return extraction_dir
 
 
 def _mock_sleep_cancel():
@@ -483,7 +484,7 @@ async def test_cleanup_blobs_no_blobs_dir(tmp_path):
          mock.patch('asyncio.sleep',
                     side_effect=_mock_sleep_cancel()):
         with pytest.raises(asyncio.CancelledError):
-            await server.cleanup_unreferenced_blobs()
+            await server.cleanup_unreferenced_file_mounts()
 
     # get_active_file_mounts_blob_ids is called unconditionally, but
     # no blobs are deleted because there is no blobs directory.
@@ -506,7 +507,7 @@ async def test_cleanup_blobs_active_blob_not_deleted(tmp_path):
          mock.patch('asyncio.sleep',
                     side_effect=_mock_sleep_cancel()):
         with pytest.raises(asyncio.CancelledError):
-            await server.cleanup_unreferenced_blobs()
+            await server.cleanup_unreferenced_file_mounts()
 
     assert blob_path.exists(), 'Active blob should not be deleted'
 
@@ -516,7 +517,7 @@ async def test_cleanup_blobs_unreferenced_old_blob_deleted(tmp_path):
     """An unreferenced blob older than the 1-hour grace period IS deleted."""
     blobs_dir = _make_blobs_dir(tmp_path, user='userA')
     old_mtime = time.time() - 7200  # 2 hours ago
-    blob_path = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+    extraction_dir = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
 
     with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
                            pathlib.Path(tmp_path)), \
@@ -526,9 +527,10 @@ async def test_cleanup_blobs_unreferenced_old_blob_deleted(tmp_path):
          mock.patch('asyncio.sleep',
                     side_effect=_mock_sleep_cancel()):
         with pytest.raises(asyncio.CancelledError):
-            await server.cleanup_unreferenced_blobs()
+            await server.cleanup_unreferenced_file_mounts()
 
-    assert not blob_path.exists(), 'Unreferenced old blob should be deleted'
+    assert not extraction_dir.exists(
+    ), 'Unreferenced old blob should be deleted'
 
 
 @pytest.mark.asyncio
@@ -546,7 +548,7 @@ async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
          mock.patch('asyncio.sleep',
                     side_effect=_mock_sleep_cancel()):
         with pytest.raises(asyncio.CancelledError):
-            await server.cleanup_unreferenced_blobs()
+            await server.cleanup_unreferenced_file_mounts()
 
     assert blob_path.exists(), (
         'Unreferenced but recent blob should not be deleted')
