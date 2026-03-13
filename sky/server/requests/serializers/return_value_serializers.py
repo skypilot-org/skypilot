@@ -79,8 +79,8 @@ def _needs_autostopping_compat() -> bool:
     """Check if the client predates API version 29 (AUTOSTOPPING).
 
     Before API version 29, AUTOSTOPPING did not exist and clusters being
-    autostopped appeared as UP. Old clients crash with ValueError if they
-    receive the unknown status string.
+    autostopped were set to INIT during status refresh. Old clients crash
+    with ValueError if they receive the unknown status string.
     """
     remote_api_version = versions.get_remote_api_version()
     return remote_api_version is not None and remote_api_version < 29
@@ -92,7 +92,7 @@ def serialize_status(return_value: Any) -> str:
     if return_value is not None and _needs_autostopping_compat():
         for cluster in return_value:
             if cluster['status'] == 'AUTOSTOPPING':
-                cluster['status'] = 'UP'
+                cluster['status'] = 'INIT'
     return orjson.dumps(return_value).decode('utf-8')
 
 
@@ -102,7 +102,7 @@ def serialize_status_kubernetes(return_value: Any) -> str:
     if return_value is not None and _needs_autostopping_compat():
         for cluster in return_value[0] + return_value[1]:
             if cluster['status'] == 'AUTOSTOPPING':
-                cluster['status'] = 'UP'
+                cluster['status'] = 'INIT'
     return orjson.dumps(return_value).decode('utf-8')
 
 
@@ -112,7 +112,7 @@ def serialize_cost_report(return_value: Any) -> str:
     if return_value is not None and _needs_autostopping_compat():
         for cluster_report in return_value:
             if cluster_report['status'] == 'AUTOSTOPPING':
-                cluster_report['status'] = 'UP'
+                cluster_report['status'] = 'INIT'
     return orjson.dumps(return_value).decode('utf-8')
 
 

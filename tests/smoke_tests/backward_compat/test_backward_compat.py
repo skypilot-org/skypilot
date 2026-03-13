@@ -718,12 +718,12 @@ class TestBackwardCompatibility:
                 cluster_name=cluster_name,
                 cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
                 timeout=300),
-            # Old client: sky status should show UP (mapped from
+            # Old client: sky status should show INIT (mapped from
             # AUTOSTOPPING) for clients < 29, or AUTOSTOPPING for >= 29.
             f'{self.ACTIVATE_BASE} && result="$(sky status '
             f'{cluster_name})"; echo "$result"; '
             f'echo "$result" | grep {cluster_name} | grep '
-            f'{"UP" if self.BASE_API_VERSION < 29 else "AUTOSTOPPING"}',
+            f'{"INIT" if self.BASE_API_VERSION < 29 else "AUTOSTOPPING"}',
             # serve test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',

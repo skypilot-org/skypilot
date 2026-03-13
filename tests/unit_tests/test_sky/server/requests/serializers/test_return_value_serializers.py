@@ -498,8 +498,8 @@ class TestSerializeStatus:
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )
-    def test_old_client_maps_autostopping_to_up(self, mock_get_version):
-        """Test that AUTOSTOPPING is mapped to UP for old clients (< 29)."""
+    def test_old_client_maps_autostopping_to_init(self, mock_get_version):
+        """Test that AUTOSTOPPING is mapped to INIT for old clients (< 29)."""
         mock_get_version.return_value = 28
         data = [{
             'name': 'test-cluster',
@@ -509,7 +509,7 @@ class TestSerializeStatus:
         serializer = return_value_serializers.get_serializer(
             server_constants.REQUEST_NAME_PREFIX + 'status')
         result = json.loads(serializer(data))
-        assert result[0]['status'] == 'UP'
+        assert result[0]['status'] == 'INIT'
 
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
@@ -599,9 +599,9 @@ class TestSerializeStatus:
         serializer = return_value_serializers.get_serializer(
             server_constants.REQUEST_NAME_PREFIX + 'status')
         result = json.loads(serializer(data))
-        assert result[0]['status'] == 'UP'
+        assert result[0]['status'] == 'INIT'
         assert result[1]['status'] == 'UP'
-        assert result[2]['status'] == 'UP'
+        assert result[2]['status'] == 'INIT'
 
 
 class TestSerializeStatusKubernetes:
@@ -618,7 +618,7 @@ class TestSerializeStatusKubernetes:
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )
     def test_old_client_maps_autostopping_in_both_lists(self, mock_get_version):
-        """Test AUTOSTOPPING -> UP in both all_clusters and unmanaged_clusters."""
+        """Test AUTOSTOPPING -> INIT in both all_clusters and unmanaged."""
         mock_get_version.return_value = 28
         data = [
             [{
@@ -638,8 +638,8 @@ class TestSerializeStatusKubernetes:
         serializer = return_value_serializers.get_serializer(
             server_constants.REQUEST_NAME_PREFIX + 'status_kubernetes')
         result = json.loads(serializer(data))
-        assert result[0][0]['status'] == 'UP'
-        assert result[1][0]['status'] == 'UP'
+        assert result[0][0]['status'] == 'INIT'
+        assert result[1][0]['status'] == 'INIT'
         # Jobs and context should be untouched
         assert result[2][0]['status'] == 'RUNNING'
         assert result[3] == 'context-name'
@@ -682,8 +682,8 @@ class TestSerializeCostReport:
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
     )
-    def test_old_client_maps_autostopping_to_up(self, mock_get_version):
-        """Test AUTOSTOPPING -> UP for old clients."""
+    def test_old_client_maps_autostopping_to_init(self, mock_get_version):
+        """Test AUTOSTOPPING -> INIT for old clients."""
         mock_get_version.return_value = 28
         data = [{
             'name': 'c1',
@@ -693,7 +693,7 @@ class TestSerializeCostReport:
         serializer = return_value_serializers.get_serializer(
             server_constants.REQUEST_NAME_PREFIX + 'cost_report')
         result = json.loads(serializer(data))
-        assert result[0]['status'] == 'UP'
+        assert result[0]['status'] == 'INIT'
 
     @mock.patch(
         'sky.server.requests.serializers.return_value_serializers.versions.get_remote_api_version'
