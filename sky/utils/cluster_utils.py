@@ -46,7 +46,9 @@ def _get_local_openssh_version() -> Optional[Tuple[int, ...]]:
         match = re.search(r'OpenSSH_(\d+)\.(\d+)', version_output)
         if match:
             return (int(match.group(1)), int(match.group(2)))
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
+        # This is non-critical and runs client-side, so we catch broadly
+        # to avoid unexpected exceptions breaking the client.
         logger.debug(f'Failed to determine OpenSSH version: '
                      f'{common_utils.format_exception(e)}')
     return None
