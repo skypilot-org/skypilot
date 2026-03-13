@@ -46,8 +46,8 @@ def _get_local_openssh_version() -> Optional[Tuple[int, ...]]:
         match = re.search(r'OpenSSH_(\d+)\.(\d+)', version_output)
         if match:
             return (int(match.group(1)), int(match.group(2)))
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        logger.warning(f'Failed to determine OpenSSH version: {e}')
     return None
 
 
