@@ -48,6 +48,18 @@ By default, the dashboard will connect to your local API server at `http://127.0
 export SKYPILOT_API_SERVER_ENDPOINT=http://username:password@skypilot-api.domain.com:30050
 ```
 
+If the API server uses OAuth2, set the environment variable:
+
+```bash
+export SKYPILOT_OAUTH_ENABLED=1
+```
+
+If you want to use a Service Account, set the environment variable:
+
+```bash
+export SKYPILOT_ACCESS_TOKEN=sky_...
+```
+
 Run the development server:
 
 ```bash
