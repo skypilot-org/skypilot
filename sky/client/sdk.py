@@ -2393,7 +2393,6 @@ def api_status(
 
 # === API server management APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.

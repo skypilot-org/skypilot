@@ -11,7 +11,7 @@ import {
 import { installUpgradeInterceptor } from '@/utils/apiInterceptor';
 import { PluginSlot } from '@/plugins/PluginSlot';
 
-function DefaultNavbarLayout({ children, isUpgrading }) {
+function DefaultNavbarLayout({ children }) {
   return (
     <>
       {/* Fixed top bar with navigation */}
@@ -19,13 +19,10 @@ function DefaultNavbarLayout({ children, isUpgrading }) {
         <TopBar />
       </div>
 
-      {/* Upgrade banner */}
-      <UpgradeBanner />
-
       {/* Main content */}
       <div
         className="transition-all duration-200 ease-in-out min-h-screen"
-        style={{ paddingTop: isUpgrading ? '112px' : '56px' }}
+        style={{ paddingTop: '56px' }}
       >
         <main className="p-6">{children}</main>
       </div>
@@ -35,7 +32,7 @@ function DefaultNavbarLayout({ children, isUpgrading }) {
 
 function LayoutContent({ children, highlighted }) {
   const isMobile = useMobile();
-  const { reportUpgrade, clearUpgrade, isUpgrading } = useUpgradeDetection();
+  const { reportUpgrade, clearUpgrade } = useUpgradeDetection();
   const [pluginsSettled, setPluginsSettled] = useState(false);
 
   // Install the fetch interceptor on mount
@@ -62,14 +59,14 @@ function LayoutContent({ children, highlighted }) {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Upgrade banner - rendered outside PluginSlot so it shows
+          regardless of which navigation plugin is active */}
+      <UpgradeBanner />
+
       <PluginSlot
         name="layout.navigation"
-        context={{ children, isUpgrading, isMobile }}
-        fallback={
-          <DefaultNavbarLayout isUpgrading={isUpgrading}>
-            {children}
-          </DefaultNavbarLayout>
-        }
+        context={{ children, isMobile }}
+        fallback={<DefaultNavbarLayout>{children}</DefaultNavbarLayout>}
       />
 
       {/* Welcome notification for first-time visitors */}

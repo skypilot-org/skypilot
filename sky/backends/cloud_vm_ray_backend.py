@@ -292,6 +292,7 @@ def _get_cluster_config_template(cloud):
         clouds.Seeweb: 'seeweb-ray.yml.j2',
         clouds.Yotta: 'yotta-ray.yml.j2',
         clouds.Mithril: 'mithril-ray.yml.j2',
+        clouds.Verda: 'verda-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
 

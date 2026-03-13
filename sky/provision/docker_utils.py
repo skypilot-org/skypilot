@@ -340,8 +340,12 @@ class DockerInitializer:
                 # enough), or the image server is public.
                 # For the former case, gcloud should be available, and latter
                 # should be fine to fail the following command.
-                self._run('gcloud auth configure-docker '
-                          f'{docker_login_config.server} --quiet || true')
+                # Use sudo so the credential helper is configured in root's
+                # docker config (/root/.docker/config.json), since docker
+                # commands run with sudo. See #8906.
+                self._run('sudo gcloud auth configure-docker '
+                          f'{shlex.quote(docker_login_config.server)} '
+                          '--quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)

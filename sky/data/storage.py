@@ -28,6 +28,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -64,6 +65,7 @@ STORE_ENABLED_CLOUDS: List[str] = [
     str(clouds.Nebius()),
     cloudflare.NAME,
     coreweave.NAME,
+    vastdata.NAME,
 ]
 
 # Maximum number of concurrent rsync upload processes
@@ -101,6 +103,10 @@ def get_cached_enabled_storage_cloud_names_or_refresh(
     if coreweave_is_enabled:
         enabled_clouds.append(coreweave.NAME)
 
+    vastdata_is_enabled, _ = vastdata.check_storage_credentials()
+    if vastdata_is_enabled:
+        enabled_clouds.append(vastdata.NAME)
+
     if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
@@ -135,6 +141,7 @@ class StoreType(enum.Enum):
     OCI = 'OCI'
     NEBIUS = 'NEBIUS'
     COREWEAVE = 'COREWEAVE'
+    VASTDATA = 'VASTDATA'
     VOLUME = 'VOLUME'
 
     @classmethod
@@ -1112,7 +1119,8 @@ class Storage(object):
                             f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in [
-                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw'
+                    's3', 'gs', 'https', 'r2', 'cos', 'oci', 'nebius', 'cw',
+                    'vastdata'
             ]:
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
@@ -1137,8 +1145,8 @@ class Storage(object):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         f'Supported paths: local, s3://, gs://, https://, '
-                        f'r2://, cos://, oci://, nebius://, cw://. '
-                        f'Got: {source}')
+                        f'r2://, cos://, oci://, nebius://, cw://, '
+                        f'vastdata://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self, name: Optional[str]) -> None:
@@ -1162,6 +1170,7 @@ class Storage(object):
                     'oci',
                     'nebius',
                     'cw',
+                    'vastdata',
             ]:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageNameError(
@@ -5023,3 +5032,56 @@ class CoreWeaveStore(S3CompatibleStore):
         data_utils.verify_coreweave_bucket(bucket_name, retry=36)
 
         return result
+
+
+@register_s3_compatible_store
+class VastDataStore(S3CompatibleStore):
+    """VastDataStore inherits from S3CompatibleStore and represents the backend
+    for VastData S3-compatible object storage buckets.
+
+    VastData is a separate company from Vast.ai (compute). This store
+    provides storage-only integration with VastData's S3-compatible API.
+    """
+
+    @classmethod
+    def get_config(cls) -> S3CompatibleConfig:
+        """Return the configuration for VastData Object Storage."""
+        return S3CompatibleConfig(
+            store_type='VASTDATA',
+            url_prefix='vastdata://',
+            client_factory=lambda region: data_utils.create_vastdata_client(),
+            resource_factory=lambda name: vastdata.resource('s3').Bucket(name),
+            split_path=data_utils.split_vastdata_path,
+            verify_bucket=data_utils.verify_vastdata_bucket,
+            aws_profile=vastdata.VASTDATA_PROFILE_NAME,
+            get_endpoint_url=vastdata.get_endpoint,
+            credentials_file=vastdata.VASTDATA_CREDENTIALS_PATH,
+            config_file=vastdata.VASTDATA_CONFIG_PATH,
+            cloud_name=vastdata.NAME,
+            default_region=vastdata.DEFAULT_REGION,
+            mount_cmd_factory=cls._get_vastdata_mount_cmd,
+        )
+
+    @classmethod
+    def _get_vastdata_mount_cmd(cls, bucket_name: str, mount_path: str,
+                                bucket_sub_path: Optional[str]) -> str:
+        """Factory method for VastData mount command."""
+        endpoint_url = vastdata.get_endpoint()
+        return mounting_utils.get_vastdata_mount_cmd(
+            vastdata.VASTDATA_CREDENTIALS_PATH, vastdata.VASTDATA_PROFILE_NAME,
+            bucket_name, endpoint_url, mount_path, bucket_sub_path)
+
+    def mount_cached_command(self,
+                             mount_path: str,
+                             config: Optional[MountCachedConfig] = None) -> str:
+        """VastData-specific cached mount implementation using rclone."""
+        install_cmd = mounting_utils.get_rclone_install_cmd()
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.VASTDATA.get_profile_name(self.name))
+        rclone_config = data_utils.Rclone.RcloneStores.VASTDATA.get_config(
+            rclone_profile_name=rclone_profile_name)
+        mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
+            rclone_config, rclone_profile_name, self.bucket.name, mount_path,
+            config)
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cached_cmd)

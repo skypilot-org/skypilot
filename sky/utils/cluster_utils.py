@@ -20,6 +20,50 @@ from sky.utils import lock_events
 
 logger = sky_logging.init_logger(__name__)
 
+# Minimum OpenSSH version that supports the SetEnv directive.
+_OPENSSH_SETENV_MIN_VERSION = (7, 8)
+
+
+@annotations.lru_cache(scope='global', maxsize=1)
+def _get_local_openssh_version() -> Optional[Tuple[int, ...]]:
+    """Get the local OpenSSH client version.
+
+    Parses the output of `ssh -V`, which looks like:
+        OpenSSH_8.9p1 Ubuntu-3ubuntu0.1, OpenSSL 3.0.2 15 Mar 2022
+
+    Returns:
+        A tuple of (major, minor) version numbers, e.g. (8, 9),
+        or None if the version cannot be determined.
+    """
+    try:
+        # ssh -V writes to stderr
+        result = subprocess.run(['ssh', '-V'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                                check=False)
+        version_output = result.stderr + result.stdout
+        match = re.search(r'OpenSSH_(\d+)\.(\d+)', version_output)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+    except Exception as e:  # pylint: disable=broad-except
+        # This is non-critical and runs client-side, so we catch broadly
+        # to avoid unexpected exceptions breaking the client.
+        logger.debug(f'Failed to determine OpenSSH version: '
+                     f'{common_utils.format_exception(e)}')
+    return None
+
+
+def _openssh_supports_setenv() -> bool:
+    """Check if the local OpenSSH version supports the SetEnv directive."""
+    version = _get_local_openssh_version()
+    if version is None:
+        # If we can't determine the version, include SetEnv as before
+        # to avoid silently breaking functionality on modern systems.
+        return True
+    return version >= _OPENSSH_SETENV_MIN_VERSION
+
+
 # The cluster yaml used to create the current cluster where the module is
 # called.
 SKY_CLUSTER_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
@@ -69,6 +113,7 @@ def _get_windows_userprofile_via_cmd() -> Optional[str]:
             text=True,
             timeout=5,
             check=False,
+            errors='replace',
         )
         if result.returncode == 0:
             userprofile = result.stdout.strip()
@@ -161,6 +206,11 @@ class SSHConfigHelper:
         # Not adding SSH agent forwarding by default here to avoid implicitly
         # using users' SSH keys in their local agent. Plus on sky launch side we
         # are not default adding SSH agent forwarding either.
+        setenv_line = ''
+        if _openssh_supports_setenv():
+            setenv_line = (f'  SetEnv '
+                           f'{constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}='
+                           f'{cluster_name_on_cloud}')
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -172,9 +222,11 @@ class SSHConfigHelper:
               UserKnownHostsFile=/dev/null
               GlobalKnownHostsFile=/dev/null
               Port {port}
-              SetEnv {constants.SKY_CLUSTER_NAME_ENV_VAR_KEY}={cluster_name_on_cloud}
-              {proxy}
-            """.rstrip())
+            """).rstrip()
+        if setenv_line:
+            codegen += '\n' + setenv_line
+        if proxy:
+            codegen += '\n' + f'  {proxy}'
         codegen = codegen + '\n'
         return codegen
 

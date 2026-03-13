@@ -706,3 +706,72 @@ class TestGetMountCachedCmdWithConfig:
         assert 'rclone mount myprofile:my-bucket /mnt/data' in cmd
         assert '--daemon' in cmd
         assert '> /dev/null 2>&1' in cmd
+
+
+class TestVastDataStorage:
+    """Tests for VastData storage integration."""
+
+    def test_store_type_vastdata_exists(self):
+        """Verify VASTDATA is a valid StoreType."""
+        assert storage_lib.StoreType.VASTDATA.value == 'VASTDATA'
+
+    def test_store_prefix(self):
+        """Verify VastData store prefix is vastdata://."""
+        assert storage_lib.StoreType.VASTDATA.store_prefix() == 'vastdata://'
+
+    def test_split_vastdata_path(self):
+        """Test splitting VastData URIs."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_vastdata_path(
+            'vastdata://my-bucket/path/to/data')
+        assert bucket == 'my-bucket'
+        assert key == 'path/to/data'
+
+    def test_split_vastdata_path_no_key(self):
+        """Test splitting VastData URIs with no key."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_vastdata_path('vastdata://my-bucket/')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_split_vastdata_path_bucket_only(self):
+        """Test splitting VastData URIs with bucket only."""
+        from sky.data import data_utils
+        bucket, key = data_utils.split_vastdata_path('vastdata://my-bucket')
+        assert bucket == 'my-bucket'
+        assert key == ''
+
+    def test_from_yaml_config_vastdata_source(self):
+        """Test Storage.from_yaml_config with VastData source."""
+        yaml_config = {
+            'source': 'vastdata://my-bucket',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.source == 'vastdata://my-bucket'
+
+    def test_from_yaml_config_vastdata_store_type(self):
+        """Test Storage.from_yaml_config with store set to vastdata."""
+        yaml_config = {
+            'name': 'test-bucket',
+            'store': 'vastdata',
+            'mode': 'COPY',
+        }
+        storage_obj = storage_lib.Storage.from_yaml_config(yaml_config)
+        assert storage_obj.name == 'test-bucket'
+
+    def test_vastdata_mount_cmd(self):
+        """Test VastData mount command generation."""
+        cmd = mounting_utils.get_vastdata_mount_cmd(
+            vastdata_credentials_path='~/.vastdata/vastdata.credentials',
+            vastdata_profile_name='vastdata',
+            bucket_name='test-bucket',
+            endpoint_url='https://s3.example.com',
+            mount_path='/mnt/data')
+        assert 'test-bucket' in cmd
+        assert 'https://s3.example.com' in cmd
+        assert '/mnt/data' in cmd
+        assert 'AWS_SHARED_CREDENTIALS_FILE=' in cmd
+
+    def test_vastdata_in_store_enabled_clouds(self):
+        """Verify VastData is in STORE_ENABLED_CLOUDS."""
+        assert 'VastData' in storage_lib.STORE_ENABLED_CLOUDS
