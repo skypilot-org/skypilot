@@ -29,12 +29,11 @@ def _run_upload(workdir: str) -> dict:
     start = time.monotonic()
     try:
         common.check_server_healthy()
-        _, blob_id = client_common.upload_mounts_to_api_server(dag)
+        client_common.upload_mounts_to_api_server(dag)
         elapsed = time.monotonic() - start
         return {
             'status': 'ok',
             'elapsed': elapsed,
-            'blob_id': blob_id,
         }
     except Exception as e:  # pylint: disable=broad-except
         elapsed = time.monotonic() - start
@@ -83,10 +82,6 @@ def main():
 
     if ok:
         times = [r['elapsed'] for r in ok]
-        blob_ids = set(r['blob_id'] for r in ok)
-        print(f'Blob IDs seen: {len(blob_ids)}')
-        for bid in sorted(blob_ids, key=lambda x: str(x)):
-            print(f'  {bid}')
         print()
         print('Latency (seconds):')
         print(f'  min:    {min(times):.3f}')
