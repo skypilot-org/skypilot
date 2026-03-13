@@ -244,6 +244,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'vastdata': aws_dependencies,
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
