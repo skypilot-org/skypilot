@@ -302,15 +302,12 @@ def should_skip_pool_status_refresh():
 
 
 def should_skip_server_heartbeat():
-    """Skip server heartbeat when not running on the API server or
-    is running as a controller."""
+    """Skip server heartbeat when running as a controller."""
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         # We are running as a controller.
         return True
-    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
-        # We are not running on the API server.
-        return True
     return False
+
 
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
