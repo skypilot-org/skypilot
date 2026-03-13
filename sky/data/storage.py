@@ -339,6 +339,14 @@ class FileMountType(enum.Enum):
     # Same read optimizations as MODEL_CHECKPOINT_RO, plus 8 parallel
     # transfers for writing sharded checkpoints (one per GPU rank).
     MODEL_CHECKPOINT_RW = 'MODEL_CHECKPOINT_RW'
+    # Read-only access to datasets.
+    # Optimized for smaller sequential reads with no parallel chunk streams
+    # and 8MB chunk size.
+    DATASET_RO = 'DATASET_RO'
+    # Read-write access to datasets.
+    # Same read optimizations as DATASET_RO, plus 16 parallel transfers
+    # for writing.
+    DATASET_RW = 'DATASET_RW'
 
 
 # Mapping from FileMountType enum to base MountCachedConfig field values.
@@ -354,6 +362,16 @@ _MOUNT_CACHED_PRESET_CONFIGS: Dict['FileMountType', Dict[str, Any]] = {
         'vfs_read_chunk_streams': 16,
         'vfs_read_chunk_size': '32M',
         'transfers': 8,
+    },
+    FileMountType.DATASET_RO: {
+        'vfs_read_chunk_streams': 0,
+        'vfs_read_chunk_size': '8M',
+        'read_only': True,
+    },
+    FileMountType.DATASET_RW: {
+        'vfs_read_chunk_streams': 0,
+        'vfs_read_chunk_size': '8M',
+        'transfers': 16,
     },
 }
 
