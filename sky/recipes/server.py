@@ -122,3 +122,19 @@ async def pin_recipe(
         func=core.toggle_pin,
         schedule_type=api_requests.ScheduleType.SHORT,
     )
+
+
+@router.post('/launch')
+async def launch_recipe(
+    request: fastapi.Request,
+    launch_body: payloads.RecipeLaunchBody,
+) -> None:
+    """Launch a recipe by name."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.RECIPE_LAUNCH,
+        request_body=launch_body,
+        func=core.launch_recipe,
+        schedule_type=api_requests.ScheduleType.LONG,
+        auth_user=request.state.auth_user,
+    )
