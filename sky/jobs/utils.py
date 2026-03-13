@@ -2861,17 +2861,7 @@ class ManagedJobCodeGen:
                           graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 2:
-            # For backward compatibility, since all_users is not supported
-            # before #4787.
-            # TODO(cooperc): Remove compatibility in v0.13.0.
-            msg = utils.cancel_jobs_by_id({job_ids})
-        elif managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility in v0.13.0.
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        elif managed_job_version < 16:
+        if managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
         else:
@@ -2893,12 +2883,7 @@ class ManagedJobCodeGen:
                            graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
-        if managed_job_version < 4:
-            # For backward compatibility, since current_workspace is not
-            # supported before #5660. Don't check the workspace.
-            # TODO(zhwu): Remove compatibility in v0.13.0.
-            msg = utils.cancel_job_by_name({job_name!r})
-        elif managed_job_version < 16:
+        if managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
         else:
             msg = utils.cancel_job_by_name(
@@ -2982,22 +2967,7 @@ class ManagedJobCodeGen:
                     tail: Optional[int] = None,
                     task: Optional[Union[str, int]] = None) -> str:
         code = textwrap.dedent(f"""\
-        if managed_job_version < 3:
-            # Versions 2 and older did not return a retcode, so we just print
-            # the result.
-            # TODO: Remove compatibility in v0.13.0.
-            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
-                                    follow={follow}, controller={controller})
-            print(result, flush=True)
-        elif managed_job_version < 6:
-            # Versions before 6 did not support tail parameter
-            # TODO: Remove compatibility in v0.13.0.
-            result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
-                                    follow={follow}, controller={controller})
-            msg, retcode = result
-            print(msg, flush=True)
-            sys.exit(retcode)
-        elif managed_job_version < 15:
+        if managed_job_version < 15:
             # Versions before 15 did not support task parameter
             result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                     follow={follow}, controller={controller}, tail={tail!r})
@@ -3029,12 +2999,10 @@ class ManagedJobCodeGen:
                      if managed_job_dag.execution else DEFAULT_EXECUTION.value)
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            set_job_info_kwargs = {{'workspace': {workspace!r}}}
-            if managed_job_version < 4:
-                # TODO(cooperc): Remove compatibility in v0.13.0.
-                set_job_info_kwargs = {{}}
-            if managed_job_version >= 5:
-                set_job_info_kwargs['entrypoint'] = {entrypoint!r}
+            set_job_info_kwargs = {{
+                'workspace': {workspace!r},
+                'entrypoint': {entrypoint!r},
+            }}
             if managed_job_version >= 8:
                 from sky.serve import serve_state
                 pool_hash = None
@@ -3060,11 +3028,7 @@ class ManagedJobCodeGen:
                     managed_job_dag.primary_tasks is None or
                     task.name in managed_job_dag.primary_tasks)
             code += textwrap.dedent(f"""\
-                if managed_job_version < 7:
-                    # TODO: Remove compatibility in v0.13.0.
-                    managed_job_state.set_pending({job_id}, {task_id},
-                                    {task.name!r}, {resources_str!r})
-                elif managed_job_version < 15:
+                if managed_job_version < 15:
                     managed_job_state.set_pending({job_id}, {task_id},
                                     {task.name!r}, {resources_str!r},
                                     {task.metadata_json!r})
