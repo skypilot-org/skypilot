@@ -786,6 +786,7 @@ Consolidating the API server and the jobs controller has a few advantages:
 - Consistent cloud/Kubernetes credentials across the API server and jobs controller.
 - Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
 - No extra VM/pod is needed for the jobs controller, saving cost.
+- High availability inherited from the API server: the controller auto-recovers when the API server restarts. During restarts, there may be brief periods of unreachability, but the SkyPilot client gracefully retries and running workloads are not affected.
 
 To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
 
