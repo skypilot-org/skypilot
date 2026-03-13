@@ -572,6 +572,12 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            'type': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    t.value for t in storage.FileMountType
+                ]
+            },
             'config': {
                 'type': 'object',
                 'properties': {
