@@ -71,8 +71,8 @@ class RequestStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
     def __gt__(self, other):
-        return (list(RequestStatus).index(self) >
-                list(RequestStatus).index(other))
+        return (list(RequestStatus).index(self)
+                > list(RequestStatus).index(other))
 
     def colored_str(self):
         color = _STATUS_TO_COLOR[self]
@@ -578,8 +578,8 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     _kill_requests(request_ids)
 
 
-def kill_requests(request_ids: Optional[List[str]] = None,
-                  user_id: Optional[str] = None) -> List[str]:
+def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
+                              user_id: Optional[str] = None) -> List[str]:
     """Kill requests with a given request ID prefix."""
     expanded_request_ids: Optional[List[str]] = None
     if request_ids is not None:
@@ -594,11 +594,6 @@ def kill_requests(request_ids: Optional[List[str]] = None,
                                  f'request ID prefix: {request_id}')
             expanded_request_ids.append(request_tasks[0].request_id)
     return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
-
-
-# needed for backward compatibility. Remove by v0.10.7 or v0.12.0
-# and rename kill_requests to kill_requests_with_prefix.
-kill_requests_with_prefix = kill_requests
 
 
 def _should_kill_request(request_id: str,

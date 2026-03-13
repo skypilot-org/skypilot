@@ -15,7 +15,6 @@ import sys
 import time
 from typing import Dict, Optional
 
-import requests
 import websockets
 from websockets.asyncio.client import ClientConnection
 from websockets.asyncio.client import connect
@@ -224,18 +223,10 @@ async def websocket_to_stdout(websocket: ClientConnection,
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
 
-    disable_latency_measurement = os.environ.get(
-        skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
-    if disable_latency_measurement:
-        timestamps_are_supported = False
-    else:
-        # TODO(aylei): remove the separate /api/health call and use the header
-        # during websocket handshake to determine the server version.
-        health_url = f'{server_url}/api/health'
-        cookie_hdr = server_common.get_cookie_header_for_url(health_url)
-        health_response = requests.get(health_url, headers=cookie_hdr)
-        health_data = health_response.json()
-        timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
+    # Timestamps are always supported by compatible servers (API version >= 24),
+    # but can be disabled via env var for latency measurement purposes.
+    timestamps_are_supported = os.environ.get(
+        skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') != '1'
 
     # Capture the original API server URL for login hint if authentication
     # is required.

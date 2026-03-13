@@ -740,10 +740,6 @@ def launch(
         job_logger=job_logger)
 
 
-# needed for backward compatibility. Remove by v0.12.0
-cluster_launch = launch
-
-
 @usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],

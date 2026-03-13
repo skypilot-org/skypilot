@@ -53,13 +53,7 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 def _get_context():
-    # TODO(aylei): remove this after we drop the backward-compatibility for
-    # 0.9.x in 0.12.0
-    # Keep backward-compatibility for the old version of SkyPilot runtimes.
-    if 'context' in globals():
-        return context.get()
-    else:
-        return None
+    return context.get()
 
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""

@@ -476,9 +476,6 @@ def validate(
     omit_max_hourly_cost = _omit(44)
 
     for task in dag.tasks:
-        if omit_user_specified_yaml:
-            # pylint: disable=protected-access
-            task._user_specified_yaml = None
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
@@ -2682,8 +2679,8 @@ def _try_localhost_callback_auth(endpoint: str) -> Optional[str]:
                    f'{colorama.Style.RESET_ALL}')
 
         start_time = time.time()
-        while (token_container['token'] is None and time.time() - start_time <
-               server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
+        while (token_container['token'] is None and time.time() - start_time
+               < server_constants.AUTH_SESSION_TIMEOUT_SECONDS):
             time.sleep(1)
 
         if token_container['token'] is None:
