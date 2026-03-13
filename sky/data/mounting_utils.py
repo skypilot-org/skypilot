@@ -98,11 +98,11 @@ def get_s3_mount_install_cmd() -> str:
 # pylint: disable=invalid-name
 def _get_s3_compatible_mount_cmd(bucket_name: str,
                                  mount_path: str,
-                                 endpoint_url: Optional[str] = None,
-                                 profile_name: Optional[str] = None,
-                                 credentials_path: Optional[str] = None,
                                  _bucket_sub_path: Optional[str] = None,
-                                 use_virtual_addressing: bool = False) -> str:
+                                 endpoint_url: Optional[str] = None,
+                                 cred_env: str = '',
+                                 rclone_extra_flags: str = '',
+                                 goofys_extra_flags: str = '') -> str:
     """Returns a command to mount an S3-compatible bucket.
 
     Uses goofys by default (x86_64) and rclone for ARM64. Handles both
@@ -112,42 +112,36 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
     Args:
         bucket_name: Name of the bucket to mount.
         mount_path: Local path to mount the bucket at.
-        endpoint_url: S3-compatible endpoint URL. If None, uses the default
-            AWS S3 endpoint.
-        profile_name: AWS profile name for authentication. If None, uses
-            default AWS credential resolution via environment.
-        credentials_path: Path to AWS-style credentials file. If None,
-            uses default AWS credential resolution (e.g., ~/.aws/credentials).
         _bucket_sub_path: Optional sub-path within the bucket.
-        use_virtual_addressing: If True, use virtual-hosted-style addressing
-            (adds --s3-force-path-style=false for rclone and --subdomain
-            for goofys). Required for providers like CoreWeave.
+        endpoint_url: S3-compatible endpoint URL. If None, uses the
+            default AWS S3 endpoint and adds --s3-env-auth=true for
+            rclone.
+        cred_env: Credential environment variable prefix string
+            (e.g., 'AWS_SHARED_CREDENTIALS_FILE=... AWS_PROFILE=... ').
+        rclone_extra_flags: Extra flags for rclone mount command
+            (e.g., '--s3-force-path-style=false').
+        goofys_extra_flags: Extra flags for goofys mount command
+            (e.g., '--subdomain').
     """
     if _bucket_sub_path is None:
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
 
-    # Build credential env vars
-    cred_env = ''
-    if credentials_path:
-        cred_env += f'AWS_SHARED_CREDENTIALS_FILE={credentials_path} '
-    if profile_name:
-        cred_env += f'AWS_PROFILE={profile_name} '
+    # Ensure trailing space for clean concatenation.
+    if cred_env and not cred_env.endswith(' '):
+        cred_env += ' '
+    if rclone_extra_flags and not rclone_extra_flags.endswith(' '):
+        rclone_extra_flags += ' '
+    if goofys_extra_flags and not goofys_extra_flags.endswith(' '):
+        goofys_extra_flags += ' '
 
-    # Build extra rclone/goofys flags
-    extra_rclone_flags = ''
-    extra_goofys_flags = ''
-    if use_virtual_addressing:
-        extra_rclone_flags += '--s3-force-path-style=false '
-        extra_goofys_flags += '--subdomain '
+    # Add endpoint flags, or env-auth fallback for plain S3.
     if endpoint_url:
-        extra_rclone_flags += f'--s3-endpoint {endpoint_url} '
-        extra_goofys_flags += f'--endpoint {endpoint_url} '
+        rclone_extra_flags += f'--s3-endpoint {endpoint_url} '
+        goofys_extra_flags += f'--endpoint {endpoint_url} '
     else:
-        # When no explicit endpoint or profile, rclone needs env-auth to
-        # pick up default AWS credentials from the environment.
-        extra_rclone_flags += '--s3-env-auth=true '
+        rclone_extra_flags += '--s3-env-auth=true '
 
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
@@ -155,13 +149,13 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
         f'{FUSERMOUNT3_SOFT_LINK_CMD} && '
         f'{cred_env}'
         f'rclone mount :s3:{bucket_name}{_bucket_sub_path} {mount_path} '
-        f'{extra_rclone_flags}'
+        f'{rclone_extra_flags}'
         '--daemon --allow-other')
     goofys_mount = (f'{cred_env}{_GOOFYS_WRAPPER} '
                     '-o allow_other '
                     f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                     f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                    f'{extra_goofys_flags}'
+                    f'{goofys_extra_flags}'
                     f'{bucket_name}{_bucket_sub_path} {mount_path}')
 
     mount_cmd = (f'{arch_check}'
@@ -190,11 +184,12 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
                          mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount Nebius bucket."""
-    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
-                                        mount_path=mount_path,
-                                        endpoint_url=endpoint_url,
-                                        profile_name=nebius_profile_name,
-                                        _bucket_sub_path=_bucket_sub_path)
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        cred_env=f'AWS_PROFILE={nebius_profile_name}')
 
 
 def get_coreweave_mount_cmd(cw_credentials_path: str,
@@ -204,13 +199,16 @@ def get_coreweave_mount_cmd(cw_credentials_path: str,
                             mount_path: str,
                             _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount CoreWeave bucket."""
-    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
-                                        mount_path=mount_path,
-                                        endpoint_url=endpoint_url,
-                                        profile_name=coreweave_profile_name,
-                                        credentials_path=cw_credentials_path,
-                                        _bucket_sub_path=_bucket_sub_path,
-                                        use_virtual_addressing=True)
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={cw_credentials_path} '
+                f'AWS_PROFILE={coreweave_profile_name}')
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        endpoint_url=endpoint_url,
+        cred_env=cred_env,
+        rclone_extra_flags='--s3-force-path-style=false',
+        goofys_extra_flags='--subdomain')
 
 
 def get_vastdata_mount_cmd(vastdata_credentials_path: str,
@@ -220,13 +218,13 @@ def get_vastdata_mount_cmd(vastdata_credentials_path: str,
                            mount_path: str,
                            _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount VastData bucket."""
-    return _get_s3_compatible_mount_cmd(
-        bucket_name=bucket_name,
-        mount_path=mount_path,
-        endpoint_url=endpoint_url,
-        profile_name=vastdata_profile_name,
-        credentials_path=vastdata_credentials_path,
-        _bucket_sub_path=_bucket_sub_path)
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={vastdata_credentials_path} '
+                f'AWS_PROFILE={vastdata_profile_name}')
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        endpoint_url=endpoint_url,
+                                        cred_env=cred_env)
 
 
 def get_gcs_mount_install_cmd() -> str:
@@ -445,12 +443,13 @@ def get_r2_mount_cmd(r2_credentials_path: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount R2 bucket."""
+    cred_env = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
+                f'AWS_PROFILE={r2_profile_name}')
     return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
                                         mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
                                         endpoint_url=endpoint_url,
-                                        profile_name=r2_profile_name,
-                                        credentials_path=r2_credentials_path,
-                                        _bucket_sub_path=_bucket_sub_path)
+                                        cred_env=cred_env)
 
 
 def get_cos_mount_cmd(rclone_config: str,
