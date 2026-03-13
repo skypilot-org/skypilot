@@ -528,9 +528,9 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
+    idle_minutes_to_autostop: Optional[int] = None,  # pylint: disable=unused-argument
     dryrun: bool = False,
-    down: bool = False,
+    down: bool = False,  # pylint: disable=unused-argument
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
@@ -745,7 +745,7 @@ def exec(  # pylint: disable=redefined-builtin
     task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,
-    down: bool = False,
+    down: bool = False,  # pylint: disable=unused-argument
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     job_logger: logging.Logger = logger,
