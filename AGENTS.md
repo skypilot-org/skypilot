@@ -281,6 +281,7 @@ When updating dependencies:
 PRs should include:
 - **Summary**: Brief description of changes (1-3 bullet points)
 - **Test plan**: How the changes were tested (commands run, manual verification steps)
+- **Review detail**: Must be written by human - specifies the level of human review needed for the PR. (E.g. quick check or rigorous line-by-line review.) This is useful for the author and human reviewers to be on the same page. Don't ever write this without explicit human instruction. Make sure the human PR author understands: they are expected to review the AI code to the level indicated, BEFORE requesting review from external reviewers.
 
 **Important**: Always generate a manual test plan describing how to verify the changes work correctly. Include specific commands, expected outputs, or UI verification steps. Whenever possible, add unit tests and smoke tests for the changes.
 
