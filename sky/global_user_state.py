@@ -873,6 +873,14 @@ def add_or_update_cluster(cluster_name: str,
 
         session.commit()
 
+    # Persist cluster YAML content to the cluster_yaml_table so that
+    # get_cluster_yaml_str() can retrieve it without a file-system fallback.
+    cluster_yaml_path = getattr(cluster_handle, 'cluster_yaml', None)
+    if cluster_yaml_path is not None and os.path.exists(cluster_yaml_path):
+        with open(cluster_yaml_path, 'r', encoding='utf-8') as f:
+            yaml_content = f.read()
+        set_cluster_yaml(cluster_name, yaml_content)
+
 
 @metrics_lib.time_me
 def add_cluster_event(cluster_name: str,
@@ -2753,10 +2761,10 @@ def get_cluster_yaml_str_multiple(cluster_yaml_paths: List[str]) -> List[str]:
 def _set_cluster_yaml_from_file(cluster_yaml_path: str,
                                 cluster_name: str) -> Optional[str]:
     """Set the cluster yaml in the database from a file."""
-    # If the cluster yaml is not in the database, check if it exists
-    # on the local file system and migrate it to the database.
-    # TODO(syang): remove this check once we have a way to migrate the
-    # cluster from file to database. Remove on v0.13.0.
+    # Backward compat: clusters created before add_or_update_cluster()
+    # persisted YAML content to cluster_yaml_table may only have the
+    # YAML on disk. Read it from the file and migrate it to the DB.
+    # TODO(syang): Remove in v0.14.0 once old clusters have aged out.
     if cluster_yaml_path is not None:
         # First try the exact path
         path_to_read = None
