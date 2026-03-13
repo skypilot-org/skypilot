@@ -277,35 +277,31 @@ def _setup_upload_logger(
 _HASH_CHUNK_SIZE = 65536
 
 
-def _compute_file_mounts_blob_id(upload_list: list) -> str:
-    """Compute a deterministic content hash of the files to be uploaded.
+def _compute_zip_blob_id(zip_path: str) -> str:
+    """Compute a stable content hash from a zip file.
 
-    Walks the file tree using the same logic as zip_files_and_folders
-    and hashes the sorted (archive_name, per_entry_hash) pairs. Each file
-    is hashed individually in stream mode.
+    Iterates over zip entries in sorted order and hashes
+    (filename, content) pairs. Ignores zip metadata (timestamps, OS)
+    so the hash is stable across re-zips of identical content.
     """
     entries: list = []
-    for archive_name, file_path, kind in storage_utils.iter_zip_entries(
-            upload_list):
-        if kind == storage_utils.ZipEntryKind.SYMLINK:
-            target = os.readlink(file_path)
-            if os.path.isabs(target):
-                target = os.path.relpath(target, os.path.dirname(file_path))
-            is_dir = os.path.isdir(file_path)
-            name = archive_name + '/' if is_dir else archive_name
-            entry_hash = hashlib.sha256(target.encode('utf-8')).digest()
-            entries.append((name, entry_hash))
-        elif kind == storage_utils.ZipEntryKind.DIR:
-            entries.append((archive_name, hashlib.sha256(b'').digest()))
-        else:
-            eh = hashlib.sha256()
-            with open(file_path, 'rb') as f:
-                while True:
-                    chunk = f.read(_HASH_CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    eh.update(chunk)
-            entries.append((archive_name, eh.digest()))
+    with zipfile.ZipFile(zip_path, 'r') as zipf:
+        for info in zipf.infolist():
+            name = info.filename
+            is_symlink = (info.external_attr >> 28) == 0xA
+            if name.endswith('/') and not is_symlink:
+                # Directory entry
+                entries.append((name, hashlib.sha256(b'').digest()))
+            else:
+                # File or symlink (symlink content is the target path)
+                eh = hashlib.sha256()
+                with zipf.open(info) as f:
+                    while True:
+                        chunk = f.read(_HASH_CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        eh.update(chunk)
+                entries.append((name, eh.digest()))
 
     entries.sort(key=lambda e: e[0])
     h = hashlib.sha256()
@@ -313,54 +309,6 @@ def _compute_file_mounts_blob_id(upload_list: list) -> str:
         h.update(name.encode('utf-8'))
         h.update(digest)
     return h.hexdigest()
-
-
-def _chunked_upload(zip_file_path: str,
-                    upload_id: str,
-                    upload_logger: logging.Logger,
-                    log_file: str,
-                    status_updater,
-                    endpoint: str = '/upload') -> None:
-    """Upload a zip file to the API server in chunks.
-
-    Shared by both the legacy ``/upload`` and ``/upload_v2`` paths.
-    """
-    zip_file_size = os.path.getsize(zip_file_path)
-    total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
-    status_updater(
-        ux_utils.spinner_message(
-            'Uploading files to API server (2/2 - Uploading)',
-            log_file,
-            is_local=True))
-    timeout = httpx.Timeout(None, read=180.0)
-    upload_completed = False
-    with httpx.Client(timeout=timeout) as client:
-        total_retries = 3
-        for retry in range(total_retries):
-            chunk_params = [
-                UploadChunkParams(client,
-                                  upload_id,
-                                  chunk_index,
-                                  total_chunks,
-                                  zip_file_path,
-                                  upload_logger,
-                                  log_file,
-                                  endpoint=endpoint)
-                for chunk_index in range(total_chunks)
-            ]
-            statuses = subprocess_utils.run_in_parallel(
-                _upload_chunk_with_retry, chunk_params)
-            if any(status == api_responses.UploadStatus.COMPLETED.value
-                   for status in statuses):
-                upload_completed = True
-                break
-            else:
-                upload_logger.info(
-                    f'No chunk upload returned completed status. '
-                    'Retrying entire upload... '
-                    f'({retry + 1} / {total_retries})')
-    if not upload_completed:
-        raise RuntimeError('Failed to upload files to API server.')
 
 
 def upload_mounts_to_api_server(
@@ -451,32 +399,24 @@ def upload_mounts_to_api_server(
         logger.info(ux_utils.starting_message('Uploading files to API server'))
         with rich_utils.client_status(
                 ux_utils.spinner_message(
-                    'Uploading files to API server', log_file,
+                    'Uploading files to API server (1/2 - Zipping)',
+                    log_file,
                     is_local=True)) as status, _setup_upload_logger(
                         log_file) as upload_logger:
+            with tempfile.NamedTemporaryFile(suffix='.zip',
+                                             delete=False) as temp_zip_file:
+                upload_logger.info(
+                    f'Zipping files to be uploaded: {upload_list}')
+                storage_utils.zip_files_and_folders(upload_list,
+                                                    temp_zip_file.name)
+                upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
 
-            def do_upload(endpoint: str, upload_id: str) -> None:
-                status.update(
-                    ux_utils.spinner_message(
-                        'Uploading files to API server (1/2 - Zipping)',
-                        log_file,
-                        is_local=True))
-                with tempfile.NamedTemporaryFile(suffix='.zip',
-                                                 delete=False) as temp_zip_file:
-                    upload_logger.info(
-                        f'Zipping files to be uploaded: {upload_list}')
-                    storage_utils.zip_files_and_folders(upload_list,
-                                                        temp_zip_file.name)
-                    upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
-                _chunked_upload(temp_zip_file.name, upload_id, upload_logger,
-                                log_file, status.update, endpoint)
-                os.unlink(temp_zip_file.name)
-                upload_logger.info(f'Uploaded files: {upload_list}')
-
+            endpoint = '/upload'
+            file_mounts_blob_id = None
             if use_v2:
-                file_mounts_blob_id = _compute_file_mounts_blob_id(upload_list)
+                file_mounts_blob_id = _compute_zip_blob_id(temp_zip_file.name)
                 upload_logger.info(f'Computed blob ID: {file_mounts_blob_id}')
-                # Check existence and upload if needed.
+                # Check existence and skip upload if already present.
                 resp = server_common.make_authenticated_request(
                     'GET',
                     '/upload_v2/blob',
@@ -491,21 +431,61 @@ def upload_mounts_to_api_server(
                 if resp.json().get('exists'):
                     upload_logger.info('Blob already exists, skipping upload')
                     logger.info('File mounts unchanged, skipping upload')
-                else:
-                    # In v2, we use the blob_id as the upload id to share
-                    # the uploaded blob across requests.
-                    do_upload('/upload_v2', file_mounts_blob_id)
-                logger.info(
-                    ux_utils.finishing_message('Files uploaded',
-                                               log_file,
-                                               is_local=True))
-                return dag, file_mounts_blob_id
+                    os.unlink(temp_zip_file.name)
+                    logger.info(
+                        ux_utils.finishing_message('Files uploaded',
+                                                   log_file,
+                                                   is_local=True))
+                    return dag, file_mounts_blob_id
+                endpoint = '/upload_v2'
+                # In v2, we use the blob_id as the upload id to share
+                # the uploaded blob across requests.
+                upload_id = file_mounts_blob_id
 
-            # Fall back to /upload for legacy server.
-            do_upload('/upload', upload_id)
-            logger.info(
-                ux_utils.finishing_message('Files uploaded',
-                                           log_file,
-                                           is_local=True))
+            zip_file_size = os.path.getsize(temp_zip_file.name)
+            total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
+            timeout = httpx.Timeout(None, read=180.0)
+            status.update(
+                ux_utils.spinner_message(
+                    'Uploading files to API server (2/2 - Uploading)',
+                    log_file,
+                    is_local=True))
+
+            upload_completed = False
+            with httpx.Client(timeout=timeout) as client:
+                total_retries = 3
+                for retry in range(total_retries):
+                    chunk_params = [
+                        UploadChunkParams(client,
+                                          upload_id,
+                                          chunk_index,
+                                          total_chunks,
+                                          temp_zip_file.name,
+                                          upload_logger,
+                                          log_file,
+                                          endpoint=endpoint)
+                        for chunk_index in range(total_chunks)
+                    ]
+                    statuses = subprocess_utils.run_in_parallel(
+                        _upload_chunk_with_retry, chunk_params)
+                    if any(status == api_responses.UploadStatus.COMPLETED.value
+                           for status in statuses):
+                        upload_completed = True
+                        break
+                    else:
+                        upload_logger.info(
+                            f'No chunk upload returned completed status. '
+                            'Retrying entire upload... '
+                            f'({retry + 1} / {total_retries})')
+            if not upload_completed:
+                raise RuntimeError('Failed to upload files to API server.')
+        os.unlink(temp_zip_file.name)
+        upload_logger.info(f'Uploaded files: {upload_list}')
+        logger.info(
+            ux_utils.finishing_message('Files uploaded',
+                                       log_file,
+                                       is_local=True))
+        if use_v2:
+            return dag, file_mounts_blob_id
 
     return dag, None
