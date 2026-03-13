@@ -301,6 +301,17 @@ def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
 
 
+def should_skip_server_heartbeat():
+    """Skip server heartbeat when not running on the API server or
+    is running as a controller."""
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # We are running as a controller.
+        return True
+    if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is None:
+        # We are not running on the API server.
+        return True
+    return False
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -362,7 +373,8 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(
         id='server-heartbeat-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
-        event_fn=server_heartbeat_event),
+        event_fn=server_heartbeat_event,
+        should_skip=should_skip_server_heartbeat),
 ]
 
 HIDDEN_REQUEST_NAMES = [
