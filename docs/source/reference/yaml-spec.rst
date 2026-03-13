@@ -1079,6 +1079,7 @@ Example:
       store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'vastdata', 'oci', or 'ibm'; default: None. Optional.
       persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
       mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
+      mount_options: '--stat-cache-ttl 60s'  # Custom flags appended to the mount command (MOUNT mode only). Optional.
 
     # Copies a cloud object store URI to the cluster. Can be private buckets.
     /datasets-s3: s3://my-awesome-dataset
