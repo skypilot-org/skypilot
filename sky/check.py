@@ -556,8 +556,7 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if (verbose and cloud is not cloudflare and cloud is not coreweave and
-                cloud is not vastdata):
+        if verbose and cloud not in (cloudflare, coreweave, vastdata):
             activated_account = cloud.get_active_user_identity_str()
         if isinstance(
                 cloud_tuple[1],

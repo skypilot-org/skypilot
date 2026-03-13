@@ -416,12 +416,14 @@ def _get_cloud_dependencies_installation_commands(
 
     storage_clouds = storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()  # pylint: disable=line-too-long
 
-    if cloudflare.NAME in storage_clouds:
-        python_packages.update(dependencies.extras_require['cloudflare'])
-    if coreweave.NAME in storage_clouds:
-        python_packages.update(dependencies.extras_require['coreweave'])
-    if vastdata.NAME in storage_clouds:
-        python_packages.update(dependencies.extras_require['vastdata'])
+    storage_only_clouds_map = {
+        cloudflare.NAME: 'cloudflare',
+        coreweave.NAME: 'coreweave',
+        vastdata.NAME: 'vastdata',
+    }
+    for cloud_name, dep_key in storage_only_clouds_map.items():
+        if cloud_name in storage_clouds:
+            python_packages.update(dependencies.extras_require[dep_key])
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
