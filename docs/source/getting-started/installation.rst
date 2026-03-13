@@ -1575,7 +1575,7 @@ VastData object storage
 
   VastData (object storage) is a separate company from Vast.ai (GPU compute). This integration is for VastData's S3-compatible object storage only.
 
-Install the necessary dependencies for VastData (uses the ``boto3`` library included in the AWS extras).
+Install the necessary dependencies for VastData:
 
 .. tab-set::
   .. tab-item:: uv venv
@@ -1585,9 +1585,9 @@ Install the necessary dependencies for VastData (uses the ``boto3`` library incl
 
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
-      uv pip install "skypilot[aws]"
+      uv pip install "skypilot[vastdata]"
       # From nightly build
-      uv pip install "skypilot-nightly[aws]"
+      uv pip install "skypilot-nightly[vastdata]"
 
   .. tab-item:: uv tool
     :sync: uv-tool-tab
@@ -1596,9 +1596,9 @@ Install the necessary dependencies for VastData (uses the ``boto3`` library incl
 
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
-      uv tool install --with pip "skypilot[aws]"
+      uv tool install --with pip "skypilot[vastdata]"
       # From nightly build
-      uv tool install --with pip "skypilot-nightly[aws]"
+      uv tool install --with pip "skypilot-nightly[vastdata]"
 
   .. tab-item:: pip
     :sync: pip-tab
@@ -1607,11 +1607,11 @@ Install the necessary dependencies for VastData (uses the ``boto3`` library incl
 
       # SkyPilot requires 3.7 <= python <= 3.13.
       # From stable release
-      pip install "skypilot[aws]"
+      pip install "skypilot[vastdata]"
       # From nightly build
-      pip install "skypilot-nightly[aws]"
+      pip install "skypilot-nightly[vastdata]"
       # From source
-      pip install -e ".[aws]"
+      pip install -e ".[vastdata]"
 
 SkyPilot uses separate configuration files for VastData to avoid conflicts with your AWS credentials. Run the following command to configure your VastData access credentials:
 
