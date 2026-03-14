@@ -298,9 +298,6 @@ def _get_cloud_dependencies_installation_commands(
     # installed, so we don't check that.
     python_packages: Set[str] = set()
 
-    # add flask to the controller dependencies for dashboard
-    python_packages.add('flask')
-
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
     # the outer && chain, preventing operator precedence issues.
