@@ -48,10 +48,10 @@ import {
   togglePinRecipe,
 } from '@/data/connectors/recipes';
 import {
-  RecipeType,
   getRecipeTypeInfo,
   getLaunchCommand,
 } from '@/data/constants/recipeTypes';
+import { usePluginRecipeTypes } from '@/plugins/PluginProvider';
 import { TimestampWithTooltip } from '@/components/utils';
 import { PluginSlot } from '@/plugins/PluginSlot';
 
@@ -245,6 +245,7 @@ export function RecipeDetail() {
   // Support both old 'yaml' and new 'recipe' query params for backwards compatibility
   const { recipe: recipeSlug } = router.query;
   const slug = recipeSlug;
+  const pluginRecipeTypes = usePluginRecipeTypes();
 
   const [template, setTemplate] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -412,7 +413,7 @@ export function RecipeDetail() {
     return null;
   }
 
-  const typeInfo = getRecipeTypeInfo(template.recipe_type);
+  const typeInfo = getRecipeTypeInfo(template.recipe_type, pluginRecipeTypes);
   const TypeIcon = typeInfo.icon;
 
   return (
@@ -598,18 +599,18 @@ export function RecipeDetail() {
             </div>
           )}
 
-          {/* Launch section - PluginSlot for devspace, CLI command for others */}
-          {template.recipe_type === RecipeType.DEVSPACE ? (
+          {/* Launch section - PluginSlot for plugin types, CLI command for built-in */}
+          {!getLaunchCommand(template.recipe_type, template.name) ? (
             <div className="mb-6">
               <PluginSlot
-                name="recipes.detail.devspace-launcher"
+                name={`recipes.detail.${template.recipe_type}-launcher`}
                 context={{
                   recipeContent: template.content,
                   recipeName: template.name,
                 }}
                 fallback={
                   <div className="text-sm text-gray-500 italic">
-                    The devspaces plugin is required to launch this recipe.
+                    A plugin is required to launch this recipe type.
                   </div>
                 }
               />

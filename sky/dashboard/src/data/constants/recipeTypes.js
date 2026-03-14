@@ -1,7 +1,9 @@
 /**
  * Recipe type constants for the Recipe Hub.
  *
- * These values must match the RecipeType enum in sky/recipes/utils.py
+ * These values must match the RecipeType enum in sky/recipes/utils.py.
+ * Plugin-provided recipe types are registered at runtime via
+ * api.registerRecipeType() and are NOT listed here.
  */
 
 import {
@@ -10,7 +12,6 @@ import {
   DatabaseIcon,
   LayersIcon,
   FileCode,
-  MonitorIcon,
 } from 'lucide-react';
 
 export const RecipeType = Object.freeze({
@@ -18,35 +19,22 @@ export const RecipeType = Object.freeze({
   JOB: 'job',
   POOL: 'pool',
   VOLUME: 'volume',
-  DEVSPACE: 'devspace',
 });
 
 /**
- * List of all valid recipe types.
+ * List of all built-in recipe types.
  */
-export const ALL_RECIPE_TYPES = Object.freeze(Object.values(RecipeType));
-
-/**
- * Check if a string is a valid recipe type.
- * @param {string} value - The value to check
- * @returns {boolean} True if valid recipe type
- */
-export function isValidRecipeType(value) {
-  return ALL_RECIPE_TYPES.includes(value);
-}
+export const BUILTIN_RECIPE_TYPES = Object.freeze(Object.values(RecipeType));
 
 /**
  * Get the list of recipe types visible in the UI.
- * Devspace type is only shown when the devspaces plugin is active.
- * @param {Array} pluginRoutes - Array of registered plugin routes
+ * Combines built-in types with any plugin-registered types.
+ * @param {Array} pluginRecipeTypes - Array of plugin-registered recipe type objects
  * @returns {Array<string>} List of visible recipe type values
  */
-export function getVisibleRecipeTypes(pluginRoutes = []) {
-  const hasDevspaces = pluginRoutes.some((route) => route.id === 'devspaces');
-  return ALL_RECIPE_TYPES.filter((type) => {
-    if (type === RecipeType.DEVSPACE) return hasDevspaces;
-    return true;
-  });
+export function getVisibleRecipeTypes(pluginRecipeTypes = []) {
+  const pluginTypeIds = pluginRecipeTypes.map((t) => t.id);
+  return [...BUILTIN_RECIPE_TYPES, ...pluginTypeIds];
 }
 
 /**
@@ -75,10 +63,12 @@ const COLOR_CLASS_MAP = {
 
 /**
  * Get icon, color, and label information for a recipe type.
+ * Checks built-in types first, then falls back to plugin-registered types.
  * @param {string} recipeType - The recipe type value
+ * @param {Array} pluginRecipeTypes - Array of plugin-registered recipe type objects
  * @returns {Object} Object with icon, color, colorClass, label (short), and fullLabel properties
  */
-export function getRecipeTypeInfo(recipeType) {
+export function getRecipeTypeInfo(recipeType, pluginRecipeTypes = []) {
   let info;
   switch (recipeType) {
     case RecipeType.CLUSTER:
@@ -113,16 +103,27 @@ export function getRecipeTypeInfo(recipeType) {
         fullLabel: 'Job Pool',
       };
       break;
-    case RecipeType.DEVSPACE:
+    default: {
+      // Check plugin-registered recipe types
+      const pluginType = pluginRecipeTypes.find((t) => t.id === recipeType);
+      if (pluginType) {
+        info = {
+          icon: pluginType.icon || FileCode,
+          color: pluginType.color || 'gray',
+          label: pluginType.label,
+          fullLabel: pluginType.fullLabel || pluginType.label,
+        };
+        break;
+      }
+      // Unknown type — use generic fallback
       info = {
-        icon: MonitorIcon,
-        color: 'sky',
-        label: 'Devspace',
-        fullLabel: 'Devspace',
+        icon: FileCode,
+        color: 'gray',
+        label: capitalizeWords(recipeType),
+        fullLabel: capitalizeWords(recipeType),
       };
       break;
-    default:
-      throw new Error(`Invalid recipe type: ${recipeType}`);
+    }
   }
   // Add the Tailwind color class
   info.colorClass = COLOR_CLASS_MAP[info.color] || 'text-gray-600';
@@ -131,7 +132,8 @@ export function getRecipeTypeInfo(recipeType) {
 
 /**
  * Generate the CLI launch command for a recipe.
- * Returns null for devspace recipes (launched via UI).
+ * Returns null for plugin-provided recipe types (they handle launching
+ * via PluginSlot).
  * @param {string} recipeType - The recipe type value
  * @param {string} recipeName - The recipe's unique name
  * @returns {string|null} The CLI command to launch this recipe, or null
@@ -146,9 +148,8 @@ export function getLaunchCommand(recipeType, recipeName) {
       return `sky volumes apply recipes:${recipeName}`;
     case RecipeType.POOL:
       return `sky jobs pool apply recipes:${recipeName}`;
-    case RecipeType.DEVSPACE:
-      return null;
     default:
-      throw new Error(`Invalid recipe type: ${recipeType}`);
+      // Plugin-provided types handle launching via PluginSlot
+      return null;
   }
 }

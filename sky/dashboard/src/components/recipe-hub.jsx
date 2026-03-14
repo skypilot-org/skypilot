@@ -66,11 +66,14 @@ import {
 } from '@/data/connectors/recipes';
 import {
   RecipeType,
-  ALL_RECIPE_TYPES,
+  BUILTIN_RECIPE_TYPES,
   getRecipeTypeInfo,
   getVisibleRecipeTypes,
 } from '@/data/constants/recipeTypes';
-import { usePluginRoutes } from '@/plugins/PluginProvider';
+import {
+  usePluginRoutes,
+  usePluginRecipeTypes,
+} from '@/plugins/PluginProvider';
 
 // Define filter options for the YAML filter dropdown
 const RECIPE_PROPERTY_OPTIONS = [
@@ -109,7 +112,8 @@ function UserName({ name, className = '' }) {
 
 // Recipe Card Component (for Pinned and My Recipes)
 function RecipeCard({ recipe, onPin }) {
-  const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
+  const pluginRecipeTypes = usePluginRecipeTypes();
+  const typeInfo = getRecipeTypeInfo(recipe.recipe_type, pluginRecipeTypes);
   const TypeIcon = typeInfo.icon;
   const slug = generateRecipeSlug(recipe.name);
 
@@ -236,6 +240,7 @@ function TemplateRow({
 
 // All Recipes Section with Sortable Table and Filter Bar (same as clusters page)
 function AllRecipesSection({ recipes, onPin, onDelete }) {
+  const pluginRecipeTypes = usePluginRecipeTypes();
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [filters, setFilters] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -390,7 +395,10 @@ function AllRecipesSection({ recipes, onPin, onDelete }) {
                 </TableRow>
               ) : (
                 sortedAndFilteredTemplates.map((recipe) => {
-                  const typeInfo = getRecipeTypeInfo(recipe.recipe_type);
+                  const typeInfo = getRecipeTypeInfo(
+                    recipe.recipe_type,
+                    pluginRecipeTypes
+                  );
                   const TypeIcon = typeInfo.icon;
                   const slug = generateRecipeSlug(recipe.name);
                   const truncatedDesc = recipe.description
@@ -841,7 +849,7 @@ const RecipeFilterItem = ({ filter, onRemove }) => {
 };
 
 // Helper to generate example YAML based on type
-function getExampleRecipe(recipeType) {
+function getExampleRecipe(recipeType, pluginRecipeTypes = []) {
   switch (recipeType) {
     case RecipeType.CLUSTER:
       return `name: my-cluster
@@ -869,16 +877,12 @@ resources:
   infra: aws
   accelerators: A100:1
 `;
-    case RecipeType.DEVSPACE:
-      return `name: my-devspace
-resources:
-  cpus: 4
-  memory: 8
-
-setup: |
-  pip install torch numpy
-`;
-    default:
+    default: {
+      // Check if a plugin provides a template for this type
+      const pluginType = pluginRecipeTypes.find((t) => t.id === recipeType);
+      if (pluginType && pluginType.template) {
+        return pluginType.template;
+      }
       return `name: my-${recipeType}
 resources:
   infra: aws
@@ -887,6 +891,7 @@ resources:
 run: |
   echo "Hello, SkyPilot!"
 `;
+    }
   }
 }
 
@@ -898,10 +903,13 @@ function CreateRecipeModal({
   initialData,
   isAuthenticated,
   visibleRecipeTypes,
+  pluginRecipeTypes = [],
 }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [content, setContent] = useState(getExampleRecipe(RecipeType.CLUSTER));
+  const [content, setContent] = useState(
+    getExampleRecipe(RecipeType.CLUSTER, pluginRecipeTypes)
+  );
   const [recipeType, setRecipeType] = useState(RecipeType.CLUSTER);
   const [ownerName, setOwnerName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -918,19 +926,19 @@ function CreateRecipeModal({
         setName('');
         setDescription('');
         setRecipeType(RecipeType.CLUSTER);
-        setContent(getExampleRecipe(RecipeType.CLUSTER));
+        setContent(getExampleRecipe(RecipeType.CLUSTER, pluginRecipeTypes));
       }
       setOwnerName('');
       setFormError(null);
     }
-  }, [initialData, isOpen]);
+  }, [initialData, isOpen, pluginRecipeTypes]);
 
   // Update example YAML when type changes (only if content matches previous example)
   const handleRecipeTypeChange = (newType) => {
-    const oldExample = getExampleRecipe(recipeType);
+    const oldExample = getExampleRecipe(recipeType, pluginRecipeTypes);
     // If user hasn't modified the content, update it with new example
     if (content === oldExample || content === '') {
-      setContent(getExampleRecipe(newType));
+      setContent(getExampleRecipe(newType, pluginRecipeTypes));
     }
     setRecipeType(newType);
   };
@@ -1009,8 +1017,8 @@ function CreateRecipeModal({
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(visibleRecipeTypes || ALL_RECIPE_TYPES).map((type) => {
-                    const info = getRecipeTypeInfo(type);
+                  {(visibleRecipeTypes || BUILTIN_RECIPE_TYPES).map((type) => {
+                    const info = getRecipeTypeInfo(type, pluginRecipeTypes);
                     const TypeIcon = info.icon;
                     return (
                       <SelectItem key={type} value={type}>
@@ -1107,6 +1115,7 @@ function CreateRecipeModal({
 export function RecipeHub() {
   const router = useRouter();
   const pluginRoutes = usePluginRoutes();
+  const pluginRecipeTypes = usePluginRecipeTypes();
 
   // Data state
   const [allRecipes, setAllRecipes] = useState([]);
@@ -1335,7 +1344,8 @@ export function RecipeHub() {
         onSubmit={handleCreate}
         initialData={initialCreateData}
         isAuthenticated={isAuthenticated}
-        visibleRecipeTypes={getVisibleRecipeTypes(pluginRoutes)}
+        visibleRecipeTypes={getVisibleRecipeTypes(pluginRecipeTypes)}
+        pluginRecipeTypes={pluginRecipeTypes}
       />
     </div>
   );

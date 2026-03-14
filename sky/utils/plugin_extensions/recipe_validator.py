@@ -1,17 +1,17 @@
 """Recipe validator extension point for plugins.
 
 Allows plugins to register custom validation functions for plugin-specific
-recipe types (e.g., devspace). Core SkyPilot calls
-``RecipeValidator.validate()`` during recipe create/update; if no validator
-is registered for the recipe type, validation is skipped.
+recipe types. Core SkyPilot calls ``RecipeValidator.validate()`` during
+recipe create/update; if no validator is registered for the recipe type,
+validation falls back to the built-in SkyPilot schema checks.
 
 Example usage in a plugin::
 
     from sky.utils.plugin_extensions import RecipeValidator
 
     RecipeValidator.register(
-        recipe_type='devspace',
-        validate_fn=my_validate_devspace_yaml,
+        recipe_type='custom',
+        validate_fn=my_validate_fn,
     )
 
 Example usage in core SkyPilot::
@@ -19,7 +19,7 @@ Example usage in core SkyPilot::
     from sky.utils.plugin_extensions import RecipeValidator
 
     # Validate recipe content (raises ValueError on failure)
-    RecipeValidator.validate('devspace', yaml_content)
+    RecipeValidator.validate('custom', yaml_content)
 """
 from typing import Callable, Dict
 
@@ -41,7 +41,8 @@ class RecipeValidator:
         """Register a validator for a recipe type.
 
         Args:
-            recipe_type: Recipe type string (e.g. ``'devspace'``).
+            recipe_type: Recipe type string identifying the plugin-provided
+                recipe type.
             validate_fn: Callable that takes a YAML content string and
                 raises ``ValueError`` if the content is invalid.
         """
