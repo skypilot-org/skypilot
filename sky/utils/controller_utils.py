@@ -34,6 +34,7 @@ from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import annotations
+from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -306,7 +307,8 @@ def _get_cloud_dependencies_installation_commands(
     # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
     # the outer && chain, preventing operator precedence issues.
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
-                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }}')
+                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }} && '
+                    f'{command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
