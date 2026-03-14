@@ -289,6 +289,13 @@ def _get_cloud_dependencies_installation_commands(
     prefix_str = ('[<step>/<total>] Check & install cloud dependencies '
                   'on controller: ')
     commands: List[str] = []
+    # Helper that suppresses output on success but shows stderr on failure.
+    # Uses eval so shell syntax (variable assignments, pipes) works.
+    commands.append(
+        'run_w_error_log() { local _e=$(mktemp); '
+        'if eval "$@" > /dev/null 2>"$_e"; then rm -f "$_e"; '
+        'else local rc=$?; echo "" >&2; cat "$_e" >&2; '
+        'rm -f "$_e"; return $rc; fi; }')
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
     empty_str = ' ' * 20
@@ -305,7 +312,7 @@ def _get_cloud_dependencies_installation_commands(
     # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
     # the outer && chain, preventing operator precedence issues.
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
-                    f'{{ {constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1; }}')
+                    f'run_w_error_log \'{constants.SKY_UV_INSTALL_CMD}\'')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
@@ -333,9 +340,9 @@ def _get_cloud_dependencies_installation_commands(
 
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
-                f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
-                f'"{dependencies.AZURE_CLI}" > /dev/null 2>&1')
+                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" && '
+                f'run_w_error_log \'{constants.SKY_UV_PIP_CMD} install '
+                f'--prerelease=allow "{dependencies.AZURE_CLI}"\'')
         elif isinstance(cloud, clouds.GCP):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
@@ -374,7 +381,12 @@ def _get_cloud_dependencies_installation_commands(
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
                 'then apt update &> /dev/null && '
-                'apt install curl socat netcat -y &> /dev/null; '
+                'apt install curl socat -y &> /dev/null && '
+                # netcat is a virtual package on newer Debian; fall back
+                # to netcat-openbsd if the bare name is not installable.
+                '(apt install netcat -y &> /dev/null || '
+                'apt install netcat-openbsd -y &> /dev/null) || '
+                '{ echo Failed to install K8s deps via apt >&2; exit 1; }; '
                 'fi" && '
                 # Install kubectl
                 'ARCH=$(uname -m) && '
@@ -395,8 +407,8 @@ def _get_cloud_dependencies_installation_commands(
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
-                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
-                'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
+                'run_w_error_log \'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb\' && '  # pylint: disable=line-too-long
+                'run_w_error_log \'sudo dpkg -i ~/cudoctl.deb\'')
         elif isinstance(cloud, clouds.IBM):
             if controller != Controllers.JOBS_CONTROLLER:
                 # We only need IBM deps on the jobs controller.
@@ -407,7 +419,7 @@ def _get_cloud_dependencies_installation_commands(
             commands.append(
                 f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
                 '{ pip list | grep vastai_sdk > /dev/null 2>&1 || '
-                'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1; }')
+                'run_w_error_log \'pip install "vastai_sdk>=0.1.12"\'; }')
 
         python_packages.update(cloud_python_dependencies)
 
@@ -421,7 +433,7 @@ def _get_cloud_dependencies_installation_commands(
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
-        f'{constants.SKY_UV_PIP_CMD} install {packages_string} > /dev/null 2>&1'
+        f'run_w_error_log \'{constants.SKY_UV_PIP_CMD} install {packages_string}\''
     )
 
     total_commands = len(commands)
