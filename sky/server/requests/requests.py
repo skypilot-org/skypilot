@@ -33,6 +33,7 @@ from sky.server import daemons
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.server.requests.serializers import return_value_serializers
 from sky.utils import asyncio_utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -47,7 +48,9 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
+# Legacy path for backward compatibility - GC will clean up logs from both
+# the new and legacy paths to handle server upgrades gracefully.
+LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 DEFAULT_REQUESTS_RETENTION_HOURS = 24  # 1 day
 
@@ -141,7 +144,7 @@ class Request:
     @property
     def log_path(self) -> pathlib.Path:
         log_path_prefix = pathlib.Path(
-            REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+            server_constants.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
         log_path_prefix.mkdir(parents=True, exist_ok=True)
         log_path = (log_path_prefix / self.request_id).with_suffix('.log')
         return log_path
@@ -231,13 +234,16 @@ class Request:
         assert isinstance(self.request_body,
                           payloads.RequestBody), (self.name, self.request_body)
         try:
+            # Use version-aware serializer to handle backward compatibility
+            # for old clients that don't recognize new fields.
+            serializer = return_value_serializers.get_serializer(self.name)
             return payloads.RequestPayload(
                 request_id=self.request_id,
                 name=self.name,
                 entrypoint=encoders.pickle_and_encode(self.entrypoint),
                 request_body=encoders.pickle_and_encode(self.request_body),
                 status=self.status.value,
-                return_value=orjson.dumps(self.return_value).decode('utf-8'),
+                return_value=serializer(self.return_value),
                 error=orjson.dumps(self.error).decode('utf-8'),
                 pid=self.pid,
                 created_at=self.created_at,
@@ -394,94 +400,6 @@ def _update_request_row_fields(
     return tuple(content[col] for col in REQUEST_COLUMNS)
 
 
-def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
-    """Kill all pending and running requests for a cluster.
-
-    Args:
-        cluster_name: the name of the cluster.
-        exclude_request_names: exclude requests with these names. This is to
-            prevent killing the caller request.
-    """
-    request_ids = [
-        request_task.request_id
-        for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-            exclude_request_names=[exclude_request_name],
-            cluster_names=[cluster_name],
-            fields=['request_id']))
-    ]
-    kill_requests(request_ids)
-
-
-def kill_requests_with_prefix(request_ids: Optional[List[str]] = None,
-                              user_id: Optional[str] = None) -> List[str]:
-    """Kill requests with a given request ID prefix."""
-    expanded_request_ids: Optional[List[str]] = None
-    if request_ids is not None:
-        expanded_request_ids = []
-        for request_id in request_ids:
-            request_tasks = get_requests_with_prefix(request_id,
-                                                     fields=['request_id'])
-            if request_tasks is None or len(request_tasks) == 0:
-                continue
-            if len(request_tasks) > 1:
-                raise ValueError(f'Multiple requests found for '
-                                 f'request ID prefix: {request_id}')
-            expanded_request_ids.append(request_tasks[0].request_id)
-    return kill_requests(request_ids=expanded_request_ids, user_id=user_id)
-
-
-def kill_requests(request_ids: Optional[List[str]] = None,
-                  user_id: Optional[str] = None) -> List[str]:
-    """Kill a SkyPilot API request and set its status to cancelled.
-
-    Args:
-        request_ids: The request IDs to kill. If None, all requests for the
-            user are killed.
-        user_id: The user ID to kill requests for. If None, all users are
-            killed.
-
-    Returns:
-        A list of request IDs that were cancelled.
-    """
-    if request_ids is None:
-        request_ids = [
-            request_task.request_id
-            for request_task in get_request_tasks(req_filter=RequestTaskFilter(
-                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
-                # Avoid cancelling the cancel request itself.
-                exclude_request_names=['sky.api_cancel'],
-                user_id=user_id,
-                fields=['request_id']))
-        ]
-    cancelled_request_ids = []
-    for request_id in request_ids:
-        with update_request(request_id) as request_record:
-            if request_record is None:
-                logger.debug(f'No request ID {request_id}')
-                continue
-            # Skip internal requests. The internal requests are scheduled with
-            # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
-            if request_record.request_id in set(
-                    event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
-                continue
-            if request_record.status > RequestStatus.RUNNING:
-                logger.debug(f'Request {request_id} already finished')
-                continue
-            if request_record.pid is not None:
-                logger.debug(f'Killing request process {request_record.pid}')
-                # Use SIGTERM instead of SIGKILL:
-                # - The executor can handle SIGTERM gracefully
-                # - After SIGTERM, the executor can reuse the request process
-                #   for other requests, avoiding the overhead of forking a new
-                #   process for each request.
-                os.kill(request_record.pid, signal.SIGTERM)
-            request_record.status = RequestStatus.CANCELLED
-            request_record.finished_at = time.time()
-            cancelled_request_ids.append(request_id)
-    return cancelled_request_ids
-
-
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
@@ -588,10 +506,15 @@ def reset_db_and_logs():
     """Create the database."""
     logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
-    logger.debug(
-        f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
-    )
-    shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
+    logger.debug('clearing local API server logs directory at '
+                 f'{server_constants.REQUEST_LOG_PATH_PREFIX}')
+    shutil.rmtree(pathlib.Path(
+        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
+                  ignore_errors=True)
+    # Also clear legacy path for backward compatibility cleanup
+    logger.debug('clearing legacy API server logs directory at '
+                 f'{LEGACY_REQUEST_LOG_PATH_PREFIX}')
+    shutil.rmtree(pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     logger.debug('clearing local API server client directory at '
                  f'{server_common.API_SERVER_CLIENT_DIR.expanduser()}')
@@ -620,9 +543,136 @@ def reset_db_and_logs():
 
 
 def request_lock_path(request_id: str) -> str:
-    lock_path = os.path.expanduser(REQUEST_LOG_PATH_PREFIX)
+    lock_path = os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX)
     os.makedirs(lock_path, exist_ok=True)
     return os.path.join(lock_path, f'.{request_id}.lock')
+
+
+def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
+    """Kill all pending and running requests for a cluster.
+
+    Args:
+        cluster_name: the name of the cluster.
+        exclude_request_names: exclude requests with these names. This is to
+            prevent killing the caller request.
+    """
+    request_ids = [
+        request_task.request_id
+        for request_task in get_request_tasks(req_filter=RequestTaskFilter(
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+            exclude_request_names=[exclude_request_name],
+            cluster_names=[cluster_name],
+            fields=['request_id']))
+    ]
+    _kill_requests(request_ids)
+
+
+def kill_requests(request_ids: Optional[List[str]] = None,
+                  user_id: Optional[str] = None) -> List[str]:
+    """Kill requests with a given request ID prefix."""
+    expanded_request_ids: Optional[List[str]] = None
+    if request_ids is not None:
+        expanded_request_ids = []
+        for request_id in request_ids:
+            request_tasks = get_requests_with_prefix(request_id,
+                                                     fields=['request_id'])
+            if request_tasks is None or len(request_tasks) == 0:
+                continue
+            if len(request_tasks) > 1:
+                raise ValueError(f'Multiple requests found for '
+                                 f'request ID prefix: {request_id}')
+            expanded_request_ids.append(request_tasks[0].request_id)
+    return _kill_requests(request_ids=expanded_request_ids, user_id=user_id)
+
+
+# needed for backward compatibility. Remove by v0.10.7 or v0.12.0
+# and rename kill_requests to kill_requests_with_prefix.
+kill_requests_with_prefix = kill_requests
+
+
+def _should_kill_request(request_id: str,
+                         request_record: Optional[Request]) -> bool:
+    if request_record is None:
+        logger.debug(f'No request ID {request_id}')
+        return False
+    # Skip internal requests. The internal requests are scheduled with
+    # request_id in range(len(INTERNAL_REQUEST_EVENTS)).
+    if request_record.request_id in set(
+            event.id for event in daemons.INTERNAL_REQUEST_DAEMONS):
+        return False
+    if request_record.status > RequestStatus.RUNNING:
+        logger.debug(f'Request {request_id} already finished')
+        return False
+    return True
+
+
+def _kill_requests(request_ids: Optional[List[str]] = None,
+                   user_id: Optional[str] = None) -> List[str]:
+    """Kill a SkyPilot API request and set its status to cancelled.
+
+    Args:
+        request_ids: The request IDs to kill. If None, all requests for the
+            user are killed.
+        user_id: The user ID to kill requests for. If None, all users are
+            killed.
+
+    Returns:
+        A list of request IDs that were cancelled.
+    """
+    if request_ids is None:
+        request_ids = [
+            request_task.request_id
+            for request_task in get_request_tasks(req_filter=RequestTaskFilter(
+                status=[RequestStatus.PENDING, RequestStatus.RUNNING],
+                # Avoid cancelling the cancel request itself.
+                exclude_request_names=['sky.api_cancel'],
+                user_id=user_id,
+                fields=['request_id']))
+        ]
+    cancelled_request_ids = []
+    for request_id in request_ids:
+        with update_request(request_id) as request_record:
+            if not _should_kill_request(request_id, request_record):
+                continue
+            if request_record.pid is not None:
+                logger.debug(f'Killing request process {request_record.pid}')
+                # Use SIGTERM instead of SIGKILL:
+                # - The executor can handle SIGTERM gracefully
+                # - After SIGTERM, the executor can reuse the request process
+                #   for other requests, avoiding the overhead of forking a new
+                #   process for each request.
+                os.kill(request_record.pid, signal.SIGTERM)
+            request_record.status = RequestStatus.CANCELLED
+            request_record.finished_at = time.time()
+            cancelled_request_ids.append(request_id)
+    return cancelled_request_ids
+
+
+@init_db_async
+@asyncio_utils.shield
+async def kill_request_async(request_id: str) -> bool:
+    """Kill a SkyPilot API request and set its status to cancelled.
+
+    Returns:
+        True if the request was killed, False otherwise.
+    """
+    async with filelock.AsyncFileLock(request_lock_path(request_id)):
+        request = await _get_request_no_lock_async(request_id)
+        if not _should_kill_request(request_id, request):
+            return False
+        assert request is not None
+        if request.pid is not None:
+            logger.debug(f'Killing request process {request.pid}')
+            # Use SIGTERM instead of SIGKILL:
+            # - The executor can handle SIGTERM gracefully
+            # - After SIGTERM, the executor can reuse the request process
+            #   for other requests, avoiding the overhead of forking a new
+            #   process for each request.
+            os.kill(request.pid, signal.SIGTERM)
+        request.status = RequestStatus.CANCELLED
+        request.finished_at = time.time()
+        await _add_or_update_request_no_lock_async(request)
+    return True
 
 
 @contextlib.contextmanager
@@ -639,7 +689,7 @@ def update_request(request_id: str) -> Generator[Optional[Request], None, None]:
             _add_or_update_request_no_lock(request)
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
 @asyncio_utils.shield
 async def update_status_async(request_id: str, status: RequestStatus) -> None:
@@ -651,7 +701,7 @@ async def update_status_async(request_id: str, status: RequestStatus) -> None:
             await _add_or_update_request_no_lock_async(request)
 
 
-@init_db
+@init_db_async
 @metrics_lib.time_me
 @asyncio_utils.shield
 async def update_status_msg_async(request_id: str, status_msg: str) -> None:
@@ -830,11 +880,17 @@ async def create_if_not_exists_async(request: Request) -> bool:
         f'({request_columns}) VALUES '
         f'({values_str}) ON CONFLICT(request_id) DO NOTHING RETURNING ROWID')
     request_row = request.to_row()
-    # Execute the SQL statement without getting the request lock.
-    # The request lock is used to prevent racing with cancellation codepath,
-    # but a request cannot be cancelled before it is created.
-    row = await _DB.execute_get_returning_value_async(sql_statement,
-                                                      request_row)
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start creating request {request.request_id}')
+    try:
+        # Execute the SQL statement without getting the request lock.
+        # The request lock is used to prevent racing with cancellation codepath,
+        # but a request cannot be cancelled before it is created.
+        row = await _DB.execute_get_returning_value_async(
+            sql_statement, request_row)
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End creating request {request.request_id}')
     return True if row else False
 
 
@@ -991,9 +1047,15 @@ _add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
 def _add_or_update_request_no_lock(request: Request):
     """Add or update a REST request into the database."""
     assert _DB is not None
-    with _DB.conn:
-        cursor = _DB.conn.cursor()
-        cursor.execute(_add_or_update_request_sql, request.to_row())
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start adding or updating request {request.request_id}')
+    try:
+        with _DB.conn:
+            cursor = _DB.conn.cursor()
+            cursor.execute(_add_or_update_request_sql, request.to_row())
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End adding or updating request {request.request_id}')
 
 
 async def _add_or_update_request_no_lock_async(request: Request):
@@ -1003,11 +1065,15 @@ async def _add_or_update_request_no_lock_async(request: Request):
                                        request.to_row())
 
 
-def set_request_failed(request_id: str, e: BaseException) -> None:
-    """Set a request to failed and populate the error message."""
+def set_exception_stacktrace(e: BaseException) -> None:
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()
     setattr(e, 'stacktrace', stacktrace)
+
+
+def set_request_failed(request_id: str, e: BaseException) -> None:
+    """Set a request to failed and populate the error message."""
+    set_exception_stacktrace(e)
     with update_request(request_id) as request_task:
         assert request_task is not None, request_id
         request_task.status = RequestStatus.FAILED
@@ -1020,9 +1086,7 @@ def set_request_failed(request_id: str, e: BaseException) -> None:
 @asyncio_utils.shield
 async def set_request_failed_async(request_id: str, e: BaseException) -> None:
     """Set a request to failed and populate the error message."""
-    with ux_utils.enable_traceback():
-        stacktrace = traceback.format_exc()
-    setattr(e, 'stacktrace', stacktrace)
+    set_exception_stacktrace(e)
     async with filelock.AsyncFileLock(request_lock_path(request_id)):
         request_task = await _get_request_no_lock_async(request_id)
         assert request_task is not None, request_id
@@ -1080,8 +1144,46 @@ async def _delete_requests(request_ids: List[str]):
     """Clean up requests by their IDs."""
     id_list_str = ','.join(repr(request_id) for request_id in request_ids)
     assert _DB is not None
-    await _DB.execute_and_commit_async(
-        f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+        logger.debug(f'Start deleting requests {request_ids}')
+    try:
+        await _DB.execute_and_commit_async(
+            f'DELETE FROM {REQUEST_TABLE} WHERE request_id IN ({id_list_str})')
+    finally:
+        if sky_logging.logging_enabled(logger, sky_logging.DEBUG):
+            logger.debug(f'End deleting requests {request_ids}')
+
+
+# TODO Remove this function on or after v0.15.0
+def _get_legacy_log_path(request_id: str) -> pathlib.Path:
+    """Get the legacy log path for a request (for backward compatibility).
+
+    This is used during GC to clean up log files from the old location
+    (~/sky_logs/api_server/requests/) after server upgrades.
+    """
+    legacy_path_prefix = pathlib.Path(
+        LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+    return (legacy_path_prefix / request_id).with_suffix('.log')
+
+
+# TODO Remove this function on or after v0.15.0
+async def _cleanup_legacy_directory_if_empty():
+    """Remove legacy request log directory if empty.
+
+    This helps clean up the legacy directory once all old logs have been
+    garbage collected after a server upgrade.
+    """
+    legacy_path = pathlib.Path(LEGACY_REQUEST_LOG_PATH_PREFIX).expanduser()
+    if not legacy_path.exists():
+        return
+    try:
+        # Check if directory is empty (no .log or .lock files)
+        if not any(legacy_path.iterdir()):
+            logger.info(f'Removing empty legacy log directory: {legacy_path}')
+            legacy_path.rmdir()
+    except Exception as e:  # pylint: disable=broad-except
+        # Don't fail GC if cleanup fails
+        logger.debug(f'Failed to cleanup legacy directory: {e}')
 
 
 async def clean_finished_requests_with_retention(retention_seconds: int,
@@ -1090,6 +1192,9 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
 
     This function removes old finished requests (SUCCEEDED, FAILED, CANCELLED)
     from the database and cleans up their associated log files.
+
+    For backward compatibility, it also cleans up log files from the legacy
+    path (~/sky_logs/api_server/requests/) to handle server upgrades.
 
     Args:
         retention_seconds: Requests older than this many seconds will be
@@ -1100,6 +1205,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
@@ -1114,16 +1220,33 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
         for req in reqs:
             # req.log_path is derived from request_id,
             # so it's ok to just grab the request_id in the above query.
+            # Delete from current path
             futs.append(
                 asyncio.create_task(
                     anyio.Path(
                         req.log_path.absolute()).unlink(missing_ok=True)))
+            # Also delete from legacy path for backward compatibility
+            # TODO Remove this on or after v0.15.0
+            legacy_log_path = _get_legacy_log_path(req.request_id)
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(legacy_log_path).unlink(missing_ok=True)))
+            # Delete debug log if it exists
+            debug_log_path = (debug_log_dir /
+                              req.request_id).with_suffix('.log')
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(debug_log_path).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])
         total_deleted += len(reqs)
         if len(reqs) < batch_size:
             break
+
+    # Try to clean up the legacy directory if it's empty
+    # TODO Remove this on or after v0.15.0
+    await _cleanup_legacy_directory_if_empty()
 
     # To avoid leakage of the log file, logs must be deleted before the
     # request task in the database.

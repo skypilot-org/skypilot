@@ -1,0 +1,1 @@
+"""Yotta cloud adaptor."""

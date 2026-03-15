@@ -1,4 +1,5 @@
 import { apiClient } from '@/data/connectors/client';
+import { getErrorMessageFromResponse } from '@/data/utils';
 
 export async function getVolumes() {
   try {
@@ -36,13 +37,14 @@ export async function getVolumes() {
           name_on_cloud: volume.name_on_cloud,
           usedby_pods: volume.usedby_pods,
           usedby_clusters: volume.usedby_clusters,
+          error_message: volume.error_message || null,
         };
       }) || [];
 
     return transformedData;
   } catch (error) {
     console.error('Failed to fetch volumes:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -52,30 +54,34 @@ export async function deleteVolume(volumeName) {
     const response = await apiClient.post('/volumes/delete', {
       names: [volumeName],
     });
-    const id =
-      response.headers.get('X-SkyPilot-Request-ID') ||
-      response.headers.get('X-Request-ID');
+    if (!response.ok) {
+      console.error(
+        `Initial API request to delete volume failed with status ${response.status}`
+      );
+      return {
+        success: false,
+        msg: `Failed to delete volume with status ${response.status}`,
+      };
+    }
+    const id = response.headers.get('X-SkyPilot-Request-ID');
+    if (!id) {
+      console.error('No request ID received from server for deleting volume');
+      return {
+        success: false,
+        msg: 'No request ID received from server for deleting volume',
+      };
+    }
     const fetchedData = await apiClient.get(`/api/get?request_id=${id}`);
-    if (fetchedData.status === 500) {
-      try {
-        const data = await fetchedData.json();
-        if (data.detail && data.detail.error) {
-          try {
-            const error = JSON.parse(data.detail.error);
-            // Handle specific error types
-            msg = error.message;
-          } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
-          }
-        }
-      } catch (parseError) {
-        console.error('Error parsing JSON:', parseError);
-      }
+    if (!fetchedData.ok) {
+      const errorMessage = await getErrorMessageFromResponse(fetchedData);
+      msg = `Failed to delete volume with status ${fetchedData.status}, error: ${errorMessage}`;
+      console.error(msg);
       return { success: false, msg: msg };
     }
     return { success: true };
   } catch (error) {
-    console.error('Failed to delete volume:', error);
-    return { success: false, msg: error.message };
+    msg = `Failed to delete volume: ${error}`;
+    console.error(msg);
+    return { success: false, msg: msg };
   }
 }

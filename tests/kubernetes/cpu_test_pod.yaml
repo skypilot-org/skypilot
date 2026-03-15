@@ -18,7 +18,7 @@ metadata:
 spec:
   containers:
   - name: skytest
-    image: us-central1-docker.pkg.dev/skypilot-375900/skypilotk8s/skypilot:latest
+    image: us-docker.pkg.dev/sky-dev-465/skypilotk8s/skypilot:latest
     # Run apt update and run a simple HTTP server
     command: ["/bin/bash", "-c", "--"]
     args: ["sudo apt update && python3 -m http.server 8080"]

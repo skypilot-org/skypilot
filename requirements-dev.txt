@@ -16,13 +16,14 @@ isort==5.12.0
 
 # type checking
 # match the version with .pre-commit-config.yaml
-mypy==1.14.1
+mypy==1.19.1
 types-PyYAML
 types-paramiko
 # 2.31 requires urlib3>2, which is incompatible with IBM and
 # kubernetes packages, which require urllib3<2.
 types-requests<2.31
-types-setuptools
+# Pin to avoid type-check errors with stricter type definitions in >=80.9
+types-setuptools<80.9
 types-cachetools
 types-pyvmomi
 types-aiofiles
@@ -35,12 +36,10 @@ pytest
 pytest-xdist
 pytest-env>=0.6
 pytest-asyncio
+buildkite-test-collector
 
 # memory profiler
 memory_profiler==0.61.0
-
-# For testing SkyServe
-aiohttp==3.9.3
 
 # For mocking AWS
 moto==5.1.2

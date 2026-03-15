@@ -3,9 +3,10 @@ import ast
 import difflib
 import hashlib
 import os
+import tempfile
 import time
 import typing
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 
@@ -16,6 +17,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import registry
+from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -243,9 +245,19 @@ def read_catalog(filename: str,
                             raise e
                 else:
                     # Download successful, save the catalog to a local file.
+                    # Use atomic write (write to temp file, then rename) to
+                    # avoid race conditions when multiple processes read/write
+                    # the catalog file concurrently during parallel test
+                    # execution.
                     os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-                    with open(catalog_path, 'w', encoding='utf-8') as f:
+                    with tempfile.NamedTemporaryFile(
+                            mode='w',
+                            dir=os.path.dirname(catalog_path),
+                            delete=False,
+                            encoding='utf-8') as f:
                         f.write(r.text)
+                        tmp_path = f.name
+                    os.rename(tmp_path, catalog_path)
                     with open(meta_path + '.md5', 'w', encoding='utf-8') as f:
                         f.write(hashlib.md5(r.text.encode()).hexdigest())
             logger.debug(f'Updated {cloud} catalog {filename}.')
@@ -385,7 +397,7 @@ def get_hourly_cost_impl(
                              f'{instance_type!r}.')
     cheapest_idx = df[price_str].idxmin()
     cheapest = df.loc[cheapest_idx]
-    return cheapest[price_str]
+    return float(cheapest[price_str])
 
 
 def _get_value(value):
@@ -466,6 +478,34 @@ def _filter_with_mem(df: 'pd.DataFrame',
         return df[df['MemoryGiB'] == memory]
 
 
+def filter_with_local_disk(df: 'pd.DataFrame',
+                           local_disk: Optional[str]) -> 'pd.DataFrame':
+    if local_disk is None:
+        return df
+
+    local_disk = local_disk.lower()
+    mode, size, at_least = resources_utils.parse_local_disk_str(local_disk)
+
+    # Disk Type
+    if mode not in ('nvme', 'ssd'):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Local disk should be either nvme or ssd. '
+                             f'Got {local_disk}.')
+    df = df[df['LocalDiskType'] == 'ssd']  # SSD is always required.
+    if mode == 'nvme':
+        df = df[df['NVMeSupported'] == True]  # pylint: disable=singleton-comparison
+
+    # Disk Size
+    total_disk = df['LocalDiskSize'].fillna(0) * df['LocalDiskCount'].fillna(0)
+
+    if at_least:
+        df = df[total_disk >= size]
+    else:
+        df = df[abs(total_disk - size) < 1.0]
+
+    return df
+
+
 def _filter_region_zone(df: 'pd.DataFrame', region: Optional[str],
                         zone: Optional[str]) -> 'pd.DataFrame':
     if region is not None:
@@ -543,6 +583,36 @@ def get_arch_from_instance_type_impl(
         return None
 
     return arch
+
+
+def get_local_disk_from_instance_type_impl(df: 'pd.DataFrame',
+                                           instance_type: str) -> Optional[str]:
+    df = _get_instance_type(df, instance_type, None)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
+    row = df.iloc[0]
+
+    if 'LocalDiskType' not in row or pd.isna(row['LocalDiskType']):
+        return None
+
+    mode = row['LocalDiskType']
+    if mode != 'ssd':
+        return None  # We don't support HDDs right now.
+
+    if pd.isna(row.get('LocalDiskSize')) or pd.isna(row.get('LocalDiskCount')):
+        # Should we raise error instead?
+        return None
+
+    total_size = float(row['LocalDiskSize']) * float(row['LocalDiskCount'])
+
+    nvme_supported = row.get('NVMeSupported', False)
+    if pd.isna(nvme_supported):
+        nvme_supported = False
+    if nvme_supported:
+        mode = 'nvme'
+
+    return f'{mode}:{int(total_size)}'
 
 
 def get_instance_type_for_accelerator_impl(
@@ -740,3 +810,94 @@ def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
     df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
     return not df.empty
+
+
+# ---------------------------------------------------------------------------
+# Config-based pricing for virtual instance types (Kubernetes, Slurm)
+# ---------------------------------------------------------------------------
+
+
+def merge_pricing_dicts(base: Dict[str, Any],
+                        override: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep-merge *override* into *base*, returning a new dict.
+
+    Top-level scalar keys (``cpu``, ``memory``) are replaced.
+    The ``accelerators`` sub-dict is merged key-by-key so that
+    unmentioned accelerators are preserved from *base*.
+    """
+    merged = dict(base)
+    for key in ('cpu', 'memory'):
+        if key in override:
+            merged[key] = override[key]
+    if 'accelerators' in override:
+        merged_accels = dict(merged.get('accelerators', {}))
+        merged_accels.update(override['accelerators'])
+        merged['accelerators'] = merged_accels
+    return merged
+
+
+def resolve_pricing_config(
+        *config_key_paths: Tuple[str, ...]) -> Dict[str, Any]:
+    """Fetch pricing from config key paths and merge in priority order.
+
+    Each path is a tuple of strings looked up via
+    ``skypilot_config.get_nested``.  Later paths override earlier ones,
+    with deep-merge semantics for the ``accelerators`` sub-dict.
+
+    Example::
+
+        resolve_pricing_config(
+            ('kubernetes', 'pricing'),
+            ('kubernetes', 'context_configs', ctx, 'pricing'),
+        )
+    """
+    from sky import skypilot_config  # pylint: disable=import-outside-toplevel
+
+    pricing: Dict[str, Any] = {}
+    for path in config_key_paths:
+        level = skypilot_config.get_nested(path, default_value=None)
+        if level is not None:
+            pricing = merge_pricing_dicts(pricing, level)
+    return pricing
+
+
+def get_hourly_cost_from_pricing(
+    pricing: Dict[str, Any],
+    cpus: float,
+    memory: float,
+    accelerator_name: Optional[str],
+    accelerator_count: Optional[int],
+) -> float:
+    """Compute hourly cost from a pricing config dict.
+
+    The pricing dict has the structure::
+
+        {
+            'cpu': <$/vCPU/hour>,
+            'memory': <$/GB/hour>,
+            'accelerators': {
+                '<AcceleratorName>': <$/accelerator/hour>,
+                ...
+            },
+        }
+
+    The two tiers are mutually exclusive:
+
+    - **Accelerator instances**: if the instance has an accelerator, the cost
+      is ``accel_count * accel_rate``.  The ``cpu`` and ``memory`` rates are
+      ignored because GPU/accelerator pricing is all-in per device.  If the
+      accelerator is not listed in the config, the cost is ``$0.00``.
+    - **CPU-only instances**: if there is no accelerator, the cost is
+      ``cpus * cpu_rate + memory * mem_rate``.
+
+    Missing keys default to 0.0.
+    """
+    if accelerator_name and accelerator_count:
+        accels = pricing.get('accelerators', {})
+        accel_rate = next((rate for name, rate in accels.items()
+                           if name.lower() == accelerator_name.lower()), 0.0)
+        return accelerator_count * accel_rate
+
+    cpu_rate = pricing.get('cpu', 0.0)
+    mem_rate = pricing.get('memory', 0.0)
+    return cpus * cpu_rate + memory * mem_rate

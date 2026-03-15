@@ -3,11 +3,22 @@
 
 import dashboardCache from './cache';
 import { getClusters } from '@/data/connectors/clusters';
-import { getManagedJobsWithClientPagination } from '@/data/connectors/jobs';
-import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
+import {
+  getManagedJobs,
+  getManagedJobsWithClientPagination,
+} from '@/data/connectors/jobs';
+import {
+  getWorkspaces,
+  getEnabledCloudsBatch,
+} from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
-import { getCloudInfrastructure } from '@/data/connectors/infra';
+import {
+  getEnabledCloudsList,
+  getWorkspaceContexts,
+  getContextGPUData,
+  getSlurmInfrastructure,
+} from '@/data/connectors/infra';
 import { getSSHNodePools } from '@/data/connectors/ssh-node-pools';
 
 /**
@@ -17,23 +28,38 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
   // Base functions used across multiple pages (no arguments)
   base: {
     getClusters: { fn: getClusters, args: [] },
+    // For jobs page - uses client-side pagination wrapper
     getManagedJobs: {
       fn: getManagedJobsWithClientPagination,
       args: [{ allUsers: true }],
     },
+    // For infra/users/workspaces pages - shared cache entry
+    getManagedJobsForOtherPages: {
+      fn: getManagedJobs,
+      args: [{ allUsers: true, skipFinished: true }],
+    },
     getWorkspaces: { fn: getWorkspaces, args: [] },
     getUsers: { fn: getUsers, args: [] },
-    getCloudInfrastructure: {
-      fn: getCloudInfrastructure,
-      args: [false],
+    getEnabledCloudsList: {
+      fn: getEnabledCloudsList,
+      args: [],
     },
+    getWorkspaceContexts: { fn: getWorkspaceContexts, args: [] },
+    getSlurmInfrastructure: { fn: getSlurmInfrastructure, args: [] },
     getSSHNodePools: { fn: getSSHNodePools, args: [] },
     getVolumes: { fn: getVolumes, args: [] },
   },
 
   // Functions with arguments (require dynamic data)
   dynamic: {
-    getEnabledClouds: { fn: getEnabledClouds, requiresWorkspaces: true },
+    getEnabledCloudsBatch: {
+      fn: getEnabledCloudsBatch,
+      requiresWorkspaces: true,
+    },
+    getContextGPUDataForAllContexts: {
+      fn: getContextGPUData,
+      requiresContexts: true,
+    },
   },
 
   // Page-specific function requirements
@@ -41,18 +67,16 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
     clusters: ['getClusters', 'getWorkspaces'],
     jobs: ['getManagedJobs', 'getClusters', 'getWorkspaces', 'getUsers'],
     infra: [
-      'getClusters',
-      'getManagedJobs',
-      'getCloudInfrastructure',
-      'getSSHNodePools',
+      // Empty - infra page uses progressive loading via fetchData()
+      // All infra functions are background-preloaded from other pages
     ],
     workspaces: [
       'getWorkspaces',
       'getClusters',
-      'getManagedJobs',
-      'getEnabledClouds',
+      'getManagedJobsForOtherPages',
+      'getEnabledCloudsBatch',
     ],
-    users: ['getUsers', 'getClusters', 'getManagedJobs'],
+    users: ['getUsers', 'getClusters', 'getManagedJobsForOtherPages'],
     volumes: ['getVolumes'],
   },
 };
@@ -66,6 +90,19 @@ class CachePreloader {
     this.preloadPromises = new Map();
     this.recentlyPreloaded = new Map(); // Track recently preloaded functions with timestamps
     this.PRELOAD_GRACE_PERIOD = 5000; // 5 seconds grace period
+    this.pluginPages = new Map(); // Dynamically registered plugin page functions
+  }
+
+  /**
+   * Register a plugin page with its fetch functions for background preloading
+   * @param {string} pageName - The plugin page name (e.g., 'gpu-manager')
+   * @param {Array<{fn: Function, args: Array}>} functions - Functions to preload
+   */
+  registerPluginPage(pageName, functions) {
+    this.pluginPages.set(pageName, functions);
+    console.log(
+      `[CachePreloader] Registered plugin page: ${pageName} with ${functions.length} functions`
+    );
   }
 
   /**
@@ -78,7 +115,10 @@ class CachePreloader {
   async preloadForPage(currentPage, options) {
     const { backgroundPreload = true, force = false } = options || {};
 
-    if (!DASHBOARD_CACHE_FUNCTIONS.pages[currentPage]) {
+    if (
+      !DASHBOARD_CACHE_FUNCTIONS.pages[currentPage] &&
+      !this.pluginPages.has(currentPage)
+    ) {
       console.warn(`Unknown page: ${currentPage}`);
       return;
     }
@@ -106,8 +146,24 @@ class CachePreloader {
    * @private
    */
   async _loadPageData(page, force = false) {
-    const requiredFunctions = DASHBOARD_CACHE_FUNCTIONS.pages[page];
+    const requiredFunctions = DASHBOARD_CACHE_FUNCTIONS.pages[page] || [];
     const promises = [];
+
+    // Also load plugin page functions if registered
+    const pluginFunctions = this.pluginPages.get(page);
+    if (pluginFunctions) {
+      for (const { fn, args } of pluginFunctions) {
+        if (force) {
+          dashboardCache.invalidate(fn, args);
+        }
+        promises.push(
+          dashboardCache.get(fn, args).then((result) => {
+            this._markAsPreloaded(fn, args);
+            return result;
+          })
+        );
+      }
+    }
 
     for (const functionName of requiredFunctions) {
       if (DASHBOARD_CACHE_FUNCTIONS.base[functionName]) {
@@ -123,9 +179,12 @@ class CachePreloader {
             return result;
           })
         );
-      } else if (functionName === 'getEnabledClouds') {
+      } else if (functionName === 'getEnabledCloudsBatch') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
+      } else if (functionName === 'getContextGPUDataForAllContexts') {
+        // Dynamic function that requires context names first
+        promises.push(this._loadContextGPUDataForAllContexts(force));
       }
     }
 
@@ -139,24 +198,53 @@ class CachePreloader {
    */
   async _loadEnabledCloudsForAllWorkspaces(force = false) {
     try {
-      // First get workspaces
       if (force) {
         dashboardCache.invalidate(getWorkspaces);
       }
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
 
-      // Then load enabled clouds for each workspace
-      const promises = workspaceNames.map((wsName) => {
+      if (force) {
+        dashboardCache.invalidateFunction(getEnabledCloudsBatch);
+      }
+      await dashboardCache.get(getEnabledCloudsBatch, [workspaceNames, false]);
+    } catch (error) {
+      console.error('[CachePreloader] Error loading enabled clouds:', error);
+    }
+  }
+
+  /**
+   * Load GPU data for all Kubernetes contexts
+   * @private
+   */
+  async _loadContextGPUDataForAllContexts(force = false) {
+    try {
+      // First get context names
+      if (force) {
+        dashboardCache.invalidate(getWorkspaceContexts);
+      }
+      const contextsData = await dashboardCache.get(getWorkspaceContexts);
+
+      if (!contextsData || !contextsData.allContextNames) {
+        return;
+      }
+
+      // Filter to only K8s contexts (not SSH)
+      const kubeContexts = contextsData.allContextNames.filter(
+        (ctx) => ctx && !ctx.startsWith('ssh-')
+      );
+
+      // Load GPU data for each context in parallel
+      const promises = kubeContexts.map((context) => {
         if (force) {
-          dashboardCache.invalidate(getEnabledClouds, [wsName]);
+          dashboardCache.invalidate(getContextGPUData, [context]);
         }
-        return dashboardCache.get(getEnabledClouds, [wsName]);
+        return dashboardCache.get(getContextGPUData, [context]);
       });
 
       await Promise.allSettled(promises);
     } catch (error) {
-      console.error('[CachePreloader] Error loading enabled clouds:', error);
+      console.error('[CachePreloader] Error loading context GPU data:', error);
     }
   }
 
@@ -188,6 +276,20 @@ class CachePreloader {
         });
       });
 
+    // Always background-preload all infra data when NOT on infra page
+    // (infra page uses progressive loading via fetchData, so we don't block it)
+    if (currentPage !== 'infra') {
+      // Base functions for infra
+      allOtherFunctions.add('getClusters');
+      allOtherFunctions.add('getManagedJobsForOtherPages');
+      allOtherFunctions.add('getEnabledCloudsList');
+      allOtherFunctions.add('getWorkspaceContexts');
+      allOtherFunctions.add('getSlurmInfrastructure');
+      allOtherFunctions.add('getSSHNodePools');
+      // Dynamic function for K8s GPU data
+      allOtherFunctions.add('getContextGPUDataForAllContexts');
+    }
+
     console.log(
       `[CachePreloader] Background preloading ${allOtherFunctions.size} unique functions: ${Array.from(allOtherFunctions).join(', ')}`
     );
@@ -202,9 +304,12 @@ class CachePreloader {
             await dashboardCache.get(fn, args);
             // Mark this function as recently preloaded
             this._markAsPreloaded(fn, args);
-          } else if (functionName === 'getEnabledClouds') {
+          } else if (functionName === 'getEnabledCloudsBatch') {
             // Dynamic function that requires workspace data
             await this._loadEnabledCloudsForAllWorkspaces(false);
+          } else if (functionName === 'getContextGPUDataForAllContexts') {
+            // Dynamic function that requires context names first
+            await this._loadContextGPUDataForAllContexts(false);
           }
           console.log(
             `[CachePreloader] Background loaded function: ${functionName}`
@@ -217,6 +322,29 @@ class CachePreloader {
         }
       }
     );
+
+    // Also preload registered plugin pages (except the current one)
+    for (const [pageName, functions] of this.pluginPages) {
+      if (pageName === currentPage) continue;
+      for (const { fn, args } of functions) {
+        preloadPromises.push(
+          dashboardCache
+            .get(fn, args)
+            .then(() => {
+              this._markAsPreloaded(fn, args);
+              console.log(
+                `[CachePreloader] Background loaded plugin function for: ${pageName}`
+              );
+            })
+            .catch((error) => {
+              console.error(
+                `[CachePreloader] Background load failed for plugin page ${pageName}:`,
+                error
+              );
+            })
+        );
+      }
+    }
 
     // Wait for all preloading to complete
     Promise.allSettled(preloadPromises).then(() => {

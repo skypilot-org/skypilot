@@ -2,9 +2,8 @@
 
 This module contains tests for the CLI utilities in sky.utils.cli_utils.
 """
+import re
 import time
-
-import pytest
 
 from sky import backends
 from sky.resources import Resources
@@ -377,3 +376,113 @@ def test_get_resources_kubernetes():
     # Test K8s TPU resources
     resources_str = status_utils._get_resources(mock_record_k8s_tpu)
     assert resources_str == '1x(gpus=tpu-v4-8:1, cpus=8, mem=32, ...)'
+
+
+def test_get_user_display_name():
+    """Test the get_user_display_name function for service account detection."""
+    # Test regular user (no SA prefix)
+    assert status_utils.get_user_display_name('john_doe',
+                                              'abc123') == 'john_doe'
+    assert status_utils.get_user_display_name('alice', 'regular-id') == 'alice'
+
+    # Test service account (SA prefix - lowercase)
+    assert status_utils.get_user_display_name('service-bot',
+                                              'sa-12345') == 'service-bot (SA)'
+
+    # Test service account (SA prefix - uppercase)
+    assert status_utils.get_user_display_name('ci-runner',
+                                              'SA-67890') == 'ci-runner (SA)'
+
+    # Test service account (SA prefix - mixed case)
+    assert status_utils.get_user_display_name('deploy-agent',
+                                              'Sa-AbCdE') == 'deploy-agent (SA)'
+
+    # Test with None user_id (should return user_name without modification)
+    assert status_utils.get_user_display_name('bob', None) == 'bob'
+
+    # Test with empty string user_id
+    assert status_utils.get_user_display_name('charlie', '') == 'charlie'
+
+
+def test_get_user_name_from_cluster_record():
+    """Test the _get_user_name function for extracting user name from cluster record."""
+    # Test regular user
+    mock_record = {
+        'user_name': 'john_doe',
+        'user_hash': 'abc123',
+    }
+    assert status_utils._get_user_name(mock_record) == 'john_doe'
+
+    # Test service account
+    mock_record_sa = {
+        'user_name': 'service-bot',
+        'user_hash': 'sa-12345',
+    }
+    assert status_utils._get_user_name(mock_record_sa) == 'service-bot (SA)'
+
+    # Test missing user_name (returns '-')
+    mock_record_no_name = {
+        'user_hash': 'abc123',
+    }
+    assert status_utils._get_user_name(mock_record_no_name) == '-'
+
+    # Test user_name is '-' (should return '-' without SA suffix)
+    mock_record_dash = {
+        'user_name': '-',
+        'user_hash': 'sa-12345',
+    }
+    assert status_utils._get_user_name(mock_record_dash) == '-'
+
+    # Test missing user_hash (no SA suffix added)
+    mock_record_no_hash = {
+        'user_name': 'alice',
+    }
+    assert status_utils._get_user_name(mock_record_no_hash) == 'alice'
+
+
+def test_get_resources_fractional_values():
+    """Test resources display for fractional CPU and memory values."""
+    from sky.utils import resources_utils
+
+    # Test fractional CPU and integer memory (0.5 CPU, 4GB)
+    mock_resources_fractional_cpu = Resources(infra='k8s/my-cluster-ctx',
+                                              cpus='0.5',
+                                              memory=4,
+                                              instance_type='0.5CPU--4GB')
+    simple, full = resources_utils.format_resource(
+        mock_resources_fractional_cpu)
+    assert 'cpus=0.5' in simple and 'cpus=0.5' in full
+    assert 'mem=4' in simple and 'mem=4' in full
+    # Ensure we don't have truncated values like 'cpus=0' or 'mem=0'
+    assert not re.search(r'\bcpus=0(?![.\d])', simple)
+    assert not re.search(r'\bcpus=0(?![.\d])', full)
+
+    # Test integer CPU and fractional memory (1 CPU, 0.5GB)
+    mock_resources_fractional_mem = Resources(infra='k8s/my-cluster-ctx',
+                                              cpus='1',
+                                              memory=0.5,
+                                              instance_type='1CPU--0.5GB')
+    simple, full = resources_utils.format_resource(
+        mock_resources_fractional_mem)
+    assert 'cpus=1' in simple and 'cpus=1' in full
+    assert 'mem=0.5' in simple and 'mem=0.5' in full
+    assert not re.search(r'\bmem=0(?![.\d])', simple)
+    assert not re.search(r'\bmem=0(?![.\d])', full)
+
+    # Test decimal CPU and memory (4.5 CPU, 8.5GB)
+    mock_resources_decimal = Resources(infra='k8s/my-cluster-ctx',
+                                       cpus='4.5',
+                                       memory=8.5,
+                                       instance_type='4.5CPU--8.5GB')
+    simple, full = resources_utils.format_resource(mock_resources_decimal)
+    assert 'cpus=4.5' in simple and 'cpus=4.5' in full
+    assert 'mem=8.5' in simple and 'mem=8.5' in full
+
+    # Test integer CPU and memory (4 CPU, 8GB)
+    mock_resources_int = Resources(infra='k8s/my-cluster-ctx',
+                                   cpus='4',
+                                   memory=8,
+                                   instance_type='4CPU--8GB')
+    simple, full = resources_utils.format_resource(mock_resources_int)
+    assert 'cpus=4' in simple and 'cpus=4' in full
+    assert 'mem=8' in simple and 'mem=8' in full

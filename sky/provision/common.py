@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import sky_logging
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import resources_utils
 
@@ -36,6 +37,15 @@ class StopFailoverError(Exception):
     """
 
 
+# These fields are sensitive and should be redacted from the config for logging
+# purposes.
+SENSITIVE_FIELDS = [
+    ('docker_config', 'docker_login_config', 'password'),
+    ('provider_config', 'create_instance_kwargs', 'login'),
+    ('provider_config', 'create_instance_kwargs', 'api_key'),
+]
+
+
 @dataclasses.dataclass
 class ProvisionConfig:
     """Configuration for provisioning."""
@@ -55,6 +65,18 @@ class ProvisionConfig:
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
+
+    def get_redacted_config(self) -> Dict[str, Any]:
+        """Get the redacted config."""
+        config = dataclasses.asdict(self)
+
+        config_copy = config_utils.Config(config)
+
+        for field_list in SENSITIVE_FIELDS:
+            val = config_copy.get_nested(field_list, default_value=None)
+            if val is not None:
+                config_copy.set_nested(field_list, '<redacted>')
+        return dict(**config_copy)
 
 
 # -------------------- output data model -------------------- #
@@ -99,6 +121,10 @@ class InstanceInfo:
     ssh_port: int = 22
     # The internal service address of the instance on Kubernetes.
     internal_svc: Optional[str] = None
+    # The infrastructure node name for display in dashboard.
+    # For Kubernetes: the k8s node name the pod runs on.
+    # For clouds: the instance name (e.g., from AWS Name tag, GCP name).
+    node_name: Optional[str] = None
 
     def get_feasible_ip(self) -> str:
         """Get the most feasible IPs of the instance. This function returns
@@ -228,6 +254,22 @@ class ClusterInfo:
             instance.ssh_port for instance in worker_instances
         ]
         return head_instance_port + worker_instance_ports
+
+    def get_node_names(self) -> Optional[List[str]]:
+        """Get current node names as a list, head first.
+
+        Returns:
+            List of node names ordered head-first, or None if unavailable.
+            For Kubernetes, this is the k8s node name the pod runs on.
+            For clouds, this is the instance name.
+        """
+        node_names: List[str] = []
+        head = self.get_head_instance()
+        if head is not None and head.node_name:
+            node_names.append(head.node_name)
+        for worker in self.get_worker_instances():
+            node_names.append(worker.node_name or '')
+        return node_names if node_names else None
 
 
 class Endpoint:

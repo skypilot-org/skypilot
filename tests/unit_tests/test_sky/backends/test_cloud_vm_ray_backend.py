@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from sky import resources
 from sky import task
 from sky.backends import cloud_vm_ray_backend
 from sky.backends.cloud_vm_ray_backend import CloudVmRayResourceHandle
@@ -308,6 +309,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
     INITIAL_TUNNEL_PORT = 10000
     INITIAL_TUNNEL_PID = 12345
+    PROCESS_JOIN_TIMEOUT_SECONDS = 30
 
     def _simulate_process_get_grpc_channel(self, queue, tunnel_creation_count,
                                            tunnel_port, tunnel_pid,
@@ -388,7 +390,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
             p.start()
 
         for p in processes:
-            p.join(timeout=15)
+            p.join(timeout=self.PROCESS_JOIN_TIMEOUT_SECONDS)
             if p.is_alive():
                 p.terminate()
                 p.join()
@@ -419,7 +421,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
             p.start()
 
         for p in processes:
-            p.join(timeout=15)
+            p.join(timeout=self.PROCESS_JOIN_TIMEOUT_SECONDS)
             if p.is_alive():
                 p.terminate()
                 p.join()
@@ -437,6 +439,15 @@ class TestCloudVmRayBackendGetGrpcChannel:
                 i] == f'localhost:{self.INITIAL_TUNNEL_PORT + 1}', f"Process {i} failed: {results[i]}"
 
         assert tunnel_creation_count.value == 2, f"Expected tunnel to be created exactly once, but was created {tunnel_creation_count.value} times"
+
+    def test_setup_num_gpus(self, monkeypatch):
+        """Test setup num GPUs."""
+        test_task = task.Task(resources=resources.Resources(
+            accelerators={'A100': 8}))
+        monkeypatch.setattr(CloudVmRayResourceHandle, '__init__',
+                            lambda self, *args, **kwargs: None)
+        backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        assert backend._get_num_gpus(test_task) == 8
 
 
 class TestIsMessageTooLong:

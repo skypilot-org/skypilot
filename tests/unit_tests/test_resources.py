@@ -1275,3 +1275,258 @@ def test_should_be_blocked_by(r_kwargs, blocked_kwargs, expected):
     r = Resources(**r_kwargs)
     blocked = Resources(**blocked_kwargs)
     assert r.should_be_blocked_by(blocked) == expected
+
+
+@mock.patch(
+    'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies')
+def test_ssh_end_to_end_make_deploy_variables(mock_check_deps,
+                                              enable_all_clouds) -> None:
+    """End-to-end test: SSH cloud reads pod_config and provision_timeout from 'ssh' config.
+
+    This test verifies that when launching an SSH cluster, the entire flow
+    (from Resources.make_deploy_variables through SSH.make_deploy_resources_variables)
+    correctly reads configuration from the 'ssh' section and NOT from 'kubernetes' section.
+    """
+    # Set up config with both SSH and Kubernetes sections
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_ssh_pod_config.yaml'
+    importlib.reload(skypilot_config)
+
+    # Create SSH cloud and resources
+    ssh_cloud = clouds.SSH()
+    cluster_name = resources_utils.ClusterName(display_name='ssh-test',
+                                               name_on_cloud='ssh-test')
+    region = clouds.Region(name='ssh-test-cluster')
+    zones = None
+    resource = Resources(cloud=ssh_cloud, instance_type='2CPU--4GB')
+
+    # Call make_deploy_variables - this is the entry point for the entire flow
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    # Verify that provision_timeout comes from SSH config (7200), not K8s config (3600)
+    assert config['timeout'] == '7200', \
+        f"Should use SSH provision_timeout (7200), not Kubernetes (3600). Got: {config['timeout']}"
+
+    # The main assertion is timeout - pod_config merging happens elsewhere in the flow
+
+    # Clean up
+    del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
+    importlib.reload(skypilot_config)
+
+
+def test_resources_add_subtract_cpu_only():
+    """Test adding and subtracting Resources with only CPU."""
+    r1 = Resources(cpus='2')
+    r2 = Resources(cpus='3')
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus == '5.0'
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus == '1.0'
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction that results in 0
+    result = r1 - r1
+    assert result is not None
+    assert result.cpus is None  # 0 becomes None
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test subtraction that would be negative (should clamp to 0/None)
+    result = r1 - r2
+    assert result is not None
+    assert result.cpus is None  # -1 becomes None (0 clamped)
+    assert result.memory is None
+    assert result.accelerators is None
+
+
+def test_resources_add_subtract_cpu_memory():
+    """Test adding and subtracting Resources with CPU and memory."""
+    r1 = Resources(cpus='2', memory='8')
+    r2 = Resources(cpus='3', memory='16')
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus == '5.0'
+    assert result.memory == '24.0'
+    assert result.accelerators is None
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus == '1.0'
+    assert result.memory == '8.0'
+    assert result.accelerators is None
+
+    # Test with None in one operand
+    r3 = Resources(cpus='2')
+    result = r1 + r3
+    assert result is not None
+    assert result.cpus == '4.0'
+    assert result.memory == '8.0'  # Preserved from r1
+    assert result.accelerators is None
+
+
+def test_resources_add_subtract_accelerators():
+    """Test adding and subtracting Resources with accelerators."""
+    r1 = Resources(accelerators={'V100': 2})
+    r2 = Resources(accelerators={'V100': 3})
+
+    # Test addition
+    result = r1 + r2
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators == {'V100': 5.0}
+
+    # Test subtraction
+    result = r2 - r1
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators == {'V100': 1.0}
+
+    # Test subtraction that results in 0 (should be removed)
+    result = r1 - r1
+    assert result is not None
+    assert result.cpus is None
+    assert result.memory is None
+    assert result.accelerators is None
+
+    # Test with different accelerator types
+    r3 = Resources(accelerators={'A100': 1})
+    result = r1 + r3
+    assert result is not None
+    assert result.accelerators == {'V100': 2.0, 'A100': 1.0}
+
+    # Test subtraction with different accelerator types
+    result = r1 - r3
+    assert result is not None
+    assert result.accelerators == {'V100': 2.0}  # A100 not in r1, so unchanged
+
+
+def test_resources_add_subtract_mixed():
+    """Test adding Resources with different combinations."""
+    # Start with all 3 resource types
+    r_base = Resources(cpus='4', memory='16', accelerators={'V100': 2})
+
+    # Add one with only memory
+    r_memory = Resources(memory='8')
+    result = r_base + r_memory
+    assert result is not None
+    assert result.cpus == '4.0'  # Preserved from r_base
+    assert result.memory == '24.0'  # 16 + 8
+    assert result.accelerators == {'V100': 2.0}  # Preserved from r_base
+
+    # Add one with only accelerator
+    r_accel = Resources(accelerators={'A100': 1})
+    result = result + r_accel
+    assert result is not None
+    assert result.cpus == '4.0'  # Still preserved
+    assert result.memory == '24.0'  # Still preserved
+    assert result.accelerators == {
+        'V100': 2.0,
+        'A100': 1.0
+    }  # Both accelerators
+
+    # Test subtraction with mixed resources
+    r_subtract = Resources(cpus='2', memory='8', accelerators={'V100': 1})
+    result = r_base - r_subtract
+    assert result is not None
+    assert result.cpus == '2.0'  # 4 - 2
+    assert result.memory == '8.0'  # 16 - 8
+    assert result.accelerators == {'V100': 1.0}  # 2 - 1
+
+    # Test subtracting None
+    result = r_base - None
+    assert result is not None
+    assert result.cpus == '4'
+    assert result.memory == '16'
+    assert result.accelerators == {'V100': 2.0}
+
+
+def test_resources_add_subtract_with_none():
+    """Test adding and subtracting with None operands."""
+    r1 = Resources(cpus='2', memory='8', accelerators={'V100': 1})
+
+    # Adding None should return self
+    result = r1 + None
+    assert result is not None
+    assert result.cpus == '2'
+    assert result.memory == '8'
+    assert result.accelerators == {'V100': 1.0}
+
+    # Subtracting None should return self
+    result = r1 - None
+    assert result is not None
+    assert result.cpus == '2'
+    assert result.memory == '8'
+    assert result.accelerators == {'V100': 1.0}
+
+
+def test_inferred_resource_not_copied():
+    """Test that when accelerator is None and only inferred by machine type,
+    the inferred accelerator values are not copied."""
+    r1 = Resources(instance_type='a2-highgpu-1g', cloud=clouds.GCP())
+    assert r1.accelerators == {'A100': 1}
+    assert r1._accelerators is None
+
+    override = {'instance_type': 'g2-standard-4'}
+    r2 = r1.copy(**override)
+    assert r2.accelerators == {'L4': 1}
+    assert r2._accelerators is None
+
+
+@mock.patch(
+    'sky.provision.kubernetes.utils.check_port_forward_mode_dependencies')
+def test_kubernetes_end_to_end_make_deploy_variables(mock_check_deps,
+                                                     enable_all_clouds) -> None:
+    """End-to-end test: Kubernetes cloud reads config from 'kubernetes' section.
+
+    This test complements test_ssh_end_to_end_make_deploy_variables by verifying
+    that Kubernetes cloud reads from 'kubernetes' section (not 'ssh' section).
+    """
+    # Set up config with both SSH and Kubernetes sections
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_ssh_pod_config.yaml'
+    importlib.reload(skypilot_config)
+
+    # Create Kubernetes cloud and resources
+    k8s_cloud = clouds.Kubernetes()
+    cluster_name = resources_utils.ClusterName(display_name='k8s-test',
+                                               name_on_cloud='k8s-test')
+    region = clouds.Region(name='test-k8s-cluster')
+    zones = None
+    resource = Resources(cloud=k8s_cloud, instance_type='2CPU--4GB')
+
+    # Call make_deploy_variables
+    config = resource.make_deploy_variables(cluster_name,
+                                            region,
+                                            zones,
+                                            num_nodes=1,
+                                            dryrun=True)
+
+    # Verify that provision_timeout comes from Kubernetes config (3600), not SSH (7200)
+    assert config['timeout'] == '3600', \
+        f"Should use Kubernetes provision_timeout (3600), not SSH (7200). Got: {config['timeout']}"
+
+    # The main assertion is timeout - pod_config merging happens elsewhere in the flow
+
+    # Clean up
+    del os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG]
+    importlib.reload(skypilot_config)

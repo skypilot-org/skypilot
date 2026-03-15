@@ -31,7 +31,7 @@ JOB_CONTROLLER_NAME: str
 def refresh_server_id() -> None:
     """Refresh the server id.
 
-    This function is used to ensure the server id is read from the authorative
+    This function is used to ensure the server id is read from the authoritative
     source.
     """
     global SERVER_ID

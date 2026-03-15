@@ -1,4 +1,4 @@
-"""SDK functions for managed jobs."""
+"""SDK functions for volumes."""
 import json
 import typing
 from typing import List
@@ -74,6 +74,7 @@ def apply(volume: volume_lib.Volume) -> server_common.RequestId[None]:
         size=volume.size,
         config=volume.config,
         labels=volume.labels,
+        use_existing=volume.use_existing,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/apply', json=json.loads(body.model_dump_json()))
@@ -100,10 +101,10 @@ def validate(volume: volume_lib.Volume) -> None:
         name=volume.name,
         volume_type=volume.type,
         infra=volume.infra,
-        resource_name=volume.resource_name,
         size=volume.size,
         config=volume.config,
         labels=volume.labels,
+        use_existing=volume.use_existing,
     )
     response = server_common.make_authenticated_request(
         'POST', '/volumes/validate', json=json.loads(body.model_dump_json()))
@@ -117,15 +118,27 @@ def validate(volume: volume_lib.Volume) -> None:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
+def ls(
+    refresh: bool = False
+) -> server_common.RequestId[List[responses.VolumeRecord]]:
     """Lists all volumes.
+
+    Args:
+        refresh: If True, refresh volume state from cloud APIs before returning.
+            This makes the call slower but returns the most up-to-date data.
+            If False (default), return cached data from the database which is
+            updated periodically by the background daemon.
 
     Returns:
         The request ID of the list request.
     """
+    params = {}
+    if refresh:
+        params['refresh'] = 'true'
     response = server_common.make_authenticated_request(
         'GET',
         '/volumes',
+        params=params,
     )
     return server_common.get_request_id(response)
 
@@ -134,16 +147,19 @@ def ls() -> server_common.RequestId[List[responses.VolumeRecord]]:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def delete(names: List[str]) -> server_common.RequestId[None]:
+def delete(names: List[str],
+           purge: bool = False) -> server_common.RequestId[None]:
     """Deletes volumes.
 
     Args:
         names: List of volume names to delete.
+        purge: If True, delete the volume from the database even if the
+          deletion API fails.
 
     Returns:
         The request ID of the delete request.
     """
-    body = payloads.VolumeDeleteBody(names=names)
+    body = payloads.VolumeDeleteBody(names=names, purge=purge)
     response = server_common.make_authenticated_request(
         'POST', '/volumes/delete', json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)

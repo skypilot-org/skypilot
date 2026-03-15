@@ -1,0 +1,70 @@
+name: "Launch SkyPilot Job"
+description: "Sets up and launches a SkyPilot job with necessary configurations."
+
+inputs:
+  task_yaml_path:
+    description: "Path to the task YAML file"
+    required: true
+  job_name:
+    description: "The unique name for the SkyPilot job."
+    required: true
+  commit_sha:
+    description: "Git commit SHA for status reporting"
+    required: true
+  skypilot_api_url:
+    description: "SkyPilot API URL"
+    required: true
+  skypilot_service_account_token:
+    description: "SkyPilot service account token"
+    required: true
+
+outputs:
+  launch_output:
+    description: "The output from the SkyPilot jobs launch command"
+    value: ${{ steps.launch.outputs.launch_output }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Environment
+      uses: ./.github/actions/setup-environment
+
+    - name: Log into SkyPilot API server
+      shell: bash
+      run: |
+        if [ -z "${{ inputs.skypilot_service_account_token }}" ]; then
+          sky api login -e ${{ inputs.skypilot_api_url }}
+        else
+          sky api login -e ${{ inputs.skypilot_api_url }} --token ${{ inputs.skypilot_service_account_token }}
+        fi
+
+    - name: Launch SkyPilot job
+      id: launch
+      shell: bash
+      run: |
+        # Prepare launch arguments from GitHub Actions inputs
+        # and launch the job asynchronously via CLI.
+        # Save the output which contains the request ID for later use.
+        set -x # Enable command printing for debugging
+
+        LAUNCH_ARGS=()
+
+        if [ -n "${{ inputs.job_name }}" ]; then
+          LAUNCH_ARGS+=( "--name=${{ inputs.job_name }}" )
+        fi
+
+        # Capture the output
+        LAUNCH_OUTPUT=$(sky jobs launch ${{ inputs.task_yaml_path }} -y --async "${LAUNCH_ARGS[@]}" 2>&1)
+        echo "$LAUNCH_OUTPUT"
+
+        # Save to file for fallback
+        echo "$LAUNCH_OUTPUT" > /tmp/skypilot_launch_output.txt
+
+        # Set as GitHub Actions output
+        {
+          echo 'launch_output<<EOF'
+          echo "$LAUNCH_OUTPUT"
+          echo 'EOF'
+        } >> $GITHUB_OUTPUT
+
+        set +x # Disable command printing

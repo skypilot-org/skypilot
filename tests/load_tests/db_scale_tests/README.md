@@ -17,9 +17,29 @@ The scale tests help understand performance bottlenecks and database query perfo
 
 The tests will add many entries to these tables during execution but will clean up automatically at the end.
 
+ **PostgreSQL Testing**: The `test_large_production_performance.sh` script supports testing with AWS RDS PostgreSQL database. When using the `--postgres` flag, the script will:
+- Create an AWS RDS PostgreSQL instance (named `skypilot-large-production-test-db`)
+- Configure the SkyPilot API server to use the PostgreSQL database
+- Automatically restart the API server with the database connection
+- Clean up the RDS instance on test completion
+
+**Prerequisites for PostgreSQL Testing:**
+- AWS CLI installed and configured with appropriate credentials
+- AWS account with permissions to create/delete RDS instances
+- Default VPC with at least 2 subnets in different availability zones
+
 ## Prerequisites
 
-Before running scale tests, you **must** create sample entries in your local database that will be used as templates for generating test data. This ensures all generated data matches your environment's specific database schema and constraints.
+Before running scale tests, you **must**:
+
+1. **Enable consolidation mode**: The server must be running under consolidation mode. Ensure your `~/.sky/config.yaml` has:
+   ```yaml
+   jobs:
+     controller:
+       consolidation_mode: true
+   ```
+
+2. **Create sample entries**: Create sample entries in your local database that will be used as templates for generating test data. This ensures all generated data matches your environment's specific database schema and constraints.
 
 ### Required Sample Data Setup
 
@@ -132,19 +152,19 @@ The `run_scale_test.py` script supports several command-line arguments to custom
 
 ```bash
 # Test only active clusters with a smaller dataset
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --test clusters \
   --cluster-count 500
 
 # Test cluster history with custom template and larger dataset
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --test history \
   --terminated-cluster scale-test-terminated \
   --history-recent 5000 \
   --history-old 15000
 
 # Test managed jobs with custom job template
-python tests/scale_tests/run_scale_test.py \
+python tests/load_tests/db_scale_tests/run_scale_test.py \
   --test jobs \
   --managed-job-id 5 \
   --job-count 20000
@@ -236,6 +256,119 @@ python tests/load_tests/db_scale_tests/cleanup_test_managed_jobs.py --managed-jo
 - `--managed-job-id ID` (required) - Deletes all jobs with job_id > this value
 
 **Note**: These scripts inject data but do not clean it up automatically, allowing you to manually test SkyPilot commands against a scaled database. Remember to run the cleanup scripts when you're done testing.
+
+## Production-Scale Data Injection
+
+For testing with production-scale data volumes, use the `inject_production_scale_data.py` script. This script reuses the existing test utilities to inject realistic production-scale data:
+
+- **1,500 active clusters** (using `inject_clusters()`)
+- **220,000 history clusters** (using `inject_cluster_history()` - 20% recent, 80% old)
+- **290,000 cluster events** associated with clusters
+- **12,500 managed jobs** (using `inject_managed_jobs()`)
+
+**Note:** The script uses the same `TestScale` class from `scale_test_utils.py`, so all data inherits GPU types, regions, and other resource information from your sample clusters (created in Prerequisites). This ensures the test data matches your actual environment.
+
+### Usage
+
+```bash
+# Inject all production-scale data
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --active-cluster scale-test-active \
+  --terminated-cluster scale-test-terminated \
+  --managed-job-id 1
+
+# Inject with custom counts
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --active-cluster scale-test-active \
+  --terminated-cluster scale-test-terminated \
+  --managed-job-id 1 \
+  --active-clusters 2000 \
+  --history-clusters 300000 \
+  --cluster-events 400000 \
+  --managed-jobs 15000
+
+# Inject only specific data types
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --active-cluster scale-test-active \
+  --terminated-cluster scale-test-terminated \
+  --managed-job-id 1 \
+  --skip-history \
+  --skip-events
+
+# Clean up (undo) all production-scale data
+# Note: --managed-job-id is optional. If not provided, managed jobs won't be cleaned up.
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --cleanup
+
+# Clean up including managed jobs (provide the template job ID)
+python tests/load_tests/db_scale_tests/inject_production_scale_data.py \
+  --cleanup \
+  --managed-job-id 2
+```
+
+**Options:**
+- `--active-cluster NAME` - Name of active cluster template (default: `scale-test-active`)
+- `--terminated-cluster NAME` - Name of terminated cluster template (default: `scale-test-terminated`)
+- `--managed-job-id ID` - Job ID of managed job template (default: `1`)
+- `--active-clusters N` - Number of active clusters (default: `1500`)
+- `--history-clusters N` - Number of history clusters (default: `220000`)
+- `--cluster-events N` - Number of cluster events (default: `290000`)
+- `--managed-jobs N` - Number of managed jobs (default: `12500`)
+- `--skip-clusters` - Skip injecting active clusters
+- `--skip-history` - Skip injecting cluster history
+- `--skip-events` - Skip injecting cluster events
+- `--skip-jobs` - Skip injecting managed jobs
+- `--cleanup` - Clean up (undo) all production-scale data instead of injecting. `--managed-job-id` is optional; if not provided, managed jobs won't be cleaned up.
+
+**Cleanup/Undo:**
+The `--cleanup` flag removes all production-scale data that was injected:
+- All clusters with names matching `prod-cluster-*`
+- All cluster history entries with names matching `prod-hist-*`
+- All cluster events associated with production clusters
+- All managed jobs with `job_id > --managed-job-id` (only if `--managed-job-id` is provided)
+
+**Why `--managed-job-id` is needed for job cleanup:**
+Unlike clusters which have predictable name patterns (`prod-cluster-*`), managed jobs are identified by their `job_id`. The cleanup script needs to know which job ID was used as the template to delete all jobs created after it. If you don't remember the template job ID, you can skip job cleanup by omitting `--managed-job-id` - clusters, history, and events will still be cleaned up.
+
+**Note**: This script injects large amounts of data and may take significant time to complete. Use `--cleanup` to remove all injected data when done testing.
+
+## Running Production Performance Test
+
+The `test_large_production_performance.sh` script runs a complete production-scale performance test that:
+- Creates sample clusters and managed jobs
+- Injects production-scale data (12,501 clusters, 12,500 managed jobs)
+- Tests performance of `sky status` and `sky jobs queue` commands
+- Automatically cleans up all test data
+
+### Usage
+
+```bash
+# Run with SQLite (default, local database)
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh
+
+# Run with PostgreSQL database (creates AWS RDS instance)
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --postgres --restart-api-server
+
+# Run with consolidation mode config only (no PostgreSQL)
+bash tests/load_tests/db_scale_tests/test_large_production_performance.sh --restart-api-server
+```
+
+**Options:**
+- `--postgres` - Create AWS RDS PostgreSQL database and configure API server to use it. Automatically enables `--restart-api-server`.
+- `--restart-api-server` - Restart the API server with consolidation mode config (`tests/test_yamls/consolidation_mode_config.yaml`)
+
+**Note:** When `--postgres` is used, the script will:
+1. Create an AWS RDS PostgreSQL instance (`skypilot-large-production-test-db`)
+2. Export `SKYPILOT_DB_CONNECTION_URI` environment variable
+3. Automatically set `--restart-api-server` flag
+4. Restart the API server once with both the database connection and consolidation mode config
+5. Clean up the RDS instance on script exit
+
+**PostgreSQL Requirements:**
+- AWS CLI installed and configured
+- AWS credentials with RDS permissions
+- Default VPC with at least 2 subnets in different availability zones
+- Region can be specified via `AWS_REGION` environment variable (default: `us-east-1`)
 
 ## Future Enhancements
 

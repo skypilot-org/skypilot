@@ -10,6 +10,7 @@ from sky.server import common as server_common
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.server.requests import requests as api_requests
 from sky.skylet import constants
 from sky.utils import common
@@ -25,11 +26,12 @@ async def up(
 ) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='serve.up',
+        request_name=request_names.RequestName.SERVE_UP,
         request_body=up_body,
         func=core.up,
         schedule_type=api_requests.ScheduleType.LONG,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -40,11 +42,12 @@ async def update(
 ) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='serve.update',
+        request_name=request_names.RequestName.SERVE_UPDATE,
         request_body=update_body,
         func=core.update,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -55,11 +58,12 @@ async def down(
 ) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='serve.down',
+        request_name=request_names.RequestName.SERVE_DOWN,
         request_body=down_body,
         func=core.down,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -70,11 +74,12 @@ async def terminate_replica(
 ) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='serve.terminate_replica',
+        request_name=request_names.RequestName.SERVE_TERMINATE_REPLICA,
         request_body=terminate_replica_body,
         func=core.terminate_replica,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -85,11 +90,12 @@ async def status(
 ) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='serve.status',
+        request_name=request_names.RequestName.SERVE_STATUS,
         request_body=status_body,
         func=core.status,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
 
 
@@ -101,11 +107,12 @@ async def tail_logs(
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
-        request_name='serve.logs',
+        request_name=request_names.RequestName.SERVE_LOGS,
         request_body=log_body,
         func=core.tail_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )
     task = executor.execute_request_in_coroutine(request_task)
     # Cancel the coroutine after the request is done or client disconnects
@@ -134,9 +141,10 @@ async def download_logs(
     download_logs_body.local_dir = str(logs_dir_on_api_server)
     await executor.schedule_request_async(
         request_id=request.state.request_id,
-        request_name='serve.sync_down_logs',
+        request_name=request_names.RequestName.SERVE_SYNC_DOWN_LOGS,
         request_body=download_logs_body,
         func=core.sync_down_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
     )

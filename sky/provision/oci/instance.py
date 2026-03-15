@@ -36,6 +36,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """Query instances.
 
@@ -44,7 +45,7 @@ def query_instances(
     A None status means the instance is marked as "terminated"
     or "terminating".
     """
-    del cluster_name  # unusedå
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, cluster_name_on_cloud
     region = provider_config['region']
 
@@ -352,6 +353,7 @@ def get_cluster_info(
                 internal_ip=inst['internal_ip'],
                 external_ip=inst['external_ip'],
                 tags=inst['tags'],
+                node_name=inst['id'],
             )
         ]
 

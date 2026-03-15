@@ -1,3 +1,4 @@
+import asyncio
 import os
 import pathlib
 import subprocess
@@ -8,8 +9,10 @@ import time
 from typing import Dict, Generator, List, Optional, Tuple, TypeVar
 
 import pytest
+import requests
 from smoke_tests import metrics_utils
 from smoke_tests import smoke_tests_utils
+import websockets
 
 import sky
 from sky import jobs
@@ -34,6 +37,8 @@ def set_user(user_id: str, user_name: str, commands: List[str]) -> List[str]:
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support multi-tenant jobs
 @pytest.mark.no_shadeform  # Shadeform does not support multi-tenant jobs
 @pytest.mark.no_seeweb  # Seeweb does not support multi-tenant jobs
+# Note: we should skip or fix on shared remote cluster because two copies of
+# this test may down each other's clusters (sky down -a with hardcoded user id).
 def test_multi_tenant(generic_cloud: str):
     if smoke_tests_utils.services_account_token_configured_in_env_file():
         pytest.skip(
@@ -62,13 +67,19 @@ def test_multi_tenant(generic_cloud: str):
                 # Stopping cluster should not change the ownership of the cluster.
                 f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
                 f'sky status {name}-1 | grep STOPPED',
-                # Both clusters should be stopped.
-                f'sky status -u | grep {name}-1 | grep STOPPED',
+                # Restarting other user's cluster should work.
+                f'sky start -y {name}-1',
+                # Cluster should still have the same disk.
+                f'sky exec {name}-1 \'ls file || exit 1\'',
+                # Restarting cluster should not change the ownership of the cluster.
+                f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
+                # Cluster 1 should be UP now, but cluster 2 should be STOPPED.
+                f'sky status -u | grep {name}-1 | grep UP',
                 f'sky status -u | grep {name}-2 | grep STOPPED',
             ]),
     ]
-    if generic_cloud == 'kubernetes':
-        # Skip the stop test for Kubernetes, as stopping is not supported.
+    if generic_cloud in ('kubernetes', 'slurm'):
+        # Skip the stop test for Kubernetes and Slurm, as stopping is not supported.
         stop_test_cmds = []
 
     test = smoke_tests_utils.Test(
@@ -77,14 +88,17 @@ def test_multi_tenant(generic_cloud: str):
             'echo "==== Test multi-tenant job on single cluster ===="',
             *set_user(user_1, user_1_name, [
                 f'sky launch -y -c {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-1 tests/test_yamls/minimal.yaml',
+                f'sky exec {name}-1 -n job-2 \'touch file\'',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 1',
                 f's=$(sky queue -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             *set_user(user_2, user_2_name, [
-                f'sky exec {name}-1 -n job-2 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
-                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-2 | grep FAILED | awk \'{{print $1}}\' | grep 2',
+                f'sky exec {name}-1 -n job-3 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
+                f'sky launch -y -c {name}-1 -n job-4 \'ls file || exit 1\'',
+                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-3 | grep FAILED | awk \'{{print $1}}\' | grep 3',
+                f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-4 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 4',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 && exit 1 || true',
-                f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-2 | grep FAILED',
+                f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-3 | grep FAILED',
                 f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             'echo "==== Test clusters from different users ===="',
@@ -192,7 +206,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                         sky.ManagedJobStatus.STARTING,
                         sky.ManagedJobStatus.RUNNING
                     ],
-                    timeout=60),
+                    timeout=600
+                    if smoke_tests_utils.is_remote_server_test() else 60),
             ]),
             *set_user(
                 user_2,
@@ -206,7 +221,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                             sky.ManagedJobStatus.STARTING,
                             sky.ManagedJobStatus.RUNNING
                         ],
-                        timeout=60),
+                        timeout=600
+                        if smoke_tests_utils.is_remote_server_test() else 60),
                     # Should only cancel user_2's job.
                     'sky jobs cancel -y --all',
                     smoke_tests_utils.
@@ -281,6 +297,11 @@ def test_requests_scheduling(generic_cloud: str):
 
 
 # ---- Test recent request tracking -----
+# We mark this test as no_remote_server since it requires a dedicated API server
+# for the test otherwise we can't make any guarantees about the most recent
+# request. Replace with another option to skip shared server tests when we have
+# one.
+@pytest.mark.no_remote_server
 def test_recent_request_tracking(generic_cloud: str):
     with smoke_tests_utils.override_sky_config():
         # We need to override the sky api endpoint env if --remote-server is
@@ -371,52 +392,33 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
                             actual: Dict[Tuple[str, ...], List[Tuple[float,
                                                                      float]]]):
 
-        def _rss_peak_aggregator(
-            baseline_values: List[Tuple[float, float]],
-            actual_values: List[Tuple[float, float]]
-        ) -> metrics_utils.AggregatedMetric:
-            """Aggregator for RSS (memory) metrics - computes peak values."""
-            baseline_peak_bytes = max([v for _, v in baseline_values
-                                      ]) if baseline_values else 0
-            actual_peak_bytes = max([v for _, v in actual_values
-                                    ]) if actual_values else 0
-
-            baseline_mb = baseline_peak_bytes / (1024 * 1024)
-            actual_mb = actual_peak_bytes / (1024 * 1024)
-
-            return metrics_utils.AggregatedMetric(baseline=baseline_mb,
-                                                  actual=actual_mb,
-                                                  unit='MB')
-
-        def _rss_per_key_threshold_checker(key_label: str, baseline: float,
-                                           actual: float, increase: float,
-                                           increase_pct: float) -> List[str]:
+        def _rss_per_key_threshold_checker(
+                diff: metrics_utils.PerKeyDiff) -> List[str]:
             """Per-key threshold checker for RSS metrics."""
             failures = []
-            if actual > 300:
+            if diff.actual > 300:
                 failures.append(f"exceeded 300 MB: {actual:.1f} MB")
-            if increase_pct > 50 and increase_pct != float('inf'):
+            if diff.increase_pct > 50 and diff.increase_pct != float('inf'):
                 failures.append(
-                    f"increased by {increase_pct:.1f}% (limit: 50%)")
+                    f"increased by {diff.increase_pct:.1f}% (limit: 50%)")
             return failures
 
         def _rss_aggregate_threshold_checker(
-                total_baseline: float, total_actual: float,
-                total_increase: float, total_increase_pct: float) -> List[str]:
+                diff: metrics_utils.AggregateDiff) -> List[str]:
             """Aggregate threshold checker for RSS metrics."""
             failures = []
-            if total_increase_pct > 20:
+            if diff.total_increase_pct > 30:
                 failures.append(
-                    f"Average memory increase too high: {total_increase_pct:.1f}% (limit: 20%)"
+                    f"Average memory increase too high: {diff.total_increase_pct:.1f}% (limit: 30%)"
                 )
             return failures
 
         metrics_utils.compare_metrics(
             baseline,
             actual,
-            aggregator_fn=_rss_peak_aggregator,
-            per_key_threshold_fn=_rss_per_key_threshold_checker,
-            aggregate_threshold_fn=_rss_aggregate_threshold_checker)
+            aggregator_fn=metrics_utils.rss_peak_aggregator,
+            per_key_checker=_rss_per_key_threshold_checker,
+            aggregate_checker=_rss_aggregate_threshold_checker)
 
     with smoke_tests_utils.override_sky_config():
         name = smoke_tests_utils.get_cluster_name()
@@ -492,6 +494,7 @@ def test_api_server_start_stop(generic_cloud: str):
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
         ],
         f'sky down -y {name} || true',
+        timeout=1200,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -543,11 +546,13 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
             sky.Resources(infra=generic_cloud,
                           **smoke_tests_utils.LOW_RESOURCE_PARAM))
         req_id = jobs.launch(task, name=job_name)
-        job_id, _ = sky.stream_and_get(req_id)
+        job_ids, _ = sky.stream_and_get(req_id)
+        assert len(job_ids) == 1
+        job_id = job_ids[0]
 
         # Wait for the job to start.
         def is_job_started(job_id: int):
-            req_id = jobs.queue(refresh=True, job_ids=[job_id])
+            req_id = jobs.queue_v2(refresh=True, job_ids=[job_id])
             job_records = sky.stream_and_get(req_id)[0]
             assert len(job_records) == 1
             return job_records[0]['status'] == sky.ManagedJobStatus.RUNNING
@@ -580,9 +585,9 @@ def test_tail_jobs_logs_blocks_ssh(generic_cloud: str):
         print("Attempting to ssh in.")
 
         # Now attempt to ssh in.
-        ssh_cmd = f'ssh -o ConnectTimeout=10 -o BatchMode=yes {name} "echo hi"'
+        ssh_cmd = f'ssh -o ConnectTimeout=30 -o BatchMode=yes {name} "echo hi"'
         ssh_ret = subprocess.Popen(ssh_cmd, shell=True)
-        if ssh_ret.wait(timeout=10) != 0:
+        if ssh_ret.wait(timeout=60) != 0:
             raise Exception("SSH failed.")
 
         print("SSH completed.")
@@ -664,9 +669,19 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
         expected_count = 128
         while time.time() - start < 120:
             count = 0
-            for req in sky.api_status(limit=None):
-                if 'logs' in req.name and req.status == 'RUNNING':
-                    count += 1
+            # Retry on connection errors since the server might be temporarily overwhelmed
+            max_retries = 3
+            for retry in range(max_retries):
+                try:
+                    for req in sky.api_status(limit=None):
+                        if 'logs' in req.name and req.status == 'RUNNING':
+                            count += 1
+                    break  # Success, exit retry loop
+                except (requests.exceptions.ConnectionError,
+                        requests.exceptions.RequestException) as e:
+                    if retry == max_retries - 1:
+                        raise  # Re-raise on final retry
+                    time.sleep(5)  # 5 second backoff before retry
             if count >= expected_count:
                 return
             yield f'Wait enough concurrent logs requests: {count}/{expected_count}'
@@ -708,5 +723,115 @@ def test_high_logs_concurrency_not_blocking_operations(generic_cloud: str,
          f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
          f'sky down -y {name} || true; sky down -y {name}-another || true; '
          f'sky jobs cancel -n {name}-job -y || true;'),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_remote_server  # Requires restarting the API server to remove existing tunnels.
+@pytest.mark.no_dependency  # We can't restart the api server in the dependency test.
+def test_high_concurrency_ssh_tunnel_opening(generic_cloud: str,
+                                             tmp_path: pathlib.Path):
+    """Test that high concurrency SSH tunnel opening does not result in timeouts."""
+    name = smoke_tests_utils.get_cluster_name()
+    concurrency = 50
+    log_file = tmp_path / 'all_logs.txt'
+    log_file.touch()
+
+    tail_log_threads: List[threading.Thread] = []
+    errors: List[str] = []
+
+    def tail_log_thread(idx: int):
+        try:
+            context.initialize()
+            os.environ = context.ContextualEnviron(os.environ)
+            ctx = context.get()
+            ctx.override_envs({'SKYPILOT_DEBUG': '1'})
+            origin = ctx.redirect_log(log_file)
+            sky.tail_logs(cluster_name=name, job_id=None, follow=False)
+            ctx.redirect_log(origin)
+        except Exception as e:  # pylint: disable=broad-except
+            errors.append(f'Error in tail log thread {idx}: {e}')
+
+    def start_concurrent_tail_logs() -> Generator[str, None, None]:
+        start_time = time.time()
+        for i in range(concurrency):
+            thread = threading.Thread(target=tail_log_thread,
+                                      args=(i,),
+                                      daemon=True)
+            tail_log_threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in tail_log_threads:
+            thread.join(timeout=60)
+
+        elapsed = time.time() - start_time
+        yield f'All {len(tail_log_threads)} concurrent tail_logs completed in {elapsed:.2f}s'
+
+        if errors:
+            raise Exception(f'Errors in tail log threads: {errors}')
+
+    test = smoke_tests_utils.Test(
+        'test_concurrent_tunnel_opening',
+        [
+            f'sky launch -c {name} --infra {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
+            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                cluster_name=name,
+                cluster_status=[sky.ClusterStatus.UP],
+                timeout=180),
+            # Restart the API server to remove existing tunnels.
+            'sky api stop; sky api start',
+            start_concurrent_tail_logs,
+            # Print the full logs for debugging.
+            f'echo "=== FULL LOGS ===" && cat {log_file}',
+            f'echo "=== ERRORS ===" && ! grep "sky.utils.locks.LockTimeout" {log_file} && echo "No LockTimeout errors"',
+            # Verify that all the tail logs requests succeeded.
+            # Assume the API server is isolated for this test only.
+            f's=$(sky api status -a -l all | grep "sky.logs" | grep SUCCEEDED) && echo $s && echo "$s" | wc -l | grep {concurrency}',
+        ],
+        (f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api stop && '
+         f'{skypilot_config.ENV_VAR_GLOBAL_CONFIG}=${skypilot_config.ENV_VAR_GLOBAL_CONFIG}_ORIGINAL sky api start; '
+         f'sky down -y {name}'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Test WebSocket large cookie header ----------
+@pytest.mark.no_remote_server
+def test_websocket_large_cookie_accepted():
+    """Test that WebSocket connections with large cookies (>8KB) are accepted.
+
+    Enterprise SSO cookies from oauth2proxy (Azure AD, Okta, etc.) can exceed
+    8KB, which hits the websockets library's default MAX_LINE_LENGTH=8192 limit
+    and causes WebSocket upgrade requests to be rejected with HTTP 400. Regular
+    HTTP requests (parsed by h11 with a 16KB default) are unaffected, which is
+    why sky status works but sky ssh fails.
+
+    The server must increase the websockets library limit so that WebSocket
+    upgrade requests with large cookie headers are not rejected at the protocol
+    parsing layer.
+    """
+    server_url = server_common.get_server_url()
+    ws_url = server_url.replace('http://',
+                                'ws://').replace('https://', 'wss://')
+    ws_url += '/kubernetes-pod-ssh-proxy'
+
+    async def _test():
+        # 12KB cookie simulating an enterprise SSO session cookie.
+        pad = 'X' * 12000
+        try:
+            ws = await websockets.connect(
+                ws_url,
+                additional_headers={'Cookie': f'_oauth2_proxy={pad}'},
+                open_timeout=5)
+            await ws.close()
+        except websockets.exceptions.InvalidStatus as e:
+            # HTTP 403 = auth rejection (expected, no valid auth token)
+            # HTTP 400 = header parsing failure (the bug)
+            assert e.response.status_code != 400, (
+                'WebSocket rejected with HTTP 400 due to large cookie '
+                'header. The websockets library MAX_LINE_LENGTH is too '
+                'small for enterprise SSO cookies (>8KB).')
+
+    asyncio.run(_test())

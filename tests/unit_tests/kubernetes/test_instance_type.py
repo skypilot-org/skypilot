@@ -57,22 +57,6 @@ def test_kubernetes_instance_type():
             assert instance_type_from_resources.accelerator_count == accelerator_count, f'Failed from resources check for {cpus}, {memory}, {accelerator_count}, {accelerator_type}'
             assert instance_type_from_resources.accelerator_type == accelerator_type, f'Failed from resources check for {cpus}, {memory}, {accelerator_count}, {accelerator_type}'
 
-    # Backward compatibility test
-    # Before https://github.com/skypilot-org/skypilot/pull/4756, the
-    # accelerators are appended with format "--{a}{type}",
-    # e.g. "4CPU--16GB--1V100".
-    # TODO(romilb): Backward compatibility, remove after 0.11.0.
-    prev_instance_type_name = '4CPU--16GB--1V100'
-    assert KubernetesInstanceType.is_valid_instance_type(
-        prev_instance_type_name
-    ), f'Failed valid instance type check for {prev_instance_type_name}'
-    cpus, memory, accelerator_count, accelerator_type = KubernetesInstanceType._parse_instance_type(
-        prev_instance_type_name)
-    assert cpus == 4, f'Failed parse check for {prev_instance_type_name}'
-    assert memory == 16, f'Failed parse check for {prev_instance_type_name}'
-    assert accelerator_count == 1, f'Failed parse check for {prev_instance_type_name}'
-    assert accelerator_type == 'V100', f'Failed parse check for {prev_instance_type_name}'
-
 
 def test_gpu_name_underscore_preservation():
     """Test that GPU names with underscores are preserved exactly as-is.

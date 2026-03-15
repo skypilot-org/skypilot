@@ -18,12 +18,13 @@ We use GitHub to track issues and features. For new contributors, we recommend l
 
 Follow the steps below to set up a local development environment for contributing to SkyPilot.
 
-#### Create a conda environment
-To avoid package conflicts, create and activate a clean conda environment:
+#### Create a virtual environment
+To avoid package conflicts, create and activate a clean virtual environment using [uv](https://docs.astral.sh/uv/):
 ```bash
-# SkyPilot requires 3.7 <= python <= 3.11.
-conda create -y -n sky python=3.10
-conda activate sky
+# SkyPilot requires python 3.9-3.11.
+# --seed is required to ensure pip is installed (needed for building wheels)
+uv venv --seed --python 3.11
+source .venv/bin/activate
 ```
 
 #### Install SkyPilot
@@ -37,18 +38,18 @@ cd skypilot
 git remote add upstream https://github.com/skypilot-org/skypilot.git
 
 # Install SkyPilot in editable mode
-pip install -e ".[all]"
+uv pip install -e ".[all]"
 # Alternatively, install specific cloud support only:
-# pip install -e ".[aws,azure,gcp,lambda]"
+# uv pip install -e ".[aws,azure,gcp,lambda]"
 
 # Install development dependencies
-pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 #### (Optional) Install `pre-commit`
 You can also install `pre-commit` hooks to help automatically format your code on commit:
 ```bash
-pip install pre-commit
+uv pip install pre-commit
 pre-commit install
 ```
 
@@ -93,10 +94,57 @@ pytest tests/test_smoke.py --generic-cloud azure
 For profiling code, use:
 
 ```
-pip install py-spy # py-spy is a sampling profiler for Python programs
+uv pip install py-spy # py-spy is a sampling profiler for Python programs
 py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
 py-spy top -- python -m sky.cli status # Get a live top view
 py-spy -h # For more options
+```
+
+#### Testing WSL features on a windows VM (Azure)
+
+To test features that require Windows Subsystem for Linux (WSL), such as the automatic Windows SSH config setup, you can create a Windows VM on Azure:
+
+```bash
+# Create resource group
+az group create --name wsl-test-vm --location eastus2
+
+# Create Windows 11 VM with WSL-compatible settings
+az vm create \
+  --resource-group wsl-test-vm \
+  --name win11-wsl-test \
+  --image MicrosoftWindowsDesktop:windows-11:win11-24h2-pro:latest \
+  --size Standard_D4s_v3 \
+  --admin-username skyuser \
+  --admin-password 'YourPassword123!' \
+  --public-ip-sku Standard
+
+# Enable WSL features on the VM
+az vm run-command invoke \
+  --resource-group wsl-test-vm \
+  --name win11-wsl-test \
+  --command-id RunPowerShellScript \
+  --scripts "
+    dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
+    dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+  "
+
+# Restart VM to apply WSL features
+az vm restart --resource-group wsl-test-vm --name win11-wsl-test
+
+# Get VM public IP for RDP connection
+az vm show --resource-group wsl-test-vm --name win11-wsl-test --show-details --query publicIps -o tsv
+```
+
+Connect via RDP, then in PowerShell (as Admin):
+```powershell
+wsl --install -d Ubuntu-22.04
+```
+
+After restart, set up Ubuntu and install SkyPilot to test WSL-specific features.
+
+**Cleanup:**
+```bash
+az group delete --name wsl-test-vm --yes --no-wait
 ```
 
 #### Testing in a container
@@ -158,50 +206,77 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
-### Test API server on Helm chart deployment
+### Testing the API server
+
+#### Local API server (recommended for development)
+
+For most development work, test with the local API server:
+
+```bash
+# Always restart API server after code changes to pick up changes
+sky api stop
+sky api start
+
+# Verify server is running
+sky api status
+```
+
+#### Mocking remote API server locally
+
+To test remote API server behavior locally:
+
+```bash
+# Start local API server (runs on port 46580 by default)
+sky api stop
+sky api start
+
+# Forward to a different port to simulate remote server
+socat TCP-LISTEN:46590,fork TCP:127.0.0.1:46580 &
+
+# Connect to the forwarded port as if it were a remote server
+sky api login -e http://127.0.0.1:46590
+```
+
+#### Test API server on Helm chart deployment
 
 By default, the [Helm Chart Deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) will use the latest released API Server. To test the local change on API Server, you can follow the steps below.
 
-First, start the API Server:
+First, prepare and build the local changes:
 
 ```bash
 # Ensure the helm repository is added and up to date
 helm repo add skypilot https://helm.skypilot.co
 helm repo update
 
+# Build the local changes
+helm dependency build ./charts/skypilot
+
+# Build the local SkyPilot changes
+DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
+docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
+```
+
+Then start the API Server with new changes:
+
+```bash
 # The following variables will be used throughout the guide
 # NAMESPACE is the namespace to deploy the API server in
 NAMESPACE=skypilot
 # RELEASE_NAME is the name of the helm release, must be unique within the namespace
 RELEASE_NAME=skypilot
 # Set up basic username/password HTTP auth, or use OAuth2 proxy
-WEB_USERNAME=skypilot
-WEB_PASSWORD=yourpassword
+WEB_USERNAME=sk
+WEB_PASSWORD=pw
 AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
 # Deploy the API server
-helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
   --namespace $NAMESPACE \
   --create-namespace \
-  --set ingress.authCredentials=$AUTH_STRING
+  --set ingress.authCredentials=$AUTH_STRING \
+  --set apiService.image=$DOCKER_IMAGE
 ```
 
-Then build the local changes and deploy the new changes to the API Server:
-
-```bash
-DOCKER_IMAGE=my-docker-repo/image-name:v1 # change the tag to deploy the new changes
-docker buildx build --push --platform linux/amd64  -t $DOCKER_IMAGE -f Dockerfile .
-
-# Build the local changes
-helm dependency build ./charts/skypilot
-
-# Deploy the new changes to the API Server
-helm upgrade --install $RELEASE_NAME ./charts/skypilot --devel \
-              --namespace $NAMESPACE \
-              --reuse-values \
-              --set apiService.image=$DOCKER_IMAGE
-```
-
-> Notice that the tag should change every time you build the local changes.
+> Notice that the tag should change every time you build the local changes. When new changes are made to the code, repeat the previous steps to build the new changes and deploy the new changes to the API Server.
 
 Then, watch the status until the `READY` shows `1/1` and `STATUS` shows `Running`:
 

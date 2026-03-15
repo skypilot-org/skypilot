@@ -13,6 +13,10 @@ VOLUME_TYPE_TO_CLOUD = {
     volume_lib.VolumeType.PVC: clouds.Kubernetes(),
     volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME: clouds.RunPod(),
 }
+CLOUD_TO_VOLUME_TYPE = {
+    clouds.Kubernetes(): [volume_lib.VolumeType.PVC],
+    clouds.RunPod(): [volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME],
+}
 
 
 class Volume:
@@ -25,7 +29,7 @@ class Volume:
             infra: Optional[str] = None,
             size: Optional[str] = None,
             labels: Optional[Dict[str, str]] = None,
-            resource_name: Optional[str] = None,
+            use_existing: Optional[bool] = None,
             config: Optional[Dict[str, Any]] = None):
         """Initialize a Volume instance.
 
@@ -35,6 +39,7 @@ class Volume:
             infra: Infrastructure specification
             size: Volume size
             labels: Volume labels
+            use_existing: Whether to use an existing volume
             config: Additional configuration
         """
         self.name = name
@@ -42,7 +47,7 @@ class Volume:
         self.infra = infra
         self.size = size
         self.labels = labels or {}
-        self.resource_name = resource_name
+        self.use_existing = use_existing
         self.config = config or {}
 
         self.cloud: Optional[str] = None
@@ -70,17 +75,16 @@ class Volume:
                              infra=config.get('infra'),
                              size=config.get('size'),
                              labels=config.get('labels'),
-                             resource_name=config.get('resource_name'),
+                             use_existing=config.get('use_existing'),
                              config=config.get('config', {}))
         if vt == volume_lib.VolumeType.RUNPOD_NETWORK_VOLUME:
-            return RunpodNetworkVolume(
-                name=config.get('name'),
-                type=vol_type_val,
-                infra=config.get('infra'),
-                size=config.get('size'),
-                labels=config.get('labels'),
-                resource_name=config.get('resource_name'),
-                config=config.get('config', {}))
+            return RunpodNetworkVolume(name=config.get('name'),
+                                       type=vol_type_val,
+                                       infra=config.get('infra'),
+                                       size=config.get('size'),
+                                       labels=config.get('labels'),
+                                       use_existing=config.get('use_existing'),
+                                       config=config.get('config', {}))
 
         raise ValueError(f'Invalid volume type: {vol_type_val}')
 
@@ -92,7 +96,7 @@ class Volume:
             'infra': self.infra,
             'size': self.size,
             'labels': self.labels,
-            'resource_name': self.resource_name,
+            'use_existing': self.use_existing,
             'config': self.config,
             'cloud': self.cloud,
             'region': self.region,
@@ -156,7 +160,7 @@ class Volume:
 
     def validate_size(self) -> None:
         """Validates that size is specified for new volumes."""
-        if not self.resource_name and not self.size:
+        if not self.use_existing and not self.size:
             raise ValueError('Size is required for new volumes. '
                              'Please specify the size in the YAML file or '
                              'use the --size flag.')
@@ -194,7 +198,7 @@ class RunpodNetworkVolume(Volume):
     """RunPod Network Volume."""
 
     def _validate_config_extra(self) -> None:
-        if self.size is not None:
+        if not self.use_existing and self.size is not None:
             try:
                 size_int = int(self.size)
                 if size_int < volume_lib.MIN_RUNPOD_NETWORK_VOLUME_SIZE_GB:
@@ -205,8 +209,7 @@ class RunpodNetworkVolume(Volume):
                 raise ValueError(f'Invalid volume size {self.size!r}: '
                                  f'{e}') from e
         if not self.zone:
-            raise ValueError(
-                'RunPod DataCenterId is required to create a network '
-                'volume. Set the zone in the infra field.')
+            raise ValueError('RunPod DataCenterId is required for network '
+                             'volumes. Set the zone in the infra field.')
 
         return

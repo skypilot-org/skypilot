@@ -1,4 +1,4 @@
-"""Atomic structures and utilties."""
+"""Atomic structures and utilities."""
 
 import threading
 

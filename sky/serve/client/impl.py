@@ -8,6 +8,7 @@ import click
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
+from sky.server.requests import request_names
 from sky.utils import admin_policy_utils
 from sky.utils import dag_utils
 
@@ -32,7 +33,9 @@ def up(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.SERVE_UP,
+            at_client_side=True) as dag:
         sdk.validate(dag)
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)
@@ -77,7 +80,9 @@ def update(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     with admin_policy_utils.apply_and_use_config_in_current_request(
-            dag, at_client_side=True) as dag:
+            dag,
+            request_name=request_names.AdminPolicyRequestName.SERVE_UPDATE,
+            at_client_side=True) as dag:
         sdk.validate(dag)
         request_id = sdk.optimize(dag)
         sdk.stream_and_get(request_id)
@@ -146,7 +151,10 @@ def apply(
     else:
         dag = dag_utils.convert_entrypoint_to_dag(task)
         with admin_policy_utils.apply_and_use_config_in_current_request(
-                dag, at_client_side=True) as dag:
+                dag,
+                request_name=request_names.AdminPolicyRequestName.
+                JOBS_POOL_APPLY,
+                at_client_side=True) as dag:
             sdk.validate(dag)
             request_id = sdk.optimize(dag)
             sdk.stream_and_get(request_id)

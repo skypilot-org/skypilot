@@ -58,6 +58,9 @@ class CloudImplementationFeatures(enum.Enum):
     # Pod/VM can have customized multiple network interfaces
     # e.g. GCP GPUDirect TCPX
     CUSTOM_MULTI_NETWORK = 'custom_multi_network'
+    # Some cloud providers provide additional, directly connected
+    # storage devices to VMs (eg: AWS Instance Storage).
+    LOCAL_DISK = 'local_disk'
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
@@ -182,13 +185,25 @@ class Cloud:
         """
         return cls._SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE
 
+    @classmethod
+    def uses_ray(cls) -> bool:
+        """Returns whether this cloud uses Ray as the distributed
+        execution framework.
+        """
+        return True
+
     #### Regions/Zones ####
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[Region]:
         """Returns the regions that offer the specified resources.
 
         The order of the regions follow the order of the regions returned by
@@ -349,15 +364,25 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_local_disk_spec_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        """Returns the local disk specs from instance type, if any."""
+        del instance_type  # unused
+        return None
+
+    @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None,
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory,
-        disk tier, region, and zone.
+        disk tier, local disk, region, and zone.
 
         For example, if cpus='4', this method returns the default instance type
         with 4 vCPUs.  If cpus='4+', this method returns the default instance
@@ -369,6 +394,11 @@ class Cloud:
 
         If disk_tier=DiskTier.MEDIUM, this method returns the default instance
         type that support medium disk tier.
+
+        If local_disk='nvme:300+', this method returns the default instance
+        type that supports NVMe compatible 300GB+ on-instance storage. This is
+        different from disk_tier in that local disks are directly attached to
+        underlying VMs.
 
         When cpus is None, memory is None or disk_tier is None, this method will
         never return None. This method may return None if the cloud's default
@@ -674,8 +704,11 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, resources: 'resources_lib.Resources',
-            requested_features: Set[CloudImplementationFeatures]) -> None:
+        cls,
+        resources: 'resources_lib.Resources',
+        requested_features: Set[CloudImplementationFeatures],
+        region: Optional[str] = None,
+    ) -> None:
         """Errors out if the cloud does not support all requested features.
 
         For instance, Lambda Cloud does not support stop, so
@@ -693,7 +726,7 @@ class Cloud:
             requested features.
         """
         unsupported_features2reason = cls._unsupported_features_for_resources(
-            resources)
+            resources, region)
 
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_effective_region_config(
@@ -723,7 +756,9 @@ class Cloud:
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -734,7 +769,7 @@ class Cloud:
             A dict of {feature: reason} for the features not supported by the
             cloud implementation.
         """
-        del resources
+        del resources, region
         raise NotImplementedError
 
     @classmethod
@@ -808,12 +843,21 @@ class Cloud:
             if acc_from_instance_type is None:
                 return False
 
-            for acc in acc_requested:
-                if acc not in acc_from_instance_type:
+            for requested_acc in acc_requested:
+                for instance_acc in acc_from_instance_type:
+                    # The requested accelerator can be canonicalized based on
+                    # the accelerator registry, which may not has the same case
+                    # as the cloud's catalog, e.g., 'RTXPro6000' in Shadeform
+                    # catalog, and 'RTXPRO6000' in RunPod catalog.
+                    if requested_acc.lower() == instance_acc.lower():
+                        # Found the requested accelerator in the instance type.
+                        break
+                else:
+                    # Requested accelerator not found in instance type.
                     return False
                 # Avoid float point precision issue.
-                if not math.isclose(acc_requested[acc],
-                                    acc_from_instance_type[acc]):
+                if not math.isclose(acc_requested[requested_acc],
+                                    acc_from_instance_type[instance_acc]):
                     return False
             return True
 
@@ -951,6 +995,21 @@ class Cloud:
     def display_name(cls) -> str:
         """Name of the cloud used in messages displayed to the user."""
         return cls.canonical_name()
+
+    # === Misc Failovers ===
+
+    @classmethod
+    def yield_cloud_specific_failover_overrides(cls,
+                                                region: Optional[str] = None
+                                               ) -> Iterable[Dict[str, Any]]:
+        """Some clouds may have configurations that require them to have
+        non-region/zone failovers. This method yields override keys for the
+        cluster config. Refer to the implementation for AWS for an example."""
+        del region  # unused
+        yield {}
+        return
+
+    # === End of Misc Failovers ===
 
     def __repr__(self):
         return self._REPR

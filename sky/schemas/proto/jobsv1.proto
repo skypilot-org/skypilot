@@ -25,6 +25,10 @@ service JobsService {
   rpc GetJobEndedTimestamp(GetJobEndedTimestampRequest) returns (GetJobEndedTimestampResponse);
   // Get log directories for jobs.
   rpc GetLogDirsForJobs(GetLogDirsForJobsRequest) returns (GetLogDirsForJobsResponse);
+  // Get job exit codes.
+  rpc GetJobExitCodes(GetJobExitCodesRequest) returns (GetJobExitCodesResponse);
+  // Set job info without creating entries in the jobs table (for managed jobs).
+  rpc SetJobInfoWithoutJobId(SetJobInfoWithoutJobIdRequest) returns (SetJobInfoWithoutJobIdResponse);
 }
 
 enum JobStatus {
@@ -68,6 +72,8 @@ message ManagedJobInfo {
   string entrypoint = 4;
   repeated ManagedJobTask tasks = 5;
   optional string user_id = 6;
+  // Execution mode: 'parallel' (job group) or 'serial' (pipeline/single job)
+  optional string execution = 7;
 }
 
 message ManagedJobTask {
@@ -75,6 +81,10 @@ message ManagedJobTask {
   string name = 2;
   string resources_str = 3;
   string metadata_json = 4;
+  // Whether this task is a primary task (true) or auxiliary task (false)
+  // within a job group. Auxiliary tasks are terminated when all primary tasks
+  // complete. NULL for non-job-group jobs (single jobs and pipelines).
+  optional bool is_primary_in_job_group = 5;
 }
 
 message QueueJobResponse {}
@@ -163,4 +173,32 @@ message GetLogDirsForJobsRequest {
 
 message GetLogDirsForJobsResponse {
   map<int64, string> job_log_dirs = 1;
+}
+
+message GetJobExitCodesRequest {
+  optional int64 job_id = 1;
+}
+
+message GetJobExitCodesResponse {
+  repeated int32 exit_codes = 1;
+}
+
+message SetJobInfoWithoutJobIdRequest {
+  string name = 1;
+  string workspace = 2;
+  string entrypoint = 3;
+  optional string pool = 4;
+  optional string pool_hash = 5;
+  optional string user_hash = 6;
+  repeated int32 task_ids = 7;
+  repeated string task_names = 8;
+  string resources_str = 9;
+  repeated string metadata_jsons = 10;
+  int32 num_jobs = 11;
+  string execution = 12;
+  repeated bool is_primary_in_job_groups = 13;
+}
+
+message SetJobInfoWithoutJobIdResponse {
+  repeated int64 job_ids = 1;
 }

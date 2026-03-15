@@ -50,7 +50,7 @@ def main():
         print("  sky jobs queue")
         print("\nOr test programmatically:")
         print("  from sky.jobs import state as job_state")
-        print("  job_state.get_managed_jobs()")
+        print("  job_state.get_managed_jobs_with_filters()")
         print("\nTo clean up these jobs later, run:")
         print("  python tests/scale_tests/cleanup_test_managed_jobs.py")
 

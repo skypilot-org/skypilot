@@ -410,6 +410,11 @@ class SeewebNodeProvider:
                 'gpu_label': self.config.node_config.get('gpu_label', ''),
             })
 
+        # Add user_customize if present (Seeweb Cloud Script)
+        if 'user_customize' in self.config.node_config:
+            payload['user_customize'] = self.config.node_config[
+                'user_customize']
+
         # Build the request object expected by ecsapi
         server_create_request_cls = (
             seeweb_adaptor.ecsapi.ServerCreateRequest  # type: ignore

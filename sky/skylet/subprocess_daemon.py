@@ -110,7 +110,8 @@ def kill_process_tree(process: psutil.Process,
 
 
 def main():
-    # daemonize()
+    daemonize()
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--parent-pid', type=int, required=True)
     parser.add_argument('--proc-pid', type=int, required=True)
@@ -156,7 +157,8 @@ def main():
         #   but if a subprocess calls setpgid(0, 0) to detach itself from the
         #   process group (usually to daemonize itself), the subprocess will
         #   not be killed.
-        pgid = get_pgid_if_leader(process.pid)
+        if process is not None:
+            pgid = get_pgid_if_leader(process.pid)
 
     if process is not None and parent_process is not None:
         # Wait for either parent or target process to exit

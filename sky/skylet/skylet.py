@@ -1,5 +1,6 @@
 """skylet: a daemon running on the head node of a cluster."""
 
+import argparse
 import concurrent.futures
 import os
 import time
@@ -43,12 +44,16 @@ EVENTS = [
 
 def start_grpc_server(port: int = constants.SKYLET_GRPC_PORT) -> grpc.Server:
     """Start the gRPC server."""
-    # This is the default value in Python 3.8 - 3.12,
+    # This is the default value in Python 3.9 - 3.12,
     # putting it here for visibility.
     # TODO(kevin): Determine the optimal max number of threads.
     max_workers = min(32, (os.cpu_count() or 1) + 4)
+    # There's only a single skylet process per cluster, so disable
+    # SO_REUSEPORT to raise an error if the port is already in use.
+    options = (('grpc.so_reuseport', 0),)
     server = grpc.server(
-        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers))
+        concurrent.futures.ThreadPoolExecutor(max_workers=max_workers),
+        options=options)
 
     autostopv1_pb2_grpc.add_AutostopServiceServicer_to_server(
         services.AutostopServiceImpl(), server)
@@ -81,7 +86,15 @@ def run_event_loop():
 
 
 def main():
-    grpc_server = start_grpc_server()
+    parser = argparse.ArgumentParser(description='Start skylet daemon')
+    parser.add_argument('--port',
+                        type=int,
+                        default=constants.SKYLET_GRPC_PORT,
+                        help=f'gRPC port to listen on (default: '
+                        f'{constants.SKYLET_GRPC_PORT})')
+    args = parser.parse_args()
+
+    grpc_server = start_grpc_server(port=args.port)
     try:
         run_event_loop()
     except KeyboardInterrupt:

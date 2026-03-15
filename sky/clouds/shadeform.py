@@ -63,6 +63,8 @@ class Shadeform(clouds.Cloud):
             'Docker images not supported on Shadeform yet.',
         clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
             'Custom multiple network interfaces not supported.',
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            'Local disk is not supported on Shadeform.',
     }
     # yapf: enable
 
@@ -74,7 +76,9 @@ class Shadeform(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided."""
         del resources  # unused
@@ -85,10 +89,15 @@ class Shadeform(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
         """Get regions that offer the requested instance type."""
         assert zone is None, 'Shadeform does not support zones.'
         del zone  # unused
@@ -150,11 +159,12 @@ class Shadeform(clouds.Cloud):
         cpus: Optional[str] = None,
         memory: Optional[str] = None,
         disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
     ) -> Optional[str]:
         """Get default instance type."""
-        del disk_tier  # Not supported
+        del disk_tier, local_disk  # Not supported
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=None,

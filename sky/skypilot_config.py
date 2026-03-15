@@ -121,9 +121,6 @@ _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 API_SERVER_CONFIG_KEY = 'api_server_config'
 
-_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
-
 Base = declarative.declarative_base()
 
 config_yaml_table = sqlalchemy.Table(
@@ -336,6 +333,35 @@ def get_nested(keys: Tuple[str, ...],
         disallowed_override_keys=None)
 
 
+def get_effective_workspace_region_config(
+        cloud: str,
+        keys: Tuple[str, ...],
+        region: Optional[str] = None,
+        default_value: Optional[Any] = None,
+        workspace: Optional[str] = None,
+        override_configs: Optional[Dict[str, Any]] = None) -> Any:
+    if workspace is None:
+        workspace = get_active_workspace()
+    workspaced_config_value = None
+    workspace_cloud_config = get_nested(keys=(
+        'workspaces',
+        workspace,
+    ),
+                                        default_value=None)
+    if workspace_cloud_config is not None:
+        workspaced_config_value = config_utils.get_cloud_config_value_from_dict(
+            dict_config=workspace_cloud_config,
+            cloud=cloud,
+            keys=keys,
+            region=region,
+            default_value=None,
+            override_configs=override_configs)
+    if workspaced_config_value is not None:
+        return workspaced_config_value
+    return get_effective_region_config(cloud, keys, region, default_value,
+                                       override_configs)
+
+
 def get_effective_region_config(
         cloud: str,
         keys: Tuple[str, ...],
@@ -482,7 +508,7 @@ def safe_reload_config() -> None:
         reload_config()
 
 
-def reload_config(init_db: bool = False) -> None:
+def reload_config() -> None:
     internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if internal_config_path is not None:
         # {ENV_VAR_SKYPILOT_CONFIG} is used internally.
@@ -494,7 +520,7 @@ def reload_config(init_db: bool = False) -> None:
         return
 
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _reload_config_as_server(init_db=init_db)
+        _reload_config_as_server()
     else:
         _reload_config_as_client()
 
@@ -572,36 +598,13 @@ def _create_table(engine: sqlalchemy.engine.Engine):
         migration_utils.SKYPILOT_CONFIG_VERSION)
 
 
-def _initialize_and_get_db() -> sqlalchemy.engine.Engine:
-    """Initialize and return the config database engine.
-
-    This function should only be called by the API Server during initialization.
-    Client-side code should never call this function.
-    """
-    assert os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None, (
-        'initialize_and_get_db() can only be called by the API Server')
-
-    global _SQLALCHEMY_ENGINE
-
-    if _SQLALCHEMY_ENGINE is not None:
-        return _SQLALCHEMY_ENGINE
-
-    with _SQLALCHEMY_ENGINE_LOCK:
-        if _SQLALCHEMY_ENGINE is not None:
-            return _SQLALCHEMY_ENGINE
-
-        # We only store config in the DB when using Postgres,
-        # so no need to pass in db_name here.
-        engine = db_utils.get_engine(None)
-
-        # Run migrations if needed
-        _create_table(engine)
-
-        _SQLALCHEMY_ENGINE = engine
-        return _SQLALCHEMY_ENGINE
+# We only store config in the DB when using Postgres,
+# so no need to pass in db_name here.
+_db_manager = db_utils.DatabaseManager(db_name='config',
+                                       create_table_fn=_create_table)
 
 
-def _reload_config_as_server(init_db: bool = False) -> None:
+def _reload_config_as_server() -> None:
     # Reset the global variables, to avoid using stale values.
     _set_loaded_config(config_utils.Config())
     _set_loaded_config_path(None)
@@ -618,12 +621,8 @@ def _reload_config_as_server(init_db: bool = False) -> None:
                 'If db config is specified, no other config is allowed')
         logger.debug('retrieving config from database')
 
-        if init_db:
-            _initialize_and_get_db()
-
         def _get_config_yaml_from_db(key: str) -> Optional[config_utils.Config]:
-            assert _SQLALCHEMY_ENGINE is not None
-            with orm.Session(_SQLALCHEMY_ENGINE) as session:
+            with orm.Session(_db_manager.get_engine()) as session:
                 row = session.query(config_yaml_table).filter_by(
                     key=key).first()
             if row:
@@ -690,7 +689,7 @@ def loaded_config_path_serialized() -> Optional[str]:
 
 
 # Load on import, synchronization is guaranteed by python interpreter.
-reload_config(init_db=True)
+reload_config()
 
 
 def loaded() -> bool:
@@ -823,6 +822,37 @@ def replace_skypilot_config(new_configs: config_utils.Config) -> Iterator[None]:
         yield
 
 
+@contextlib.contextmanager
+def remove_queue_name_from_config() -> Iterator[None]:
+    """Removes the local_queue_name from the config."""
+    config = to_dict()
+
+    def update_to_none_if_set(keys: Tuple[str, ...]) -> None:
+        if config.get_nested(keys, None) is not None:
+            logger.debug(f'removing local queue name: setting {keys} to None')
+            config.set_nested(keys, None)
+
+    def remove_from_context_configs(keys: Tuple[str, ...]) -> None:
+        for context_name, _ in config.get_nested((*keys, 'context_configs'),
+                                                 {}).items():
+            update_to_none_if_set((*keys, 'context_configs', context_name,
+                                   'kueue', 'local_queue_name'))
+
+    # remove from global config
+    update_to_none_if_set(('kubernetes', 'kueue', 'local_queue_name'))
+    remove_from_context_configs(('kubernetes',))
+    # remove from all workspaces configs
+    for workspace_name, _ in config.get_nested(('workspaces',), {}).items():
+        update_to_none_if_set(('workspaces', workspace_name, 'kubernetes',
+                               'kueue', 'local_queue_name'))
+        remove_from_context_configs(
+            ('workspaces', workspace_name, 'kubernetes'))
+    logger.debug(
+        f'config without local queue: {yaml_utils.dump_yaml_str(dict(config))}')
+    with replace_skypilot_config(config):
+        yield
+
+
 def _compose_cli_config(cli_config: Optional[List[str]]) -> config_utils.Config:
     """Composes the skypilot CLI config.
     CLI config can either be:
@@ -906,15 +936,13 @@ def update_api_server_config_no_lock(config: config_utils.Config) -> None:
         if existing_db_url:
 
             def _set_config_yaml_to_db(key: str, config: config_utils.Config):
-                # reload_config(init_db=True) is called when this module is
-                # imported, so the database engine must already be initialized.
-                assert _SQLALCHEMY_ENGINE is not None
+                engine = _db_manager.get_engine()
                 config_str = yaml_utils.dump_yaml_str(dict(config))
-                with orm.Session(_SQLALCHEMY_ENGINE) as session:
-                    if (_SQLALCHEMY_ENGINE.dialect.name ==
+                with orm.Session(engine) as session:
+                    if (engine.dialect.name ==
                             db_utils.SQLAlchemyDialect.SQLITE.value):
                         insert_func = sqlite.insert
-                    elif (_SQLALCHEMY_ENGINE.dialect.name ==
+                    elif (engine.dialect.name ==
                           db_utils.SQLAlchemyDialect.POSTGRESQL.value):
                         insert_func = postgresql.insert
                     else:

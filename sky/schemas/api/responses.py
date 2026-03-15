@@ -1,7 +1,7 @@
 """Responses for the API server."""
 
 import enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pydantic
 
@@ -77,8 +77,17 @@ class APIHealthResponse(ResponseBaseModel):
     version: str = ''
     version_on_disk: str = ''
     commit: str = ''
+    # Whether basic auth on api server is enabled
     basic_auth_enabled: bool = False
     user: Optional[models.User] = None
+    # Whether service account token is enabled
+    service_account_token_enabled: bool = False
+    # Whether basic auth on ingress is enabled
+    ingress_basic_auth_enabled: bool = False
+    # Latest version info (if available)
+    latest_version: Optional[str] = None
+    # Whether external proxy auth is enabled
+    external_proxy_auth_enabled: bool = False
 
 
 class StatusResponse(ResponseBaseModel):
@@ -90,7 +99,7 @@ class StatusResponse(ResponseBaseModel):
     # This is an internally facing field anyway, so it's less
     # of a problem that it's not typed.
     handle: Optional[Any] = None
-    last_use: str
+    last_use: Optional[str] = None
     status: status_lib.ClusterStatus
     autostop: int
     to_down: bool
@@ -98,11 +107,8 @@ class StatusResponse(ResponseBaseModel):
     # metadata is a JSON, so we use Any here.
     metadata: Optional[Dict[str, Any]] = None
     cluster_hash: str
-    # pydantic cannot generate the pydantic-core schema for
-    # storage_mounts_metadata, so we use Any here.
-    storage_mounts_metadata: Optional[Dict[str, Any]] = None
     cluster_ever_up: bool
-    status_updated_at: int
+    status_updated_at: Optional[int] = None
     user_hash: str
     user_name: str
     config_hash: Optional[str] = None
@@ -121,7 +127,9 @@ class StatusResponse(ResponseBaseModel):
     cpus: Optional[str] = None
     memory: Optional[str] = None
     accelerators: Optional[str] = None
+    labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
+    node_names: Optional[str] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
@@ -189,6 +197,7 @@ class ManagedJobRecord(ResponseBaseModel):
     entrypoint: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     controller_pid: Optional[int] = None
+    controller_pid_started_at: Optional[float] = None
     dag_yaml_path: Optional[str] = None
     env_file_path: Optional[str] = None
     last_recovered_at: Optional[float] = None
@@ -198,8 +207,27 @@ class ManagedJobRecord(ResponseBaseModel):
     pool: Optional[str] = None
     pool_hash: Optional[str] = None
     current_cluster_name: Optional[str] = None
+    cluster_name_on_cloud: Optional[str] = None
     job_id_on_pool_cluster: Optional[int] = None
     accelerators: Optional[Dict[str, int]] = None
+    labels: Optional[Dict[str, str]] = None
+    links: Optional[Dict[str, str]] = None
+    # Node names for dashboard display (comma-separated)
+    node_names: Optional[str] = None
+    # JobGroup fields
+    # Execution mode: 'parallel' (job group) or 'serial' (pipeline/single job)
+    execution: Optional[str] = None
+    is_job_group: Optional[bool] = None
+    # Whether this task is a primary task (True) or auxiliary task (False)
+    # within a job group. NULL for non-job-group jobs (single jobs and
+    # pipelines).
+    is_primary_in_job_group: Optional[bool] = None
+    # Network endpoint information (extracted from cluster handle)
+    # List of (internal_ip, external_ip) tuples for all nodes
+    internal_external_ips: Optional[List[Tuple[str, str]]] = None
+    # K8s DNS entries mapping Pod name to internal_svc
+    # Only populated for Kubernetes clusters
+    internal_services: Optional[Dict[str, Optional[str]]] = None
 
 
 class VolumeRecord(ResponseBaseModel):
@@ -221,3 +249,8 @@ class VolumeRecord(ResponseBaseModel):
     status: Optional[str] = None
     usedby_pods: List[str]
     usedby_clusters: List[str]
+    is_ephemeral: bool = False
+    usedby_fetch_failed: bool = False
+    # Error message for volume in ERROR state (e.g., PVC pending due to
+    # access mode mismatch)
+    error_message: Optional[str] = None

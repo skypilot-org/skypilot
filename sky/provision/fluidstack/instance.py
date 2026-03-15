@@ -274,6 +274,7 @@ def get_cluster_info(
                 external_ip=instance_info['ip_address'],
                 ssh_port=instance_info['ssh_port'],
                 tags={},
+                node_name=instance_id,
             )
         ]
         if instance_info['name'].endswith('-head'):
@@ -291,9 +292,10 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
+    retry_if_missing: bool = False,
 ) -> Dict[str, Tuple[Optional['status_lib.ClusterStatus'], Optional[str]]]:
     """See sky/provision/__init__.py"""
-    del cluster_name  # unused
+    del cluster_name, retry_if_missing  # unused
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
     instances = _filter_instances(cluster_name_on_cloud, None)
