@@ -2896,6 +2896,154 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
+# Default images for each image_builder type.
+_IMAGE_BUILDER_DEFAULTS = {
+    'dind': {
+        'image': 'docker:29.3-dind',
+        'cache_vol_name': 'dind-storage',
+        'cache_mount': '/var/lib/docker',
+    },
+    'buildkit': {
+        'image': 'moby/buildkit:v0.28.0-rootless',
+        'cache_vol_name': 'buildkit-cache',
+        # rootless buildkitd (uid 1000) stores data under the XDG data dir;
+        # /var/lib/buildkit is the root-mode path and is not used here.
+        'cache_mount': '/home/user/.local/share/buildkit',
+    },
+}
+
+
+def get_image_builder_cache_vol_name(image_builder_type: str) -> str:
+    """Return the volume name used for the image_builder cache."""
+    return _IMAGE_BUILDER_DEFAULTS[image_builder_type]['cache_vol_name']
+
+
+def _image_builder_to_pod_config(
+        image_builder_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate a ``kubernetes.image_builder`` config dict into a pod_config fragment.
+
+    The cache volume always uses ``emptyDir`` here.  If the user specified a
+    SkyPilot volume (``image_builder_cfg['volume']``), the emptyDir is replaced with
+    a PVC reference and a per-pod ``subPath`` is injected later in
+    ``_create_pods()`` once the pod name is known.
+    """
+    image_builder_type = image_builder_cfg['type']
+    defaults = _IMAGE_BUILDER_DEFAULTS[image_builder_type]
+    cache_vol_name = defaults['cache_vol_name']
+
+    if image_builder_type == 'dind':
+        pod_cfg: Dict[str, Any] = {
+            'spec': {
+                'containers': [
+                    {
+                        'name': 'ray-node',
+                        'env': [{
+                            'name': 'DOCKER_HOST',
+                            'value': 'unix:///var/run/dind/docker.sock',
+                        }],
+                        'volumeMounts': [{
+                            'name': 'docker-sock-dir',
+                            'mountPath': '/var/run/dind',
+                        }],
+                    },
+                    {
+                        'name': 'dind',
+                        'image': defaults['image'],
+                        'securityContext': {
+                            'privileged': True
+                        },
+                        'env': [{
+                            'name': 'DOCKER_TLS_CERTDIR',
+                            'value': '',
+                        }],
+                        'args': [
+                            '--host=unix:///var/run/dind/docker.sock',
+                            '--group=1000',
+                        ],
+                        'volumeMounts': [
+                            {
+                                'name': 'docker-sock-dir',
+                                'mountPath': '/var/run/dind',
+                            },
+                            {
+                                'name': cache_vol_name,
+                                'mountPath': defaults['cache_mount'],
+                            },
+                        ],
+                    },
+                ],
+                'volumes': [
+                    {
+                        'name': 'docker-sock-dir',
+                        'emptyDir': {}
+                    },
+                    {
+                        'name': cache_vol_name,
+                        'emptyDir': {}
+                    },
+                ],
+            }
+        }
+    else:
+        # buildkit
+        pod_cfg = {
+            'spec': {
+                'containers': [
+                    {
+                        'name': 'ray-node',
+                        'env': [{
+                            'name': 'BUILDKIT_HOST',
+                            'value': 'unix:///run/buildkit/buildkitd.sock',
+                        }],
+                        'volumeMounts': [{
+                            'name': 'buildkit-sock',
+                            'mountPath': '/run/buildkit',
+                        }],
+                    },
+                    {
+                        'name': 'buildkitd',
+                        'image': defaults['image'],
+                        'args': [
+                            '--addr=unix:///run/buildkit/buildkitd.sock',
+                            '--oci-worker-no-process-sandbox',
+                        ],
+                        'securityContext': {
+                            'seccompProfile': {
+                                'type': 'Unconfined'
+                            },
+                            'appArmorProfile': {
+                                'type': 'Unconfined'
+                            },
+                            'runAsUser': 1000,
+                            'runAsGroup': 1000,
+                        },
+                        'volumeMounts': [
+                            {
+                                'name': 'buildkit-sock',
+                                'mountPath': '/run/buildkit',
+                            },
+                            {
+                                'name': cache_vol_name,
+                                'mountPath': defaults['cache_mount'],
+                            },
+                        ],
+                    },
+                ],
+                'volumes': [
+                    {
+                        'name': 'buildkit-sock',
+                        'emptyDir': {}
+                    },
+                    {
+                        'name': cache_vol_name,
+                        'emptyDir': {}
+                    },
+                ],
+            }
+        }
+    return pod_cfg
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
@@ -2961,10 +3109,36 @@ def combine_pod_config_fields(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
-    # Merge the kubernetes config into the YAML for both head and worker nodes.
-    config_utils.merge_k8s_configs(
-        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
-        ['node_config'], kubernetes_config)
+    node_config = (merged_cluster_yaml_obj['available_node_types']
+                   ['ray_head_default']['node_config'])
+
+    # --- ImageBuilder injection (DinD / BuildKit) ---
+    # ImageBuilder is the base layer; pod_config merges on top (pod_config wins).
+    image_builder_cfg = skypilot_config.get_effective_region_config(
+        cloud=cloud_str,
+        region=context_str,
+        keys=('image_builder',),
+        default_value=None)
+    task_image_builder_cfg = config_utils.get_cloud_config_value_from_dict(
+        dict_config=cluster_config_overrides,
+        cloud=cloud_str,
+        region=context_str,
+        keys=('image_builder',),
+        default_value=None)
+    if task_image_builder_cfg:
+        image_builder_cfg = task_image_builder_cfg
+    if image_builder_cfg:
+        image_builder_pod_cfg = _image_builder_to_pod_config(image_builder_cfg)
+        config_utils.merge_k8s_configs(node_config, image_builder_pod_cfg)
+        # Persist effective image_builder config in provider so _create_pods() can
+        # perform Phase 2 (emptyDir → PVC substitution + subPath injection).
+        if 'provider' in merged_cluster_yaml_obj:
+            merged_cluster_yaml_obj['provider'][
+                'image_builder_config'] = image_builder_cfg
+
+    # Merge the kubernetes pod_config into the YAML for both head and worker
+    # nodes. This comes after image_builder so explicit pod_config wins on conflicts.
+    config_utils.merge_k8s_configs(node_config, kubernetes_config)
     return merged_cluster_yaml_obj
 
 
@@ -3817,7 +3991,7 @@ def get_pod_primary_container(
 ):
     """Return the primary workload container for a SkyPilot pod.
 
-    Pods may include sidecars (e.g., log shippers). Kubernetes preserves the
+    Pods may include image_builders (e.g., log shippers). Kubernetes preserves the
     ordering of the `containers` list as authored, but mutating webhooks can
     inject additional containers. Callers should not rely on containers[0].
     """

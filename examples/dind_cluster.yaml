@@ -18,33 +18,6 @@ setup: |
 
 config:
   kubernetes:
-    pod_config:
-      spec:
-        containers:
-          - name: ray-node
-            env:
-              - name: DOCKER_HOST
-                value: "unix:///var/run/dind/docker.sock"
-            volumeMounts:
-              - name: docker-sock-dir
-                mountPath: /var/run/dind
-          - name: dind
-            image: docker:29.3-dind
-            securityContext:
-              privileged: true
-            env:
-              - name: DOCKER_TLS_CERTDIR
-                value: ""
-            args:
-              - "--host=unix:///var/run/dind/docker.sock"
-              - "--group=1000"
-            volumeMounts:
-              - name: docker-sock-dir
-                mountPath: /var/run/dind
-              - name: dind-storage
-                mountPath: /var/lib/docker
-        volumes:
-          - name: docker-sock-dir
-            emptyDir: {}
-          - name: dind-storage
-            emptyDir: {}
+    image_builder:
+      type: dind
+      # volume: builder-volume

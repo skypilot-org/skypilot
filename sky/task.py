@@ -14,6 +14,7 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
@@ -872,6 +873,38 @@ class Task:
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)
+
+        # Resolve image_builder cache volume (if configured) to include it in
+        # the access-mode check below.  It must NOT be added to
+        # self.volume_mounts because it is managed by the image_builder
+        # container, not by ray-node.
+        image_builder_vol_mounts: List[volume_lib.VolumeMount] = []
+        image_builder_cfg = skypilot_config.get_nested(
+            ('kubernetes', 'image_builder'), default_value=None)
+        # Task-level override wins over the global config.
+        for res in self.resources:
+            task_image_builder = (res.cluster_config_overrides.get(
+                'kubernetes', {}).get('image_builder'))
+            if task_image_builder:
+                image_builder_cfg = task_image_builder
+                break
+        image_builder_vol_name = (image_builder_cfg or {}).get('volume')
+        # Only resolve and check the image_builder volume if it is not already
+        # present in the task's own volume_mounts (same name = same PVC, the
+        # access-mode check will run on it via the normal task-volume path).
+        if image_builder_vol_name and not any(
+                vm.volume_name == image_builder_vol_name
+                for vm in volume_mounts):
+            try:
+                image_builder_vol_mounts.append(
+                    volume_lib.VolumeMount.resolve(
+                        path='',
+                        volume_name=image_builder_vol_name,
+                    ))
+            except exceptions.VolumeNotFoundError:
+                pass  # Will be surfaced later during provisioning.
+        all_vols_to_validate = volume_mounts + image_builder_vol_mounts
+
         # Disable certain access modes
         disabled_modes = {}
         if self.num_nodes > 1:
@@ -891,7 +924,7 @@ class Task:
             'region': ('', None),
             'zone': ('', None),
         }
-        for vol in volume_mounts:
+        for vol in all_vols_to_validate:
             # Check access mode
             access_mode = vol.volume_config.config.get('access_mode', '')
             if access_mode in disabled_modes:

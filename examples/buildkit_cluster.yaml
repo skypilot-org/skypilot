@@ -22,31 +22,6 @@ setup: |
 
 config:
   kubernetes:
-    pod_config:
-      spec:
-        containers:
-          - name: ray-node
-            env:
-              - name: BUILDKIT_HOST
-                value: "unix:///run/buildkit/buildkitd.sock"
-            volumeMounts:
-              - name: buildkit-sock
-                mountPath: /run/buildkit
-          - name: buildkitd
-            image: moby/buildkit:v0.28.0-rootless
-            args:
-              - --addr=unix:///run/buildkit/buildkitd.sock
-              - --oci-worker-no-process-sandbox
-            securityContext:
-              seccompProfile:
-                type: Unconfined
-              appArmorProfile:
-                type: Unconfined
-              runAsUser: 1000
-              runAsGroup: 1000
-            volumeMounts:
-              - name: buildkit-sock
-                mountPath: /run/buildkit
-        volumes:
-          - name: buildkit-sock
-            emptyDir: {}
+    image_builder:
+      type: buildkit
+      # volume: builder-volume
