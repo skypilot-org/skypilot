@@ -372,9 +372,9 @@ def _get_cloud_dependencies_installation_commands(
                 'sudo bash -c "if '
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
-                '! command -v netcat &> /dev/null; '
+                '! command -v nc &> /dev/null; '
                 'then apt update &> /dev/null && '
-                'apt install curl socat netcat -y &> /dev/null; '
+                'apt install curl socat netcat-openbsd -y &> /dev/null; '
                 'fi" && '
                 # Install kubectl
                 'ARCH=$(uname -m) && '
