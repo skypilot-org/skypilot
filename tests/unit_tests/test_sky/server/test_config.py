@@ -73,7 +73,7 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
     assert c.num_server_workers == 1
     assert c.long_worker_config.garanteed_parallelism == 1
     assert c.long_worker_config.burstable_parallelism == 0
-    assert c.short_worker_config.garanteed_parallelism == 3
+    assert c.short_worker_config.garanteed_parallelism == 4
     assert c.short_worker_config.burstable_parallelism == 0
     assert c.queue_backend == config.QueueBackend.MULTIPROCESSING
 
@@ -125,7 +125,7 @@ def test_parallel_size_short():
     # Test with insufficient memory
     blocking_size = 1
     mem_size_gb = 2
-    expected = 3
+    expected = 4
     assert config._max_short_worker_parallism(mem_size_gb,
                                               blocking_size) == expected
 
@@ -139,7 +139,7 @@ def test_parallel_size_short():
     # Test with limited memory
     blocking_size = 1
     mem_size_gb = 3
-    expected = 3
+    expected = 4
     assert config._max_short_worker_parallism(mem_size_gb,
                                               blocking_size) == expected
 

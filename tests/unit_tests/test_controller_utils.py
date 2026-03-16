@@ -502,15 +502,11 @@ def test_get_cloud_dependencies_installation_commands_cloudflare_storage(
     monkeypatch.setattr(
         'sky.utils.controller_utils.storage_lib.get_cached_enabled_storage_cloud_names_or_refresh',
         mock_get_cached_enabled_storage_cloud_names_or_refresh)
-    monkeypatch.setattr('sky.utils.controller_utils.cloudflare.NAME',
-                        'cloudflare')
 
     controller = controller_utils.Controllers.from_type(controller_type)
     commands = controller_utils._get_cloud_dependencies_installation_commands(
         controller)
 
-    # Should include cloudflare dependencies (which are aws dependencies)
-    combined_commands = ' '.join(commands)
     # Cloudflare dependencies include AWS dependencies
     assert any('awscli' in cmd or 'boto3' in cmd for cmd in commands)
 

@@ -59,7 +59,9 @@ class Kubernetes(clouds.Cloud):
     # where the suffix is 21 characters long.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
-    _MAX_VOLUME_NAME_LEN_LIMIT = 253
+    # Limit the length of the volume name to match the label value
+    # limit (63 characters)
+    _MAX_VOLUME_NAME_LEN_LIMIT = 63
 
     _SUPPORTS_SERVICE_ACCOUNT_ON_REMOTE = True
 
@@ -87,6 +89,8 @@ class Kubernetes(clouds.Cloud):
         clouds.CloudImplementationFeatures.CUSTOM_NETWORK_TIER:
             ('Custom network tier is not supported in this Kubernetes '
              'cluster.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            (f'Local disk is not supported on {_REPR}'),
     }
 
     IMAGE_CPU = 'skypilot:custom-cpu-ubuntu-2004'
@@ -317,7 +321,7 @@ class Kubernetes(clouds.Cloud):
                          f'{context}. Reason: {reason}')
 
             autoscaler_type = skypilot_config.get_effective_region_config(
-                cloud='kubernetes',
+                cloud=cls._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -358,10 +362,10 @@ class Kubernetes(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        # TODO(romilb): Investigate how users can provide their own cost catalog
-        #  for Kubernetes clusters.
-        # For now, assume zero cost for Kubernetes clusters
-        return 0.0
+        # pylint: disable=import-outside-toplevel
+        from sky.catalog import kubernetes_catalog
+        return kubernetes_catalog.get_hourly_cost(instance_type, use_spot,
+                                                  region, zone)
 
     def accelerators_to_hourly_cost(self,
                                     accelerators: Dict[str, int],
@@ -383,11 +387,12 @@ class Kubernetes(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional['resources_utils.DiskTier'] = None,
+            local_disk: Optional[str] = None,
             region: Optional[str] = None,
             zone: Optional[str] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
-        del disk_tier, region, zone  # Unused.
+        del disk_tier, region, zone, local_disk  # Unused.
         # We strip '+' from resource requests since Kubernetes can provision
         # exactly the requested resources.
         instance_cpus = float(
@@ -721,7 +726,7 @@ class Kubernetes(clouds.Cloud):
             # DWS is only supported in GKE, check the autoscaler type.
             autoscaler_type = skypilot_config.get_effective_region_config(
                 # TODO(kyuds): Support SSH node pools as well.
-                cloud='kubernetes',
+                cloud=self._REPR.lower(),
                 region=context,
                 keys=('autoscaler',),
                 default_value=None)
@@ -904,6 +909,7 @@ class Kubernetes(clouds.Cloud):
             cpus=resources.cpus,
             memory=resources.memory,
             disk_tier=resources.disk_tier,
+            local_disk=resources.local_disk,
             region=resources.region,
             zone=resources.zone)
 
@@ -1344,7 +1350,7 @@ class Kubernetes(clouds.Cloud):
         # Check if the cluster has any node pools with autoscaling enabled
         # with machine types that support high perf networking for GKE.
         autoscaler_type = skypilot_config.get_effective_region_config(
-            cloud='kubernetes',
+            cloud=cls._REPR.lower(),
             region=context,
             keys=('autoscaler',),
             default_value=None)

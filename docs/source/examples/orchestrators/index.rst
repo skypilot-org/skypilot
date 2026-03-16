@@ -8,3 +8,4 @@ Orchestrators
    Cron <cron>
    Github Actions <github_actions>
    Prefect <prefect>
+   Temporal <temporal>

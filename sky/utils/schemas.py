@@ -307,6 +307,9 @@ def _get_single_resources_schema():
             'network_tier': {
                 'type': 'string',
             },
+            'local_disk': {
+                'type': 'string',
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -523,6 +526,17 @@ def get_storage_schema():
     # pylint: disable=import-outside-toplevel
     from sky.data import storage
 
+    # Refer to https://rclone.org/docs/#options for more information
+    # on rclone-specific nomenclature.
+    rclone_memory_units = ('B', 'K', 'M', 'G', 'T', 'P')
+    rclone_memory_pattern = (
+        '^[0-9]+('
+        f'{"|".join([unit.lower() for unit in rclone_memory_units])}|'
+        f'{"|".join([unit.upper() for unit in rclone_memory_units])})?$')
+    rclone_duration_pattern = (
+        r'^(?:(?:[-+]?(?:\d+(?:\.\d+)?|\.\d+)'
+        r'(?:ms|[smhdwMy]))+|([-+]?(?:\d+(?:\.\d+)?|\.\d+)))$')
+
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -561,6 +575,12 @@ def get_storage_schema():
             'mount_options': {
                 'type': 'string'
             },
+            'type': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    t.value for t in storage.FileMountType
+                ]
+            },
             'config': {
                 'type': 'object',
                 'properties': {
@@ -580,6 +600,47 @@ def get_storage_schema():
                     },
                     'attach_mode': {
                         'type': 'string',
+                    },
+                    'mount_cached': {
+                        'type': 'object',
+                        'additionalProperties': False,
+                        'properties': {
+                            'transfers': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'buffer_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_cache_max_age': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'vfs_read_ahead': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_size': {
+                                'type': 'string',
+                                'pattern': rclone_memory_pattern,
+                            },
+                            'vfs_read_chunk_streams': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'vfs_write_back': {
+                                'type': 'string',
+                                'pattern': rclone_duration_pattern,
+                            },
+                            'read_only': {
+                                'type': 'boolean',
+                            },
+                        },
                     },
                 },
             },
@@ -612,6 +673,10 @@ def get_volume_mount_schema():
             },
             'is_ephemeral': {
                 'type': 'boolean',
+            },
+            'sub_path': {
+                'type': 'string',
+                'pattern': constants.SUB_PATH_PATTERN,
             },
             'volume_config': {
                 'type': 'object',
@@ -1129,6 +1194,54 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     },
 }
 
+_SBATCH_OPTIONS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'oneOf': [
+            {
+                'type': 'string',
+                # Disallow newlines to prevent script injection in
+                # #SBATCH directives.
+                'pattern': r'^[^\n]*$'
+            },
+            {
+                'type': 'number'
+            },
+            {
+                'type': 'boolean'
+            },
+            {
+                'type': 'null'
+            },
+        ]
+    },
+}
+
+_PRICING_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'cpu': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'memory': {
+            'type': 'number',
+            'minimum': 0
+        },
+        'accelerators': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': {
+                'type': 'number',
+                'minimum': 0
+            },
+        },
+    },
+}
+
 _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
     'pod_config': {
         'type': 'object',
@@ -1236,6 +1349,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             'minimum': 1,
         }],
     },
+    'pricing': _PRICING_SCHEMA,
 }
 
 
@@ -1425,7 +1539,18 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
-            }
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }]
+                },
+                **_LABELS_SCHEMA,
+                **_CAPABILITIES_SCHEMA,
+                **_NETWORK_CONFIG_SCHEMA,
+            },
+            **_check_not_both_fields_present('instance_tags', 'labels')
         },
         'kubernetes': {
             'type': 'object',
@@ -1508,6 +1633,42 @@ def get_config_schema():
                 'provision_timeout': {
                     'type': 'integer',
                 },
+                'pricing': _PRICING_SCHEMA,
+                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                'cluster_configs': {
+                    'type': 'object',
+                    'required': [],
+                    'properties': {},
+                    'additionalProperties': {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'workdir': {
+                                'type': 'string',
+                            },
+                            'tmpdir': {
+                                'type': 'string',
+                            },
+                            'pricing': _PRICING_SCHEMA,
+                            'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
+                            'partition_configs': {
+                                'type': 'object',
+                                'required': [],
+                                'properties': {},
+                                'additionalProperties': {
+                                    'type': 'object',
+                                    'required': [],
+                                    'additionalProperties': False,
+                                    'properties': {
+                                        'pricing': _PRICING_SCHEMA,
+                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
             }
         },
         'oci': {
@@ -1518,7 +1679,8 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {},
-                    # Properties are either 'default' or a region name.
+                    # Properties are either 'default' or a region
+                    # name.
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
@@ -1582,6 +1744,9 @@ def get_config_schema():
                             'project_id': {
                                 'type': 'string',
                             },
+                            'subnet_id': {
+                                'type': 'string',
+                            },
                             'fabric': {
                                 'type': 'string',
                             },
@@ -1634,7 +1799,7 @@ def get_config_schema():
         'items': {
             'type': 'string',
             'case_insensitive_enum':
-                (list(constants.ALL_CLOUDS) + ['cloudflare'])
+                (list(constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS)
         }
     }
 
@@ -1721,6 +1886,10 @@ def get_config_schema():
             'cluster_terminal_event_retention_hours': {
                 'type': 'number',
             },
+            'daemon_log_max_bytes': {
+                'type': 'integer',
+                'minimum': 0,
+            },
         }
     }
 
@@ -1738,7 +1907,8 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_cloud_names = list(
+        constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
     # Create pattern for not supported clouds, i.e.
     # all clouds except aws, gcp, kubernetes, ssh, nebius
     not_supported_clouds = [
@@ -1968,7 +2138,7 @@ def get_config_schema():
     }
 
     for cloud, config in cloud_configs.items():
-        if cloud == 'aws':
+        if cloud in ('aws', 'azure'):
             config['properties'].update(
                 {'remote_identity': _PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY})
         elif cloud == 'kubernetes':
@@ -1976,6 +2146,7 @@ def get_config_schema():
         else:
             config['properties'].update(_REMOTE_IDENTITY_SCHEMA)
 
+    # TODO (kyuds): deprecated; remove v0.13.0
     data_schema = {
         'type': 'object',
         'required': [],

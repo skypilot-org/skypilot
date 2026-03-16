@@ -26,6 +26,8 @@ each other.
 import collections
 import concurrent.futures
 import fnmatch
+import io
+import json
 import os
 import pathlib
 import re
@@ -61,6 +63,7 @@ from sky import skypilot_config
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
 from sky.client import sdk
+from sky.client.cli import deprecation_utils
 from sky.client.cli import flags
 from sky.client.cli import table_utils
 from sky.client.cli import utils as cli_utils
@@ -577,6 +580,7 @@ def _parse_override_params(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     network_tier: Optional[str] = None,
+    local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     config_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -636,6 +640,11 @@ def _parse_override_params(
             override_params['network_tier'] = None
         else:
             override_params['network_tier'] = network_tier
+    if local_disk is not None:
+        if local_disk.lower() == 'none':
+            override_params['local_disk'] = None
+        else:
+            override_params['local_disk'] = local_disk
     if ports:
         if any(p.lower() == 'none' for p in ports):
             if len(ports) > 1:
@@ -827,6 +836,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
     network_tier: Optional[str] = None,
+    local_disk: Optional[str] = None,
     ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     secret: Optional[List[Tuple[str, str]]] = None,
@@ -880,6 +890,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
                                              network_tier=network_tier,
+                                             local_disk=local_disk,
                                              ports=ports,
                                              config_override=config_override)
     if field_to_ignore is not None:
@@ -1165,6 +1176,7 @@ def launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    local_disk: Optional[str],
     ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     wait_for: Optional[str],
@@ -1225,6 +1237,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
+        local_disk=local_disk,
         ports=ports,
         config_override=config_override,
         git_url=git_url,
@@ -1358,6 +1371,7 @@ def exec(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    local_disk: Optional[str],
     async_call: bool,
     config_override: Optional[Dict[str, Any]] = None,
     git_url: Optional[str] = None,
@@ -1459,8 +1473,11 @@ def exec(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
+        local_disk=local_disk,
         ports=ports,
-        field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
+        field_to_ignore=[
+            'cpus', 'memory', 'disk_size', 'disk_tier', 'local_disk', 'ports'
+        ],
         config_override=config_override,
         git_url=git_url,
         git_ref=git_ref,
@@ -1846,12 +1863,20 @@ def _show_enabled_infra(
                 **_get_shell_complete_args(_complete_cluster_name))
 @flags.all_users_option('Show all clusters, including those not owned by the '
                         'current user.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
-           endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, show_pools: bool, clusters: List[str],
-           all_users: bool):
+def status(verbose: bool,
+           refresh: bool,
+           ip: bool,
+           endpoints: bool,
+           endpoint: Optional[int],
+           show_managed_jobs: bool,
+           show_services: bool,
+           show_pools: bool,
+           clusters: List[str],
+           all_users: bool,
+           output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -2038,6 +2063,15 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     # Phase 3: Get cluster records and handle special cases
     cluster_records = _get_cluster_records_and_set_ssh_config(
         query_clusters, refresh_mode, all_users, verbose)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([
+                r.model_dump(mode='json', exclude={'handle', 'credentials'})
+                for r in cluster_records
+            ],
+                       indent=2))
+        return
 
     # TOOD(zhwu): setup the ssh config for status
     if ip or show_endpoints:
@@ -2319,11 +2353,16 @@ def cost_report(all: bool, days: int):  # pylint: disable=redefined-builtin
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
+@flags.output_format_option()
 @usage_lib.entrypoint
-def queue(clusters: List[str], skip_finished: bool, all_users: bool):
+def queue(clusters: List[str],
+          skip_finished: bool,
+          all_users: bool,
+          output_format: str = 'table'):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='cyan')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.secho('Fetching and parsing job queue...', fg='cyan')
     if not clusters:
         cluster_records = _get_cluster_records_and_set_ssh_config(
             None, all_users=all_users)
@@ -2332,6 +2371,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     logger.info(f'Fetching job queue for: {", ".join(clusters)}')
     job_tables = {}
+    job_records: Dict[str, list] = {}
 
     def _get_job_queue(cluster):
         try:
@@ -2347,9 +2387,19 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
                        f'  {common_utils.format_exception(e)}')
             return
-        job_tables[cluster] = table_utils.format_job_queue(job_table)
+        if output_format == flags.OUTPUT_FORMAT_JSON:
+            job_records[cluster] = [
+                r.model_dump(mode='json') for r in job_table
+            ]
+        else:
+            job_tables[cluster] = table_utils.format_job_queue(job_table)
 
     subprocess_utils.run_in_parallel(_get_job_queue, clusters)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(json.dumps(job_records, indent=2))
+        return
+
     user_str = 'all users' if all_users else 'current user'
     for cluster, job_table in job_tables.items():
         click.echo(f'\nJob queue of {user_str} on cluster {cluster}\n'
@@ -3635,11 +3685,13 @@ def _down_or_stop_clusters(
     '-w',
     type=str,
     help='The workspace to check. If None, all workspaces will be checked.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def check(infra_list: Tuple[str],
           verbose: bool,
-          workspace: Optional[str] = None):
+          workspace: Optional[str] = None,
+          output_format: str = 'table'):
     """Check which clouds are available to use.
 
     This checks access credentials for all clouds supported by SkyPilot. If a
@@ -3660,16 +3712,27 @@ def check(infra_list: Tuple[str],
       \b
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
+      \b
+      # Output in JSON format for scripting.
+      sky check -o json
     """
     infra_arg = infra_list if len(infra_list) > 0 else None
     request_id = sdk.check(infra_list=infra_arg,
                            verbose=verbose,
                            workspace=workspace)
-    sdk.stream_and_get(request_id)
-    api_server_url = server_common.get_server_url()
-    click.echo()
-    click.echo(
-        click.style(f'Using SkyPilot API server: {api_server_url}', fg='green'))
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        # Suppress streamed output and print the result as JSON
+        null_stream = io.StringIO()
+        result = sdk.stream_and_get(request_id, output_stream=null_stream)
+        click.echo(json.dumps(result, indent=2))
+    else:
+        sdk.stream_and_get(request_id)
+        api_server_url = server_common.get_server_url()
+        click.echo()
+        click.echo(
+            click.style(f'Using SkyPilot API server: {api_server_url}',
+                        fg='green'))
 
 
 @cli.command()
@@ -3700,6 +3763,7 @@ def check(infra_list: Tuple[str],
     default=False,
     help='Show pricing and instance details for a specified accelerator across '
     'all regions and clouds.')
+@flags.verbose_option()
 @catalog.fallback_to_default_catalog
 @usage_lib.entrypoint
 def show_gpus(
@@ -3708,8 +3772,11 @@ def show_gpus(
         infra: Optional[str],
         cloud: Optional[str],
         region: Optional[str],
-        all_regions: bool):
+        all_regions: bool,
+        verbose: bool):
     """Show supported GPU/TPU/accelerators and their prices.
+
+    NOTE: This command is deprecated. Use ``sky gpus list`` instead.
 
     The names and counts shown can be set in the ``accelerators`` field in task
     YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
@@ -3717,13 +3784,13 @@ def show_gpus(
     accepted by the above.
 
     To show the detailed information of a GPU/TPU type (its price, which clouds
-    offer it, the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
+    offer it, the quantity in each VM type, etc.), use ``sky gpus list <gpu>``.
 
     To show all accelerators, including less common ones and their detailed
-    information, use ``sky show-gpus --all``.
+    information, use ``sky gpus list --all``.
 
     To show all regions for a specified accelerator, use
-    ``sky show-gpus <accelerator> --all-regions``.
+    ``sky gpus list <accelerator> --all-regions``.
 
     If ``--region`` or ``--all-regions`` is not specified, the price displayed
     for each instance type is the lowest across all regions for both on-demand
@@ -3736,7 +3803,8 @@ def show_gpus(
 
     If ``--cloud slurm`` is specified, it will show the maximum quantities of
     the GPU available on a single node and the real-time availability of the
-    GPU across all nodes in the Slurm cluster.
+    GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
+    accelerator details.
 
     Definitions of certain fields:
 
@@ -3751,6 +3819,26 @@ def show_gpus(
     * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
       in the Kubernetes cluster.
     """
+    # Call the shared implementation
+    _show_gpus_impl(accelerator_str,
+                    all,
+                    infra,
+                    cloud,
+                    region,
+                    all_regions,
+                    verbose=verbose)
+
+
+def _show_gpus_impl(
+        accelerator_str: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        all_regions: bool,
+        verbose: bool = False,
+        output_format: str = 'table'):
+    """Shared implementation for show_gpus and gpus_list commands."""
     cloud, region, _ = _handle_infra_cloud_region_zone_options(infra,
                                                                cloud,
                                                                region,
@@ -3809,6 +3897,28 @@ def show_gpus(
     query_ssh_realtime_gpu = (ssh_is_enabled and
                               (cloud_name is None or cloud_is_ssh))
 
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        name, quantity = None, None
+        if accelerator_str is not None:
+            parts = accelerator_str.split(':')
+            name = parts[0]
+            if len(parts) == 2:
+                quantity = int(parts[1])
+        result = sdk.stream_and_get(
+            sdk.list_accelerators(gpus_only=True,
+                                  name_filter=name,
+                                  quantity_filter=quantity,
+                                  region_filter=region,
+                                  clouds=cloud_name,
+                                  case_sensitive=False,
+                                  all_regions=all_regions))
+        json_result = {
+            gpu: [item._asdict() for item in items
+                 ] for gpu, items in result.items()
+        }
+        click.echo(json.dumps(json_result, indent=2))
+        return
+
     def _list_to_str(lst):
 
         def format_number(n):
@@ -3857,7 +3967,7 @@ def show_gpus(
                 identity_short = 'SSH Node Pool' if is_ssh else 'Kubernetes'
                 debug_msg = (
                     f'To show available accelerators in {identity_short}, '
-                    f'run: sky show-gpus --cloud {cloud_name}')
+                    f'run: sky gpus list --cloud {cloud_name}')
             full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
@@ -3977,7 +4087,7 @@ def show_gpus(
         quantity_filter: Optional[int] = None,
         slurm_cluster_name: Optional[str] = None,
     ) -> Tuple[List[Tuple[str, 'prettytable.PrettyTable']],
-               Optional['prettytable.PrettyTable']]:
+               Optional['prettytable.PrettyTable'], List[Tuple[str, str]]]:
         """Get Slurm GPU availability tables.
 
         Args:
@@ -4008,15 +4118,28 @@ def show_gpus(
                 err_msg = (f'Resources{gpu_info_msg} not found '
                            'in any Slurm partition. ')
                 debug_msg = ('To show available accelerators on Slurm,'
-                             ' run: sky show-gpus --cloud slurm ')
+                             ' run: sky gpus list --cloud slurm ')
             raise ValueError(err_msg + debug_msg)
 
         realtime_gpu_infos = []
+        failed_infos: List[Tuple[str, str]] = []
         total_gpu_info: Dict[str, List[int]] = collections.defaultdict(
             lambda: [0, 0])
 
-        for (slurm_cluster,
-             availability_list) in realtime_gpu_availability_lists:
+        for entry in realtime_gpu_availability_lists:
+            # Handle both 2-element (old server) and 3-element (new server)
+            # tuples for backward compatibility.
+            # TODO(kevin): remove this in v0.13.0
+            if len(entry) == 3:
+                slurm_cluster, availability_list, error = entry
+            else:
+                slurm_cluster, availability_list = entry
+                error = None
+
+            if error is not None:
+                failed_infos.append((slurm_cluster, error))
+                continue
+
             realtime_gpu_table = log_utils.create_table(
                 ['GPU', qty_header, 'UTILIZATION'])
             for realtime_gpu_availability in sorted(availability_list):
@@ -4050,7 +4173,7 @@ def show_gpus(
         else:
             total_realtime_gpu_table = None
 
-        return realtime_gpu_infos, total_realtime_gpu_table
+        return realtime_gpu_infos, total_realtime_gpu_table, failed_infos
 
     def _format_kubernetes_node_info_combined(
             contexts_info: List[Tuple[str, 'models.KubernetesNodesInfo']],
@@ -4163,41 +4286,64 @@ def show_gpus(
                 f'{colorama.Style.RESET_ALL}\n'
                 f'{node_table.get_string()}')
 
-    def _format_slurm_node_info(slurm_cluster_names: List[str]) -> str:
-        node_table = log_utils.create_table([
+    def _format_slurm_partition_info(slurm_cluster_names: List[str]) -> str:
+        partition_table = log_utils.create_table([
             'CLUSTER',
-            'NODE',
             'PARTITION',
-            'STATE',
             'GPU',
             'UTILIZATION',
         ])
 
+        # TODO(kevin): Create a new endpoint that returns per-partition info.
         request_ids = [(cluster_name,
                         sdk.slurm_node_info(slurm_cluster_name=cluster_name))
                        for cluster_name in slurm_cluster_names]
 
+        failed_clusters = []
+        # Aggregate GPU counts by (cluster, partition, gpu_type).
+        # Each value is [total_gpus, free_gpus].
+        gpu_counts: Dict[Tuple[str, str, str],
+                         List[int]] = collections.defaultdict(lambda: [0, 0])
         for cluster_name, request_id in request_ids:
-            nodes_info = sdk.stream_and_get(request_id)
+            try:
+                nodes_info = sdk.stream_and_get(request_id)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Failed to get partition info for '
+                               f'Slurm cluster {cluster_name!r}: '
+                               f'{common_utils.format_exception(e)}')
+                failed_clusters.append(cluster_name)
+                continue
 
             for node_info in nodes_info:
-                node_table.add_row([
-                    cluster_name,
-                    node_info.get('node_name'),
-                    node_info.get('partition', '-'),
-                    node_info.get('node_state'),
-                    node_info.get('gpu_type') or '',
-                    (f'{node_info.get("free_gpus", 0)} of '
-                     f'{node_info.get("total_gpus", 0)} free'),
-                ])
+                gpu_type = node_info.get('gpu_type') or ''
+                total = node_info.get('total_gpus', 0)
+                free = node_info.get('free_gpus', 0)
+                partitions = node_info.get('partition', '').split(',')
+                for partition in partitions:
+                    key = (cluster_name, partition.strip(), gpu_type)
+                    gpu_counts[key][0] += total
+                    gpu_counts[key][1] += free
 
-        slurm_per_node_msg = 'Slurm per node accelerator availability'
-        # Optional: Add hint message if needed, similar to k8s
+        for key in sorted(gpu_counts):
+            cluster_name, partition, gpu_type = key
+            total, free = gpu_counts[key]
+            partition_table.add_row([
+                cluster_name,
+                partition,
+                gpu_type,
+                f'{free} of {total} free',
+            ])
+
+        slurm_per_partition_msg = (
+            'Slurm per-partition accelerator availability')
+        if failed_clusters:
+            slurm_per_partition_msg += (f' (skipped unreachable clusters: '
+                                        f'{", ".join(failed_clusters)})')
 
         return (f'{colorama.Fore.LIGHTMAGENTA_EX}{colorama.Style.NORMAL}'
-                f'{slurm_per_node_msg}'
+                f'{slurm_per_partition_msg}'
                 f'{colorama.Style.RESET_ALL}\n'
-                f'{node_table.get_string()}')
+                f'{partition_table.get_string()}')
 
     def _get_labeled_zero_gpu_hint(
             all_nodes_info: List[Tuple[str,
@@ -4367,7 +4513,7 @@ def show_gpus(
         return False, print_section_titles
 
     def _format_slurm_realtime_gpu(
-            total_table, slurm_realtime_infos,
+            total_table, slurm_realtime_infos, failed_infos,
             show_node_info: bool) -> Generator[str, None, None]:
         # print total table
         yield (f'{colorama.Fore.GREEN}{colorama.Style.BRIGHT}'
@@ -4385,9 +4531,18 @@ def show_gpus(
                    f'{colorama.Style.RESET_ALL}\n')
             yield from slurm_realtime_table.get_string()
             yield '\n'
-        if show_node_info:
+
+        for (cluster_name, error_msg) in failed_infos:
+            yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Slurm Cluster: {cluster_name}'
+                   f'{colorama.Style.RESET_ALL}\n')
+            yield (f'{colorama.Fore.YELLOW}'
+                   f'Error: {error_msg}'
+                   f'{colorama.Style.RESET_ALL}\n')
+
+        if show_node_info and slurm_realtime_infos:
             cluster_names = [cluster for cluster, _ in slurm_realtime_infos]
-            yield _format_slurm_node_info(cluster_names)
+            yield _format_slurm_partition_info(cluster_names)
 
     def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
@@ -4439,7 +4594,7 @@ def show_gpus(
                     # If --cloud slurm is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    slurm_realtime_infos, total_table = (
+                    slurm_realtime_infos, total_table, failed_infos = (
                         _get_slurm_realtime_gpu_tables(
                             slurm_cluster_name=region))
                 except ValueError as e:
@@ -4452,9 +4607,11 @@ def show_gpus(
                     if k8s_printed:
                         yield '\n'
 
-                    yield from _format_slurm_realtime_gpu(total_table,
-                                                          slurm_realtime_infos,
-                                                          show_node_info=True)
+                    yield from _format_slurm_realtime_gpu(
+                        total_table,
+                        slurm_realtime_infos,
+                        failed_infos,
+                        show_node_info=verbose)
 
             if cloud_is_slurm:
                 # Do not show clouds if --cloud slurm is specified
@@ -4570,13 +4727,14 @@ def show_gpus(
             # accelerator is requested
             print_section_titles = True
             try:
-                slurm_realtime_infos, total_table = (
+                slurm_realtime_infos, total_table, failed_infos = (
                     _get_slurm_realtime_gpu_tables(name_filter=name,
                                                    quantity_filter=quantity,
                                                    slurm_cluster_name=region))
 
                 yield from _format_slurm_realtime_gpu(total_table,
                                                       slurm_realtime_infos,
+                                                      failed_infos,
                                                       show_node_info=False)
             except ValueError as e:
                 # In the case of a specific accelerator, show the error message
@@ -4635,7 +4793,7 @@ def show_gpus(
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
-            yield 'To show available accelerators, run: sky show-gpus --all'
+            yield 'To show available accelerators, run: sky gpus list --all'
             return
 
         for i, (gpu, items) in enumerate(list_accelerators_result.items()):
@@ -4701,6 +4859,171 @@ def show_gpus(
         for out in outputs:
             click.echo(out, nl=False)
         click.echo()
+
+
+@cli.group('gpus', cls=_NaturalOrderGroup)
+def gpus_cli():
+    """SkyPilot GPU/Accelerator CLI."""
+    pass
+
+
+@gpus_cli.command('list', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.argument('accelerator_str', required=False)
+@flags.all_option('Show details of all GPU/TPU/accelerator offerings.')
+@click.option('--infra',
+              default=None,
+              type=str,
+              help='Infrastructure to query. Examples: "aws", "aws/us-east-1"')
+@click.option('--cloud',
+              default=None,
+              type=str,
+              help='Cloud provider to query.',
+              hidden=True)
+@click.option(
+    '--region',
+    required=False,
+    type=str,
+    help=
+    ('The region to use. If not specified, shows accelerators from all regions.'
+    ),
+    hidden=True,
+)
+@click.option(
+    '--all-regions',
+    is_flag=True,
+    default=False,
+    help='Show pricing and instance details for a specified accelerator across '
+    'all regions and clouds.')
+@flags.verbose_option()
+@flags.output_format_option()
+@catalog.fallback_to_default_catalog
+@usage_lib.entrypoint
+def gpus_list(
+        accelerator_str: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        infra: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        all_regions: bool,
+        verbose: bool,
+        output_format: str = 'table'):
+    """Show supported GPU/TPU/accelerators and their prices.
+
+    The names and counts shown can be set in the ``accelerators`` field in task
+    YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
+    table shows 8x V100s are supported, then the string ``V100:8`` will be
+    accepted by the above.
+
+    To show the detailed information of a GPU/TPU type (its price, which clouds
+    offer it, the quantity in each VM type, etc.), use ``sky gpus list <gpu>``.
+
+    To show all accelerators, including less common ones and their detailed
+    information, use ``sky gpus list --all``.
+
+    To show all regions for a specified accelerator, use
+    ``sky gpus list <accelerator> --all-regions``.
+
+    If ``--region`` or ``--all-regions`` is not specified, the price displayed
+    for each instance type is the lowest across all regions for both on-demand
+    and spot instances. There may be multiple regions with the same lowest
+    price.
+
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
+
+    If ``--cloud slurm`` is specified, it will show the maximum quantities of
+    the GPU available on a single node and the real-time availability of the
+    GPU across all nodes in the Slurm cluster. Use ``-v`` to show per-partition
+    accelerator details.
+
+    Definitions of certain fields:
+
+    * ``DEVICE_MEM``: Memory of a single device; does not depend on the device
+      count of the instance (VM).
+
+    * ``HOST_MEM``: Memory of the host instance (VM).
+
+    * ``QTY_PER_NODE`` (Kubernetes only): GPU quantities that can be requested
+      on a single node.
+
+    * ``UTILIZATION`` (Kubernetes only): Total number of GPUs free / available
+      in the Kubernetes cluster.
+    """
+    # Call the shared implementation
+    _show_gpus_impl(accelerator_str,
+                    all,
+                    infra,
+                    cloud,
+                    region,
+                    all_regions,
+                    verbose=verbose,
+                    output_format=output_format)
+
+
+@gpus_cli.command('label', cls=_DocumentedCodeCommand)
+@flags.config_option(expose_value=False)
+@click.option('--context',
+              '-c',
+              type=str,
+              default=None,
+              help='Kubernetes context to use. If not specified, uses the '
+              'current context from the API server.')
+@click.option('--cleanup',
+              is_flag=True,
+              default=False,
+              help='Only cleanup existing GPU labeler resources.')
+@click.option('--async',
+              'async_mode',
+              is_flag=True,
+              default=False,
+              help='Do not wait for GPU labeling to complete.')
+@usage_lib.entrypoint
+def gpus_label(context: Optional[str], cleanup: bool, async_mode: bool):
+    """Label GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    This command runs on the API server to label GPU nodes with
+    skypilot.co/accelerator labels. This is required for SkyPilot to
+    identify GPU types on nodes that don't have pre-configured labels.
+
+    Note: This command currently only supports NVIDIA GPUs. AMD GPUs
+    must be labeled manually.
+
+    Example usage:
+
+      # Label GPUs in the current Kubernetes context
+      sky gpus label
+
+      # Label GPUs in a specific context
+      sky gpus label --context my-k8s-cluster
+
+      # Cleanup labeling resources
+      sky gpus label --cleanup
+
+      # Start labeling without waiting for completion
+      sky gpus label --async
+    """
+    request_id = sdk.kubernetes_label_gpus(
+        context=context,
+        cleanup_only=cleanup,
+        wait_for_completion=not async_mode,
+    )
+    # Stream logs to show progress (spinners, node info, etc.)
+    # The actual output is in the streamed logs, not just the return value
+    result = sdk.stream_and_get(request_id)
+
+    # Exit with appropriate code based on success
+    if not result.get('success', False):
+        sys.exit(1)
+
+
+# Deprecate 'sky show-gpus' in favor of 'sky gpus list'
+# pylint: disable=protected-access
+deprecation_utils._deprecate_and_hide_command(
+    group=None,
+    command_to_deprecate=show_gpus,
+    alternative_command='sky gpus list')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -5131,6 +5454,7 @@ def jobs_launch(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    local_disk: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
@@ -5186,6 +5510,7 @@ def jobs_launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
+        local_disk=local_disk,
         ports=ports,
         job_recovery=job_recovery,
         config_override=config_override,
@@ -5304,10 +5629,16 @@ def jobs_launch(
               help='Show only pending/running jobs\' information.')
 @flags.all_users_option('Show jobs from all users.')
 @flags.all_option('Show all jobs.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool, all: bool, limit: int):
+def jobs_queue(verbose: bool,
+               refresh: bool,
+               skip_finished: bool,
+               all_users: bool,
+               all: bool,
+               limit: int,
+               output_format: str = 'table'):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -5365,7 +5696,8 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
       sky jobs queue -l 10
 
     """
-    click.secho('Fetching managed job statuses...', fg='cyan')
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         max_num_jobs_to_show = (limit if not all else None)
         fields = _DEFAULT_MANAGED_JOB_FIELDS_TO_GET
@@ -5398,6 +5730,17 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
             (managed_jobs_request_id,
              queue_result_version) = managed_jobs_future.result()
             pool_status_request_id = pool_status_future.result()
+
+        if output_format == flags.OUTPUT_FORMAT_JSON:
+            result = sdk.stream_and_get(managed_jobs_request_id)
+            if queue_result_version.v2():
+                managed_jobs_, _, _, _ = result
+            else:
+                managed_jobs_ = result
+            click.echo(
+                json.dumps([r.model_dump(mode='json') for r in managed_jobs_],
+                           indent=2))
+            return
 
         num_jobs, msg = _handle_jobs_queue_request(
             managed_jobs_request_id,
@@ -5437,6 +5780,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
               type=str,
               help='Pool name to cancel.')
 @click.argument('job_ids', default=None, type=int, required=False, nargs=-1)
+@_add_click_options(flags.GRACEFUL_OPTIONS)
 @flags.all_option('Cancel all managed jobs for the current user.')
 @flags.yes_option()
 @flags.all_users_option('Cancel all managed jobs from all users.')
@@ -5446,6 +5790,8 @@ def jobs_cancel(
     name: Optional[str],
     pool: Optional[str],  # pylint: disable=redefined-outer-name
     job_ids: Tuple[int],
+    graceful: bool,
+    graceful_timeout: Optional[int],
     all: bool,
     yes: bool,
     all_users: bool,
@@ -5500,6 +5846,8 @@ def jobs_cancel(
         managed_jobs.cancel(job_ids=job_ids,
                             name=name,
                             pool=pool,
+                            graceful=graceful,
+                            graceful_timeout=graceful_timeout,
                             all=all,
                             all_users=all_users))
 
@@ -5668,6 +6016,7 @@ def jobs_pool_apply(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    local_disk: Optional[str],
     mode: str,
     workers: Optional[int],
     yes: bool,
@@ -5676,14 +6025,14 @@ def jobs_pool_apply(
     """Either apply a config to a pool for managed jobs submission
     or update the number of workers in the pool. One of POOL_YAML or --workers
     must be provided.
-    Config:
-        If the pool is already running, the config will be applied to the pool.
-        Otherwise, a new pool will be created.
-    Workers:
-        The --workers option can be used to override the number of workers
-        specified in the YAML file, or to update workers without a YAML file.
-        Example:
-            sky jobs pool apply -p my-pool --workers 5
+
+    Config: If the pool is already running, the config will be applied to the
+    pool. Otherwise, a new pool will be created.
+
+    Workers: The --workers option can be used to override the number of workers
+    specified in the YAML file, or to update workers without a YAML file.
+
+    Example: ``sky jobs pool apply -p my-pool --workers 5``
     """
     cloud, region, zone = _handle_infra_cloud_region_zone_options(
         infra, cloud, region, zone)
@@ -5730,6 +6079,7 @@ def jobs_pool_apply(
             disk_size=disk_size,
             disk_tier=disk_tier,
             network_tier=network_tier,
+            local_disk=local_disk,
             ports=ports,
             not_supported_cmd='sky jobs pool up',
             pool=True,
@@ -6177,6 +6527,7 @@ def _generate_task_with_service(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    local_disk: Optional[str],
     not_supported_cmd: str,
     pool: bool,  # pylint: disable=redefined-outer-name
     git_url: Optional[str] = None,
@@ -6210,6 +6561,7 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
+        local_disk=local_disk,
         ports=ports,
         git_url=git_url,
         git_ref=git_ref,
@@ -6336,6 +6688,7 @@ def serve_up(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     network_tier: Optional[str],
+    local_disk: Optional[str],
     yes: bool,
     async_call: bool,
     git_url: Optional[str] = None,
@@ -6395,6 +6748,7 @@ def serve_up(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
+        local_disk=local_disk,
         ports=ports,
         not_supported_cmd='sky serve up',
         pool=False,
@@ -6450,8 +6804,8 @@ def serve_update(
         secret_file: Optional[Dict[str, str]], secret: List[Tuple[str, str]],
         gpus: Optional[str], instance_type: Optional[str], ports: Tuple[str],
         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-        disk_tier: Optional[str], network_tier: Optional[str], mode: str,
-        yes: bool, async_call: bool):
+        disk_tier: Optional[str], network_tier: Optional[str],
+        local_disk: Optional[str], mode: str, yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -6506,6 +6860,7 @@ def serve_update(
         disk_size=disk_size,
         disk_tier=disk_tier,
         network_tier=network_tier,
+        local_disk=local_disk,
         ports=ports,
         not_supported_cmd='sky serve update',
         pool=False,
@@ -7066,11 +7421,22 @@ INT_OR_NONE = IntOrNone()
     required=False,
     help=(f'Number of requests to show, default is {_NUM_REQUESTS_TO_SHOW},'
           f' set to "none" or "all" to show all requests.'))
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              required=False,
+              help=('Filter request by cluster name.'))
 @flags.verbose_option('Show more details.')
+@flags.output_format_option()
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
-               verbose: bool, limit: Optional[int]):
+def api_status(request_id_prefixes: Optional[List[str]],
+               all_status: bool,
+               verbose: bool,
+               limit: Optional[int],
+               cluster: Optional[str],
+               output_format: str = 'table'):
     """List requests on SkyPilot API server."""
     if not request_id_prefixes:
         request_id_prefixes = None
@@ -7078,7 +7444,14 @@ def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
     request_list = sdk.api_status(request_id_prefixes, all_status, limit,
-                                  fields)
+                                  fields, cluster)
+
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        click.echo(
+            json.dumps([r.model_dump(mode='json') for r in request_list],
+                       indent=2))
+        return
+
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
@@ -7165,20 +7538,60 @@ def api_logout():
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
+@flags.output_format_option()
 @flags.config_option(expose_value=False)
 @usage_lib.entrypoint
-def api_info():
+def api_info(output_format: str):
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
-    api_server_info = sdk.api_info()
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.echo(f'SkyPilot client version: {sky.__version__}, '
+                   f'commit: {sky.__commit__}')
+    try:
+        api_server_info = sdk.api_info()
+    except requests_lib.exceptions.RequestException:
+        is_local = server_common.is_api_server_local()
+        if is_local:
+            click.echo('No SkyPilot API server is connected\n'
+                       f'{ux_utils.INDENT_SYMBOL}To connect to an existing API '
+                       'server: sky api login\n'
+                       f'{ux_utils.INDENT_LAST_SYMBOL}To start a local API '
+                       'server: sky api start')
+        else:
+            click.echo(
+                f'Could not connect to SkyPilot API server at {url}\n'
+                f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
+                f'sky api login --relogin -e {url}\n'
+                f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '
+                'sky api logout')
+        return
+
     api_server_user = api_server_info.user
     if api_server_user is not None:
         user = api_server_user
     else:
         user = models.User.get_current_user()
-    # Print client version and commit.
-    click.echo(f'SkyPilot client version: {sky.__version__}, '
-               f'commit: {sky.__commit__}')
+
+    # JSON output mode
+    if output_format == flags.OUTPUT_FORMAT_JSON:
+        output_data = {
+            'client': {
+                'version': sky.__version__,
+                'commit': sky.__commit__,
+            },
+            'server': {
+                'url': url,
+                'status': api_server_info.status.value,
+                'version': api_server_info.version,
+                'commit': api_server_info.commit,
+                'api_version': api_server_info.api_version,
+            },
+            'user': user.name,
+        }
+        click.echo(json.dumps(output_data, indent=2))
+        return
+
+    # Default table/text output
 
     config = skypilot_config.get_user_config()
     config = dict(config)

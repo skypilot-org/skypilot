@@ -140,7 +140,7 @@ available_node_types:
           imagePullPolicy: Never
           image: skypilot:latest
           command: ["/bin/bash", "-c", "--"]
-          args: ["trap : TERM INT; sleep infinity & wait;"]
+          args: ["trap : TERM INT; while true; do sleep infinity & wait $!; done"]
           lifecycle:
             postStart:
               exec:
@@ -205,7 +205,7 @@ available_node_types:
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
-          args: ['trap : TERM INT; sleep infinity & wait;']
+          args: ["trap : TERM INT; while true; do sleep infinity & wait $!; done"]
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: 6379  # Redis port

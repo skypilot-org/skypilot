@@ -163,8 +163,9 @@ def docker_start_cmds(
         env_flags,
         user_options_str,
         '--net=host',
-        # SkyPilot: Add following options to enable fuse.
+        # SkyPilot: Add following options to enable fuse and resource limits.
         '--cap-add=SYS_ADMIN',
+        '--cap-add=SYS_RESOURCE',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
         '--entrypoint=/bin/bash',
@@ -205,7 +206,11 @@ class DockerInitializer:
         self.initialized = False
         # podman is not fully tested yet.
         use_podman = docker_config.get('use_podman', False)
-        self.docker_cmd = 'podman' if use_podman else 'docker'
+        self.docker_cmd_name = 'podman' if use_podman else 'docker'
+        # Use sudo to avoid 'permission denied' errors when the SSH user
+        # is not in the docker group (e.g., on Nebius). The provisioned VM
+        # always has passwordless sudo. See #8764.
+        self.docker_cmd = f'sudo {self.docker_cmd_name}'
         self.log_path = log_path
 
     def _run(
@@ -335,8 +340,12 @@ class DockerInitializer:
                 # enough), or the image server is public.
                 # For the former case, gcloud should be available, and latter
                 # should be fine to fail the following command.
-                self._run('gcloud auth configure-docker '
-                          f'{docker_login_config.server} --quiet || true')
+                # Use sudo so the credential helper is configured in root's
+                # docker config (/root/.docker/config.json), since docker
+                # commands run with sudo. See #8906.
+                self._run('sudo gcloud auth configure-docker '
+                          f'{shlex.quote(docker_login_config.server)} '
+                          '--quiet || true')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
             specific_image = docker_login_config.format_image(specific_image)
@@ -438,6 +447,23 @@ class DockerInitializer:
             'sudo systemctl disable jupyterhub > /dev/null 2>&1 || true;',
             run_env='host')
 
+        # Detect the container's default user for SSH. We run without -u 0
+        # to get the actual default user not root. This ensures SSH connects
+        # as the correct user whose home directory and SSH keys we've set up.
+        # Pattern matching to prevent MOTD contamination and reliably
+        # parse docker user. Refer to CommandRunner::_get_remote_home_dir.
+        # Note: We use single quotes around the inner command and escape
+        # them to prevent $(whoami) from being expanded on the host VM.
+        docker_user_cmd = (f'{self.docker_cmd} exec {self.container_name} '
+                           'bash -c \'echo SKYPILOT_DOCKER_USER: $(whoami)\'')
+        docker_user_output = self._run(docker_user_cmd, separate_stderr=True)
+        docker_user_match = _DOCKER_USER_PATTERN.search(docker_user_output)
+        if docker_user_match:
+            docker_user = docker_user_match.group(1)
+        else:
+            raise ValueError('Failed to find Docker user identifier: '
+                             f'{docker_user_output}')
+
         # Change the default port of sshd from 22 to DEFAULT_DOCKER_PORT.
         # Append the host VM's authorized_keys to the container's authorized_keys.
         # This allows any machine that can ssh into the host VM to ssh into the
@@ -454,22 +480,16 @@ class DockerInitializer:
             f'echo "Port {port}" | sudo tee -a /etc/ssh/sshd_config > /dev/null;'
             'mkdir -p ~/.ssh;'
             'cat /tmp/host_ssh_authorized_keys >> ~/.ssh/authorized_keys;'
+            # Set ownership of .ssh to the detected docker user, since these
+            # commands run as root but SSH will connect as the default user
+            # who needs write access to ~/.ssh
+            f'chown -R {shlex.quote(docker_user)} ~/.ssh;'
             'sudo service ssh start;'
             'sudo sed -i "s/mesg n/tty -s \\&\\& mesg n/" ~/.profile;'
             f'{SETUP_ENV_VARS_CMD}',
             run_env='docker')
 
         # SkyPilot: End of Setup Commands.
-        # Pattern matching to prevent MOTD contamination and reliably
-        # parse docker user. Refer to CommandRunner::_get_remote_home_dir.
-        docker_user_output = self._run('echo "SKYPILOT_DOCKER_USER: $(whoami)"',
-                                       run_env='docker')
-        docker_user_match = _DOCKER_USER_PATTERN.search(docker_user_output)
-        if docker_user_match:
-            docker_user = docker_user_match.group(1)
-        else:
-            raise ValueError('Failed to find Docker user identifier: '
-                             f'{docker_user_output}')
         self.initialized = True
         return docker_user
 
@@ -479,15 +499,16 @@ class DockerInitializer:
         # before checking if docker is installed to avoid permission issues.
         docker_cmd = ('id -nG $USER | grep -qw docker || '
                       'sudo usermod -aG docker $USER > /dev/null 2>&1;'
-                      f'command -v {self.docker_cmd} || echo {no_exist!r}')
+                      f'command -v {self.docker_cmd_name} || echo {no_exist!r}')
         cleaned_output = self._run(docker_cmd)
         timeout = 60 * 10  # 10 minute timeout
         start = time.time()
         while no_exist in cleaned_output or 'docker' not in cleaned_output:
             if time.time() - start > timeout:
                 logger.error(
-                    f'{self.docker_cmd.capitalize()} not installed. Please use '
-                    f'an image with {self.docker_cmd.capitalize()} installed.')
+                    f'{self.docker_cmd_name.capitalize()} not installed. '
+                    f'Please use an image with '
+                    f'{self.docker_cmd_name.capitalize()} installed.')
                 return
             time.sleep(5)
             cleaned_output = self._run(docker_cmd)

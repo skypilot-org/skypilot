@@ -36,6 +36,7 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import gpu_names
 from sky.utils import kubernetes_enums
 from sky.utils import plugin_extensions
 from sky.utils import schemas
@@ -695,7 +696,7 @@ class GFDLabelFormatter(GPULabelFormatter):
         """Searches against a canonical list of NVIDIA GPUs and pattern
         matches the canonical GPU name against the GFD label.
         """
-        for canonical_name in kubernetes_constants.CANONICAL_GPU_NAMES:
+        for canonical_name in gpu_names.CANONICAL_GPU_NAMES:
             # A100-80GB accelerator is A100-SXM-80GB or A100-PCIE-80GB
             if canonical_name == 'A100-80GB' and re.search(
                     r'A100.*-80GB', value):
@@ -765,13 +766,52 @@ class KarpenterLabelFormatter(SkyPilotLabelFormatter):
     LABEL_KEY = 'karpenter.k8s.aws/instance-gpu-name'
 
 
+class NebiusLabelFormatter(GPULabelFormatter):
+    """Custom label formatter for Nebius
+
+    Uses nebius.com/gpu-name as the key, and the uppercase SkyPilot
+    accelerator str as the value.
+    """
+
+    LABEL_KEY = 'nebius.com/gpu-name'
+
+    @classmethod
+    def get_label_key(cls, accelerator: Optional[str] = None) -> str:
+        return cls.LABEL_KEY
+
+    @classmethod
+    def get_label_keys(cls) -> List[str]:
+        return [cls.LABEL_KEY]
+
+    @classmethod
+    def get_label_values(cls, accelerator: str) -> List[str]:
+        # For Nebius formatter, we use the uppercase accelerator str.
+        return [accelerator.upper()]
+
+    @classmethod
+    def match_label_key(cls, label_key: str) -> bool:
+        return label_key == cls.LABEL_KEY
+
+    @classmethod
+    def get_accelerator_from_label_value(cls, value: str) -> str:
+        return value.upper()
+
+    @classmethod
+    def validate_label_value(cls, value: str) -> Tuple[bool, str]:
+        """Values must be all uppercase for the Nebius formatter."""
+        is_valid = value == value.upper()
+        return is_valid, (f'Label value {value!r} must be uppercase if using '
+                          f'the {cls.get_label_key()} label.'
+                          if not is_valid else '')
+
+
 # LABEL_FORMATTER_REGISTRY stores the label formats SkyPilot will try to
 # discover the accelerator type from. The order of the list is important, as
 # it will be used to determine the priority of the label formats when
 # auto-detecting the GPU label type.
 LABEL_FORMATTER_REGISTRY = [
     SkyPilotLabelFormatter, GKELabelFormatter, KarpenterLabelFormatter,
-    GFDLabelFormatter, CoreWeaveLabelFormatter
+    GFDLabelFormatter, CoreWeaveLabelFormatter, NebiusLabelFormatter
 ]
 
 
@@ -1213,6 +1253,14 @@ class CoreweaveAutoscaler(Autoscaler):
     can_query_backend: bool = False
 
 
+class NebiusAutoscaler(Autoscaler):
+    """Nebius autoscaler
+    """
+
+    label_formatter: Any = NebiusLabelFormatter
+    can_query_backend: bool = False
+
+
 class GenericAutoscaler(Autoscaler):
     """Generic autoscaler
     """
@@ -1226,6 +1274,7 @@ AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.COREWEAVE: CoreweaveAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.NEBIUS: NebiusAutoscaler,
     kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
@@ -1360,6 +1409,7 @@ class V1Node:
         exclude_not_ready: bool = False,
         exclude_effects: Optional[List[str]] = None,
         exclude_keys: Optional[List[str]] = None,
+        exclude_key_prefixes: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get the taints on the node.
 
@@ -1369,6 +1419,8 @@ class V1Node:
             exclude_effects: The taint effects to exclude,
               e.g. ['PreferNoSchedule'].
             exclude_keys: The taint keys to exclude.
+            exclude_key_prefixes: Taint key prefixes to exclude,
+              e.g. ['node-role.kubernetes.io/'].
 
         Returns:
             List[Dict[str, Any]]: The taints on the node.
@@ -1386,6 +1438,9 @@ class V1Node:
             if exclude_effects and t.effect in exclude_effects:
                 continue
             if exclude_keys and t.key in exclude_keys:
+                continue
+            if exclude_key_prefixes and any(
+                    t.key.startswith(p) for p in exclude_key_prefixes):
                 continue
             taints.append({
                 'key': t.key,
@@ -1760,7 +1815,7 @@ def get_accelerator_label_key_values(
         context, 'ssh-') if (context and is_ssh_node_pool) else context
 
     autoscaler_type = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
         region=context,
         keys=('autoscaler',),
         default_value=None)
@@ -2023,8 +2078,7 @@ def check_credentials(context: Optional[str],
         gpu_msg = (f'Cluster has {len(unlabeled_nodes)} nodes with '
                    f'accelerators that are not labeled. '
                    f'To label the nodes, run '
-                   f'`python -m sky.utils.kubernetes.gpu_labeler '
-                   f'--context {context}`')
+                   f'`sky gpus label --context {context}`')
     else:
         try:
             # This function raises a ResourcesUnavailableError in three cases:
@@ -3116,8 +3170,9 @@ def get_autoscaler_type(
     context: Optional[str] = None
 ) -> Optional[kubernetes_enums.KubernetesAutoscalerType]:
     """Returns the autoscaler type by reading from config"""
+    is_ssh_node_pool = context.startswith('ssh-') if context else False
     autoscaler_type = skypilot_config.get_effective_region_config(
-        cloud='kubernetes',
+        cloud='ssh' if is_ssh_node_pool else 'kubernetes',
         region=context,
         keys=('autoscaler',),
         default_value=None)
@@ -3221,6 +3276,14 @@ def get_handled_taint_keys() -> List[str]:
     if custom_key:
         keys.append(custom_key)
     return keys
+
+
+# Taint key prefixes that indicate node roles rather than problems.
+# These are excluded when determining if a node has problematic taints.
+_ROLE_TAINT_KEY_PREFIXES = [
+    'node-role.kubernetes.io/master',
+    'node-role.kubernetes.io/control-plane',
+]
 
 
 def get_kubernetes_node_info(
@@ -3367,10 +3430,12 @@ def get_kubernetes_node_info(
 
         # Check if node is ready
         node_is_ready = node.is_ready()
-        node_taints = node.get_taints(exclude_cordon=True,
-                                      exclude_not_ready=True,
-                                      exclude_effects=['PreferNoSchedule'],
-                                      exclude_keys=get_handled_taint_keys())
+        node_taints = node.get_taints(
+            exclude_cordon=True,
+            exclude_not_ready=True,
+            exclude_effects=['PreferNoSchedule'],
+            exclude_keys=get_handled_taint_keys(),
+            exclude_key_prefixes=_ROLE_TAINT_KEY_PREFIXES)
         node_is_tainted = len(node_taints) > 0
 
         if accelerator_count == 0:
@@ -3885,10 +3950,23 @@ def _gpu_resource_key_helper(context: Optional[str]) -> str:
     """Helper function to get the GPU resource key."""
     gpu_resource_key = SUPPORTED_GPU_RESOURCE_KEYS['nvidia']
     try:
-        nodes = kubernetes.core_api(context).list_node().items
-        for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
-            if any(gpu_key in node.status.capacity for node in nodes):
-                return gpu_key
+        response = kubernetes.core_api(context).list_node(
+            _request_timeout=kubernetes.API_TIMEOUT, _preload_content=False)
+        try:
+            supported_gpu_keys = set(SUPPORTED_GPU_RESOURCE_KEYS.values())
+            capacity_keys: typing.Set[str] = set()
+            for capacity in ijson.items(response,
+                                        'items.item.status.capacity',
+                                        buf_size=IJSON_BUFFER_SIZE):
+                capacity_keys.update(
+                    supported_gpu_keys.intersection(capacity.keys()))
+                if len(capacity_keys) == len(supported_gpu_keys):
+                    break
+            for gpu_key in SUPPORTED_GPU_RESOURCE_KEYS.values():
+                if gpu_key in capacity_keys:
+                    return gpu_key
+        finally:
+            response.release_conn()
     except Exception as e:  # pylint: disable=broad-except
         logger.warning(f'Failed to load kube config or query nodes: {e}. '
                        'Falling back to default GPU resource key.')

@@ -7,12 +7,14 @@ class RequestName(str, enum.Enum):
     # General requests
     CHECK = 'check'
     ENABLED_CLOUDS = 'enabled_clouds'
+    ENABLED_CLOUDS_BATCH = 'enabled_clouds_batch'
     REALTIME_KUBERNETES_GPU_AVAILABILITY = (
         'realtime_kubernetes_gpu_availability')
     KUBERNETES_NODE_INFO = 'kubernetes_node_info'
     REALTIME_SLURM_GPU_AVAILABILITY = 'realtime_slurm_gpu_availability'
     SLURM_NODE_INFO = 'slurm_node_info'
     STATUS_KUBERNETES = 'status_kubernetes'
+    KUBERNETES_LABEL_GPUS = 'kubernetes_label_gpus'
     LIST_ACCELERATORS = 'list_accelerators'
     LIST_ACCELERATOR_COUNTS = 'list_accelerator_counts'
     OPTIMIZE = 'optimize'
@@ -90,6 +92,7 @@ class RequestName(str, enum.Enum):
     REQUEST_DAEMON_MANAGED_JOB_STATUS_REFRESH = 'managed-job-status-refresh'
     REQUEST_DAEMON_SKY_SERVE_STATUS_REFRESH = 'sky-serve-status-refresh'
     REQUEST_DAEMON_POOL_STATUS_REFRESH = 'pool-status-refresh'
+    REQUEST_DAEMON_SERVER_HEARTBEAT = 'server-heartbeat'
 
     def __repr__(self):
         return self.value

@@ -642,6 +642,21 @@ function ActiveTab({
         </div>
       </div>
 
+      {/* Plugin Slot: Cluster Infra Nodes */}
+      <PluginSlot
+        name="clusters.detail.nodes"
+        context={{
+          clusterHash: clusterData.cluster_hash,
+          clusterName: clusterData.cluster,
+          clusterNameOnCloud: clusterData.cluster_name_on_cloud,
+          nodeNames: clusterData.node_names,
+          numNodes: clusterData.num_nodes,
+          infra: clusterData.full_infra,
+          status: clusterData.status,
+        }}
+        wrapperClassName="mb-6"
+      />
+
       {/* Jobs Table - Only show for active clusters */}
       {!isHistoricalCluster && (
         <div className="mb-8">

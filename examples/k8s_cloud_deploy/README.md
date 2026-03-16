@@ -8,7 +8,7 @@ This example demonstrates how to deploy a Kubernetes cluster on the cloud with S
 pip install "skypilot-nightly[lambda,kubernetes]"
 ```
 
-2. Use a cloud which supports opening ports on SkyPilot or manually expose ports 6443 and 443 on the VMs. This is required to expose k8s API server. 
+2. Use a cloud which supports opening ports on SkyPilot or manually expose ports 6443 and 443 on the VMs. This is required to expose k8s API server.
 
    For example, if using lambda cloud, configure the firewall on the lambda cloud dashboard to allow inbound connections on port `443` and `6443`.
 
@@ -18,7 +18,7 @@ pip install "skypilot-nightly[lambda,kubernetes]"
 
 ## Instructions
 
-1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node. If using GCP, AWS or Azure, uncomment the ports line to allow inbound connections to the Kubernetes API server. 
+1. Edit `cloud_k8s.yaml` to set the desired number of workers and GPUs per node. If using GCP, AWS or Azure, uncomment the ports line to allow inbound connections to the Kubernetes API server.
 ```yaml
 resources:
   infra: lambda
@@ -42,7 +42,7 @@ NAME              STATUS   ROLES                  AGE   VERSION
 129-80-133-44     Ready    <none>                 14m   v1.30.4+k3s1
 150-230-191-161   Ready    control-plane,master   14m   v1.30.4+k3s1
 
-$ sky show-gpus --cloud kubernetes
+$ sky gpus list --cloud kubernetes
 Kubernetes GPUs
 GPU  REQUESTABLE_QTY_PER_NODE  UTILIZATION
 A10  1                         2 of 2 free
@@ -56,7 +56,7 @@ NODE             GPU       UTILIZATION
 ## Run AI workloads on your Kubernetes cluster with SkyPilot
 
 ### Development clusters
-To launch a [GPU enabled development cluster](https://docs.skypilot.co/en/latest/examples/interactive-development.html), run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`. 
+To launch a [GPU enabled development cluster](https://docs.skypilot.co/en/latest/examples/interactive-development.html), run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`.
 
 SkyPilot will setup SSH config for you.
 * [SSH access](https://docs.skypilot.co/en/latest/examples/interactive-development.html#ssh): `ssh mycluster`

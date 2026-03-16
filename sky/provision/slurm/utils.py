@@ -5,7 +5,7 @@ import os
 import re
 import shlex
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from paramiko.config import SSHConfig
 
@@ -16,11 +16,15 @@ from sky.adaptors import slurm
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import gpu_names
 from sky.utils.db import kv_cache
 
 logger = sky_logging.init_logger(__name__)
 
 DEFAULT_SLURM_PATH = '~/.slurm/config'
+
+_VAR_PATTERN = re.compile(r'\$(\w+|\{[^}]*\})')
+
 SLURM_MARKER_FILE = '.sky_slurm_cluster'
 SLURM_CONTAINER_MARKER_FILE = '.sky_slurm_container'
 
@@ -33,6 +37,28 @@ _GRES_GPU_PATTERN = re.compile(r'\bgpu:(?:(?P<type>[^:(]+):)?(?P<count>\d+)',
 _SLURM_NODES_INFO_CACHE_TTL = 30 * 60
 # Proctrack type is highly unlikely to change.
 _SLURM_PROCTRACK_TYPE_CACHE_TTL = 24 * 60 * 60
+# Pyxis plugin availability is unlikely to change frequently.
+_SLURM_PYXIS_CHECK_CACHE_TTL = 24 * 60 * 60
+# FUSE availability is unlikely to change frequently.
+_SLURM_FUSE_CHECK_CACHE_TTL = 24 * 60 * 60
+
+
+def expand_path_vars(path: str, env: Dict[str, str]) -> str:
+    """Expand $VAR and ${VAR} in path using the given environment dict.
+
+    Inspired by os.path.expandvars from CPython:
+    https://github.com/python/cpython/blob/56c4f10d/Lib/posixpath.py#L284-L334
+    Only $name and ${name} forms are expanded. Unknown variables are
+    left unchanged.
+    """
+
+    def _repl(m: re.Match) -> str:
+        name = m.group(1)
+        if name.startswith('{') and name.endswith('}'):
+            name = name[1:-1]
+        return env.get(name, m.group(0))
+
+    return _VAR_PATTERN.sub(_repl, path)
 
 
 def get_gpu_type_and_count(gres_str: str) -> Tuple[Optional[str], int]:
@@ -148,6 +174,76 @@ def get_proctrack_type(cluster: str) -> Optional[str]:
                          f'{common_utils.format_exception(e)}')
 
     return proctrack_type
+
+
+def _check_cluster_feature(
+    cluster: str,
+    feature_name: str,
+    check_fn: Callable[[slurm.SlurmClient], bool],
+    cache_ttl: int,
+) -> bool:
+    """Check if a feature is available on a Slurm cluster, with caching.
+
+    Args:
+        cluster: Name of the Slurm cluster.
+        feature_name: Short name for the feature (used in cache key and logs).
+        check_fn: A callable that takes a SlurmClient and returns True if
+            the feature is available.
+        cache_ttl: Time-to-live for the cache entry in seconds.
+    """
+    cache_key = f'slurm:{feature_name}_enabled:{cluster}'
+    cached = kv_cache.get_cache_entry(cache_key)
+    if cached is not None:
+        logger.debug(f'Slurm {feature_name} check found in cache '
+                     f'({cache_key})')
+        return cached == 'true'
+
+    ssh_config = get_slurm_ssh_config()
+    ssh_config_dict = ssh_config.lookup(cluster)
+    client = slurm.SlurmClient(
+        ssh_config_dict['hostname'],
+        int(ssh_config_dict.get('port', 22)),
+        ssh_config_dict['user'],
+        get_identity_file(ssh_config_dict),
+        ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
+        ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
+        identities_only=get_identities_only(ssh_config_dict),
+    )
+    enabled = check_fn(client)
+
+    try:
+        kv_cache.add_or_update_cache_entry(cache_key,
+                                           'true' if enabled else 'false',
+                                           time.time() + cache_ttl)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Failed to cache slurm {feature_name} check for '
+                     f'{cluster}: {common_utils.format_exception(e)}')
+
+    return enabled
+
+
+def check_pyxis_enabled(cluster: str) -> bool:
+    """Check if the Pyxis SPANK plugin is installed on a Slurm cluster.
+
+    Pyxis is required for Docker container support on Slurm. This function
+    caches the result per cluster since the plugin availability is unlikely
+    to change frequently.
+    """
+    return _check_cluster_feature(cluster, 'pyxis',
+                                  lambda c: c.check_pyxis_enabled(),
+                                  _SLURM_PYXIS_CHECK_CACHE_TTL)
+
+
+def check_fuse_enabled(cluster: str) -> bool:
+    """Check if FUSE is available on a Slurm cluster.
+
+    FUSE is required for storage mounting (MOUNT/MOUNT_CACHED modes) via
+    tools like goofys and rclone. This function caches the result per
+    cluster since FUSE availability is unlikely to change frequently.
+    """
+    return _check_cluster_feature(cluster, 'fuse',
+                                  lambda c: c.check_fuse_enabled(),
+                                  _SLURM_FUSE_CHECK_CACHE_TTL)
 
 
 class SlurmInstanceType:
@@ -459,25 +555,22 @@ def check_instance_fits(
     if acc_type is not None:
         assert acc_count is not None, (acc_type, acc_count)
 
+        # Resolve to the exact raw GRES type that will be used at deploy
+        # time, so the CPU/memory fitness check below runs against the
+        # same nodes that Slurm will actually schedule on.
+        try:
+            resolved_type = resolve_gres_gpu_type(cluster, acc_type, acc_count,
+                                                  partition)
+        except exceptions.ResourcesUnavailableError as e:
+            return (False, str(e))
+
+        # Filter to nodes carrying the resolved raw type with enough GPUs.
         gpu_nodes = []
         for node_info in nodes:
-            # Extract the GPU type and count from the GRES string
             node_acc_type, node_acc_count = get_gpu_type_and_count(
                 node_info.gres)
-            if node_acc_type is None:
-                continue
-
-            # TODO(jwj): Handle status check.
-
-            # Check if the node has the requested GPU type and at least the
-            # requested count
-            if (node_acc_type.lower() == acc_type.lower() and
-                    node_acc_count >= acc_count):
+            if (node_acc_type == resolved_type and node_acc_count >= acc_count):
                 gpu_nodes.append(node_info)
-        if len(gpu_nodes) == 0:
-            return (False,
-                    f'No GPU nodes found with at least {acc_type}:{acc_count} '
-                    f'on the cluster.')
 
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
@@ -493,50 +586,226 @@ def check_instance_fits(
     return fits, reason
 
 
-# GRES names are highly unlikely to change within a cluster.
-# TODO(kevin): Cache using sky/utils/db/kv_cache.py too.
-@annotations.lru_cache(scope='global', maxsize=10)
-def get_gres_gpu_type(cluster: str, requested_gpu_type: str) -> str:
-    """Get the actual GPU type as it appears in the cluster's GRES.
+# Vendor prefixes stripped during normalization for matching purposes.
+_GPU_VENDOR_PREFIXES = ('nvidia', 'amd', 'intel', 'tesla')
+
+
+def _normalize_gpu_name(name: str) -> str:
+    """Normalize a GPU name for fuzzy comparison.
+
+    Strips vendor prefixes, normalizes separators, and lowercases. Used only
+    for matching, never for submission.
+
+    Examples:
+        'nvidia_h100_80gb_hbm3' -> 'h100-80gb-hbm3'
+        'H100'                -> 'h100'
+        'A100-SXM-80GB'       -> 'a100-sxm-80gb'
+    """
+    result = name.lower().replace('_', '-')
+    for prefix in _GPU_VENDOR_PREFIXES:
+        if result.startswith(prefix + '-'):
+            result = result[len(prefix) + 1:]
+            break
+    return result
+
+
+def _is_segment_subsequence(segments_a: List[str],
+                            segments_b: List[str]) -> bool:
+    """Check if segments_a appears as an ordered subsequence of segments_b.
+
+    Each segment must match exactly (preventing e.g. 'l4' matching 'l40').
+
+    Examples:
+        (['h100'], ['h100', '80gb', 's'])          -> True
+        (['a100', '80gb'], ['a100', 'sxm4', '80gb']) -> True
+        (['v100', '32gb'], ['v100', 'pcie', '16gb']) -> False
+        (['l4'], ['l40'])                           -> False
+    """
+    # The iterator is stateful: once an element is consumed it won't be
+    # revisited, so matches are always found in left-to-right order.
+    b_iter = iter(segments_b)
+    for seg in segments_a:
+        # Scan forward through b_iter for a matching segment.
+        for b_seg in b_iter:
+            if seg == b_seg:
+                break
+        else:
+            # for...else: runs when b_iter is exhausted without finding
+            # seg, meaning segments_a is not a subsequence.
+            return False
+    return True
+
+
+def _accelerator_name_matches_slurm(requested_acc: str,
+                                    candidate_raw: str) -> bool:
+    """Check if a requested accelerator name matches a Slurm GRES raw type.
+
+    Matching rules (checked in order):
+    1. Case-insensitive exact match of raw strings.
+    2. Normalized forms are equal (vendor-prefix stripped, separators unified).
+    3. Segment subsequence: the shorter name's dash-segments appear in order
+       within the longer name's segments. Handles both prefix cases
+       (H100 ~ H100-80GB-S) and non-contiguous memory variants
+       (A100-80GB ~ A100-SXM4-80GB, V100-32GB ~ V100-PCIE-32GB).
+       Exact segment matching prevents false positives (L4 ≠ L40).
 
     Args:
-        cluster: Name of the Slurm cluster.
-        requested_gpu_type: The GPU type requested by the user.
+        requested_acc: The accelerator name requested by the user
+            (e.g. 'H100', 'A100-80GB').
+        candidate_raw: A raw GRES GPU type string from Slurm node metadata
+            (e.g. 'NVIDIA_H100_80GB_HBM3').
 
     Returns:
-        The actual GPU type as it appears in the cluster's GRES string.
-        Falls back to the requested type if not found.
+        True if the names are considered matching.
     """
-    try:
-        ssh_config = get_slurm_ssh_config()
-        ssh_config_dict = ssh_config.lookup(cluster)
-        client = slurm.SlurmClient(
-            ssh_config_dict['hostname'],
-            int(ssh_config_dict.get('port', 22)),
-            ssh_config_dict['user'],
-            get_identity_file(ssh_config_dict),
-            ssh_proxy_command=ssh_config_dict.get('proxycommand', None),
-            ssh_proxy_jump=ssh_config_dict.get('proxyjump', None),
-            identities_only=get_identities_only(ssh_config_dict),
-        )
+    # 1. Exact case-insensitive match.
+    if requested_acc.lower() == candidate_raw.lower():
+        return True
 
-        nodes = client.info_nodes()
+    # 2. Normalized equality.
+    req_norm = _normalize_gpu_name(requested_acc)
+    cand_norm = _normalize_gpu_name(candidate_raw)
+    if req_norm == cand_norm:
+        return True
 
-        for node_info in nodes:
-            node_gpu_type, _ = get_gpu_type_and_count(node_info.gres)
-            if node_gpu_type is None:
+    # 3. Segment subsequence (bidirectional): either side's segments may
+    #    be a subsequence of the other (e.g. user says 'A100-80GB' and
+    #    cluster has 'a100-sxm4-80gb', or vice-versa).
+    req_segments = req_norm.split('-')
+    cand_segments = cand_norm.split('-')
+    if len(req_segments) < len(cand_segments):
+        return _is_segment_subsequence(req_segments, cand_segments)
+    if len(cand_segments) < len(req_segments):
+        return _is_segment_subsequence(cand_segments, req_segments)
+    return False
+
+
+def canonicalize_raw_gpu_name(raw_name: str) -> str:
+    """Convert a raw Slurm GRES GPU type to a canonical display name.
+
+    Iterates CANONICAL_GPU_NAMES (most-specific first) and returns the
+    first canonical name whose normalized form matches the raw string.
+    Falls back to uppercasing.
+
+    Matching rules (checked in order for each canonical name):
+    1. Normalized equality (vendor-prefix stripped, separators unified).
+    2. Segment subsequence: canonical's dash-segments appear in order within
+       the raw name's segments. One-directional only (canonical into raw)
+       because the list is ordered most-specific first.
+
+    Examples:
+        'nvidia_h100_80gb_hbm3'  -> 'H100-80GB'
+        'nvidia_a100_sxm4_80gb'  -> 'A100-80GB'
+        'nvidia_l40s'            -> 'L40S'
+        'H100'                   -> 'H100'
+        'unknown_custom_gpu'     -> 'UNKNOWN_CUSTOM_GPU'
+    """
+    raw_norm = _normalize_gpu_name(raw_name)
+    raw_segments = raw_norm.split('-')
+
+    for canonical in gpu_names.CANONICAL_GPU_NAMES:
+        can_norm = _normalize_gpu_name(canonical)
+
+        # 1. Normalized equality (also covers exact case-insensitive matches
+        #    since normalization lowercases and unifies separators).
+        if can_norm == raw_norm:
+            return canonical
+
+        # 2. Canonical segments are a subsequence of raw segments.
+        # One-directional: only check canonical-into-raw, not the reverse,
+        # because the list is ordered most-specific first (e.g. 'H100-80GB'
+        # before 'H100') and a reverse match would cause 'H100' to
+        # incorrectly resolve to 'H100-80GB'.
+        can_segments = can_norm.split('-')
+        if len(can_segments) < len(raw_segments):
+            if _is_segment_subsequence(can_segments, raw_segments):
+                return canonical
+
+    return raw_name.upper()
+
+
+def resolve_gres_gpu_type(
+    cluster: str,
+    requested_gpu_type: str,
+    requested_count: int = 1,
+    partition: Optional[str] = None,
+) -> str:
+    """Resolve a canonical GPU name to the raw GRES type on a Slurm cluster.
+
+    Queries live node metadata and applies fuzzy matching to find the actual
+    GRES GPU type string that the Slurm scheduler expects. The resolved raw
+    type is used directly in ``#SBATCH --gres=gpu:<raw_type>:<count>``.
+
+    Selection policy when multiple raw types match (deterministic):
+        1. Prefer exact case-insensitive raw match.
+        2. Prefer the raw type with the most supporting nodes.
+        3. Tie-break lexicographically by raw type string.
+
+    Args:
+        cluster: Name of the Slurm cluster (SSH config host).
+        requested_gpu_type: The GPU type requested by the user (canonical or
+            raw, e.g. 'H100', 'A100-80GB', 'nvidia_h100_80gb_hbm3').
+        requested_count: Minimum number of GPUs per node required.
+        partition: If set, only consider nodes in this partition.
+
+    Returns:
+        The raw GRES GPU type string as it appears on the cluster.
+
+    Raises:
+        exceptions.ResourcesUnavailableError: If no matching GPU type is found.
+    """
+    nodes = _get_slurm_nodes_info(cluster)
+    default_partition = get_cluster_default_partition(cluster)
+
+    # Collect all GPU types from every node (for error messages) and
+    # matching candidates (for selection) in a single pass.
+    all_gpu_types: Dict[str, int] = {}
+    candidates: Dict[str, int] = {}
+    for node_info in nodes:
+        if partition is not None:
+            node_part = node_info.partition
+            if (default_partition is not None and node_part.endswith('*') and
+                    node_part[:-1] == default_partition):
+                node_part = node_part[:-1]
+            if node_part != partition:
                 continue
-            if node_gpu_type.lower() == requested_gpu_type.lower():
-                return node_gpu_type
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(
-            'Failed to determine the exact GPU GRES type from the Slurm '
-            f'cluster {cluster!r}. Falling back to '
-            f'{requested_gpu_type.lower()!r}. This may cause issues if the '
-            f'casing is incorrect. Error: {common_utils.format_exception(e)}')
 
-    # GRES names are more commonly in lowercase from what we've seen so far.
-    return requested_gpu_type.lower()
+        node_acc_type, node_acc_count = get_gpu_type_and_count(node_info.gres)
+        if node_acc_type is None:
+            continue
+        all_gpu_types[node_acc_type] = all_gpu_types.get(node_acc_type, 0) + 1
+        if node_acc_count < requested_count:
+            continue
+        if _accelerator_name_matches_slurm(requested_gpu_type, node_acc_type):
+            candidates[node_acc_type] = candidates.get(node_acc_type, 0) + 1
+
+    if not candidates:
+        partition_msg = f' in partition {partition!r}' if partition else ''
+        if all_gpu_types:
+            discovered_msg = (f' Discovered GPU types on cluster: '
+                              f'{sorted(all_gpu_types.keys())}')
+        else:
+            discovered_msg = ' No GPU nodes found on cluster.'
+        raise exceptions.ResourcesUnavailableError(
+            f'No GPU nodes matching {requested_gpu_type!r} '
+            f'(count>={requested_count}) found on Slurm cluster '
+            f'{cluster!r}{partition_msg}.{discovered_msg}')
+
+    # Selection: prefer exact match, then highest node count, then
+    # alphabetical.
+    chosen = min(
+        candidates,
+        key=lambda rt: (
+            # 0 (exact match) before 1 (fuzzy)
+            rt.lower() != requested_gpu_type.lower(),
+            # prioritize GPU type with more nodes
+            -candidates[rt],
+            # alphabetical tie-break
+            rt,
+        ))
+    logger.debug(f'Resolved {requested_gpu_type!r} -> {chosen!r} '
+                 f'on cluster {cluster!r} (candidates: {dict(candidates)}).')
+    return chosen
 
 
 def _get_slurm_node_info_list(
@@ -594,7 +863,7 @@ def _get_slurm_node_info_list(
         node_gpu_type, total_gpus = get_gpu_type_and_count(gres_str)
         if total_gpus > 0:
             if node_gpu_type is not None:
-                node_gpu_type = node_gpu_type.upper()
+                node_gpu_type = canonicalize_raw_gpu_name(node_gpu_type)
             else:
                 node_gpu_type = 'GPU'
 

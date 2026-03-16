@@ -42,6 +42,8 @@ class PrimeIntellect(clouds.Cloud):
             ('Custom image not supported yet.'),
         clouds.CloudImplementationFeatures.DOCKER_IMAGE:
             ('Custom docker image not supported yet.'),
+        clouds.CloudImplementationFeatures.LOCAL_DISK:
+            ('Local disk is not supported yet.'),
     }
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
@@ -143,12 +145,14 @@ class PrimeIntellect(clouds.Cloud):
                                   memory: Optional[str] = None,
                                   disk_tier: Optional[
                                       resources_utils.DiskTier] = None,
+                                  local_disk: Optional[str] = None,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> Optional[str]:
         """Returns the default instance type for Prime Intellect."""
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='primeintellect')
@@ -219,7 +223,8 @@ class PrimeIntellect(clouds.Cloud):
             default_instance_type = PrimeIntellect.get_default_instance_type(
                 cpus=resources.cpus,
                 memory=resources.memory,
-                disk_tier=resources.disk_tier)
+                disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk)
             if default_instance_type is None:
                 # TODO(pokgak): Add hints to all return values in this method
                 # to help users understand why the resources are not
@@ -237,6 +242,7 @@ class PrimeIntellect(clouds.Cloud):
              acc_count,
              use_spot=resources.use_spot,
              cpus=resources.cpus,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='primeintellect')

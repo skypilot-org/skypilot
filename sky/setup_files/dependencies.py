@@ -11,7 +11,8 @@ from typing import Dict, List
 clouds_with_ray = ['ibm', 'docker', 'scp']
 
 install_requires = [
-    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
+    # wheel 0.46.2+ required for CVE-2026-24049
+    'wheel>=0.46.3',
     'setuptools',  # TODO: match version to pyproject.toml once #5153 is fixed
     'pip',
     'cachetools',
@@ -92,7 +93,8 @@ install_requires = [
     'paramiko',
     'types-paramiko',
     'alembic>=1.8.0',
-    'aiohttp',
+    # aiohttp 3.13.3+ required for CVE-2025-69223
+    'aiohttp>=3.13.3',
     'anyio',
 ]
 
@@ -176,6 +178,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     # timeout of AzureCliCredential.
     'azure': [
         AZURE_CLI,
+        # TODO(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
         'azure-core>=1.31.0',
         'azure-identity>=1.19.0',
         'azure-mgmt-network>=27.0.0',
@@ -229,6 +232,7 @@ cloud_dependencies: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'primeintellect': [],  # No dependencies needed for primeintellect
+    # TODO:(jason810496): azure-core 1.38.0+ required for CVE-2026-21226
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
@@ -240,6 +244,7 @@ cloud_dependencies: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'vastdata': aws_dependencies,
     'nebius': [
         # Nebius requires grpcio and protobuf, so we need to include
         # our constraints here.
@@ -249,9 +254,11 @@ cloud_dependencies: Dict[str, List[str]] = {
     ] + aws_dependencies,
     'hyperbolic': [],  # No dependencies needed for hyperbolic
     'seeweb': ['ecsapi==0.4.0'],
+    'mithril': [],  # No dependencies needed for mithril
     'shadeform': [],  # No dependencies needed for shadeform
     'slurm': ['python-hostlist'],
     'yotta': [],  # No dependencies needed for Yotta
+    'verda': [],  # No dependencies needed for verda
 }
 
 # Calculate which clouds should be included in the [all] installation.
@@ -261,6 +268,9 @@ if sys.version_info < (3, 10):
     # Nebius needs python3.10. If python 3.9 [all] will not install nebius
     clouds_for_all.remove('nebius')
     clouds_for_all.remove('seeweb')
+    # latest ibm-cloud-sdk-core installation fails on Python 3.9,
+    # so we remove it from the [all] installation.
+    clouds_for_all.remove('ibm')
 
 if sys.version_info >= (3, 12):
     # The version of ray we use does not work with >= 3.12, so avoid clouds

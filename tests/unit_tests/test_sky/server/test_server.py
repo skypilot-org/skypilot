@@ -2,6 +2,8 @@
 
 import argparse
 import asyncio
+import os
+import pathlib
 import threading
 import time
 from unittest import mock
@@ -11,6 +13,7 @@ import pytest
 import uvicorn
 
 from sky import models
+from sky.server import common as server_common
 from sky.server import server
 from sky.server.requests import executor
 from sky.skylet import constants
@@ -420,3 +423,132 @@ async def test_launch_endpoint_passes_auth_user():
         assert kwargs['auth_user'] == auth_user
         # request_id is passed as first positional argument
         assert args[0] == 'launch-request-id'
+
+
+# --- Tests for cleanup_unreferenced_file_mounts ---
+
+# A deterministic 64-char hex string used as a blob ID in tests.
+_BLOB_HEX = 'a' * 64
+
+
+def _make_blobs_dir(tmp_path: pathlib.Path,
+                    user: str = 'userA') -> pathlib.Path:
+    """Create the blobs directory structure under *tmp_path* and return it."""
+    blobs_dir = tmp_path / user / 'file_mounts' / 'blobs'
+    blobs_dir.mkdir(parents=True)
+    return blobs_dir
+
+
+def _create_blob(blobs_dir: pathlib.Path, blob_id: str,
+                 mtime: float) -> pathlib.Path:
+    """Create a blob extraction directory with the given *mtime*."""
+    extraction_dir = blobs_dir / blob_id
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+    (extraction_dir / 'placeholder.txt').write_text('test')
+    os.utime(extraction_dir, (mtime, mtime))
+    return extraction_dir
+
+
+def _mock_sleep_cancel():
+    """Return a side_effect for asyncio.sleep that cancels after one call.
+
+    The first call lets the ``while True`` body execute once, then raises
+    ``asyncio.CancelledError`` to break out of the loop.
+    """
+    call_count = 0
+
+    async def _side_effect(_delay):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First call: the sleep *before* the first cleanup iteration.
+            # Return immediately so we proceed to _do_cleanup.
+            return
+        # Second call (next iteration) – break out.
+        raise asyncio.CancelledError
+
+    return _side_effect
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_no_blobs_dir(tmp_path):
+    """clients_dir exists but has no blobs subdirectory – should be a no-op."""
+    # Create a user directory without the blobs sub-tree.
+    user_dir = tmp_path / 'userA'
+    user_dir.mkdir()
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids') as mock_get, \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    # get_active_file_mounts_blob_ids is called unconditionally, but
+    # no blobs are deleted because there is no blobs directory.
+    mock_get.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_active_blob_not_deleted(tmp_path):
+    """A blob referenced by an active request must NOT be deleted,
+    even if its mtime is older than the grace period."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value={_BLOB_HEX}), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), 'Active blob should not be deleted'
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_unreferenced_old_blob_deleted(tmp_path):
+    """An unreferenced blob older than the 1-hour grace period IS deleted."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    old_mtime = time.time() - 7200  # 2 hours ago
+    extraction_dir = _create_blob(blobs_dir, _BLOB_HEX, old_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert not extraction_dir.exists(
+    ), 'Unreferenced old blob should be deleted'
+
+
+@pytest.mark.asyncio
+async def test_cleanup_blobs_unreferenced_recent_blob_not_deleted(tmp_path):
+    """An unreferenced blob within the grace period (recent) is NOT deleted."""
+    blobs_dir = _make_blobs_dir(tmp_path, user='userA')
+    recent_mtime = time.time() - 60  # 1 minute ago (well within grace)
+    blob_path = _create_blob(blobs_dir, _BLOB_HEX, recent_mtime)
+
+    with mock.patch.object(server_common, 'API_SERVER_CLIENT_DIR',
+                           pathlib.Path(tmp_path)), \
+         mock.patch('sky.server.requests.requests'
+                    '.get_active_file_mounts_blob_ids',
+                    return_value=set()), \
+         mock.patch('asyncio.sleep',
+                    side_effect=_mock_sleep_cancel()):
+        with pytest.raises(asyncio.CancelledError):
+            await server.cleanup_unreferenced_file_mounts()
+
+    assert blob_path.exists(), (
+        'Unreferenced but recent blob should not be deleted')

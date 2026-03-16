@@ -221,7 +221,30 @@ TASK_OPTIONS = [
 
         2. ``--secret JWT_SECRET``: set ``$JWT_SECRET`` on the cluster to be
         the same value of ``$JWT_SECRET`` in the local environment.""",
-    )
+    ),
+    click.option(
+        '--local-disk',
+        default=None,
+        type=str,
+        required=False,
+        help="""\
+        Local (instance) storage requirement. Format: [mode:]size[+] or mode.
+        Mode is "nvme" (default) or "ssd". Size is total GB across all disks.
+        If only mode specified, size defaults to 100+. If only size specified,
+        mode defaults to nvme. Examples:
+
+        \b
+        1. ``--local-disk nvme:1000+``: NVMe SSD with at least 1TB total.
+
+        2. ``--local-disk ssd:500``: SSD with exactly 500GB total.
+
+        3. ``--local-disk nvme``: Any NVMe instance (at least 100GB).
+
+        4. ``--local-disk 1000+``: NVMe (default) with at least 1TB.
+
+        Note: Local storage is ephemeral and lost when the instance terminates.
+        """,
+    ),
 ]
 
 TASK_OPTIONS_WITH_NAME = [
@@ -384,5 +407,33 @@ def wait_for_option(pair: str):
             default=None,
             required=False,
             help=autostop_lib.AutostopWaitFor.cli_help_message(pair=pair))(func)
+
+    return return_option_decorator
+
+
+# Output format choices for CLI commands
+OUTPUT_FORMAT_TABLE = 'table'
+OUTPUT_FORMAT_JSON = 'json'
+OUTPUT_FORMAT_CHOICES = [OUTPUT_FORMAT_TABLE, OUTPUT_FORMAT_JSON]
+
+
+def output_format_option(helptext: Optional[str] = None):
+    """A decorator for the --output/-o option.
+
+    This decorator adds an output format option to CLI commands.
+    Supported formats: table (default), json.
+    """
+    if helptext is None:
+        helptext = 'Output format. Choices: table, json. Default: table.'
+
+    def return_option_decorator(func):
+        return click.option('--output',
+                            '-o',
+                            'output_format',
+                            type=click.Choice(OUTPUT_FORMAT_CHOICES,
+                                              case_sensitive=False),
+                            default=OUTPUT_FORMAT_TABLE,
+                            required=False,
+                            help=helptext)(func)
 
     return return_option_decorator

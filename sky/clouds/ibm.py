@@ -58,6 +58,8 @@ class IBM(clouds.Cloud):
             clouds.CloudImplementationFeatures.CUSTOM_MULTI_NETWORK:
                 ('Customized multiple network interfaces are not supported on '
                  f'{cls._REPR}.'),
+            clouds.CloudImplementationFeatures.LOCAL_DISK:
+                (f'Local disk is not supported on {cls._REPR}'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -273,11 +275,13 @@ class IBM(clouds.Cloud):
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
             disk_tier: Optional['resources_utils.DiskTier'] = None,
+            local_disk: Optional[str] = None,
             region: Optional[str] = None,
             zone: Optional[str] = None) -> Optional[str]:
         return catalog.get_default_instance_type(cpus=cpus,
                                                  memory=memory,
                                                  disk_tier=disk_tier,
+                                                 local_disk=local_disk,
                                                  region=region,
                                                  zone=zone,
                                                  clouds='ibm')
@@ -316,6 +320,7 @@ class IBM(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier,
+                local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone)
             if default_instance_type is None:
@@ -332,6 +337,7 @@ class IBM(clouds.Cloud):
              acc_count,
              cpus=resources.cpus,
              memory=resources.memory,
+             local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
              clouds='ibm')

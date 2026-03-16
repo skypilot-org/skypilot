@@ -291,6 +291,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # single jobs
         execution_mode = (dag.execution.value
                           if dag.execution else DEFAULT_EXECUTION.value)
+        assert dag.name is not None, 'dag must have a name'
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -311,6 +312,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
             if dag.is_job_group():
                 is_primary_in_job_group = (dag.primary_tasks is None or
                                            task.name in dag.primary_tasks)
+            assert task.name is not None, 'task must have a name'
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
@@ -412,7 +414,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
 
     workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
     entrypoint = common_utils.get_current_command()
-    pool_hash = serve_state.get_service_hash(pool)
+    pool_hash = serve_state.get_service_hash(pool) if pool else None
     user_hash = common_utils.get_user_hash()
 
     # Prepare task data
@@ -1092,7 +1094,8 @@ def queue_v2(
             return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
-    accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+    accessible_workspaces = list(
+        workspaces_core.get_accessible_workspace_names())
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -1208,7 +1211,9 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False,
            all_users: bool = False,
-           pool: Optional[str] = None) -> None:
+           pool: Optional[str] = None,
+           graceful: bool = False,
+           graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -1252,7 +1257,9 @@ def cancel(name: Optional[str] = None,
             current_workspace = skypilot_config.get_active_workspace()
             try:
                 request = managed_jobsv1_pb2.CancelJobsRequest(
-                    current_workspace=current_workspace)
+                    current_workspace=current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
 
                 if all_users or all or job_ids:
                     request.all_users = all_users
@@ -1277,10 +1284,13 @@ def cancel(name: Optional[str] = None,
         if use_legacy:
             if all_users or all or job_ids:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    job_ids, all_users=all_users)
+                    job_ids,
+                    all_users=all_users,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
-                    name)
+                    name, graceful=graceful, graceful_timeout=graceful_timeout)
             else:
                 assert pool is not None, (job_ids, name, pool, all)
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(

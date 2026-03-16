@@ -15,6 +15,7 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 import dotenv
+import filelock
 
 import sky
 from sky import core
@@ -34,6 +35,7 @@ from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
+from sky.metrics import utils as metrics_lib
 from sky.server import plugins
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -243,7 +245,7 @@ class JobController:
                 task_envs['SKYPILOT_JOB_RANK'] = '0'
             task.update_envs(task_envs)
 
-    def _download_log_and_stream(
+    def download_log_and_stream(
         self,
         task_id: Optional[int],
         handle: Optional['cloud_vm_ray_backend.CloudVmRayResourceHandle'],
@@ -700,7 +702,7 @@ class JobController:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
-                        await asyncio.to_thread(self._download_log_and_stream,
+                        await asyncio.to_thread(self.download_log_and_stream,
                                                 task_id, handle,
                                                 job_id_on_pool_cluster)
                 except Exception as e:  # pylint: disable=broad-except
@@ -743,6 +745,7 @@ class JobController:
                 force_refresh_statuses=set(status_lib.ClusterStatus))
 
             external_failures: Optional[List[ExternalClusterFailure]] = None
+            cluster_event_reason = None
             if cluster_status != status_lib.ClusterStatus.UP:
                 # The cluster is (partially) preempted or failed. It can be
                 # down, INIT or STOPPED, based on the interruption behavior of
@@ -753,6 +756,35 @@ class JobController:
                 logger.info(
                     f'Cluster is preempted or failed{cluster_status_str}. '
                     'Recovering...')
+
+                # Fetch and log cluster events to provide context on why the
+                # cluster entered INIT/non-UP state.
+                try:
+                    events = await asyncio.to_thread(
+                        global_user_state.get_cluster_events,
+                        cluster_name=cluster_name,
+                        cluster_hash=None,
+                        event_type=global_user_state.ClusterEventType.
+                        STATUS_CHANGE,
+                        include_timestamps=True,
+                        limit=5)
+                    if events:
+                        event_strs = []
+                        for event in events:
+                            # Need cast due to dictionary semantics
+                            transitioned_at = int(event['transitioned_at'])
+                            timestamp = time.strftime(
+                                '%Y-%m-%d %H:%M:%S',
+                                time.localtime(transitioned_at))
+                            event_strs.append(
+                                f'  {timestamp}: {event["reason"]}')
+                        events_str = '\n'.join(event_strs)
+                        logger.info(f'Recent cluster events:\n{events_str}')
+                        cluster_event_reason = str(events[-1]['reason'])
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug('Failed to fetch cluster events: '
+                                 f'{common_utils.format_exception(e)}')
+
                 if ExternalFailureSource.is_registered():
                     cluster_failures = await asyncio.to_thread(
                         ExternalFailureSource.get, cluster_name=cluster_name)
@@ -781,7 +813,7 @@ class JobController:
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    await asyncio.to_thread(self._download_log_and_stream,
+                    await asyncio.to_thread(self.download_log_and_stream,
                                             task_id, handle,
                                             job_id_on_pool_cluster)
 
@@ -935,16 +967,18 @@ class JobController:
                 force_transit_to_recovering=force_transit_to_recovering,
                 callback_func=callback_func,
                 external_failures=external_failures,
+                cluster_event_reason=cluster_event_reason,
             )
 
             recovered_time = await executor.recover()
 
             # Update cluster_name for pools after recovery
             if self._pool is not None:
-                cluster_name, job_id_on_pool_cluster = (
+                pool_cluster_name, job_id_on_pool_cluster = (
                     await
                     managed_job_state.get_pool_submit_info_async(self._job_id))
-                assert cluster_name is not None
+                assert pool_cluster_name is not None
+                cluster_name = pool_cluster_name
 
             await managed_job_state.set_recovered_async(
                 self._job_id,
@@ -1645,10 +1679,19 @@ class ControllerManager:
         # launch).
         self._starting_signal = asyncio.Condition(lock=self._job_tasks_lock)
 
+        # Store graceful cancel info per job, keyed by job_id.
+        # Populated by cancel_job() and consumed by run_job().
+        self._cancel_info: Dict[int, Tuple[bool, Optional[int]]] = {}
+        self._cancel_info_lock = asyncio.Lock()
+
         self._pid = os.getpid()
         self._pid_started_at = psutil.Process(self._pid).create_time()
 
-    async def _cleanup(self, job_id: int, pool: Optional[str] = None):
+    async def _cleanup(self,
+                       job_id: int,
+                       pool: Optional[str] = None,
+                       graceful: bool = False,
+                       graceful_timeout: Optional[int] = None):
         """Clean up the cluster(s) and storages.
 
         (1) Clean up the succeeded task(s)' ephemeral storage. The storage has
@@ -1673,7 +1716,10 @@ class ControllerManager:
                     cluster_name = (
                         managed_job_utils.generate_managed_job_cluster_name(
                             task.name, job_id))
-                    managed_job_utils.terminate_cluster(cluster_name)
+                    managed_job_utils.terminate_cluster(
+                        cluster_name,
+                        graceful=graceful,
+                        graceful_timeout=graceful_timeout)
                     status = core.status(cluster_names=[cluster_name],
                                          all_users=True)
                     assert (len(status) == 0 or
@@ -1681,9 +1727,10 @@ class ControllerManager:
                                 f'{cluster_name} is not down: {status}')
                     logger.info(f'{cluster_name} is down')
                 else:
-                    cluster_name, job_id_on_pool_cluster = (
+                    pool_cluster_name, job_id_on_pool_cluster = (
                         managed_job_state.get_pool_submit_info(job_id))
-                    if cluster_name is not None:
+                    if pool_cluster_name is not None:
+                        cluster_name = pool_cluster_name
                         if job_id_on_pool_cluster is not None:
                             core.cancel(cluster_name=cluster_name,
                                         job_ids=[job_id_on_pool_cluster],
@@ -1721,16 +1768,26 @@ class ControllerManager:
             # file mounts.
             for file_mount in (task.file_mounts or {}).values():
                 try:
-                    # For consolidation mode, there is no two-hop file mounts
-                    # and the file path here represents the real user data.
-                    # We skip the cleanup for consolidation mode.
-                    if (not data_utils.is_cloud_store_url(file_mount) and
-                            not managed_job_utils.is_consolidation_mode()):
-                        path = os.path.expanduser(file_mount)
-                        if os.path.isdir(path):
-                            shutil.rmtree(path)
-                        else:
-                            os.remove(path)
+                    # Skip if we are using cloud storage as the source.
+                    if data_utils.is_cloud_store_url(file_mount):
+                        continue
+                    # Otherwise, we always cleanup local files since they are
+                    # no longer needed after task cleanup, the file can be:
+                    # - Two hop file mounts rsynced from the API server: refer
+                    #   translate_local_file_mounts_to_two_hop for more details.
+                    # - API server file mount cache in consolidation mode:
+                    #   actually there is a dummy two hop that rsync the files
+                    #   from ~/.sky/clients to ~/.sky/tmp/controller/{ID}
+                    #   on server, which isolates the file mounts between
+                    #   tasks. Here we assume the source is always isolated
+                    #   even if the dummy two hop is removed.
+                    # TODO(aylei): remove dummy two hop after we isolate the
+                    # file mount cache for tasks.
+                    path = os.path.expanduser(file_mount)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.warning(
                         f'Failed to clean up file mount {file_mount}: {e}')
@@ -1751,6 +1808,94 @@ class ControllerManager:
             # we only raise the last error that occurred, but its fine to lose
             # some data here.
             raise error
+
+    async def _download_log_from_cluster(
+            self,
+            controller: JobController,
+            job_id: int,
+            task_id: int,
+            cluster_name: str,
+            job_id_on_cluster: Optional[int] = None) -> None:
+        """Download logs for a single task from its cluster.
+
+        Looks up the cluster by name and downloads logs via the controller's
+        download_log_and_stream method. Skips gracefully if the cluster is
+        not found.
+        """
+        clusters = await asyncio.to_thread(
+            backend_utils.get_clusters,
+            cluster_names=[cluster_name],
+            refresh=common.StatusRefreshMode.NONE,
+            all_users=True,
+            _include_is_managed=True)
+
+        if not clusters:
+            logger.info(f'Cluster {cluster_name} not found for job {job_id}, '
+                        f'task {task_id}. Skipping log download.')
+            return
+
+        assert len(clusters) == 1, (clusters, cluster_name)
+        handle = clusters[0].get('handle')
+        await asyncio.to_thread(controller.download_log_and_stream, task_id,
+                                handle, job_id_on_cluster)
+
+    async def _download_logs_for_cancelled_job(self, controller: JobController,
+                                               job_id: int, task_ids: List[int],
+                                               dag: 'sky.Dag',
+                                               pool: Optional[str]) -> None:
+        """Download logs for a cancelled job before cleanup.
+
+        This ensures that logs remain accessible after job cancellation,
+        using the same code path as successful/failed jobs by calling the
+        JobController's download_log_and_stream method.
+
+        The download is best-effort - if a cluster is already down or
+        unreachable, we skip gracefully. For job groups, multiple tasks
+        may have been running simultaneously, so we download logs for all
+        of them.
+
+        Args:
+            controller: The JobController instance for this job.
+            job_id: The managed job ID.
+            task_ids: The task IDs that were actively running (need log
+                download). For single tasks and pipelines this is typically
+                one ID; for job groups it can be multiple.
+            dag: The DAG for the job (used to get task names for cluster
+                name generation).
+            pool: Optional pool name if using a pool.
+        """
+        logger.info(f'Downloading logs for cancelled job {job_id}, '
+                    f'task_ids {task_ids}')
+
+        if pool is not None:
+            # Pool jobs are single-task; job groups don't support pools.
+            cluster_name, job_id_on_pool_cluster = (
+                await managed_job_state.get_pool_submit_info_async(job_id))
+
+            if cluster_name is None:
+                logger.info(f'No cluster found for job {job_id}. '
+                            'Skipping log download.')
+                return
+
+            await self._download_log_from_cluster(controller, job_id,
+                                                  task_ids[0], cluster_name,
+                                                  job_id_on_pool_cluster)
+            return
+
+        # Non-pool path: download logs for each active task.
+        for task_id in task_ids:
+            try:
+                task = dag.tasks[task_id]
+                assert task.name is not None, task
+                cluster_name = (
+                    managed_job_utils.generate_managed_job_cluster_name(
+                        task.name, job_id))
+                await self._download_log_from_cluster(controller, job_id,
+                                                      task_id, cluster_name)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to download logs for job {job_id}, '
+                    f'task {task_id}: {common_utils.format_exception(e)}')
 
     # Use context.contextual to enable per-job output redirection and env var
     # isolation.
@@ -1816,6 +1961,7 @@ class ControllerManager:
                     '%s', job_id, e)
 
         cancelling = False
+        graceful, graceful_timeout = False, None
         try:
             controller = JobController(job_id, self.starting,
                                        self._job_tasks_lock,
@@ -1834,16 +1980,60 @@ class ControllerManager:
             await task
         except asyncio.CancelledError:
             logger.info(f'Job {job_id} was cancelled')
+
+            async with self._cancel_info_lock:
+                cancel_info = self._cancel_info.pop(job_id, None)
+            if cancel_info is not None:
+                graceful, graceful_timeout = cancel_info
+                logger.debug(f'Job {job_id} graceful cancel: '
+                             f'graceful={graceful}, timeout={graceful_timeout}')
+
             dag = _get_dag(job_id)
-            task_id, _ = await (
-                managed_job_state.get_latest_task_id_status_async(job_id))
+
+            # Query all task statuses BEFORE set_cancelling_async changes
+            # them. At this point, statuses accurately reflect which tasks
+            # were actually started vs still pending.
+            id_statuses = await (
+                managed_job_state.get_all_task_ids_statuses_async(job_id))
+
+            # The "latest" non-terminal task - needed for
+            # set_cancelling_async callback and set_cancelled_async later.
+            task_id, _ = (
+                managed_job_state.get_latest_task_id_from_statuses(id_statuses))
             assert task_id is not None, job_id
             logger.info(f'Cancelling managed job, job_id: {job_id}, '
                         f'task_id: {task_id}')
+
+            # Tasks that were actually started (have clusters with logs to
+            # download). PENDING tasks never had a cluster; terminal tasks
+            # already had logs downloaded via the normal path.
+            # - Pipeline: only the currently-running task is active; later
+            #   tasks are still PENDING.
+            # - Job group: all tasks that haven't already finished are
+            #   active (they run in parallel).
+            active_task_ids = [
+                tid for tid, status in id_statuses
+                if not status.is_terminal() and
+                status != managed_job_state.ManagedJobStatus.PENDING
+            ]
+
             await managed_job_state.set_cancelling_async(
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(
                     job_id=job_id, task_id=task_id, task=dag.tasks[task_id]))
+
+            # Download logs before cleanup so they remain accessible after
+            # cancellation. This is best-effort - if the cluster is already
+            # down, we skip gracefully.
+            if active_task_ids:
+                try:
+                    await self._download_logs_for_cancelled_job(
+                        controller, job_id, active_task_ids, dag, pool)
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.warning(
+                        f'Failed to download logs for cancelled job '
+                        f'{job_id}: {common_utils.format_exception(e)}')
+
             cancelling = True
             raise
         except Exception as e:
@@ -1852,7 +2042,10 @@ class ControllerManager:
             raise
         finally:
             try:
-                await self._cleanup(job_id, pool=pool)
+                await self._cleanup(job_id,
+                                    pool=pool,
+                                    graceful=graceful,
+                                    graceful_timeout=graceful_timeout)
                 logger.info(
                     f'Cluster of managed job {job_id} has been cleaned up.')
             except Exception as e:  # pylint: disable=broad-except
@@ -1939,6 +2132,14 @@ class ControllerManager:
         while True:
             cancels = os.listdir(jobs_constants.CONSOLIDATED_SIGNAL_PATH)
             for cancel in cancels:
+                if not cancel.isdigit():
+                    # There maybe unexpected files that are written to the
+                    # signal directory. We for sure write filelocks to the
+                    # directory, so we need to skip.
+                    if not cancel.endswith('.lock'):
+                        logger.debug('Detected unexpected file in signal '
+                                     f'directory: {cancel}. Skipping...')
+                    continue
                 async with self._job_tasks_lock:
                     job_id = int(cancel)
                     if job_id in self.job_tasks:
@@ -1946,18 +2147,36 @@ class ControllerManager:
 
                         task = self.job_tasks[job_id]
 
-                        # Run the cancellation in the background, so we can
-                        # return immediately.
+                        signal_path = os.path.join(
+                            jobs_constants.CONSOLIDATED_SIGNAL_PATH, cancel)
+                        with filelock.FileLock(signal_path + '.lock'):
+                            try:
+                                content = pathlib.Path(signal_path).read_text(
+                                    encoding='utf-8').strip()
+                            except Exception as e:  # pylint: disable=broad-except
+                                content = ''
+                                logger.debug(
+                                    'Problem occurred when reading '
+                                    f'{signal_path}: '
+                                    f'{common_utils.format_exception(e)}')
+                            finally:
+                                os.remove(signal_path)
+
+                        # Parse and store graceful cancel info before
+                        # cancelling the task.
+                        graceful, graceful_timeout = managed_job_utils.parse_job_cancel_file(  # pylint: disable=line-too-long
+                            content)
+                        async with self._cancel_info_lock:
+                            self._cancel_info[job_id] = (graceful,
+                                                         graceful_timeout)
                         task.cancel()
                         logger.info(f'Job {job_id} cancelled successfully')
-
-                        os.remove(f'{jobs_constants.CONSOLIDATED_SIGNAL_PATH}/'
-                                  f'{job_id}')
             await asyncio.sleep(15)
 
     async def monitor_loop(self):
         """Monitor the job loop."""
         logger.info(f'Starting monitor loop for pid {self._pid}...')
+        pid_str = str(self._pid)
 
         while True:
             async with self._job_tasks_lock:
@@ -1967,6 +2186,15 @@ class ControllerManager:
 
             async with self._job_tasks_lock:
                 starting_count = len(self.starting)
+
+            # Report per-process metrics.
+            if metrics_lib.METRICS_ENABLED:
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_STARTING_COUNT.labels(
+                    pid=pid_str).set(starting_count)
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_RUNNING_COUNT.labels(
+                    pid=pid_str).set(len(running_tasks))
+                metrics_lib.SKY_MANAGED_JOBS_LIMIT_LAUNCHES_PER_WORKER.labels(
+                    pid=pid_str).set(controller_utils.LAUNCHES_PER_WORKER)
 
             if starting_count >= controller_utils.LAUNCHES_PER_WORKER:
                 # launching a job takes around 1 minute, so lets wait half that
@@ -1981,6 +2209,10 @@ class ControllerManager:
             max_jobs = min(controller_utils.MAX_JOBS_PER_WORKER,
                            (controller_utils.MAX_TOTAL_RUNNING_JOBS //
                             controller_utils.get_number_of_jobs_controllers()))
+
+            if metrics_lib.METRICS_ENABLED:
+                metrics_lib.SKY_MANAGED_JOBS_CONTROLLER_MAX_JOBS.labels(
+                    pid=pid_str).set(max_jobs)
 
             if len(running_tasks) >= max_jobs:
                 logger.info('Too many jobs running, waiting for 60 seconds')

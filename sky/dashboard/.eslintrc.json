@@ -1,3 +1,27 @@
 {
-  "extends": ["next/core-web-vitals", "prettier"]
+  "extends": ["next/core-web-vitals", "prettier"],
+  "plugins": ["import"],
+  "rules": {
+    "import/named": "error"
+  },
+  "settings": {
+    "import/ignore": ["node_modules", "\\.css$"],
+    "import/resolver": {
+      "alias": {
+        "map": [["@", "./src"]],
+        "extensions": [".js", ".jsx", ".ts", ".tsx"]
+      }
+    },
+    "import/parsers": {
+      "espree": [".js", ".jsx"]
+    },
+    "import/internal-regex": "^@/"
+  },
+  "parserOptions": {
+    "sourceType": "module",
+    "ecmaVersion": 2022,
+    "ecmaFeatures": {
+      "jsx": true
+    }
+  }
 }
