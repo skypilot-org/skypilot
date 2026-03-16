@@ -161,11 +161,15 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('zone', sqlalchemy.Text, server_default=None),
     # Node names for dashboard display (comma-separated)
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
-    # Token ID for the API access token created for this job (if any).
-    # Used to clean up the token when the job completes.
-    sqlalchemy.Column('api_access_token_id',
-                      sqlalchemy.Text,
-                      server_default=None),
+)
+
+# Separate table for API access token IDs associated with managed jobs.
+# Maps job_id -> token_id for cleanup when the job completes.
+api_access_token_table = sqlalchemy.Table(
+    'api_access_tokens',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('token_id', sqlalchemy.Text, nullable=False),
 )
 
 # TODO(cooperc): drop the table in a migration
@@ -1880,9 +1884,8 @@ def set_api_access_token_id(job_id: int, token_id: str) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         session.execute(
-            sqlalchemy.update(job_info_table).where(
-                job_info_table.c.spot_job_id == job_id).values(
-                    api_access_token_id=token_id))
+            sqlalchemy.insert(api_access_token_table).values(job_id=job_id,
+                                                             token_id=token_id))
         session.commit()
 
 
@@ -1891,8 +1894,8 @@ def get_api_access_token_id(job_id: int) -> Optional[str]:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
         result = session.execute(
-            sqlalchemy.select(job_info_table.c.api_access_token_id).where(
-                job_info_table.c.spot_job_id == job_id)).fetchone()
+            sqlalchemy.select(api_access_token_table.c.token_id).where(
+                api_access_token_table.c.job_id == job_id)).fetchone()
         if result is None:
             return None
         return result[0]
