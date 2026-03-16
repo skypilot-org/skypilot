@@ -295,6 +295,9 @@ def is_consolidation_mode() -> bool:
     ).expanduser()
     effective = signal_file.exists()
 
+    # We should only do this check on API server, as the controller will not
+    # have related config and will always seemingly disabled for consolidation
+    # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
         # Warn if explicit config disagrees with actual state — the admin
         # needs to restart the server for the config change to take effect.
