@@ -21,14 +21,13 @@ class TestPreemptionGuardFlag:
     def test_starts_unset(self):
         assert not autostop_lib.is_preemption_hook_triggered()
 
-    def test_set_makes_it_triggered(self):
-        autostop_lib.set_preemption_hook_triggered()
+    def test_set_if_not_set_returns_true_first_time(self):
+        assert autostop_lib.set_preemption_hook_if_not_set() is True
         assert autostop_lib.is_preemption_hook_triggered()
 
-    def test_double_set_is_idempotent(self):
-        autostop_lib.set_preemption_hook_triggered()
-        autostop_lib.set_preemption_hook_triggered()
-        assert autostop_lib.is_preemption_hook_triggered()
+    def test_set_if_not_set_returns_false_second_time(self):
+        assert autostop_lib.set_preemption_hook_if_not_set() is True
+        assert autostop_lib.set_preemption_hook_if_not_set() is False
 
 
 class TestPreemptionGraceSeconds:
@@ -238,7 +237,7 @@ class TestSigtermHandler:
         from sky.skylet import skylet
 
         # Pre-set the guard flag
-        autostop_lib.set_preemption_hook_triggered()
+        autostop_lib.set_preemption_hook_if_not_set()
 
         with pytest.raises(SystemExit):
             skylet._handle_sigterm(None, None)

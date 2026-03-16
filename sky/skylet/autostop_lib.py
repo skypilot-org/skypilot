@@ -42,8 +42,9 @@ _AUTOSTOP_INDICATOR = 'autostop_indicator'
 
 # Guard flag to prevent double execution of the preemption hook.
 # Both AWS metadata polling and SIGTERM handler may trigger the hook;
-# this event ensures only the first caller runs it.
+# the lock + event pair ensures only the first caller runs it.
 _preemption_hook_triggered = threading.Event()
+_preemption_hook_lock = threading.Lock()
 
 
 class AutostopWaitFor(enum.Enum):
@@ -244,14 +245,21 @@ def is_preemption_hook_triggered() -> bool:
     return _preemption_hook_triggered.is_set()
 
 
-def set_preemption_hook_triggered() -> None:
-    """Marks the preemption hook as triggered.
+def set_preemption_hook_if_not_set() -> bool:
+    """Atomically marks the preemption hook as triggered.
 
-    This should be called before executing the hook so that concurrent
-    callers (SIGTERM handler and AWS metadata polling) can detect that
-    the hook is already running and skip duplicate execution.
+    This should be called before executing the hook. It ensures that only
+    one of the concurrent callers (SIGTERM handler and AWS metadata polling)
+    can proceed.
+
+    Returns:
+        True if the hook was not triggered and is now set, False otherwise.
     """
-    _preemption_hook_triggered.set()
+    with _preemption_hook_lock:
+        if _preemption_hook_triggered.is_set():
+            return False
+        _preemption_hook_triggered.set()
+        return True
 
 
 def get_preemption_grace_seconds(provider_name: str) -> int:

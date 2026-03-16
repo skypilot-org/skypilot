@@ -191,8 +191,7 @@ class SpotTerminationEvent(SkyletEvent):
             if autostop_lib.is_preemption_hook_triggered():
                 return
             if self._check_aws_spot_termination():
-                if not autostop_lib.is_preemption_hook_triggered():
-                    autostop_lib.set_preemption_hook_triggered()
+                if autostop_lib.set_preemption_hook_if_not_set():
                     grace = autostop_lib.get_preemption_grace_seconds(
                         provider_name)
                     capped_timeout = min(autostop_config.hook_timeout, grace)

@@ -99,9 +99,8 @@ def _handle_sigterm(signum, frame):
     from pod termination never reaches the skylet process.
     """
     del signum, frame  # Unused.
-    if autostop_lib.is_preemption_hook_triggered():
+    if not autostop_lib.set_preemption_hook_if_not_set():
         sys.exit(0)
-    autostop_lib.set_preemption_hook_triggered()
 
     config = autostop_lib.get_autostop_config()
     if config.hook:
