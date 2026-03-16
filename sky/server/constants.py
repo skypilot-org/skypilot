@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 40  # content-addressed file mounts upload
+API_VERSION = 41  # file mounts upload v2
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -34,7 +34,7 @@ VERSION_HEADER = 'X-SkyPilot-Version'
 MIN_RECIPE_LAUNCH_API_VERSION = 33
 
 # Minimum API version that supports upload API v2.
-UPLOAD_API_V2_VERSION = 40
+UPLOAD_API_V2_VERSION = 41
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

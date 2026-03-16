@@ -7544,7 +7544,28 @@ def api_logout():
 def api_info(output_format: str):
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
-    api_server_info = sdk.api_info()
+    if output_format != flags.OUTPUT_FORMAT_JSON:
+        click.echo(f'SkyPilot client version: {sky.__version__}, '
+                   f'commit: {sky.__commit__}')
+    try:
+        api_server_info = sdk.api_info()
+    except requests_lib.exceptions.RequestException:
+        is_local = server_common.is_api_server_local()
+        if is_local:
+            click.echo('No SkyPilot API server is connected\n'
+                       f'{ux_utils.INDENT_SYMBOL}To connect to an existing API '
+                       'server: sky api login\n'
+                       f'{ux_utils.INDENT_LAST_SYMBOL}To start a local API '
+                       'server: sky api start')
+        else:
+            click.echo(
+                f'Could not connect to SkyPilot API server at {url}\n'
+                f'{ux_utils.INDENT_SYMBOL}To re-login to the API server: '
+                f'sky api login --relogin -e {url}\n'
+                f'{ux_utils.INDENT_LAST_SYMBOL}To logout the server: '
+                'sky api logout')
+        return
+
     api_server_user = api_server_info.user
     if api_server_user is not None:
         user = api_server_user
@@ -7571,9 +7592,6 @@ def api_info(output_format: str):
         return
 
     # Default table/text output
-    # Print client version and commit.
-    click.echo(f'SkyPilot client version: {sky.__version__}, '
-               f'commit: {sky.__commit__}')
 
     config = skypilot_config.get_user_config()
     config = dict(config)

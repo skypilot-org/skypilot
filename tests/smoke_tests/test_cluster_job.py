@@ -704,7 +704,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_hyperbolic  # Hyperbolic has low availability of T4 GPUs
 @pytest.mark.no_seeweb  # Seeweb does not support T4 GPUs
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)
@@ -1284,18 +1284,19 @@ def test_add_pod_annotations_for_autodown_with_launch():
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
             # Autodown is set.
             f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --infra kubernetes',
-            # Get names of the pods containing cluster name.
+            # Get names of the pods matching the cluster's
+            # skypilot-cluster-name annotation (excludes cloud-cmd pods
+            # whose annotation value is '{name}-cloud-cmd').
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                f"pod_1=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 1p) && "
                 # Describe the first pod and check for annotations.
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
             ),
-            # Get names of the pods containing cluster name.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                f"pod_2=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 2p) && "
                 # Describe the second pod and check for annotations.
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
@@ -1318,10 +1319,11 @@ def test_add_and_remove_pod_annotations_with_autostop():
             f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --infra kubernetes',
             # Set autodown on the cluster with 'autostop' command.
             f'sky autostop -y {name} -i 20 --down',
-            # Get names of the pods containing cluster name.
+            # Get names of the pods matching the cluster's
+            # skypilot-cluster-name annotation.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                f"pod_1=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 1p) && "
                 # Describe the first pod and check for annotations.
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
@@ -1329,7 +1331,7 @@ def test_add_and_remove_pod_annotations_with_autostop():
             # Describe the second pod and check for annotations.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                f"pod_2=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 2p) && "
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
             ),
@@ -1338,14 +1340,14 @@ def test_add_and_remove_pod_annotations_with_autostop():
             # Describe the first pod and check if annotations are removed.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                f"pod_1=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 1p) && "
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             ),
             # Describe the second pod and check if annotations are removed.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
-                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                f"pod_2=$(kubectl get pods -o custom-columns=NAME:.metadata.name,ANN:.metadata.annotations.skypilot-cluster-name --no-headers | awk -v n=\"{name}\" '$NF==n{{print \"pod/\"$1}}' | sed -n 2p) && "
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
                 'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             ),
@@ -1417,6 +1419,9 @@ def test_volumes_on_kubernetes():
             # Launch with the new volume - should show warning that pvc1 and /mnt/data4 won't be mounted
             f's=$(sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml 2>&1 | tee /dev/stderr) && echo "$s" | grep -i "WARNING: New ephemeral volume(s) with path /mnt/data4 and new volume(s) pvc1 specified in task but not mounted"',
             f'sky logs {name} 2 --status',  # Ensure the second job succeeded.
+            f'sky down -y {name}',
+            f'sky launch -y -c {name} --infra kubernetes tests/test_yamls/pvc_volume_with_new.yaml --env HAVE_SUB_DIR=true --env NEW_LAUNCH=true',
+            f'sky logs {name} 1 --status',  # Ensure the first job on the new cluster succeeded.
             f'sky down -y {name} && sky volumes ls && sky volumes delete pvc0 existing0 pvc1 vol-existing1 -y',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "pvc0"); if [ -n "$vol" ]; then echo "pvc0 not deleted" && exit 1; else echo "pvc0 deleted"; fi',
             f'vols=$(sky volumes ls) && echo "$vols" && vol=$(echo "$vols" | grep "existing0"); if [ -n "$vol" ]; then echo "existing0 not deleted" && exit 1; else echo "existing0 deleted"; fi',
@@ -1918,7 +1923,7 @@ def test_cancel_azure():
 @pytest.mark.no_hyperbolic  # Hyperbolic does not support num_nodes > 1 yet
 @pytest.mark.no_seeweb  # Seeweb does not support num_nodes > 1 yet
 @pytest.mark.resource_heavy
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'L40S'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     if generic_cloud in ('kubernetes', 'slurm'):
         accelerator = smoke_tests_utils.get_available_gpus(infra=generic_cloud)

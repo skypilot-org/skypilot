@@ -50,20 +50,20 @@ Bootstrap to confirm SkyPilot is installed, connected to an API server, and has 
 **Step 1: Check installation and API server connectivity**
 
 ```bash
-sky api status -l 1
+sky api info
 ```
 | Output contains | Meaning | Next action |
 |-----------------|---------|-------------|
-| A table with request data | Server is running and connected | **Bootstrap done.** Skip to user's task. |
-| `SkyPilot API server is not running.` | No server connected | Go to "Start or connect a server" below. |
+| Server version and status | Server is running and connected | **Bootstrap done.** Skip to user's task. |
+| `No SkyPilot API server is connected` | No server connected | Go to "Start or connect a server" below. |
+| `Could not connect to SkyPilot API server` | Remote server unreachable or auth expired | Tell the user and suggest `sky api login --relogin -e <endpoint>` to reconnect. |
 | `command not found: sky` | SkyPilot not installed | Go to "Install SkyPilot" below. |
-| Connection error or authentication error | Remote server unreachable or auth expired | Tell the user and suggest `sky api login -e <endpoint>` to reconnect. |
 
 **Install SkyPilot** (only if `sky` command not found):
 ```bash
 pip install "skypilot[aws,gcp,kubernetes]"  # Pick clouds the user needs
 ```
-Ask the user which clouds they need if unclear, then re-run `sky api status -l 1`.
+Ask the user which clouds they need if unclear, then re-run `sky api info`.
 
 **Start or connect a server** (only if "not running"):
 
@@ -73,7 +73,7 @@ Ask the user:
 - **Connect to existing server:** `sky api login -e <API_SERVER_URL>` — get the URL from the user.
 - **Start locally:** `sky api start`
 
-After either path, re-run `sky api status -l 1` to confirm the server is reachable.
+After either path, re-run `sky api info` to confirm the server is reachable.
 
 **Step 2: Check cloud credentials** (only for fresh setups — skip if the server was already running)
 ```bash
@@ -231,6 +231,10 @@ resources:
 # Launch and run a task
 sky launch -c mycluster task.yaml
 
+# Launch with autostop at launch time (preferred: saves cost, no follow-up command needed)
+sky launch -c mycluster task.yaml -i 30        # stop after 30 min idle
+sky launch -c mycluster task.yaml -i 30 --down # tear down after 30 min idle
+
 # Override or pass environment variables via CLI
 sky launch -c mycluster task.yaml --env MODEL_NAME=llama3 --env BATCH_SIZE=64
 
@@ -240,11 +244,9 @@ sky exec mycluster another_task.yaml
 # Run an inline command
 sky exec mycluster -- python train.py --epochs 10
 
-# Set autostop (stop after 30 min idle, preserving disk)
-sky autostop mycluster -i 30
-
-# Set autodown (tear down after 30 min idle)
-sky autostop mycluster -i 30 --down
+# Set autostop after launch (use if you forgot to set -i at launch time)
+sky autostop mycluster -i 30        # stop after 30 min idle, preserving disk (can restart with sky start)
+sky autostop mycluster -i 30 --down # tear down after 30 min idle (disk is deleted, cannot restart)
 
 # Stop to save costs, restart later
 sky stop mycluster

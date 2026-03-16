@@ -947,6 +947,7 @@ def write_cluster_config(
                     path=vol.path,
                     volume_name_on_cloud=vol.volume_config.name_on_cloud,
                     volume_id_on_cloud=vol.volume_config.id_on_cloud,
+                    sub_path=vol.sub_path,
                 )
                 volume_mount_vars.append(volume_info)
 
@@ -972,6 +973,10 @@ def write_cluster_config(
             'user': common_utils.get_cleaned_username(
                 os.environ.get(constants.USER_ENV_VAR, '')),
             'workspace': skypilot_config.get_active_workspace(),
+            # The original username before cleaning, used in pod
+            # annotations where character restrictions don't apply.
+            'original_user': (os.environ.get(constants.USER_ENV_VAR, '') or
+                              common_utils.get_current_user_name()),
 
             # Networking configs
             'use_internal_ips': skypilot_config.get_effective_region_config(
@@ -1220,6 +1225,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_seeweb_authentication(config)
     elif isinstance(cloud, clouds.Mithril):
         config = auth.setup_mithril_authentication(config)
+    elif isinstance(cloud, clouds.Verda):
+        config = auth.setup_verda_authentication(config)
     else:
         assert False, cloud
     yaml_utils.dump_yaml(tmp_yaml_path, config)

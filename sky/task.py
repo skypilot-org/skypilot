@@ -857,7 +857,7 @@ class Task:
                 elif 'name' in vol:
                     # External volume with 'name' field
                     volume_mount = volume_lib.VolumeMount.resolve(
-                        dst_path, vol['name'])
+                        dst_path, vol['name'], sub_path=vol.get('sub_path'))
                 else:
                     raise ValueError(
                         f'Invalid volume config: {dst_path}: {vol}. '
@@ -1583,6 +1583,17 @@ class Task:
                         blob_path = storage.source
                     else:
                         blob_path = 'cw://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.VASTDATA:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('vastdata://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'vastdata://' + storage.name
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })

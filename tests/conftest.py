@@ -96,8 +96,10 @@ all_clouds_in_smoke_tests = [
     'seeweb',
     'shadeform',
     'coreweave',
+    'vastdata',
     'slurm',
     'mithril',
+    'verda',
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -122,14 +124,15 @@ cloud_to_pytest_keyword = {
     'primeintellect': 'primeintellect',
     'do': 'do',
     'vast': 'vast',
-    'runpod': 'runpod',
     'nebius': 'nebius',
     'hyperbolic': 'hyperbolic',
     'shadeform': 'shadeform',
     'seeweb': 'seeweb',
     'coreweave': 'coreweave',
+    'vastdata': 'vastdata',
     'slurm': 'slurm',
     'mithril': 'mithril',
+    'verda': 'verda',
 }
 
 
@@ -325,7 +328,7 @@ def _get_cloud_to_run(config) -> List[str]:
 
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            if cloud in ['cloudflare', 'coreweave']:
+            if cloud in ['cloudflare', 'coreweave', 'vastdata']:
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
@@ -391,6 +394,8 @@ def pytest_collection_modifyitems(config, items):
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
                     continue
                 if config.getoption('--coreweave') and cloud == 'coreweave':
+                    continue
+                if config.getoption('--vastdata') and cloud == 'vastdata':
                     continue
                 item.add_marker(skip_marks[cloud])
 

@@ -469,15 +469,11 @@ def validate(
 
     # TODO(kevin): remove this in v0.13.0
     omit_user_specified_yaml = _omit(15)
-    # TODO (kyuds): remove this in v0.13.0
+    # TODO (kyuds): remove these in v0.13.0
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
-    if omit_local_disk:
-        logger.debug('`local_disk` is ignored because the server does '
-                     'not support it yet.')
-    if omit_mount_cached_config:
-        logger.debug('`mount_cached_config` is ignored because the server '
-                     'does not support it yet.')
+    omit_file_mount_type = _omit(40)
+
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -489,9 +485,18 @@ def validate(
             for resource in task.resources:
                 # pylint: disable=protected-access
                 resource._set_local_disk(None)
+            logger.debug('`local_disk` is ignored because the server does '
+                         'not support it yet.')
         if omit_mount_cached_config:
             for storage in task.storage_mounts.values():
                 storage.mount_cached_config = None
+            logger.debug('`mount_cached_config` is ignored because the server '
+                         'does not support it yet.')
+        if omit_file_mount_type:
+            for storage in task.storage_mounts.values():
+                storage.file_mount_type = None
+            logger.debug('`type` is ignored because the server does not '
+                         'support it yet.')
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
@@ -2391,7 +2396,6 @@ def api_status(
 
 # === API server management APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
