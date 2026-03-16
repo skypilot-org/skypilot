@@ -400,72 +400,10 @@ def upload_mounts_to_api_server(
         use_v2 = (remote_api_version is not None and
                   remote_api_version >= server_constants.UPLOAD_API_V2_VERSION)
 
-        upload_lock = None
-        # Just an inline context manager to avoid adding another
-        # try..finally block indentation.
-        @contextlib.contextmanager
-        def unlock():
-            try:
-                yield
-            finally:
-                if upload_lock is not None:
-                    upload_lock.release()
-
-        logger.info(ux_utils.starting_message('Uploading files to API server'))
-        with rich_utils.client_status(
-                ux_utils.spinner_message(
-                    'Uploading files to API server (1/2 - Zipping)',
-                    log_file,
-                    is_local=True)) as status, _setup_upload_logger(
-                        log_file) as upload_logger, unlock():
-            with tempfile.NamedTemporaryFile(suffix='.zip',
-                                             delete=False) as temp_zip_file:
-                upload_logger.info(
-                    f'Zipping files to be uploaded: {upload_list}')
-                storage_utils.zip_files_and_folders(upload_list,
-                                                    temp_zip_file.name)
-                upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
-
-            endpoint = '/upload'
-            blob_id = None
-            if use_v2:
-                blob_id = _compute_zip_blob_id(temp_zip_file.name)
-                upload_logger.info(f'Computed blob ID: {blob_id}')
-                lock_dir = os.path.expanduser(_FILE_UPLOAD_LOCK_DIR)
-                os.makedirs(lock_dir, exist_ok=True)
-                # Lock on blob_id to avoid concurrent uploads of the same
-                # blob.
-                lock_path = os.path.join(lock_dir, f'{blob_id}.lock')
-                upload_lock = filelock.FileLock(lock_path)
-                # Will be released in the context manager
-                upload_lock.acquire()
-                # Check existence and skip upload if already present.
-                resp = server_common.make_authenticated_request(
-                    'GET',
-                    '/upload_v2/blob',
-                    params={
-                        'user_hash': common_utils.get_user_hash(),
-                        'blob_id': blob_id,
-                    })
-                if resp.status_code != 200:
-                    raise RuntimeError(f'Failed to check blob existence: '
-                                       f'{resp.status_code} '
-                                       f'{resp.content.decode("utf-8")}')
-                if resp.json().get('exists'):
-                    upload_logger.info('Blob already exists, skipping upload')
-                    logger.info('File mounts unchanged, skipping upload')
-                    os.unlink(temp_zip_file.name)
-                    logger.info(
-                        ux_utils.finishing_message('Files uploaded',
-                                                   log_file,
-                                                   is_local=True))
-                    return dag, blob_id
-                endpoint = '/upload_v2'
-                # In v2, we use the blob_id as the upload id to share
-                # the uploaded blob across requests.
-                upload_id = blob_id
-
-            zip_file_size = os.path.getsize(temp_zip_file.name)
+        def _upload_zip(endpoint: str, upload_id: str, zip_file_path: str,
+                        status: rich_utils.GeneralStatus,
+                        upload_logger: logging.Logger):
+            zip_file_size = os.path.getsize(zip_file_path)
             total_chunks = int(math.ceil(zip_file_size / _UPLOAD_CHUNK_BYTES))
             timeout = httpx.Timeout(None, read=180.0)
             status.update(
@@ -483,7 +421,7 @@ def upload_mounts_to_api_server(
                                           upload_id,
                                           chunk_index,
                                           total_chunks,
-                                          temp_zip_file.name,
+                                          zip_file_path,
                                           upload_logger,
                                           log_file,
                                           endpoint=endpoint)
@@ -502,13 +440,66 @@ def upload_mounts_to_api_server(
                             f'({retry + 1} / {total_retries})')
             if not upload_completed:
                 raise RuntimeError('Failed to upload files to API server.')
-        os.unlink(temp_zip_file.name)
-        upload_logger.info(f'Uploaded files: {upload_list}')
+
+        blob_id = None
+        logger.info(ux_utils.starting_message('Uploading files to API server'))
+        with rich_utils.client_status(
+                ux_utils.spinner_message(
+                    'Uploading files to API server (1/2 - Zipping)',
+                    log_file,
+                    is_local=True)) as status, _setup_upload_logger(
+                        log_file) as upload_logger:
+            with tempfile.NamedTemporaryFile(suffix='.zip',
+                                             delete=False) as temp_zip_file:
+                upload_logger.info(
+                    f'Zipping files to be uploaded: {upload_list}')
+                storage_utils.zip_files_and_folders(upload_list,
+                                                    temp_zip_file.name)
+                upload_logger.info(f'Zipped files to: {temp_zip_file.name}')
+
+            if use_v2:
+                blob_id = _compute_zip_blob_id(temp_zip_file.name)
+                upload_logger.info(f'Computed blob ID: {blob_id}')
+                lock_dir = os.path.expanduser(_FILE_UPLOAD_LOCK_DIR)
+                os.makedirs(lock_dir, exist_ok=True)
+                # In v2, lock on blob_id to avoid concurrent uploads of the same
+                # blob.
+                with filelock.FileLock(os.path.join(lock_dir,
+                                                    f'{blob_id}.lock')):
+                    # Check existence and skip upload if already present.
+                    resp = server_common.make_authenticated_request(
+                        'GET',
+                        '/upload_v2/blob',
+                        params={
+                            'user_hash': common_utils.get_user_hash(),
+                            'blob_id': blob_id,
+                        })
+                    if resp.status_code != 200:
+                        raise RuntimeError(f'Failed to check blob existence: '
+                                           f'{resp.status_code} '
+                                           f'{resp.content.decode("utf-8")}')
+                    if resp.json().get('exists'):
+                        upload_logger.info('Blob already exists, skipping')
+                        os.unlink(temp_zip_file.name)
+                        logger.info(
+                            ux_utils.finishing_message('Files uploaded',
+                                                       log_file,
+                                                       is_local=True))
+                        return dag, blob_id
+                    # In v2, we use the blob_id as the upload id to share
+                    # the uploaded blob across requests.
+                    _upload_zip('/upload_v2', blob_id, temp_zip_file.name,
+                                status, upload_logger)
+            else:
+                _upload_zip('/upload', upload_id, temp_zip_file.name, status,
+                            upload_logger)
+
+            os.unlink(temp_zip_file.name)
+            upload_logger.info(f'Uploaded files: {upload_list}')
         logger.info(
             ux_utils.finishing_message('Files uploaded',
                                        log_file,
                                        is_local=True))
         if use_v2:
             return dag, blob_id
-
     return dag, None
