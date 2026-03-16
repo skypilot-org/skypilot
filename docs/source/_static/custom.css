@@ -244,7 +244,7 @@ active tab to be moved up. */
 }
 
 .copy-page-success .copy-page-main {
-  color: #28a745;
+  color: var(--pst-color-success, #28a745);
 }
 
 /* Dropdown */
