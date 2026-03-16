@@ -2926,19 +2926,6 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
-    # Maybe touch the signal file on API server startup. Do it again here even
-    # if we already touched it in the sky/server/common.py::_start_api_server.
-    # This is because the sky/server/common.py::_start_api_server function call
-    # is running outside the skypilot API server process tree. The process tree
-    # starts within that function (see the `subprocess.Popen` call in
-    # sky/server/common.py::_start_api_server). When pg is used, the
-    # _start_api_server function will not load the config file from db, which
-    # will ignore the consolidation mode config. Here, inside the process tree,
-    # we already reload the config as a server (with env var _start_api_server),
-    # so we will respect the consolidation mode config.
-    # Refers to #7717 for more details.
-    managed_job_utils.is_consolidation_mode(on_api_restart=True)
-
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -2948,6 +2935,9 @@ if __name__ == '__main__':
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')
+    # Set up consolidation mode signal file. Needs global user state DB access
+    # to check for existing controller clusters.
+    managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash

@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import enum
 import os
+import pathlib
 import tempfile
 import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set
@@ -1364,9 +1365,18 @@ def _get_total_usable_memory_mb(pool: bool, consolidation_mode: bool) -> float:
 
 
 def _is_consolidation_mode(pool: bool) -> bool:
+    # Note: `pool` here really means "jobs" - whether we fetch the jobs
+    # consolidation or the serve consolidation value.
+    # TODO(cooperc): rename the argument
+    if pool:
+        # For jobs, the signal file is the source of truth (managed by
+        # setup_consolidation_mode_on_startup at server start).
+        signal_file = pathlib.Path(
+            managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+        ).expanduser()
+        return signal_file.exists()
     return skypilot_config.get_nested(
-        ('jobs' if pool else 'serve', 'controller', 'consolidation_mode'),
-        default_value=False)
+        ('serve', 'controller', 'consolidation_mode'), default_value=False)
 
 
 @annotations.lru_cache(scope='request')
@@ -1424,6 +1434,11 @@ def get_resources_lock_path() -> str:
 
 
 def _get_number_of_services(pool: bool) -> int:
+    # TODO(cooperc): This should divide by POOL_JOBS_RESOURCES_RATIO, not
+    # multiply. The intent is to give pools R times more memory than jobs, but
+    # _get_parallelism already applies (1 + R) to the per-unit cost. Multiplying
+    # here applies the ratio twice (quadratically), so with R != 1 services
+    # would get far fewer slots than intended. Masked by R=1 today.
     return _get_parallelism(pool=pool,
                             raw_resource_per_unit=SERVE_MONITORING_MEMORY_MB *
                             POOL_JOBS_RESOURCES_RATIO)

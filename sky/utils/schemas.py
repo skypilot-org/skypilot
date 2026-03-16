@@ -1381,7 +1381,9 @@ def get_config_schema():
                         'autostop': _AUTOSTOP_SCHEMA,
                         'consolidation_mode': {
                             'type': 'boolean',
-                            'default': False,
+                            # When unset, automatically enabled for deploy-mode
+                            # servers (--deploy) if no existing controller
+                            # clusters are found.
                         },
                         'controller_logs_gc_retention_hours': {
                             'type': 'integer',

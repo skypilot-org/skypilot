@@ -5,13 +5,11 @@ import asyncio
 import collections
 import datetime
 import enum
-import ipaddress
 import json
 import time
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
                     Union)
-import urllib.parse
 
 import colorama
 import sqlalchemy
@@ -25,7 +23,6 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
 from sky.skylet import constants
@@ -213,27 +210,6 @@ def create_table(engine: sqlalchemy.engine.Engine):
     migration_utils.safe_alembic_upgrade(engine,
                                          migration_utils.SPOT_JOBS_DB_NAME,
                                          migration_utils.SPOT_JOBS_VERSION)
-
-
-def force_no_postgres() -> bool:
-    """Force no postgres.
-
-    If the db is localhost on the api server, and we are not in consolidation
-    mode, we must force using sqlite and not using the api server on the jobs
-    controller.
-    """
-    conn_string = skypilot_config.get_nested(('db',), None)
-
-    if conn_string:
-        parsed = urllib.parse.urlparse(conn_string)
-        # it freezes if we use the normal get_consolidation_mode function
-        consolidation_mode = skypilot_config.get_nested(
-            ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-        if ((parsed.hostname == 'localhost' or
-             ipaddress.ip_address(parsed.hostname).is_loopback) and
-                not consolidation_mode):
-            return True
-    return False
 
 
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
