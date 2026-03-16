@@ -111,11 +111,10 @@ def _select_nonterminal_replicas_to_scale_down(
         # For pools, query the actual job counts so we prefer scaling down
         # idle workers.
         cluster_job_counts = (
-            managed_job_state.get_nonterminal_job_counts_by_pool(
-                service_name))
+            managed_job_state.get_nonterminal_job_counts_by_pool(service_name))
         for info in replicas:
-            replica_job_counts[info.replica_id] = (
-                cluster_job_counts.get(info.cluster_name, 0))
+            replica_job_counts[info.replica_id] = (cluster_job_counts.get(
+                info.cluster_name, 0))
     else:
         # For SkyServe, job counts are not tracked. Use a uniform value
         # so the sort falls through to the remaining criteria.
