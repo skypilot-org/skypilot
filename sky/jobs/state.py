@@ -2035,18 +2035,20 @@ def get_nonterminal_job_counts_by_pool(
         query = sqlalchemy.select(
             job_info_table.c.current_cluster_name,
             # pylint: disable=not-callable
-            sqlalchemy.func.count(spot_table.c.spot_job_id.distinct())
-        ).select_from(
-            spot_table.outerjoin(
-                job_info_table, spot_table.c.spot_job_id ==
-                job_info_table.c.spot_job_id)).where(
-                    sqlalchemy.and_(
-                        ~spot_table.c.status.in_([
-                            status.value
-                            for status in ManagedJobStatus.terminal_statuses()
-                        ]),
-                        job_info_table.c.pool == pool,
-                    )).group_by(job_info_table.c.current_cluster_name)
+            sqlalchemy.func.count(
+                spot_table.c.spot_job_id.distinct()
+            )).select_from(
+                spot_table.outerjoin(
+                    job_info_table,
+                    spot_table.c.spot_job_id == job_info_table.c.spot_job_id)
+            ).where(
+                sqlalchemy.and_(
+                    ~spot_table.c.status.in_([
+                        status.value
+                        for status in ManagedJobStatus.terminal_statuses()
+                    ]),
+                    job_info_table.c.pool == pool,
+                )).group_by(job_info_table.c.current_cluster_name)
         rows = session.execute(query).fetchall()
         return {row[0]: row[1] for row in rows if row[0] is not None}
 
