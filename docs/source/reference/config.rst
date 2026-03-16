@@ -366,6 +366,9 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
+.. note::
+  For deploy-mode API servers (``--deploy``), :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default, which runs the jobs controller within the API server. In this mode, ``controller.resources`` and ``controller.autostop`` settings are ignored.
+
 For more information about managed jobs, see :ref:`managed-jobs`.
 
 
@@ -434,7 +437,7 @@ Example:
 ``jobs.controller.resources``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure resources for the managed jobs controller.
+Configure resources for the managed jobs controller. Ignored when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers); in that case, tune the API server's resources instead (see :ref:`sky-api-server-resources-tuning`).
 
 For more details about tuning the jobs controller resources, see :ref:`jobs-controller-sizing`.
 
@@ -457,7 +460,7 @@ Example:
 ``jobs.controller.autostop``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
+Configure :ref:`autostop <auto-stop>` for the managed jobs controller. Not applicable when :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), since the controller lifecycle is tied to the API server.
 
 By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically restarted when a new job is launched.
 
