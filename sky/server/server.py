@@ -601,11 +601,8 @@ async def cleanup_unreferenced_file_mounts():
                 if staging_base.exists():
                     for staging in staging_base.iterdir():
                         if staging.is_dir():
-                            try:
-                                if staging.stat().st_mtime < grace_cutoff:
-                                    shutil.rmtree(staging, ignore_errors=True)
-                            except FileNotFoundError:
-                                pass
+                            if staging.stat().st_mtime < grace_cutoff:
+                                shutil.rmtree(staging, ignore_errors=True)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
                              f'{common_utils.format_exception(e)}')
