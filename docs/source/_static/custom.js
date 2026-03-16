@@ -63,43 +63,92 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 });
 
-// Copy page as Markdown for LLMs.
+// Copy page as Markdown — split button next to page title.
 document.addEventListener('DOMContentLoaded', function () {
-    var btn = document.getElementById('copy-markdown-btn');
-    if (!btn) return;
+    var h1 = document.querySelector('.bd-content h1');
+    if (!h1) return;
 
-    btn.addEventListener('click', function () {
-        // Build the .html.md URL for the current page.
-        var path = window.location.pathname;
-        // Normalize: /path/ -> /path/index.html
-        if (path.endsWith('/')) path += 'index.html';
-        var mdUrl = path + '.md';
+    // Build the .html.md URL for the current page.
+    var pagePath = window.location.pathname;
+    if (pagePath.endsWith('/')) pagePath += 'index.html';
+    var mdUrl = pagePath + '.md';
 
-        var label = btn.querySelector('.copy-markdown-label');
-        var originalText = label.textContent;
-        label.textContent = 'Copying...';
+    // SVG icons.
+    var copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    var arrowIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
+    var chevronIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    var checkIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
 
-        fetch(mdUrl)
-            .then(function (resp) {
-                if (!resp.ok) throw new Error('Not found');
-                return resp.text();
-            })
-            .then(function (text) {
-                return navigator.clipboard.writeText(text);
-            })
-            .then(function () {
-                label.textContent = 'Copied!';
-                btn.classList.add('copy-markdown-success');
-                setTimeout(function () {
-                    label.textContent = originalText;
-                    btn.classList.remove('copy-markdown-success');
-                }, 2000);
-            })
-            .catch(function () {
-                label.textContent = 'Failed to copy';
-                setTimeout(function () {
-                    label.textContent = originalText;
-                }, 2000);
-            });
+    // Build the split button widget.
+    var wrapper = document.createElement('div');
+    wrapper.className = 'copy-page-wrapper';
+    wrapper.innerHTML =
+        '<div class="copy-page-split">' +
+            '<button class="copy-page-main" title="Copy page as Markdown">' + copyIcon + '<span class="copy-page-label">Copy page</span></button>' +
+            '<button class="copy-page-toggle" title="More options">' + chevronIcon + '</button>' +
+        '</div>' +
+        '<div class="copy-page-dropdown">' +
+            '<button class="copy-page-item" data-action="copy">' + copyIcon + ' Copy page as Markdown</button>' +
+            '<button class="copy-page-item" data-action="open">' + arrowIcon + ' Open Markdown</button>' +
+        '</div>';
+
+    // Insert after the h1 — position absolutely relative to h1's section.
+    h1.style.position = 'relative';
+    h1.appendChild(wrapper);
+
+    var mainBtn = wrapper.querySelector('.copy-page-main');
+    var toggleBtn = wrapper.querySelector('.copy-page-toggle');
+    var dropdown = wrapper.querySelector('.copy-page-dropdown');
+    var label = wrapper.querySelector('.copy-page-label');
+
+    function getMdUrl() { return mdUrl; }
+
+    function copyMarkdown(callback) {
+        fetch(getMdUrl())
+            .then(function (r) { if (!r.ok) throw new Error(); return r.text(); })
+            .then(function (t) { return navigator.clipboard.writeText(t); })
+            .then(function () { if (callback) callback(true); })
+            .catch(function () { if (callback) callback(false); });
+    }
+
+    function showCopied() {
+        label.textContent = 'Copied!';
+        mainBtn.querySelector('svg').outerHTML = checkIcon;
+        wrapper.classList.add('copy-page-success');
+        setTimeout(function () {
+            label.textContent = 'Copy page';
+            mainBtn.querySelector('svg').outerHTML = copyIcon;
+            wrapper.classList.remove('copy-page-success');
+        }, 2000);
+    }
+
+    // Main button: copy immediately.
+    mainBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        copyMarkdown(function (ok) { if (ok) showCopied(); });
+    });
+
+    // Toggle dropdown.
+    toggleBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        dropdown.classList.toggle('open');
+    });
+
+    // Dropdown items.
+    dropdown.addEventListener('click', function (e) {
+        var item = e.target.closest('[data-action]');
+        if (!item) return;
+        e.stopPropagation();
+        dropdown.classList.remove('open');
+        if (item.dataset.action === 'copy') {
+            copyMarkdown(function (ok) { if (ok) showCopied(); });
+        } else if (item.dataset.action === 'open') {
+            window.open(getMdUrl(), '_blank');
+        }
+    });
+
+    // Close dropdown on outside click.
+    document.addEventListener('click', function () {
+        dropdown.classList.remove('open');
     });
 });
