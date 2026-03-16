@@ -20,7 +20,7 @@ Local Agent (Claude Code, Codex, etc.)
 
 - **Agent** runs locally, generates hypotheses, edits `train.py`, submits jobs in detached mode (`-d`)
 - **SkyPilot clusters** run the 5-min training experiments on cloud GPUs; jobs queue and pipeline automatically via the [job queue](https://docs.skypilot.co/en/latest/reference/job-queue.html)
-- **S3 bucket** mounted at `/bucket` on every VM via [SkyPilot storage](https://docs.skypilot.co/en/latest/reference/storage.html) —
+- **S3 bucket** mounted at `/bucket` on every VM via [SkyPilot storage](https://docs.skypilot.co/en/latest/reference/storage.html) -
   experiments write status/logs as regular files, no AWS CLI needed on VMs
 
 ## Files
