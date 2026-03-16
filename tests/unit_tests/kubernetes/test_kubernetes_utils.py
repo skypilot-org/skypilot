@@ -1437,7 +1437,7 @@ def test_combine_pod_config_fields_ssh_cloud():
                                                  context=ssh_context)
 
         # Verify that get_effective_region_config was called with 'ssh' cloud
-        # and context without the "ssh-" prefix, once for image_builder and
+        # and context without the "ssh-" prefix, once for container_tools and
         # once for pod_config.
         assert mock_get_config.call_count == 2
         mock_get_config.assert_has_calls([
@@ -1447,7 +1447,7 @@ def test_combine_pod_config_fields_ssh_cloud():
                  default_value={}),
             call(cloud='ssh',
                  region='my-cluster',
-                 keys=('image_builder',),
+                 keys=('container_tools',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -1509,7 +1509,7 @@ def test_combine_pod_config_fields_kubernetes_cloud():
                                                  context=k8s_context)
 
         # Verify that get_effective_region_config was called with 'kubernetes'
-        # cloud and the context as-is, once for image_builder and once for
+        # cloud and the context as-is, once for container_tools and once for
         # pod_config.
         assert mock_get_config.call_count == 2
         mock_get_config.assert_has_calls([
@@ -1519,7 +1519,7 @@ def test_combine_pod_config_fields_kubernetes_cloud():
                  default_value={}),
             call(cloud='kubernetes',
                  region=k8s_context,
-                 keys=('image_builder',),
+                 keys=('container_tools',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -2010,7 +2010,7 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
                  default_value={}),
             call(cloud='ssh',
                  region='test-cluster',
-                 keys=('image_builder',),
+                 keys=('container_tools',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -2047,7 +2047,7 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
                  default_value={}),
             call(cloud='kubernetes',
                  region=k8s_context,
-                 keys=('image_builder',),
+                 keys=('container_tools',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -2987,7 +2987,7 @@ class TestGetHandledTaintKeys(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Tests for kubernetes.image_builder shorthand config
+# Tests for kubernetes.container_tools shorthand config
 # ---------------------------------------------------------------------------
 
 _BASE_CLUSTER_YAML = {
@@ -3016,13 +3016,13 @@ _BASE_CLUSTER_YAML = {
 }
 
 
-class TestImageBuilderToPodConfig(unittest.TestCase):
-    """Tests for _image_builder_to_pod_config()."""
+class TestContainerToolsToPodConfig(unittest.TestCase):
+    """Tests for _container_tools_to_pod_config()."""
 
-    def _get_result(self, image_builder_type):
+    def _get_result(self, container_tools_type):
         import copy
-        cfg = {'type': image_builder_type}
-        return utils._image_builder_to_pod_config(cfg)
+        cfg = {'type': container_tools_type}
+        return utils._container_tools_to_pod_config(cfg)
 
     # ---- DinD ----
 
@@ -3033,7 +3033,7 @@ class TestImageBuilderToPodConfig(unittest.TestCase):
         env_names = [e['name'] for e in ray['env']]
         assert 'DOCKER_HOST' in env_names
 
-    def test_dind_image_builder_is_privileged(self):
+    def test_dind_container_tools_is_privileged(self):
         pod_cfg = self._get_result('dind')
         containers = pod_cfg['spec']['containers']
         dind = next(c for c in containers if c['name'] == 'dind')
@@ -3054,7 +3054,7 @@ class TestImageBuilderToPodConfig(unittest.TestCase):
         env_names = [e['name'] for e in ray['env']]
         assert 'BUILDKIT_HOST' in env_names
 
-    def test_buildkit_image_builder_runs_as_user_1000(self):
+    def test_buildkit_container_tools_runs_as_user_1000(self):
         pod_cfg = self._get_result('buildkit')
         containers = pod_cfg['spec']['containers']
         bkd = next(c for c in containers if c['name'] == 'buildkitd')
@@ -3067,39 +3067,39 @@ class TestImageBuilderToPodConfig(unittest.TestCase):
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'buildkit-cache' not in volume_names
 
-    # ---- get_image_builder_defaults ----
+    # ---- get_container_tools_defaults ----
 
     def test_get_defaults_returns_valid_dind(self):
-        defaults = utils.get_image_builder_defaults('dind')
+        defaults = utils.get_container_tools_defaults('dind')
         assert 'image' in defaults
         assert 'cache_vol_name' in defaults
         assert 'cache_mount' in defaults
 
     def test_get_defaults_returns_valid_buildkit(self):
-        defaults = utils.get_image_builder_defaults('buildkit')
+        defaults = utils.get_container_tools_defaults('buildkit')
         assert 'image' in defaults
         assert defaults['cache_mount'] == '/home/user/.local/share/buildkit'
 
     def test_get_defaults_unknown_type_raises(self):
         with self.assertRaises(ValueError) as ctx:
-            utils.get_image_builder_defaults('unknown')
-        assert 'Unknown image_builder type' in str(ctx.exception)
+            utils.get_container_tools_defaults('unknown')
+        assert 'Unknown container_tools type' in str(ctx.exception)
         assert "'unknown'" in str(ctx.exception)
 
 
-class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
-    """Tests for combine_pod_config_fields() with image_builder config."""
+class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
+    """Tests for combine_pod_config_fields() with container_tools config."""
 
     def _base_yaml(self):
         import copy
         return copy.deepcopy(_BASE_CLUSTER_YAML)
 
-    def test_dind_image_builder_injected_from_global_config(self):
-        """ImageBuilder containers and volumes appear when global image_builder config set."""
+    def test_dind_container_tools_injected_from_global_config(self):
+        """ContainerTools containers and volumes appear when global container_tools config set."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('image_builder',):
+            if keys == ('container_tools',):
                 return {'type': 'dind'}
             return default_value
 
@@ -3122,12 +3122,12 @@ class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
         # No cache volume by default; PVC is injected later in _create_pods.
         assert 'dind-storage' not in volume_names
 
-    def test_buildkit_image_builder_injected_from_global_config(self):
-        """BuildKit image_builder is injected correctly."""
+    def test_buildkit_container_tools_injected_from_global_config(self):
+        """BuildKit container_tools is injected correctly."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('image_builder',):
+            if keys == ('container_tools',):
                 return {'type': 'buildkit'}
             return default_value
 
@@ -3149,18 +3149,18 @@ class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
         # No cache volume by default; PVC is injected later in _create_pods.
         assert 'buildkit-cache' not in volume_names
 
-    def test_task_image_builder_overrides_global(self):
-        """Task-level image_builder config fully replaces global image_builder config."""
+    def test_task_container_tools_overrides_global(self):
+        """Task-level container_tools config fully replaces global container_tools config."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('image_builder',):
+            if keys == ('container_tools',):
                 # Global says dind
                 return {'type': 'dind'}
             return default_value
 
         # Task overrides to buildkit
-        overrides = {'kubernetes': {'image_builder': {'type': 'buildkit'}}}
+        overrides = {'kubernetes': {'container_tools': {'type': 'buildkit'}}}
 
         with patch('sky.skypilot_config.get_effective_region_config',
                    side_effect=mock_get_config):
@@ -3177,15 +3177,15 @@ class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
         assert 'buildkitd' in container_names
         assert 'dind' not in container_names
 
-    def test_pod_config_overrides_image_builder(self):
-        """Explicit pod_config takes precedence over auto-injected image_builder."""
+    def test_pod_config_overrides_container_tools(self):
+        """Explicit pod_config takes precedence over auto-injected container_tools."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('image_builder',):
+            if keys == ('container_tools',):
                 return {'type': 'dind'}
             if keys == ('pod_config',):
-                # User overrides the dind image_builder image
+                # User overrides the dind container_tools image
                 return {
                     'spec': {
                         'containers': [{
@@ -3211,12 +3211,12 @@ class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
             c for c in node_cfg['spec']['containers'] if c['name'] == 'dind')
         assert dind['image'] == 'docker:custom-image'
 
-    def test_image_builder_config_stored_in_provider(self):
-        """Effective image_builder config is persisted into provider for Phase 2."""
+    def test_container_tools_config_stored_in_provider(self):
+        """Effective container_tools config is persisted into provider for Phase 2."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('image_builder',):
+            if keys == ('container_tools',):
                 return {'type': 'dind', 'volume': 'my-cache'}
             return default_value
 
@@ -3229,17 +3229,17 @@ class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
                 cloud=sky_clouds.Kubernetes(),
                 context='test-ctx')
 
-        assert result['provider']['image_builder_config'] == {
+        assert result['provider']['container_tools_config'] == {
             'type': 'dind',
             'volume': 'my-cache'
         }
 
-    def test_no_image_builder_config_no_injection(self):
-        """No image_builder containers when image_builder config is absent."""
+    def test_no_container_tools_config_no_injection(self):
+        """No container_tools containers when container_tools config is absent."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            # image_builder absent; pod_config returns empty dict
+            # container_tools absent; pod_config returns empty dict
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3258,8 +3258,8 @@ class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
         assert 'buildkitd' not in container_names
 
 
-class TestInjectImageBuilderCacheVolume(unittest.TestCase):
-    """Tests for inject_image_builder_cache_volume()."""
+class TestInjectContainerToolsCacheVolume(unittest.TestCase):
+    """Tests for inject_container_tools_cache_volume()."""
 
     def _make_pod_spec(self,
                        ctr_name='dind',
@@ -3290,10 +3290,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
 
     def test_dind_no_pvc_adds_emptydir(self):
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name=None,
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name=None,
+                                                  context='ctx',
+                                                  namespace='ns')
 
         vols = pod['spec']['volumes']
         assert len(vols) == 1
@@ -3310,10 +3310,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
 
     def test_buildkit_no_pvc_adds_emptydir(self):
         pod = self._make_pod_spec(ctr_name='buildkitd')
-        utils.inject_image_builder_cache_volume(pod, {'type': 'buildkit'},
-                                                pvc_name=None,
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'buildkit'},
+                                                  pvc_name=None,
+                                                  context='ctx',
+                                                  namespace='ns')
 
         vols = pod['spec']['volumes']
         assert len(vols) == 1
@@ -3329,10 +3329,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
 
     def test_dind_pvc_adds_volume_and_subpath(self):
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name='my-pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name='my-pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         vols = pod['spec']['volumes']
         assert len(vols) == 1
@@ -3348,10 +3348,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
     def test_dind_pvc_no_fsgroup(self):
         """DinD runs privileged — no fsGroup needed."""
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name='my-pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name='my-pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         assert 'securityContext' not in pod['spec']
 
@@ -3359,10 +3359,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
 
     def test_buildkit_pvc_adds_volume_and_fsgroup(self):
         pod = self._make_pod_spec(ctr_name='buildkitd')
-        utils.inject_image_builder_cache_volume(pod, {'type': 'buildkit'},
-                                                pvc_name='my-pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'buildkit'},
+                                                  pvc_name='my-pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         vols = pod['spec']['volumes']
         assert vols[0]['persistentVolumeClaim']['claimName'] == 'my-pvc'
@@ -3381,10 +3381,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         """If user already set fsGroup, don't override it."""
         pod = self._make_pod_spec(ctr_name='buildkitd')
         pod['spec']['securityContext'] = {'fsGroup': 2000}
-        utils.inject_image_builder_cache_volume(pod, {'type': 'buildkit'},
-                                                pvc_name='my-pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'buildkit'},
+                                                  pvc_name='my-pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         assert pod['spec']['securityContext']['fsGroup'] == 2000
 
@@ -3396,14 +3396,14 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         pod2 = self._make_pod_spec(ctr_name='dind')
         pod2['metadata']['name'] = 'pod-2'
 
-        utils.inject_image_builder_cache_volume(pod1, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context='ctx',
-                                                namespace='ns')
-        utils.inject_image_builder_cache_volume(pod2, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod1, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
+        utils.inject_container_tools_cache_volume(pod2, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         sp1 = pod1['spec']['containers'][1]['volumeMounts'][0]['subPath']
         sp2 = pod2['spec']['containers'][1]['volumeMounts'][0]['subPath']
@@ -3413,14 +3413,14 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         pod_a = self._make_pod_spec(ctr_name='dind')
         pod_b = self._make_pod_spec(ctr_name='dind')
 
-        utils.inject_image_builder_cache_volume(pod_a, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context='ctx-a',
-                                                namespace='ns')
-        utils.inject_image_builder_cache_volume(pod_b, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context='ctx-b',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod_a, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context='ctx-a',
+                                                  namespace='ns')
+        utils.inject_container_tools_cache_volume(pod_b, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context='ctx-b',
+                                                  namespace='ns')
 
         sp_a = pod_a['spec']['containers'][1]['volumeMounts'][0]['subPath']
         sp_b = pod_b['spec']['containers'][1]['volumeMounts'][0]['subPath']
@@ -3432,10 +3432,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         """If user already has a volumeMount at the cache path, skip."""
         existing = [{'name': 'user-vol', 'mountPath': '/var/lib/docker'}]
         pod = self._make_pod_spec(ctr_name='dind', existing_mounts=existing)
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         # No new volumes or mounts added.
         assert 'volumes' not in pod['spec']
@@ -3456,10 +3456,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         }]
         pod = self._make_pod_spec(ctr_name='dind',
                                   existing_volumes=existing_vols)
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name='shared-pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name='shared-pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         # Should NOT add a second volume entry.
         assert len(pod['spec']['volumes']) == 1
@@ -3480,10 +3480,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         }]
         pod = self._make_pod_spec(ctr_name='dind',
                                   existing_volumes=existing_vols)
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name='cache-pvc',
-                                                context='ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name='cache-pvc',
+                                                  context='ctx',
+                                                  namespace='ns')
 
         assert len(pod['spec']['volumes']) == 2
         pvc_names = [
@@ -3497,10 +3497,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
     def test_pvc_subpath_with_none_context(self):
         """context=None should not crash; subPath uses empty string."""
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context=None,
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context=None,
+                                                  namespace='ns')
 
         dind_ctr = next(
             c for c in pod['spec']['containers'] if c['name'] == 'dind')
@@ -3508,10 +3508,10 @@ class TestInjectImageBuilderCacheVolume(unittest.TestCase):
         assert vm['subPath'].startswith('var_lib_docker_')
         # Verify a different context produces a different subPath.
         pod2 = self._make_pod_spec(ctr_name='dind')
-        utils.inject_image_builder_cache_volume(pod2, {'type': 'dind'},
-                                                pvc_name='pvc',
-                                                context='real-ctx',
-                                                namespace='ns')
+        utils.inject_container_tools_cache_volume(pod2, {'type': 'dind'},
+                                                  pvc_name='pvc',
+                                                  context='real-ctx',
+                                                  namespace='ns')
         vm2 = next(c for c in pod2['spec']['containers']
                    if c['name'] == 'dind')['volumeMounts'][0]
         assert vm['subPath'] != vm2['subPath']

@@ -1298,11 +1298,11 @@ secrets:
         os.unlink(yaml_path)
 
 
-# ---------- image_builder volume in resolve_and_validate_volumes ----------
+# ---------- container_tools volume in resolve_and_validate_volumes ----------
 
 
-def test_image_builder_volume_resolved_from_global_config():
-    """image_builder volume is resolved and included in validation."""
+def test_container_tools_volume_resolved_from_global_config():
+    """container_tools volume is resolved and included in validation."""
     t = task.Task()
     t._volumes = {'/mnt': 'task-vol'}
     t.resources = [make_mock_resource()]
@@ -1324,19 +1324,19 @@ def test_image_builder_volume_resolved_from_global_config():
          mock.patch('sky.skypilot_config.get_nested',
                     return_value={'type': 'dind', 'volume': 'builder-cache'}):
         t.resolve_and_validate_volumes()
-        # task volumes only — image_builder vol must not appear
+        # task volumes only — container_tools vol must not appear
         assert len(t.volume_mounts) == 1
         assert t.volume_mounts[0].volume_name == 'task-vol'
 
 
-def test_image_builder_volume_task_override():
-    """Line 883: task-level image_builder config overrides global."""
+def test_container_tools_volume_task_override():
+    """Line 883: task-level container_tools config overrides global."""
     t = task.Task()
     t._volumes = {'/mnt': 'task-vol'}
     res = make_mock_resource()
     res.cluster_config_overrides = {
         'kubernetes': {
-            'image_builder': {
+            'container_tools': {
                 'type': 'buildkit',
                 'volume': 'task-builder-vol'
             }
@@ -1367,8 +1367,8 @@ def test_image_builder_volume_task_override():
         assert len(t.volume_mounts) == 1
 
 
-def test_image_builder_volume_not_found_is_ignored():
-    """VolumeNotFoundError for image_builder volume is silently
+def test_container_tools_volume_not_found_is_ignored():
+    """VolumeNotFoundError for container_tools volume is silently
     caught."""
     t = task.Task()
     t._volumes = {'/mnt': 'task-vol'}
@@ -1386,16 +1386,16 @@ def test_image_builder_volume_not_found_is_ignored():
                     side_effect=get_vol_by_name), \
          mock.patch('sky.skypilot_config.get_nested',
                     return_value={'type': 'dind', 'volume': 'missing-vol'}):
-        # Should NOT raise even though image_builder vol doesn't exist.
+        # Should NOT raise even though container_tools vol doesn't exist.
         t.resolve_and_validate_volumes()
         assert len(t.volume_mounts) == 1
 
 
-def test_image_builder_volume_skip_if_already_in_task_volumes():
-    """Lines 889-891: image_builder volume that is already in task
+def test_container_tools_volume_skip_if_already_in_task_volumes():
+    """Lines 889-891: container_tools volume that is already in task
     volume_mounts is not resolved twice."""
     t = task.Task()
-    # Task mounts the same volume as image_builder uses.
+    # Task mounts the same volume as container_tools uses.
     t._volumes = {'/mnt': 'shared-vol'}
     t.resources = [make_mock_resource()]
 
@@ -1407,7 +1407,7 @@ def test_image_builder_volume_skip_if_already_in_task_volumes():
         }
         t.resolve_and_validate_volumes()
         # get_volume_by_name should be called only once (for the task volume),
-        # not a second time for image_builder since names match.
+        # not a second time for container_tools since names match.
         assert get_vol.call_count == 1
 
 
@@ -1430,8 +1430,8 @@ def test_multinode_rwo_volume_raises():
             t.resolve_and_validate_volumes()
 
 
-def test_multinode_rwo_image_builder_volume_raises():
-    """multi-node + image_builder vol with RWO raises."""
+def test_multinode_rwo_container_tools_volume_raises():
+    """multi-node + container_tools vol with RWO raises."""
     t = task.Task()
     t._volumes = {'/mnt': 'task-vol'}
     t.resources = [make_mock_resource()]

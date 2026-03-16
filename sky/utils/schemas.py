@@ -1350,7 +1350,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
-    'image_builder': {
+    'container_tools': {
         'type': 'object',
         'required': ['type'],
         'additionalProperties': False,
@@ -1359,7 +1359,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                 'type': 'string',
                 'enum': ['dind', 'buildkit'],
             },
-            # SkyPilot volume name for the image_builder cache.
+            # SkyPilot volume name for the container_tools cache.
             # Omit to use an ephemeral emptyDir volume instead.
             'volume': {
                 'type': 'string',

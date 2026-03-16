@@ -5,6 +5,10 @@ resources:
 num_nodes: 1
 
 setup: |
+  # Install buildkit
+  BUILDKIT_VERSION=v0.28.0
+  curl -fsSL "https://github.com/moby/buildkit/releases/download/${BUILDKIT_VERSION}/buildkit-${BUILDKIT_VERSION}.linux-amd64.tar.gz" | sudo tar -xz -C /usr/local bin/buildctl
+  buildctl --version
   # Install docker-cli
   sudo install -m 0755 -d /etc/apt/keyrings
   sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
@@ -14,10 +18,12 @@ setup: |
   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
   sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
   sudo apt-get update && sudo apt-get install -y docker-ce-cli
-  docker info
+  docker --version
+  docker buildx create --name skypilot-builder --driver remote unix:///run/buildkit/buildkitd.sock
+  docker buildx use skypilot-builder
 
 config:
   kubernetes:
-    image_builder:
-      type: dind
+    container_tools:
+      type: buildkit
       # volume: my-builder-cache # SkyPilot volume name

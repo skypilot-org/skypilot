@@ -1267,7 +1267,7 @@ class TestKubernetesSecurityContext(unittest.TestCase):
         }
 
         # Set up mocks — only return the pod_config for the pod_config key;
-        # return default_value for other keys (e.g. image_builder).
+        # return default_value for other keys (e.g. container_tools).
         def _side_effect(*args, **kwargs):
             if kwargs.get('keys') == ('pod_config',):
                 return user_pod_config

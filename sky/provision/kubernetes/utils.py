@@ -2896,8 +2896,8 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
-# Default images for each image_builder type.
-_IMAGE_BUILDER_DEFAULTS = {
+# Default images for each container_tools type.
+_CONTAINER_TOOLS_DEFAULTS = {
     'dind': {
         'image': 'docker:29.3-dind',
         'cache_vol_name': 'dind-storage',
@@ -2913,18 +2913,19 @@ _IMAGE_BUILDER_DEFAULTS = {
 }
 
 
-def get_image_builder_defaults(image_builder_type: str) -> Dict[str, str]:
+def get_container_tools_defaults(container_tools_type: str) -> Dict[str, str]:
     """Return a copy of the default config for the given image builder type."""
-    defaults = _IMAGE_BUILDER_DEFAULTS.get(image_builder_type)
+    defaults = _CONTAINER_TOOLS_DEFAULTS.get(container_tools_type)
     if defaults is None:
-        raise ValueError(f'Unknown image_builder type: {image_builder_type!r}. '
-                         f'Supported: {list(_IMAGE_BUILDER_DEFAULTS)}')
+        raise ValueError(
+            f'Unknown container_tools type: {container_tools_type!r}. '
+            f'Supported: {list(_CONTAINER_TOOLS_DEFAULTS)}')
     return dict(defaults)
 
 
-def inject_image_builder_cache_volume(
+def inject_container_tools_cache_volume(
     pod_spec: Dict[str, Any],
-    image_builder_config: Dict[str, Any],
+    container_tools_config: Dict[str, Any],
     pvc_name: Optional[str],
     context: Optional[str],
     namespace: str,
@@ -2943,8 +2944,8 @@ def inject_image_builder_cache_volume(
     * If the user already mounted something at the cache path via
       ``pod_config``, this function is a no-op.
     """
-    runtime_type = image_builder_config['type']
-    defaults = _IMAGE_BUILDER_DEFAULTS[runtime_type]
+    runtime_type = container_tools_config['type']
+    defaults = _CONTAINER_TOOLS_DEFAULTS[runtime_type]
     ctr_name = 'dind' if runtime_type == 'dind' else 'buildkitd'
     cache_vol_name = defaults['cache_vol_name']
     cache_mount = defaults['cache_mount']
@@ -3014,19 +3015,19 @@ def inject_image_builder_cache_volume(
                 })
 
 
-def _image_builder_to_pod_config(
-        image_builder_cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Translate a ``kubernetes.image_builder`` config into a pod_config fragment.
+def _container_tools_to_pod_config(
+        container_tools_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate a ``kubernetes.container_tools`` config into a pod_config fragment.
 
     No cache volume is created here.  If the user specified a SkyPilot volume
-    (``image_builder_cfg['volume']``), the PVC volume and volumeMount are
+    (``container_tools_cfg['volume']``), the PVC volume and volumeMount are
     injected later in ``_create_pods()`` once the pod name is known (so that a
     per-pod ``subPath`` can be set).
     """
-    image_builder_type = image_builder_cfg['type']
-    defaults = get_image_builder_defaults(image_builder_type)
+    container_tools_type = container_tools_cfg['type']
+    defaults = get_container_tools_defaults(container_tools_type)
 
-    if image_builder_type == 'dind':
+    if container_tools_type == 'dind':
         pod_cfg: Dict[str, Any] = {
             'spec': {
                 'containers': [
@@ -3183,31 +3184,32 @@ def combine_pod_config_fields(
     node_config = (merged_cluster_yaml_obj['available_node_types']
                    ['ray_head_default']['node_config'])
 
-    # --- ImageBuilder injection (DinD / BuildKit) ---
-    # ImageBuilder is the base layer; pod_config merges on top (pod_config wins).
-    image_builder_cfg = skypilot_config.get_effective_region_config(
+    # --- ContainerTools injection (DinD / BuildKit) ---
+    # ContainerTools is the base layer; pod_config merges on top (pod_config wins).
+    container_tools_cfg = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context_str,
-        keys=('image_builder',),
+        keys=('container_tools',),
         default_value=None)
-    task_image_builder_cfg = config_utils.get_cloud_config_value_from_dict(
+    task_container_tools_cfg = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
         cloud=cloud_str,
         region=context_str,
-        keys=('image_builder',),
+        keys=('container_tools',),
         default_value=None)
-    if task_image_builder_cfg:
-        image_builder_cfg = task_image_builder_cfg
-    if image_builder_cfg:
-        image_builder_pod_cfg = _image_builder_to_pod_config(image_builder_cfg)
-        config_utils.merge_k8s_configs(node_config, image_builder_pod_cfg)
-        # Persist effective image_builder config in provider.
+    if task_container_tools_cfg:
+        container_tools_cfg = task_container_tools_cfg
+    if container_tools_cfg:
+        container_tools_pod_cfg = _container_tools_to_pod_config(
+            container_tools_cfg)
+        config_utils.merge_k8s_configs(node_config, container_tools_pod_cfg)
+        # Persist effective container_tools config in provider.
         if 'provider' in merged_cluster_yaml_obj:
             merged_cluster_yaml_obj['provider'][
-                'image_builder_config'] = image_builder_cfg
+                'container_tools_config'] = container_tools_cfg
 
     # Merge the kubernetes pod_config into the YAML for both head and worker
-    # nodes. This comes after image_builder so explicit pod_config wins on conflicts.
+    # nodes. This comes after container_tools so explicit pod_config wins on conflicts.
     config_utils.merge_k8s_configs(node_config, kubernetes_config)
     return merged_cluster_yaml_obj
 

@@ -1,9 +1,9 @@
-# Container Runtimes in SkyPilot Pods (DinD / BuildKit)
+# Container Tools in SkyPilot Pods (DinD / BuildKit)
 
 SkyPilot clusters running on Kubernetes are backed by one or more Pods.
 Workflows that require container operations inside those Pods — such as
 building and pushing images or launching nested containers — need an in-Pod
-container runtime. SkyPilot provides a built-in `image_builder` config that
+container tool. SkyPilot provides a built-in `container_tools` config that
 automatically injects a sidecar container with the appropriate runtime.
 
 This page describes two supported approaches and helps you choose the one
@@ -39,7 +39,7 @@ Add the following to the task YAML's `config` field:
 ```yaml
 config:
   kubernetes:
-    image_builder:
+    container_tools:
       type: dind
 ```
 
@@ -47,7 +47,7 @@ Or apply it globally to all SkyPilot clusters in SkyPilot config:
 
 ```yaml
 kubernetes:
-  image_builder:
+  container_tools:
     type: dind
 ```
 
@@ -56,7 +56,7 @@ To persist the Docker cache across cluster restarts, specify a SkyPilot volume:
 ```yaml
 config:
   kubernetes:
-    image_builder:
+    container_tools:
       type: dind
       volume: my-builder-cache # SkyPilot volume name
 ```
@@ -65,12 +65,12 @@ config:
 > nodes can mount it simultaneously. Each pod gets its own `subPath` within
 > the PVC, so a single volume can be safely shared across clusters.
 
-See [dind_cluster.yaml](https://github.com/skypilot-org/skypilot/blob/master/examples/image_builder/dind_cluster.yaml) for a complete example.
+See [dind_cluster.yaml](https://github.com/skypilot-org/skypilot/blob/master/examples/container_tools/dind_cluster.yaml) for a complete example.
 
 ### Launch and verify
 
 ```bash
-sky launch -c dev examples/image_builder/dind_cluster.yaml
+sky launch -c dev examples/container_tools/dind_cluster.yaml
 
 # Confirm the Docker daemon in the sidecar is reachable
 sky exec dev -- docker info
@@ -92,7 +92,7 @@ Add the following to the task YAML's `config` field:
 ```yaml
 config:
   kubernetes:
-    image_builder:
+    container_tools:
       type: buildkit
 ```
 
@@ -100,7 +100,7 @@ Or apply it globally in SkyPilot config:
 
 ```yaml
 kubernetes:
-  image_builder:
+  container_tools:
     type: buildkit
 ```
 
@@ -109,7 +109,7 @@ To persist the BuildKit cache across cluster restarts:
 ```yaml
 config:
   kubernetes:
-    image_builder:
+    container_tools:
       type: buildkit
       volume: my-builder-cache # SkyPilot volume name
 ```
@@ -118,12 +118,12 @@ config:
 > nodes can mount it simultaneously. Each pod gets its own `subPath` within
 > the PVC, so a single volume can be safely shared across clusters.
 
-See [buildkit_cluster.yaml](https://github.com/skypilot-org/skypilot/blob/master/examples/image_builder/buildkit_cluster.yaml) for a complete example.
+See [buildkit_cluster.yaml](https://github.com/skypilot-org/skypilot/blob/master/examples/container_tools/buildkit_cluster.yaml) for a complete example.
 
 ### Launch and verify
 
 ```bash
-sky launch -c dev examples/image_builder/buildkit_cluster.yaml
+sky launch -c dev examples/container_tools/buildkit_cluster.yaml
 # ssh to the cluster
 ssh dev
 ```

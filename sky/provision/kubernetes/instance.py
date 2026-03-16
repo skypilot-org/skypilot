@@ -1136,19 +1136,19 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             })
 
     # Image-builder cache volume injection: if a SkyPilot volume was specified
-    # for the image_builder cache, look up the PVC name.  The actual volume +
+    # for the container_tools cache, look up the PVC name.  The actual volume +
     # volumeMount are added per-pod inside _create_resource_thread (so that
     # each pod can have its own subPath).
-    image_builder_config = provider_config.get('image_builder_config')
-    image_builder_pvc_name: Optional[str] = None
-    if image_builder_config and image_builder_config.get('volume'):
-        builder_vol_name = image_builder_config['volume']
+    container_tools_config = provider_config.get('container_tools_config')
+    container_tools_pvc_name: Optional[str] = None
+    if container_tools_config and container_tools_config.get('volume'):
+        builder_vol_name = container_tools_config['volume']
         vol_record = global_user_state.get_volume_by_name(builder_vol_name)
         if vol_record is None:
             raise exceptions.VolumeNotFoundError(
                 f'Image-builder cache volume '
                 f'{builder_vol_name!r} not found.')
-        image_builder_pvc_name = vol_record['handle'].name_on_cloud
+        container_tools_pvc_name = vol_record['handle'].name_on_cloud
 
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
@@ -1255,11 +1255,11 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['labels']['component'] = pod_name
 
         # Inject cache volume + volumeMount for the image-builder container.
-        if image_builder_config:
-            kubernetes_utils.inject_image_builder_cache_volume(
+        if container_tools_config:
+            kubernetes_utils.inject_container_tools_cache_volume(
                 pod_spec=pod_spec_copy,
-                image_builder_config=image_builder_config,
-                pvc_name=image_builder_pvc_name,
+                container_tools_config=container_tools_config,
+                pvc_name=container_tools_pvc_name,
                 context=context,
                 namespace=namespace,
             )

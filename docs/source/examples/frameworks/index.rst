@@ -12,4 +12,4 @@ Frameworks
    MLFlow <https://nebius.com/blog/posts/orchestrating-llm-fine-tuning-k8s-skypilot-mlflow>
    MPI <mpi>
    Spyder IDE <spyder>
-   Container Runtimes (DinD / BuildKit) <image_builder>
+   Container Tools (DinD / BuildKit) <container_tools>
