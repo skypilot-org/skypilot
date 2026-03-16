@@ -569,7 +569,7 @@ It is automatically launched when the first managed job is submitted, and it is 
 Thus, **no user action is needed** to manage its lifecycle.
 
 .. note::
-  If you are using a SkyPilot API server, you can run the controller within the same pod as your API server by enabling :ref:`consolidation mode <jobs-consolidation-mode>`.
+  For deploy-mode API servers (Helm, Docker, or ``sky api start --deploy``), the jobs controller runs within the API server by default via :ref:`consolidation mode <jobs-consolidation-mode>`, so no separate VM or pod is created. To use a separate controller cluster instead, explicitly set ``consolidation_mode: false`` in the :ref:`config <config-yaml-jobs-controller-consolidation-mode>`.
 
 You can see the controller with :code:`sky status -u` and refresh its status by using the :code:`-r/--refresh` flag.
 
@@ -586,6 +586,9 @@ To adjust the size of the jobs controller instance, see :ref:`jobs-controller-cu
 
 High availability controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+  High availability mode applies to separate jobs controller clusters only. When using :ref:`consolidation mode <jobs-consolidation-mode>` (the default for deploy-mode API servers), the jobs controller inherits the resilience of the API server deployment (e.g., Kubernetes Deployment restarts, persistent database). High availability mode is not needed in that case.
 
 High availability mode ensures the controller for Managed Jobs remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
 
@@ -615,6 +618,9 @@ Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that
 
 To use long-lived static credentials for the jobs controller, just make sure the right credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller. **If you're already using local credentials that don't expire, no action is needed.**
 
+.. tip::
+  When using :ref:`consolidation mode <jobs-consolidation-mode>` (the default for deploy-mode API servers), the jobs controller shares the API server's credentials directly. No separate credential upload is needed.
+
 To set up credentials:
 
 - **AWS**: :ref:`Create a dedicated SkyPilot IAM user <dedicated-aws-user>` and use a static ``~/.aws/credentials`` file.
@@ -625,6 +631,9 @@ To set up credentials:
 
 Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+  When using :ref:`consolidation mode <jobs-consolidation-mode>` (the default for deploy-mode API servers), the jobs controller runs within the API server and these resource settings are ignored. To tune resources in consolidation mode, adjust the API server's resources instead. See :ref:`sky-api-server-resources-tuning`.
 
 You may want to customize the jobs controller resources for several reasons:
 
@@ -700,6 +709,9 @@ The next time you use :code:`sky jobs launch`, a new controller will be created 
 
 Best practices for scaling up the jobs controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. note::
+  When using :ref:`consolidation mode <jobs-consolidation-mode>` (the default for deploy-mode API servers), the limits below are governed by the API server's resources. See :ref:`sky-api-server-resources-tuning` for how to tune them.
 
 .. tip::
   For managed jobs, it's highly recommended to use :ref:`long-lived credentials for cloud authentication <managed-jobs-creds>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
