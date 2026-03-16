@@ -1,7 +1,6 @@
 """Kubernetes instance provisioning."""
 import copy
 import datetime
-import hashlib
 import json
 import re
 import sys
@@ -1256,85 +1255,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['labels']['component'] = pod_name
 
         # Inject cache volume + volumeMount for the image-builder container.
-        # When a SkyPilot PVC is configured, each pod gets its own subPath.
-        # Otherwise, add an emptyDir so the builder avoids writing to the
-        # container overlay (nested overlayfs causes perf/stability issues
-        # for DinD).
         if image_builder_config:
-            runtime_type = image_builder_config['type']
-            defaults = kubernetes_utils.get_image_builder_defaults(runtime_type)
-            image_builder_ctr_name = ('dind' if runtime_type == 'dind' else
-                                      'buildkitd')
-            cache_vol_name = defaults['cache_vol_name']
-
-            # Check if the user already mounted a volume at the cache path
-            # via pod_config (e.g. manual emptyDir or hostPath).
-            user_already_mounted = False
-            for ctr in pod_spec_copy['spec'].get('containers', []):
-                if ctr['name'] == image_builder_ctr_name:
-                    for vm in ctr.get('volumeMounts', []):
-                        if vm.get('mountPath') == defaults['cache_mount']:
-                            user_already_mounted = True
-                            break
-                    break
-
-            if not user_already_mounted:
-                if image_builder_pvc_name:
-                    # PVC path: per-pod subPath for isolation.
-                    # For rootless buildkitd (uid/gid 1000), set fsGroup so
-                    # the PVC mount is writable.  Only done here (not in
-                    # the static template) to avoid affecting ray-node when
-                    # no PVC is used.
-                    if runtime_type == 'buildkit':
-                        pod_sec = pod_spec_copy['spec'].setdefault(
-                            'securityContext', {})
-                        pod_sec.setdefault('fsGroup', 1000)
-                        pod_sec.setdefault('fsGroupChangePolicy',
-                                           'OnRootMismatch')
-                    prefix = ('var_lib_docker'
-                              if runtime_type == 'dind' else 'buildkit_cache')
-                    current_pod_name = pod_spec_copy['metadata']['name']
-                    hash_key = f'{context}:{namespace}:{current_pod_name}'
-                    sub_path = (
-                        f'{prefix}_'
-                        f'{hashlib.sha256(hash_key.encode()).hexdigest()[:12]}')
-                    # Reuse an existing volume entry for this PVC if one
-                    # already exists (avoids duplicate spec.volumes entries).
-                    existing_vol = next(
-                        (v['name']
-                         for v in pod_spec_copy['spec'].get('volumes', [])
-                         if v.get('persistentVolumeClaim', {}).get('claimName')
-                         == image_builder_pvc_name), None)
-                    if existing_vol:
-                        vol_name = existing_vol
-                    else:
-                        vol_name = cache_vol_name
-                        pod_spec_copy['spec'].setdefault('volumes', []).append({
-                            'name': vol_name,
-                            'persistentVolumeClaim': {
-                                'claimName': image_builder_pvc_name
-                            },
-                        })
-                    for ctr in pod_spec_copy['spec'].get('containers', []):
-                        if ctr['name'] == image_builder_ctr_name:
-                            ctr.setdefault('volumeMounts', []).append({
-                                'name': vol_name,
-                                'mountPath': defaults['cache_mount'],
-                                'subPath': sub_path,
-                            })
-                else:
-                    # No PVC: add an emptyDir so the builder doesn't write
-                    # to the container overlay layer.
-                    pod_spec_copy['spec'].setdefault('volumes', []).append({
-                        'name': cache_vol_name,
-                        'emptyDir': {},
-                    })
-                    for ctr in pod_spec_copy['spec'].get('containers', []):
-                        if ctr['name'] == image_builder_ctr_name:
-                            ctr.setdefault('volumeMounts', []).append({
-                                'name': cache_vol_name,
-                                'mountPath': defaults['cache_mount'],
-                            })
+            kubernetes_utils.inject_image_builder_cache_volume(
+                pod_spec=pod_spec_copy,
+                image_builder_config=image_builder_config,
+                pvc_name=image_builder_pvc_name,
+                context=context,
+                namespace=namespace,
+            )
 
         # We need to keep the following fields in the pod spec to be same for
         # head and worker pods.

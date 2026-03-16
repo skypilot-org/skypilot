@@ -2922,6 +2922,98 @@ def get_image_builder_defaults(image_builder_type: str) -> Dict[str, str]:
     return dict(defaults)
 
 
+def inject_image_builder_cache_volume(
+    pod_spec: Dict[str, Any],
+    image_builder_config: Dict[str, Any],
+    pvc_name: Optional[str],
+    context: Optional[str],
+    namespace: str,
+) -> None:
+    """Inject a cache volume + volumeMount into the image-builder container.
+
+    Mutates *pod_spec* in place.
+
+    * If *pvc_name* is set, a PVC-backed volume with a per-pod ``subPath``
+      is added (for persistent cache).  For BuildKit the pod-level
+      ``securityContext.fsGroup`` is set so the rootless daemon (uid 1000)
+      can write to the PVC.
+    * Otherwise an ``emptyDir`` is added so the builder avoids writing to
+      the container overlay (nested overlayfs causes perf/stability issues
+      for DinD).
+    * If the user already mounted something at the cache path via
+      ``pod_config``, this function is a no-op.
+    """
+    runtime_type = image_builder_config['type']
+    defaults = _IMAGE_BUILDER_DEFAULTS[runtime_type]
+    ctr_name = 'dind' if runtime_type == 'dind' else 'buildkitd'
+    cache_vol_name = defaults['cache_vol_name']
+    cache_mount = defaults['cache_mount']
+
+    # Check if the user already mounted a volume at the cache path
+    # via pod_config (e.g. manual emptyDir or hostPath).
+    for ctr in pod_spec['spec'].get('containers', []):
+        if ctr['name'] == ctr_name:
+            for vm in ctr.get('volumeMounts', []):
+                if vm.get('mountPath') == cache_mount:
+                    return  # User-provided mount takes precedence.
+            break
+
+    if pvc_name:
+        # PVC path: per-pod subPath for isolation.
+        # For rootless buildkitd (uid/gid 1000), set fsGroup so the PVC
+        # mount is writable.
+        if runtime_type == 'buildkit':
+            pod_sec = pod_spec['spec'].setdefault('securityContext', {})
+            pod_sec.setdefault('fsGroup', 1000)
+            pod_sec.setdefault('fsGroupChangePolicy', 'OnRootMismatch')
+
+        prefix = ('var_lib_docker'
+                  if runtime_type == 'dind' else 'buildkit_cache')
+        pod_name = pod_spec['metadata']['name']
+        hash_key = f'{context or ""}:{namespace}:{pod_name}'
+        sub_path = (f'{prefix}_'
+                    f'{hashlib.sha256(hash_key.encode()).hexdigest()[:12]}')
+
+        # Reuse an existing volume entry for this PVC if one already exists
+        # (avoids duplicate spec.volumes entries).
+        existing_vol = next((
+            v['name']
+            for v in pod_spec['spec'].get('volumes', [])
+            if v.get('persistentVolumeClaim', {}).get('claimName') == pvc_name),
+                            None)
+        if existing_vol:
+            vol_name = existing_vol
+        else:
+            vol_name = cache_vol_name
+            pod_spec['spec'].setdefault('volumes', []).append({
+                'name': vol_name,
+                'persistentVolumeClaim': {
+                    'claimName': pvc_name
+                },
+            })
+
+        for ctr in pod_spec['spec'].get('containers', []):
+            if ctr['name'] == ctr_name:
+                ctr.setdefault('volumeMounts', []).append({
+                    'name': vol_name,
+                    'mountPath': cache_mount,
+                    'subPath': sub_path,
+                })
+    else:
+        # No PVC: add an emptyDir so the builder doesn't write to the
+        # container overlay layer.
+        pod_spec['spec'].setdefault('volumes', []).append({
+            'name': cache_vol_name,
+            'emptyDir': {},
+        })
+        for ctr in pod_spec['spec'].get('containers', []):
+            if ctr['name'] == ctr_name:
+                ctr.setdefault('volumeMounts', []).append({
+                    'name': cache_vol_name,
+                    'mountPath': cache_mount,
+                })
+
+
 def _image_builder_to_pod_config(
         image_builder_cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Translate a ``kubernetes.image_builder`` config into a pod_config fragment.

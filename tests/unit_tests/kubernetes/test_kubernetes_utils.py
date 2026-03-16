@@ -9,6 +9,7 @@ import tempfile
 from typing import Optional
 import unittest
 from unittest import mock
+from unittest.mock import call
 from unittest.mock import patch
 
 import kubernetes
@@ -1423,18 +1424,33 @@ def test_combine_pod_config_fields_ssh_cloud():
 
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = pod_config_for_context
+
+        def _side_effect_ssh(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return pod_config_for_context
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_ssh
         result = utils.combine_pod_config_fields(cluster_yaml_obj,
                                                  cluster_config_overrides,
                                                  cloud=ssh_cloud,
                                                  context=ssh_context)
 
         # Verify that get_effective_region_config was called with 'ssh' cloud
-        # and context without the "ssh-" prefix
-        mock_get_config.assert_called_once_with(cloud='ssh',
-                                                region='my-cluster',
-                                                keys=('pod_config',),
-                                                default_value={})
+        # and context without the "ssh-" prefix, once for image_builder and
+        # once for pod_config.
+        assert mock_get_config.call_count == 2
+        mock_get_config.assert_has_calls([
+            call(cloud='ssh',
+                 region='my-cluster',
+                 keys=('pod_config',),
+                 default_value={}),
+            call(cloud='ssh',
+                 region='my-cluster',
+                 keys=('image_builder',),
+                 default_value=None),
+        ],
+                                         any_order=False)
 
         # Verify the pod config was merged
         node_config = result['available_node_types']['ray_head_default'][
@@ -1480,18 +1496,33 @@ def test_combine_pod_config_fields_kubernetes_cloud():
 
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = pod_config_for_context
+
+        def _side_effect_k8s(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return pod_config_for_context
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_k8s
         result = utils.combine_pod_config_fields(cluster_yaml_obj,
                                                  cluster_config_overrides,
                                                  cloud=k8s_cloud,
                                                  context=k8s_context)
 
-        # Verify that get_effective_region_config was called with 'kubernetes' cloud
-        # and the context as-is
-        mock_get_config.assert_called_once_with(cloud='kubernetes',
-                                                region=k8s_context,
-                                                keys=('pod_config',),
-                                                default_value={})
+        # Verify that get_effective_region_config was called with 'kubernetes'
+        # cloud and the context as-is, once for image_builder and once for
+        # pod_config.
+        assert mock_get_config.call_count == 2
+        mock_get_config.assert_has_calls([
+            call(cloud='kubernetes',
+                 region=k8s_context,
+                 keys=('pod_config',),
+                 default_value={}),
+            call(cloud='kubernetes',
+                 region=k8s_context,
+                 keys=('image_builder',),
+                 default_value=None),
+        ],
+                                         any_order=False)
 
         # Verify the pod config was merged
         node_config = result['available_node_types']['ray_head_default'][
@@ -1950,7 +1981,13 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
     # Test SSH cloud gets SSH config
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = ssh_pod_config
+
+        def _side_effect_isolation_ssh(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return ssh_pod_config
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_isolation_ssh
 
         result = utils.combine_pod_config_fields(cluster_yaml_obj, {},
                                                  cloud=ssh_cloud,
@@ -1965,15 +2002,29 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
             "Kubernetes config leaked to SSH!"
 
         # Verify get_effective_region_config was called with 'ssh'
-        mock_get_config.assert_called_with(cloud='ssh',
-                                           region='test-cluster',
-                                           keys=('pod_config',),
-                                           default_value={})
+        assert mock_get_config.call_count == 2
+        mock_get_config.assert_has_calls([
+            call(cloud='ssh',
+                 region='test-cluster',
+                 keys=('pod_config',),
+                 default_value={}),
+            call(cloud='ssh',
+                 region='test-cluster',
+                 keys=('image_builder',),
+                 default_value=None),
+        ],
+                                         any_order=False)
 
     # Test Kubernetes cloud gets Kubernetes config
     with patch('sky.skypilot_config.get_effective_region_config'
               ) as mock_get_config:
-        mock_get_config.return_value = k8s_pod_config
+
+        def _side_effect_isolation_k8s(cloud, region, keys, default_value):
+            if keys == ('pod_config',):
+                return k8s_pod_config
+            return default_value
+
+        mock_get_config.side_effect = _side_effect_isolation_k8s
 
         result = utils.combine_pod_config_fields(cluster_yaml_obj, {},
                                                  cloud=k8s_cloud,
@@ -1988,10 +2039,18 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
             "SSH config leaked to Kubernetes!"
 
         # Verify get_effective_region_config was called with 'kubernetes'
-        mock_get_config.assert_called_with(cloud='kubernetes',
-                                           region=k8s_context,
-                                           keys=('pod_config',),
-                                           default_value={})
+        assert mock_get_config.call_count == 2
+        mock_get_config.assert_has_calls([
+            call(cloud='kubernetes',
+                 region=k8s_context,
+                 keys=('pod_config',),
+                 default_value={}),
+            call(cloud='kubernetes',
+                 region=k8s_context,
+                 keys=('image_builder',),
+                 default_value=None),
+        ],
+                                         any_order=False)
 
 
 def test_hardcoded_kubernetes_functions_not_used_during_ssh_provisioning():
@@ -2925,3 +2984,534 @@ class TestGetHandledTaintKeys(unittest.TestCase):
             assert 'custom.io/gpu' in keys
             assert utils.TPU_RESOURCE_KEY in keys
             assert 'nvidia.com/gpu' in keys
+
+
+# ---------------------------------------------------------------------------
+# Tests for kubernetes.image_builder shorthand config
+# ---------------------------------------------------------------------------
+
+_BASE_CLUSTER_YAML = {
+    'provider': {
+        'type': 'external',
+        'module': 'sky.provision.kubernetes',
+        'namespace': 'default',
+    },
+    'available_node_types': {
+        'ray_head_default': {
+            'node_config': {
+                'metadata': {
+                    'name': 'test-cluster-head',
+                    'namespace': 'default',
+                    'labels': {},
+                },
+                'spec': {
+                    'containers': [{
+                        'name': 'ray-node',
+                        'image': 'skypilot:latest',
+                    }],
+                },
+            }
+        }
+    },
+}
+
+
+class TestImageBuilderToPodConfig(unittest.TestCase):
+    """Tests for _image_builder_to_pod_config()."""
+
+    def _get_result(self, image_builder_type):
+        import copy
+        cfg = {'type': image_builder_type}
+        return utils._image_builder_to_pod_config(cfg)
+
+    # ---- DinD ----
+
+    def test_dind_has_ray_node_env(self):
+        pod_cfg = self._get_result('dind')
+        containers = pod_cfg['spec']['containers']
+        ray = next(c for c in containers if c['name'] == 'ray-node')
+        env_names = [e['name'] for e in ray['env']]
+        assert 'DOCKER_HOST' in env_names
+
+    def test_dind_image_builder_is_privileged(self):
+        pod_cfg = self._get_result('dind')
+        containers = pod_cfg['spec']['containers']
+        dind = next(c for c in containers if c['name'] == 'dind')
+        assert dind['securityContext']['privileged'] is True
+
+    def test_dind_no_cache_volume_by_default(self):
+        """No cache volume is injected; PVC is added later in _create_pods."""
+        pod_cfg = self._get_result('dind')
+        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
+        assert 'dind-storage' not in volume_names
+
+    # ---- BuildKit ----
+
+    def test_buildkit_has_ray_node_env(self):
+        pod_cfg = self._get_result('buildkit')
+        containers = pod_cfg['spec']['containers']
+        ray = next(c for c in containers if c['name'] == 'ray-node')
+        env_names = [e['name'] for e in ray['env']]
+        assert 'BUILDKIT_HOST' in env_names
+
+    def test_buildkit_image_builder_runs_as_user_1000(self):
+        pod_cfg = self._get_result('buildkit')
+        containers = pod_cfg['spec']['containers']
+        bkd = next(c for c in containers if c['name'] == 'buildkitd')
+        assert bkd['securityContext']['runAsUser'] == 1000
+        assert bkd['securityContext']['runAsGroup'] == 1000
+
+    def test_buildkit_no_cache_volume_by_default(self):
+        """No cache volume is injected; PVC is added later in _create_pods."""
+        pod_cfg = self._get_result('buildkit')
+        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
+        assert 'buildkit-cache' not in volume_names
+
+    # ---- get_image_builder_defaults ----
+
+    def test_get_defaults_returns_valid_dind(self):
+        defaults = utils.get_image_builder_defaults('dind')
+        assert 'image' in defaults
+        assert 'cache_vol_name' in defaults
+        assert 'cache_mount' in defaults
+
+    def test_get_defaults_returns_valid_buildkit(self):
+        defaults = utils.get_image_builder_defaults('buildkit')
+        assert 'image' in defaults
+        assert defaults['cache_mount'] == '/home/user/.local/share/buildkit'
+
+    def test_get_defaults_unknown_type_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            utils.get_image_builder_defaults('unknown')
+        assert 'Unknown image_builder type' in str(ctx.exception)
+        assert "'unknown'" in str(ctx.exception)
+
+
+class TestCombinePodConfigFieldsWithImageBuilder(unittest.TestCase):
+    """Tests for combine_pod_config_fields() with image_builder config."""
+
+    def _base_yaml(self):
+        import copy
+        return copy.deepcopy(_BASE_CLUSTER_YAML)
+
+    def test_dind_image_builder_injected_from_global_config(self):
+        """ImageBuilder containers and volumes appear when global image_builder config set."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('image_builder',):
+                return {'type': 'dind'}
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        container_names = [c['name'] for c in node_cfg['spec']['containers']]
+        assert 'dind' in container_names
+        assert 'ray-node' in container_names
+        volume_names = [v['name'] for v in node_cfg['spec']['volumes']]
+        assert 'docker-sock-dir' in volume_names
+        # No cache volume by default; PVC is injected later in _create_pods.
+        assert 'dind-storage' not in volume_names
+
+    def test_buildkit_image_builder_injected_from_global_config(self):
+        """BuildKit image_builder is injected correctly."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('image_builder',):
+                return {'type': 'buildkit'}
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        container_names = [c['name'] for c in node_cfg['spec']['containers']]
+        assert 'buildkitd' in container_names
+        volume_names = [v['name'] for v in node_cfg['spec']['volumes']]
+        assert 'buildkit-sock' in volume_names
+        # No cache volume by default; PVC is injected later in _create_pods.
+        assert 'buildkit-cache' not in volume_names
+
+    def test_task_image_builder_overrides_global(self):
+        """Task-level image_builder config fully replaces global image_builder config."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('image_builder',):
+                # Global says dind
+                return {'type': 'dind'}
+            return default_value
+
+        # Task overrides to buildkit
+        overrides = {'kubernetes': {'image_builder': {'type': 'buildkit'}}}
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides=overrides,
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        container_names = [c['name'] for c in node_cfg['spec']['containers']]
+        assert 'buildkitd' in container_names
+        assert 'dind' not in container_names
+
+    def test_pod_config_overrides_image_builder(self):
+        """Explicit pod_config takes precedence over auto-injected image_builder."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('image_builder',):
+                return {'type': 'dind'}
+            if keys == ('pod_config',):
+                # User overrides the dind image_builder image
+                return {
+                    'spec': {
+                        'containers': [{
+                            'name': 'dind',
+                            'image': 'docker:custom-image',
+                        }]
+                    }
+                }
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        dind = next(
+            c for c in node_cfg['spec']['containers'] if c['name'] == 'dind')
+        assert dind['image'] == 'docker:custom-image'
+
+    def test_image_builder_config_stored_in_provider(self):
+        """Effective image_builder config is persisted into provider for Phase 2."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            if keys == ('image_builder',):
+                return {'type': 'dind', 'volume': 'my-cache'}
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        assert result['provider']['image_builder_config'] == {
+            'type': 'dind',
+            'volume': 'my-cache'
+        }
+
+    def test_no_image_builder_config_no_injection(self):
+        """No image_builder containers when image_builder config is absent."""
+        cluster_yaml = self._base_yaml()
+
+        def mock_get_config(cloud, region, keys, default_value=None):
+            # image_builder absent; pod_config returns empty dict
+            return default_value
+
+        with patch('sky.skypilot_config.get_effective_region_config',
+                   side_effect=mock_get_config):
+            from sky import clouds as sky_clouds
+            result = utils.combine_pod_config_fields(
+                cluster_yaml,
+                cluster_config_overrides={},
+                cloud=sky_clouds.Kubernetes(),
+                context='test-ctx')
+
+        node_cfg = result['available_node_types']['ray_head_default'][
+            'node_config']
+        container_names = [c['name'] for c in node_cfg['spec']['containers']]
+        assert 'dind' not in container_names
+        assert 'buildkitd' not in container_names
+
+
+class TestInjectImageBuilderCacheVolume(unittest.TestCase):
+    """Tests for inject_image_builder_cache_volume()."""
+
+    def _make_pod_spec(self,
+                       ctr_name='dind',
+                       existing_mounts=None,
+                       existing_volumes=None):
+        """Build a minimal pod spec with one image-builder container."""
+        ctr = {'name': ctr_name}
+        if existing_mounts is not None:
+            ctr['volumeMounts'] = existing_mounts
+        spec: dict = {
+            'metadata': {
+                'name': 'test-pod'
+            },
+            'spec': {
+                'containers': [
+                    {
+                        'name': 'ray-node'
+                    },
+                    ctr,
+                ],
+            },
+        }
+        if existing_volumes is not None:
+            spec['spec']['volumes'] = existing_volumes
+        return spec
+
+    # ---- DinD: emptyDir (no PVC) ----
+
+    def test_dind_no_pvc_adds_emptydir(self):
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name=None,
+                                                context='ctx',
+                                                namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert len(vols) == 1
+        assert vols[0]['name'] == 'dind-storage'
+        assert vols[0]['emptyDir'] == {}
+
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        assert len(dind_ctr['volumeMounts']) == 1
+        assert dind_ctr['volumeMounts'][0]['mountPath'] == '/var/lib/docker'
+        assert 'subPath' not in dind_ctr['volumeMounts'][0]
+
+    # ---- BuildKit: emptyDir (no PVC) ----
+
+    def test_buildkit_no_pvc_adds_emptydir(self):
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_image_builder_cache_volume(pod, {'type': 'buildkit'},
+                                                pvc_name=None,
+                                                context='ctx',
+                                                namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert len(vols) == 1
+        assert vols[0]['name'] == 'buildkit-cache'
+        assert vols[0]['emptyDir'] == {}
+
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        assert bk_ctr['volumeMounts'][0]['mountPath'] == (
+            '/home/user/.local/share/buildkit')
+
+    # ---- DinD: PVC with subPath ----
+
+    def test_dind_pvc_adds_volume_and_subpath(self):
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name='my-pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert len(vols) == 1
+        assert vols[0]['persistentVolumeClaim']['claimName'] == 'my-pvc'
+
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        vm = dind_ctr['volumeMounts'][0]
+        assert vm['mountPath'] == '/var/lib/docker'
+        assert vm['subPath'].startswith('var_lib_docker_')
+        assert len(vm['subPath']) == len('var_lib_docker_') + 12
+
+    def test_dind_pvc_no_fsgroup(self):
+        """DinD runs privileged — no fsGroup needed."""
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name='my-pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        assert 'securityContext' not in pod['spec']
+
+    # ---- BuildKit: PVC with subPath + fsGroup ----
+
+    def test_buildkit_pvc_adds_volume_and_fsgroup(self):
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        utils.inject_image_builder_cache_volume(pod, {'type': 'buildkit'},
+                                                pvc_name='my-pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        vols = pod['spec']['volumes']
+        assert vols[0]['persistentVolumeClaim']['claimName'] == 'my-pvc'
+
+        bk_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'buildkitd')
+        vm = bk_ctr['volumeMounts'][0]
+        assert vm['mountPath'] == '/home/user/.local/share/buildkit'
+        assert vm['subPath'].startswith('buildkit_cache_')
+
+        sec = pod['spec']['securityContext']
+        assert sec['fsGroup'] == 1000
+        assert sec['fsGroupChangePolicy'] == 'OnRootMismatch'
+
+    def test_buildkit_pvc_preserves_existing_fsgroup(self):
+        """If user already set fsGroup, don't override it."""
+        pod = self._make_pod_spec(ctr_name='buildkitd')
+        pod['spec']['securityContext'] = {'fsGroup': 2000}
+        utils.inject_image_builder_cache_volume(pod, {'type': 'buildkit'},
+                                                pvc_name='my-pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        assert pod['spec']['securityContext']['fsGroup'] == 2000
+
+    # ---- subPath hashing ----
+
+    def test_subpath_varies_by_pod_name(self):
+        pod1 = self._make_pod_spec(ctr_name='dind')
+        pod1['metadata']['name'] = 'pod-1'
+        pod2 = self._make_pod_spec(ctr_name='dind')
+        pod2['metadata']['name'] = 'pod-2'
+
+        utils.inject_image_builder_cache_volume(pod1, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context='ctx',
+                                                namespace='ns')
+        utils.inject_image_builder_cache_volume(pod2, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        sp1 = pod1['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        sp2 = pod2['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        assert sp1 != sp2
+
+    def test_subpath_varies_by_context_and_namespace(self):
+        pod_a = self._make_pod_spec(ctr_name='dind')
+        pod_b = self._make_pod_spec(ctr_name='dind')
+
+        utils.inject_image_builder_cache_volume(pod_a, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context='ctx-a',
+                                                namespace='ns')
+        utils.inject_image_builder_cache_volume(pod_b, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context='ctx-b',
+                                                namespace='ns')
+
+        sp_a = pod_a['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        sp_b = pod_b['spec']['containers'][1]['volumeMounts'][0]['subPath']
+        assert sp_a != sp_b
+
+    # ---- User-provided mount: no-op ----
+
+    def test_noop_when_user_already_mounted_cache_path(self):
+        """If user already has a volumeMount at the cache path, skip."""
+        existing = [{'name': 'user-vol', 'mountPath': '/var/lib/docker'}]
+        pod = self._make_pod_spec(ctr_name='dind', existing_mounts=existing)
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        # No new volumes or mounts added.
+        assert 'volumes' not in pod['spec']
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        assert len(dind_ctr['volumeMounts']) == 1
+        assert dind_ctr['volumeMounts'][0]['name'] == 'user-vol'
+
+    # ---- Duplicate PVC reuse ----
+
+    def test_reuses_existing_pvc_volume_entry(self):
+        """If the same PVC is already in spec.volumes, reuse it."""
+        existing_vols = [{
+            'name': 'task-data',
+            'persistentVolumeClaim': {
+                'claimName': 'shared-pvc'
+            },
+        }]
+        pod = self._make_pod_spec(ctr_name='dind',
+                                  existing_volumes=existing_vols)
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name='shared-pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        # Should NOT add a second volume entry.
+        assert len(pod['spec']['volumes']) == 1
+        assert pod['spec']['volumes'][0]['name'] == 'task-data'
+
+        # The volumeMount should reference the existing volume name.
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        assert dind_ctr['volumeMounts'][0]['name'] == 'task-data'
+
+    def test_adds_new_volume_when_pvc_differs(self):
+        """Different PVC → new volume entry added."""
+        existing_vols = [{
+            'name': 'other-vol',
+            'persistentVolumeClaim': {
+                'claimName': 'other-pvc'
+            },
+        }]
+        pod = self._make_pod_spec(ctr_name='dind',
+                                  existing_volumes=existing_vols)
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name='cache-pvc',
+                                                context='ctx',
+                                                namespace='ns')
+
+        assert len(pod['spec']['volumes']) == 2
+        pvc_names = [
+            v.get('persistentVolumeClaim', {}).get('claimName')
+            for v in pod['spec']['volumes']
+        ]
+        assert 'cache-pvc' in pvc_names
+
+    # ---- context=None ----
+
+    def test_pvc_subpath_with_none_context(self):
+        """context=None should not crash; subPath uses empty string."""
+        pod = self._make_pod_spec(ctr_name='dind')
+        utils.inject_image_builder_cache_volume(pod, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context=None,
+                                                namespace='ns')
+
+        dind_ctr = next(
+            c for c in pod['spec']['containers'] if c['name'] == 'dind')
+        vm = dind_ctr['volumeMounts'][0]
+        assert vm['subPath'].startswith('var_lib_docker_')
+        # Verify a different context produces a different subPath.
+        pod2 = self._make_pod_spec(ctr_name='dind')
+        utils.inject_image_builder_cache_volume(pod2, {'type': 'dind'},
+                                                pvc_name='pvc',
+                                                context='real-ctx',
+                                                namespace='ns')
+        vm2 = next(c for c in pod2['spec']['containers']
+                   if c['name'] == 'dind')['volumeMounts'][0]
+        assert vm['subPath'] != vm2['subPath']

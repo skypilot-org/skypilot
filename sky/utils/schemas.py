@@ -1359,7 +1359,7 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
                 'type': 'string',
                 'enum': ['dind', 'buildkit'],
             },
-            # SkyPilot volume name (sky volume up) for the image_builder cache.
+            # SkyPilot volume name for the image_builder cache.
             # Omit to use an ephemeral emptyDir volume instead.
             'volume': {
                 'type': 'string',

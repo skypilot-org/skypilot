@@ -744,6 +744,7 @@ def make_mock_resource(cloud=None, region=None, zone=None):
             self.region = region
             self.zone = zone
             self.priority = 0
+            self.cluster_config_overrides = {}
 
         def copy(self, **override):
             # Return a new instance with overridden attributes
@@ -1295,3 +1296,186 @@ secrets:
             assert value.get_secret_value() == expected_secrets[key]
     finally:
         os.unlink(yaml_path)
+
+
+# ---------- image_builder volume in resolve_and_validate_volumes ----------
+
+
+def test_image_builder_volume_resolved_from_global_config():
+    """image_builder volume is resolved and included in validation."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'task-vol'}
+    t.resources = [make_mock_resource()]
+
+    def get_vol_by_name(name):
+        if name == 'task-vol':
+            return {
+                'handle': make_mock_volume_config(name='task-vol', cloud='aws')
+            }
+        if name == 'builder-cache':
+            return {
+                'handle': make_mock_volume_config(name='builder-cache',
+                                                  cloud='aws')
+            }
+        return None
+
+    with mock.patch('sky.global_user_state.get_volume_by_name',
+                    side_effect=get_vol_by_name), \
+         mock.patch('sky.skypilot_config.get_nested',
+                    return_value={'type': 'dind', 'volume': 'builder-cache'}):
+        t.resolve_and_validate_volumes()
+        # task volumes only — image_builder vol must not appear
+        assert len(t.volume_mounts) == 1
+        assert t.volume_mounts[0].volume_name == 'task-vol'
+
+
+def test_image_builder_volume_task_override():
+    """Line 883: task-level image_builder config overrides global."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'task-vol'}
+    res = make_mock_resource()
+    res.cluster_config_overrides = {
+        'kubernetes': {
+            'image_builder': {
+                'type': 'buildkit',
+                'volume': 'task-builder-vol'
+            }
+        }
+    }
+    t.resources = [res]
+
+    def get_vol_by_name(name):
+        if name == 'task-vol':
+            return {
+                'handle': make_mock_volume_config(name='task-vol', cloud='aws')
+            }
+        if name == 'task-builder-vol':
+            return {
+                'handle': make_mock_volume_config(name='task-builder-vol',
+                                                  cloud='aws')
+            }
+        return None
+
+    # Global config says 'global-cache', but task override says
+    # 'task-builder-vol'.  The task override should win.
+    with mock.patch('sky.global_user_state.get_volume_by_name',
+                    side_effect=get_vol_by_name), \
+         mock.patch('sky.skypilot_config.get_nested',
+                    return_value={'type': 'dind', 'volume': 'global-cache'}):
+        t.resolve_and_validate_volumes()
+        # Should not raise — 'task-builder-vol' exists.
+        assert len(t.volume_mounts) == 1
+
+
+def test_image_builder_volume_not_found_is_ignored():
+    """VolumeNotFoundError for image_builder volume is silently
+    caught."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'task-vol'}
+    t.resources = [make_mock_resource()]
+
+    def get_vol_by_name(name):
+        if name == 'task-vol':
+            return {
+                'handle': make_mock_volume_config(name='task-vol', cloud='aws')
+            }
+        # 'missing-vol' not found
+        return None
+
+    with mock.patch('sky.global_user_state.get_volume_by_name',
+                    side_effect=get_vol_by_name), \
+         mock.patch('sky.skypilot_config.get_nested',
+                    return_value={'type': 'dind', 'volume': 'missing-vol'}):
+        # Should NOT raise even though image_builder vol doesn't exist.
+        t.resolve_and_validate_volumes()
+        assert len(t.volume_mounts) == 1
+
+
+def test_image_builder_volume_skip_if_already_in_task_volumes():
+    """Lines 889-891: image_builder volume that is already in task
+    volume_mounts is not resolved twice."""
+    t = task.Task()
+    # Task mounts the same volume as image_builder uses.
+    t._volumes = {'/mnt': 'shared-vol'}
+    t.resources = [make_mock_resource()]
+
+    with mock.patch('sky.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('sky.skypilot_config.get_nested',
+                    return_value={'type': 'dind', 'volume': 'shared-vol'}):
+        get_vol.return_value = {
+            'handle': make_mock_volume_config(name='shared-vol', cloud='aws')
+        }
+        t.resolve_and_validate_volumes()
+        # get_volume_by_name should be called only once (for the task volume),
+        # not a second time for image_builder since names match.
+        assert get_vol.call_count == 1
+
+
+def test_multinode_rwo_volume_raises():
+    """multi-node task with ReadWriteOnce volume raises."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'rwo-vol'}
+    t.resources = [make_mock_resource()]
+    t.num_nodes = 2
+
+    with mock.patch('sky.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('sky.skypilot_config.get_nested', return_value=None):
+        get_vol.return_value = {
+            'handle': make_mock_volume_config(
+                name='rwo-vol',
+                cloud='aws',
+                config={'access_mode': 'ReadWriteOnce'})
+        }
+        with pytest.raises(ValueError, match='ReadWriteOnce.*multi-node'):
+            t.resolve_and_validate_volumes()
+
+
+def test_multinode_rwo_image_builder_volume_raises():
+    """multi-node + image_builder vol with RWO raises."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'task-vol'}
+    t.resources = [make_mock_resource()]
+    t.num_nodes = 2
+
+    def get_vol_by_name(name):
+        if name == 'task-vol':
+            return {
+                'handle': make_mock_volume_config(
+                    name='task-vol',
+                    cloud='aws',
+                    config={'access_mode': 'ReadWriteMany'})
+            }
+        if name == 'builder-cache':
+            return {
+                'handle': make_mock_volume_config(
+                    name='builder-cache',
+                    cloud='aws',
+                    config={'access_mode': 'ReadWriteOnce'})
+            }
+        return None
+
+    with mock.patch('sky.global_user_state.get_volume_by_name',
+                    side_effect=get_vol_by_name), \
+         mock.patch('sky.skypilot_config.get_nested',
+                    return_value={'type': 'dind', 'volume': 'builder-cache'}):
+        with pytest.raises(ValueError, match='ReadWriteOnce.*multi-node'):
+            t.resolve_and_validate_volumes()
+
+
+def test_multinode_rwx_volume_passes():
+    """Multi-node with ReadWriteMany volume should pass."""
+    t = task.Task()
+    t._volumes = {'/mnt': 'rwx-vol'}
+    t.resources = [make_mock_resource()]
+    t.num_nodes = 2
+
+    with mock.patch('sky.global_user_state.get_volume_by_name') as get_vol, \
+         mock.patch('sky.skypilot_config.get_nested', return_value=None):
+        get_vol.return_value = {
+            'handle': make_mock_volume_config(
+                name='rwx-vol',
+                cloud='aws',
+                config={'access_mode': 'ReadWriteMany'})
+        }
+        t.resolve_and_validate_volumes()
+        assert len(t.volume_mounts) == 1

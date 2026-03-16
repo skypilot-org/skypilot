@@ -1266,8 +1266,14 @@ class TestKubernetesSecurityContext(unittest.TestCase):
             }
         }
 
-        # Set up mocks
-        mock_get_cloud_config_value.return_value = user_pod_config
+        # Set up mocks — only return the pod_config for the pod_config key;
+        # return default_value for other keys (e.g. image_builder).
+        def _side_effect(*args, **kwargs):
+            if kwargs.get('keys') == ('pod_config',):
+                return user_pod_config
+            return kwargs.get('default_value')
+
+        mock_get_cloud_config_value.side_effect = _side_effect
 
         # Call the combine_pod_config_fields function
         combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
@@ -1333,7 +1339,12 @@ class TestKubernetesSecurityContext(unittest.TestCase):
         }
 
         # Set up mocks
-        mock_get_cloud_config_value.return_value = user_pod_config
+        def _side_effect(*args, **kwargs):
+            if kwargs.get('keys') == ('pod_config',):
+                return user_pod_config
+            return kwargs.get('default_value')
+
+        mock_get_cloud_config_value.side_effect = _side_effect
 
         # Call the combine_pod_config_fields function
         combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
@@ -1425,7 +1436,12 @@ class TestKubernetesVolumeMerging(unittest.TestCase):
             }
         }
 
-        mock_get_cloud_config_value.return_value = user_pod_config
+        def _side_effect(*args, **kwargs):
+            if kwargs.get('keys') == ('pod_config',):
+                return user_pod_config
+            return kwargs.get('default_value')
+
+        mock_get_cloud_config_value.side_effect = _side_effect
 
         combined_yaml_obj = kubernetes_utils.combine_pod_config_fields(
             cluster_yaml_with_system_volumes, {}, None)
