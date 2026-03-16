@@ -3201,8 +3201,7 @@ def combine_pod_config_fields(
     if image_builder_cfg:
         image_builder_pod_cfg = _image_builder_to_pod_config(image_builder_cfg)
         config_utils.merge_k8s_configs(node_config, image_builder_pod_cfg)
-        # Persist effective image_builder config in provider so _create_pods() can
-        # perform Phase 2 (emptyDir → PVC substitution + subPath injection).
+        # Persist effective image_builder config in provider.
         if 'provider' in merged_cluster_yaml_obj:
             merged_cluster_yaml_obj['provider'][
                 'image_builder_config'] = image_builder_cfg
