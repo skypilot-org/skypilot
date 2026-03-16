@@ -6,6 +6,10 @@ High Availability Controller
 
 Overview
 --------
+
+.. note::
+  For deploy-mode API servers, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default for managed jobs. In consolidation mode, the jobs controller runs within the API server and inherits the resilience of the API server's Kubernetes Deployment (automatic restarts, persistent database). This page applies to deployments that use a **separate** controller cluster -- either because consolidation mode is explicitly disabled, or for the Sky Serve controller.
+
 By default, the controller for both Managed Jobs and Sky Serve runs as a single instance (either a VM or a Kubernetes Pod). If this instance fails due to node issues, pod crashes, or other unexpected events, the controller plane becomes unavailable, impacting service management capabilities until the controller is manually recovered or relaunched.
 
 To enhance resilience and ensure controller plane continuity, we offer a high availability mode for the controller, which automatically recovers from failures.
