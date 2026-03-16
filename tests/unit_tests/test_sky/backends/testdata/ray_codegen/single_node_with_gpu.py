@@ -118,7 +118,13 @@ class _ProcessingArgs:
         self.streaming_prefix = streaming_prefix
 
 def _get_context():
-    return context.get()
+    # The globals() guard is needed because this function is inlined into
+    # generated codegen scripts (sky_job_*) deployed to remote nodes, where
+    # 'context' may not be imported/defined.
+    if 'context' in globals():
+        return context.get()
+    else:
+        return None
 
 def _handle_io_stream(io_stream, out_stream, args: _ProcessingArgs):
     """Process the stream of a process."""
