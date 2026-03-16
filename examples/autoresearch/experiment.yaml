@@ -1,0 +1,49 @@
+resources:
+  accelerators: H100:1
+  use_spot: true
+
+workdir: .
+
+file_mounts:
+  /bucket:
+    source: s3://  # Replace with your S3 bucket, e.g. s3://my-autoresearch-bucket
+    mode: MOUNT
+
+envs:
+  EXPERIMENT_ID: baseline
+  EXPERIMENT_DESC: "baseline run"
+
+setup: |
+  pip install uv
+  uv sync
+  uv run prepare.py
+
+run: |
+  mkdir -p /bucket/status /bucket/logs
+
+  # Report running status
+  echo -e "${EXPERIMENT_ID}\trunning\t0.000000\t0.0\t${EXPERIMENT_DESC}" \
+    > /bucket/status/${EXPERIMENT_ID}.txt
+
+  # Run the experiment (5-min fixed budget)
+  uv run train.py > run.log 2>&1
+  EXIT_CODE=$?
+
+  if [ $EXIT_CODE -ne 0 ]; then
+    STATUS="crash"
+    VAL_BPB="0.000000"
+    MEMORY_GB="0.0"
+    tail -n 50 run.log > /bucket/logs/${EXPERIMENT_ID}_error.txt
+  else
+    STATUS="done"
+    VAL_BPB=$(grep "^val_bpb:" run.log | awk '{print $2}')
+    PEAK_VRAM=$(grep "^peak_vram_mb:" run.log | awk '{print $2}')
+    MEMORY_GB=$(echo "scale=1; ${PEAK_VRAM} / 1024" | bc)
+  fi
+
+  # Upload full log
+  cp run.log /bucket/logs/${EXPERIMENT_ID}.log
+
+  # Write final status
+  echo -e "${EXPERIMENT_ID}\t${STATUS}\t${VAL_BPB}\t${MEMORY_GB}\t${EXPERIMENT_DESC}" \
+    > /bucket/status/${EXPERIMENT_ID}.txt
