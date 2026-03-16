@@ -418,7 +418,7 @@ Example:
 
 Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
 
-Default: when unset, automatically enabled for deploy-mode API servers (``--deploy``) if no existing jobs controller clusters are found. Otherwise disabled. Changes require an API server restart to take effect.
+Default: when unset, automatically enabled for deploy-mode API servers (``--deploy``). Otherwise disabled. Changes require an API server restart to take effect.
 
 Example:
 

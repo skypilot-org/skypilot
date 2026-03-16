@@ -2935,14 +2935,15 @@ if __name__ == '__main__':
     logger.info('Initializing database engine')
     global_user_state.initialize_and_get_db()
     logger.info('Database engine initialized')
-    # Set up consolidation mode signal file. Needs global user state DB access
-    # to check for existing controller clusters.
-    managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
     # Initialize request db
     requests_lib.reset_db_and_logs()
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Set up consolidation mode signal file. Needs global user state DB access
+    # to check for existing controller clusters. Placed after user hash restore
+    # to avoid accidentally using the wrong server hash.
+    managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
     # Pre-load plugin RBAC rules before initializing permission service.
     # This ensures plugin RBAC rules are available when policies are created.
     logger.info('Pre-loading plugin RBAC rules')
