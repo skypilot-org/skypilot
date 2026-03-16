@@ -1,33 +1,35 @@
 # Parallel Autoresearch with SkyPilot
 
-Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using SkyPilot. A local coding agent submits experiments to multiple GPU clusters simultaneously and tracks results via a shared S3 bucket.
+Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). A local coding agent uses the skill to spin up VMs, submit experiments, and parallelize work across multiple GPU clusters as it sees fit.
 
 `program.md` preserves the original autoresearch rules (only edit `train.py`, fixed
-5-min budget, minimize `val_bpb`, simplicity criterion, never stop) and adds
-SkyPilot-based parallel submission and S3 coordination.
+5-min budget, minimize `val_bpb`, simplicity criterion, never stop) and delegates
+all infrastructure operations to the SkyPilot skill.
 
 ## Architecture
 
 ```
 Local Agent (Claude Code, Codex, etc.)
   |
-  |-- edits train.py with idea A --> sky launch -c gpu-a -d experiment.yaml
-  |-- edits train.py with idea B --> sky launch -c gpu-b -d experiment.yaml
-  |-- edits train.py with idea C --> sky exec gpu-a -d experiment.yaml  (queues behind A)
+  |-- uses the SkyPilot skill to:
+  |     - launch GPU clusters
+  |     - submit experiment jobs (from experiment.yaml)
+  |     - check job status and stream logs
+  |     - tear down idle clusters
   |
-  +-- polls s3://<your-bucket>/status/* and sky queue for results
+  |-- edits train.py with hypotheses
+  |-- polls s3://<your-bucket>/status/* for results
 ```
 
-- **Agent** runs locally, generates hypotheses, edits `train.py`, submits jobs in detached mode (`-d`)
-- **SkyPilot clusters** run the 5-min training experiments on cloud GPUs; jobs queue and pipeline automatically via the [job queue](https://docs.skypilot.co/en/latest/reference/job-queue.html)
-- **S3 bucket** mounted at `/bucket` on every VM via [SkyPilot storage](https://docs.skypilot.co/en/latest/reference/storage.html) -
-  experiments write status/logs as regular files, no AWS CLI needed on VMs
+- **Agent** runs locally, generates hypotheses, edits `train.py`
+- **SkyPilot skill** handles all infrastructure — the agent tells it what to do (launch a cluster, submit a job, check logs) and the skill translates that into the right SkyPilot commands
+- **S3 bucket** mounted at `/bucket` on every VM via [SkyPilot storage](https://docs.skypilot.co/en/latest/reference/storage.html) — experiments write status/logs as regular files
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `experiment.yaml` | SkyPilot task: runs one experiment, reports status to S3 |
+| `experiment.yaml` | SkyPilot task template: runs one experiment, reports status to S3 |
 | `program.md` | Agent instructions (give this to your coding agent) |
 
 ## Quick Start
@@ -46,9 +48,13 @@ cp /path/to/this/example/program.md .
 # 4. Prepare data
 pip install uv && uv sync && uv run prepare.py
 
-# 5. Tell your agent to start
+# 5. Install the SkyPilot skill for your agent
+#    See: https://docs.skypilot.co/en/latest/getting-started/skill.html
+
+# 6. Tell your agent to start
 #    "Read program.md and start running parallel experiments"
 ```
 
-If your agent has the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html)
-installed, it can set up SkyPilot automatically. Otherwise ensure `sky check` passes first.
+The SkyPilot skill handles installation, credential setup, and all cluster
+operations. If SkyPilot isn't installed yet, the skill will guide through that
+too.

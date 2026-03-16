@@ -15,8 +15,8 @@ To set up a new experiment, work with the user to:
    - `train.py` — the file you modify. Model architecture, optimizer, training loop.
 4. **Ask for S3 bucket name**: Ask the user which S3 bucket to use for sharing results between experiments (e.g. `s3://my-autoresearch-bucket`). Use this bucket everywhere below instead of the placeholder. Update `experiment.yaml` to reference the chosen bucket under `file_mounts`.
 5. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
-6. **Verify SkyPilot**: Run `sky check` to confirm cloud credentials are configured. If SkyPilot is not installed, install it first (`pip install skypilot-nightly[aws]`). If you have the SkyPilot agent skill available, use it for guidance.
-7. **Ask about infra preference**: Ask the user if they have a preference for a specific cloud or infra (e.g. `--infra nebius`, `--infra aws`, `--infra kubernetes`). If they do, pass `--infra <choice>` to every `sky launch` command. If not, omit it — SkyPilot will automatically pick the cheapest available option.
+6. **Verify SkyPilot**: Use the SkyPilot skill to confirm SkyPilot is installed and cloud credentials are configured. The skill handles installation and credential setup if needed.
+7. **Ask about infra preference**: Ask the user if they have a preference for a specific cloud or infra (e.g. `--infra nebius`, `--infra aws`, `--infra kubernetes`). If they do, set `infra:` in the YAML for every launch. If not, omit it — SkyPilot will automatically pick the cheapest available option.
 8. **Initialize shared results**: Create the results header in S3:
    ```
    echo -e "experiment_id\tstatus\tval_bpb\tmemory_gb\tdescription" > /tmp/results.tsv
@@ -28,10 +28,16 @@ Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Unlike the original autoresearch where each experiment runs locally on a single GPU,
-here experiments run on cloud GPUs via SkyPilot. You submit experiments using
-`experiment.yaml`, which launches a VM with a GPU, mounts the S3 bucket at `/bucket`,
-runs training, and writes results to the bucket.
+Experiments run on cloud GPUs via SkyPilot. Use the **SkyPilot skill** for all
+infrastructure operations — launching clusters, submitting jobs, checking
+status, reading logs, tearing down clusters. The skill knows SkyPilot's CLI,
+YAML format, and best practices. You don't need to memorize commands; just tell
+the skill what you want to do and it will handle it.
+
+A template YAML (`experiment.yaml`) is provided in this directory. It launches
+a VM with a GPU, mounts the S3 bucket at `/bucket`, runs training, and writes
+results to the bucket. Pass it to the skill when launching experiments, and
+override `EXPERIMENT_ID` and `EXPERIMENT_DESC` via `--env` flags.
 
 **What you CAN do:**
 - Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
@@ -66,113 +72,43 @@ num_params_M:     50.3
 depth:            8
 ```
 
-The key metric is `val_bpb`. Experiment jobs write this to `status/<id>.txt` in the
-shared S3 bucket automatically.
+The key metric is `val_bpb`. Experiment jobs write this to `status/<id>.txt` in
+the shared S3 bucket automatically.
 
-## Submitting experiments with SkyPilot
+## Submitting experiments with the SkyPilot skill
 
-Each experiment runs on a cloud GPU via SkyPilot. The S3 bucket `s3://<YOUR-BUCKET>`
-is mounted at `/bucket` on every VM, so experiment jobs write status and logs as
-regular files.
+Use the SkyPilot skill for all cluster and job operations. Here's the workflow:
 
-**Cluster naming**: Clusters are long-lived compute resources — name them by purpose or
-track, not by experiment number. Use names like `gpu-a`, `gpu-b`, `arch-track`,
-`opt-track`, etc. Experiment IDs (sequential like `exp-01`, `exp-02`) identify
-individual runs and are passed via `--env EXPERIMENT_ID`.
+**Launching experiments**: Tell the skill to launch `experiment.yaml` on a
+named cluster with the appropriate `EXPERIMENT_ID` and `EXPERIMENT_DESC` env
+vars. The skill will use `sky launch` for new clusters and `sky exec` for
+existing ones. Always submit in detached mode (`-d`) so you can move on
+immediately.
 
-**First experiment on a new cluster** — use `sky launch -d` (detached):
+**Parallel experiments**: Launch on separate clusters. The skill handles
+cluster naming and provisioning. Keep at most **4 clusters** running at a time.
+
+**Pipelining**: Queue 2-3 experiments on the same cluster — they run
+back-to-back with no idle gap. The skill uses `sky exec` for this.
+
+**Avoiding workdir conflicts**: Since SkyPilot syncs the working directory at
+submission time, parallel experiments need separate folders to avoid one
+submission picking up another's code. Create a folder per queued job, copy the
+relevant files (`train.py`, `prepare.py`, `pyproject.toml`, `experiment.yaml`),
+edit `train.py` there, and tell the skill to use that folder as the workdir
+(`--workdir /tmp/autoresearch/<folder>`).
+
+**Checking status**: Use the skill to check cluster status, job queues, and
+logs. Poll S3 for experiment results:
 ```
-# Edit train.py with your experimental change, then:
-sky launch experiment.yaml -c gpu-a -d \
-  --env EXPERIMENT_ID=exp-01 \
-  --env EXPERIMENT_DESC="baseline run"
-```
-
-**Subsequent experiments on the same cluster** — use `sky exec -d`:
-```
-# Edit train.py with a new idea, then:
-sky exec gpu-a experiment.yaml -d \
-  --env EXPERIMENT_ID=exp-02 \
-  --env EXPERIMENT_DESC="increase LR to 0.04"
-```
-
-Jobs queue on the cluster and run sequentially (each experiment uses the full GPU).
-Submit the next experiment right away — it starts as soon as the current one finishes,
-eliminating idle time between runs.
-
-**Pipeline experiments** — queue 2-3 experiments per cluster to keep GPUs saturated:
-```
-# Queue two experiments back-to-back on the same cluster:
-sky exec gpu-a experiment.yaml -d \
-  --env EXPERIMENT_ID=exp-05 --env EXPERIMENT_DESC="idea A"
-sky exec gpu-a experiment.yaml -d \
-  --env EXPERIMENT_ID=exp-06 --env EXPERIMENT_DESC="idea B"
-# exp-06 starts automatically when exp-05 finishes — no idle gap.
-```
-
-**Parallel experiments on separate clusters:**
-```
-sky launch experiment.yaml -c arch-track -d \
-  --env EXPERIMENT_ID=exp-03 \
-  --env EXPERIMENT_DESC="double model width"
-
-sky launch experiment.yaml -c opt-track -d \
-  --env EXPERIMENT_ID=exp-04 \
-  --env EXPERIMENT_DESC="muon LR 0.05"
-```
-
-**Avoiding workdir conflicts**: Since `sky launch` and `sky exec` sync the working
-directory at submission time, parallel experiments need separate folders to avoid one
-submission picking up another's code. Create a folder **per queued job** and copy the
-code before submitting:
-```
-# For each parallel experiment, create a separate workdir:
-mkdir -p /tmp/autoresearch/gpu-a
-cp train.py prepare.py pyproject.toml experiment.yaml /tmp/autoresearch/gpu-a/
-# Edit /tmp/autoresearch/gpu-a/train.py with idea A, then:
-sky launch experiment.yaml -c gpu-a -d --workdir /tmp/autoresearch/gpu-a \
-  --env EXPERIMENT_ID=exp-03 --env EXPERIMENT_DESC="idea A"
-
-# Meanwhile, a different folder for a different cluster:
-mkdir -p /tmp/autoresearch/gpu-b
-cp train.py prepare.py pyproject.toml experiment.yaml /tmp/autoresearch/gpu-b/
-# Edit /tmp/autoresearch/gpu-b/train.py with idea B, then:
-sky launch experiment.yaml -c gpu-b -d --workdir /tmp/autoresearch/gpu-b \
-  --env EXPERIMENT_ID=exp-04 --env EXPERIMENT_DESC="idea B"
-```
-**Important**: When pipelining multiple jobs on the same cluster, each queued job
-needs its own workdir folder too, since the workdir is snapshotted at submission time.
-For example, to queue two jobs on `gpu-a`, use `/tmp/autoresearch/gpu-a-exp05/` and
-`/tmp/autoresearch/gpu-a-exp06/`.
-
-**Cluster limit**: Keep at most **4 clusters** running at a time (default). Before
-launching a new cluster, check `sky status` — if 4 are already up, either reuse one
-with `sky exec` or wait for one to finish and tear it down first. You can submit
-multiple sequential experiments to the same cluster using `sky exec`.
-
-## Checking status
-
-Poll experiment status from S3 (locally):
-```
-# Check a specific experiment
 aws s3 cp s3://<YOUR-BUCKET>/status/exp-01.txt -
 
-# List all experiment statuses
 for f in $(aws s3 ls s3://<YOUR-BUCKET>/status/ | awk '{print $4}'); do
   echo "=== $f ===" && aws s3 cp s3://<YOUR-BUCKET>/status/$f -
 done
 ```
 
-Check SkyPilot cluster and job queue status:
-```
-sky status          # cluster overview
-sky queue gpu-a     # see all queued/running/finished jobs on a cluster
-sky logs gpu-a 3    # stream logs for job ID 3 (from sky queue output)
-```
-
-Since all jobs are submitted detached (`-d`), `sky queue` is your primary way to see
-what's running, queued, and completed on each cluster. Use S3 polling for experiment
-results (val_bpb, crash status).
+**Cleanup**: Use the skill to tear down idle clusters.
 
 ## Logging results
 
@@ -218,23 +154,24 @@ LOOP FOREVER:
 
 1. **Check shared state**: Download `results.tsv` and poll `status/` in the bucket to see what's running and what's been tried.
 2. **Pick an idea** that hasn't been tried and isn't currently running.
-3. **Prepare the experiment**: Copy code to a per-cluster folder (see "Avoiding workdir conflicts"), edit `train.py` there with the experimental change.
-4. **Submit** the experiment with `-d` (detached): Use `sky launch -d` (new cluster) or `sky exec -d` (existing cluster) with a unique EXPERIMENT_ID. Pipeline 2-3 jobs per cluster when you have ideas ready — they queue and run back-to-back with no idle gap.
+3. **Prepare the experiment**: Copy code to a per-job folder (see "Avoiding workdir conflicts"), edit `train.py` there with the experimental change.
+4. **Submit** via the SkyPilot skill: launch `experiment.yaml` with a unique EXPERIMENT_ID, detached. Pipeline 2-3 jobs per cluster when you have ideas ready.
 5. **Don't wait** — detached mode returns immediately. Move on to the next idea or check results.
 6. **Periodically check** S3 for completed experiments. Record results in `results.tsv`.
    - If val_bpb improved (lower than current best): copy the winning `train.py` back to the repo, commit it to `autoresearch/<tag>`. This becomes the new baseline for future ideas.
    - If val_bpb is equal or worse: log as `discard` and move on.
-7. **Tear down** idle clusters with `sky down <cluster>` to save costs.
+7. **Tear down** idle clusters via the SkyPilot skill to save costs.
 8. **Repeat**. Use results from completed experiments to inform next ideas. If you feel stuck, re-read the code, try combining previous near-misses, or try more radical architectural changes.
 
 **Timeout**: Each experiment takes ~5 minutes (+ startup overhead). If a run exceeds 10 minutes, treat it as a failure.
 
-**Crashes**: If a run crashes (OOM, bug, etc.), check `logs/<id>_error.txt` in the bucket. If it's a trivial fix (typo, missing import), fix and resubmit. If the idea is fundamentally broken, log "crash" and move on.
+**Crashes**: If a run crashes (OOM, bug, etc.), check the logs via the SkyPilot skill or look at `logs/<id>_error.txt` in the bucket. If it's a trivial fix (typo, missing import), fix and resubmit. If the idea is fundamentally broken, log "crash" and move on.
 
 **NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
 
 ## Cleanup
 
+Use the SkyPilot skill to tear down all clusters when done:
 ```
-sky down -a  # tear down all clusters
+sky down -a
 ```
