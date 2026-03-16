@@ -15,6 +15,29 @@ from sky.adaptors import vast
 logger = sky_logging.init_logger(__name__)
 
 
+def _extract_country_code(region: str) -> str:
+    """Extract 2-letter country code from a region string.
+
+    Handles both new normalized format ("US") and legacy format (", US, NA").
+
+    Args:
+        region: Region string, either a 2-letter code or legacy geolocation.
+
+    Returns:
+        The 2-letter country code (e.g., "US").
+    """
+    # If already a 2-letter code, return as-is
+    if len(region) == 2 and region.isalpha():
+        return region.upper()
+    # Legacy format: extract from geolocation string like ", US, NA"
+    parts = [p.strip() for p in region.split(',')]
+    for i in range(len(parts) - 2, -1, -1):
+        if len(parts[i]) == 2 and parts[i].isalpha():
+            return parts[i].upper()
+    # Fallback: take last 2 characters
+    return region[-2:].strip().upper()
+
+
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
     instances = vast.vast().show_instances()
@@ -88,14 +111,11 @@ def launch(name: str,
          The disk size {xx} GB is not exactly matched the requested
          size {yy} GB. It is possible to charge extra cost on disk.
       *  `ports`: This is a feature flag to expose ports to the internet.
-      *  `geolocation`: Geolocation on Vast can be as specific as the
-         host chooses to be. They can say, for instance, "Yutakachō,
-         Shinagawa District, Tokyo, JP." Such a specific geolocation
-         as ours would fail to return this host in a simple string
-         comparison if a user searched for "JP".
-         Since regardless of specificity, all our geolocations end
-         in two-letter country codes we just snip that to conform
-         to how many providers state their geolocation.
+      *  `geolocation`: The region parameter can be either a 2-letter
+         country code (e.g., "US", "JP") or a legacy geolocation string
+         (e.g., ", US, NA"). We extract the country code to query Vast's
+         API, which accepts 2-letter country codes for the geolocation
+         filter.
       *  Since the catalog is cached, we can't gaurantee availability
          of any machine at the point of inquiry.  As a consequence we
          search for the machine again and potentially return a failure
@@ -111,10 +131,14 @@ def launch(name: str,
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
+    # Extract 2-letter country code from region (handles both new "US" format
+    # and legacy ", US, NA" format for backward compatibility)
+    country_code = _extract_country_code(region)
+
     query = [
         'chunked=true',
         'georegion=true',
-        f'geolocation="{region[-2:]}"',
+        f'geolocation="{country_code}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',

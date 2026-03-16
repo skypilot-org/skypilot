@@ -24,6 +24,35 @@ _map = {
 }
 
 
+def extract_country_code(geolocation: str) -> str:
+    """Extract the 2-letter country code from a Vast geolocation string.
+
+    Vast geolocation strings have the format: "City, CountryCode, Continent"
+    Examples:
+        ", US, NA" -> "US"
+        "New York, US, NA" -> "US"
+        "London, GB, EU" -> "GB"
+        ", CA, NA" -> "CA"
+
+    Args:
+        geolocation: The raw geolocation string from Vast API.
+
+    Returns:
+        The 2-letter country code (e.g., "US", "CA", "GB").
+    """
+    # Split by comma and strip whitespace from each part
+    parts = [p.strip() for p in geolocation.split(',')]
+    # The country code is typically the second-to-last part (before continent)
+    # Format is: [City (optional)], CountryCode, Continent
+    if len(parts) >= 2:
+        # Get the second-to-last non-empty part, or last 2 chars as fallback
+        for i in range(len(parts) - 2, -1, -1):
+            if len(parts[i]) == 2 and parts[i].isalpha():
+                return parts[i].upper()
+    # Fallback: take last 2 characters (original behavior)
+    return geolocation[-2:].strip().upper()
+
+
 def create_instance_type(obj: Dict[str, Any]) -> str:
     stubify = lambda x: re.sub(r'\s', '_', x)
     return '{}x-{}-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
@@ -124,6 +153,9 @@ if __name__ == '__main__':
             'TotalGpuMemoryInMiB': offer['gpu_total_ram']
         }).replace('"', '\'')
 
+        # Normalize region to 2-letter country code (e.g., ", US, NA" -> "US")
+        entry['Region'] = extract_country_code(entry['Region'])
+
         priceMap[instance_type].append(entry)
 
     for instanceList in priceMap.values():
@@ -139,8 +171,9 @@ if __name__ == '__main__':
         maxBid = max([x.get('SpotPrice') for x in toList])
         for instance in toList:
             hosting_type = instance.get('HostingType', 0)
+            # Region is already normalized to 2-letter country code
             stub = (f'{instance["InstanceType"]} '
-                    f'{instance["Region"][-2:]} {hosting_type}')
+                    f'{instance["Region"]} {hosting_type}')
             if stub in seen:
                 printstub = f'{stub}#print'
                 if printstub not in seen:
