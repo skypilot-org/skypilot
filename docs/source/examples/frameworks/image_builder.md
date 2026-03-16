@@ -1,0 +1,1 @@
+../../generated-examples/image_builder.md

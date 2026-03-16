@@ -20,4 +20,4 @@ config:
   kubernetes:
     image_builder:
       type: dind
-      # volume: builder-volume
+      # volume: my-builder-cache # SkyPilot volume name

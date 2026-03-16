@@ -106,6 +106,5 @@ Table of contents
    multi-kubernetes
    Configuring Pricing <kubernetes-pricing>
    SkyPilot vs. Vanilla Kubernetes <skypilot-and-vanilla-k8s>
-   Container Runtimes (DinD / BuildKit) <kubernetes-docker-in-docker>
    Examples <examples/index>
    kubernetes-troubleshooting

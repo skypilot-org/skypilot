@@ -2913,23 +2913,26 @@ _IMAGE_BUILDER_DEFAULTS = {
 }
 
 
-def get_image_builder_cache_vol_name(image_builder_type: str) -> str:
-    """Return the volume name used for the image_builder cache."""
-    return _IMAGE_BUILDER_DEFAULTS[image_builder_type]['cache_vol_name']
+def get_image_builder_defaults(image_builder_type: str) -> Dict[str, str]:
+    """Return a copy of the default config for the given image builder type."""
+    defaults = _IMAGE_BUILDER_DEFAULTS.get(image_builder_type)
+    if defaults is None:
+        raise ValueError(f'Unknown image_builder type: {image_builder_type!r}. '
+                         f'Supported: {list(_IMAGE_BUILDER_DEFAULTS)}')
+    return dict(defaults)
 
 
 def _image_builder_to_pod_config(
         image_builder_cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Translate a ``kubernetes.image_builder`` config dict into a pod_config fragment.
+    """Translate a ``kubernetes.image_builder`` config into a pod_config fragment.
 
-    The cache volume always uses ``emptyDir`` here.  If the user specified a
-    SkyPilot volume (``image_builder_cfg['volume']``), the emptyDir is replaced with
-    a PVC reference and a per-pod ``subPath`` is injected later in
-    ``_create_pods()`` once the pod name is known.
+    No cache volume is created here.  If the user specified a SkyPilot volume
+    (``image_builder_cfg['volume']``), the PVC volume and volumeMount are
+    injected later in ``_create_pods()`` once the pod name is known (so that a
+    per-pod ``subPath`` can be set).
     """
     image_builder_type = image_builder_cfg['type']
-    defaults = _IMAGE_BUILDER_DEFAULTS[image_builder_type]
-    cache_vol_name = defaults['cache_vol_name']
+    defaults = get_image_builder_defaults(image_builder_type)
 
     if image_builder_type == 'dind':
         pod_cfg: Dict[str, Any] = {
@@ -2960,28 +2963,16 @@ def _image_builder_to_pod_config(
                             '--host=unix:///var/run/dind/docker.sock',
                             '--group=1000',
                         ],
-                        'volumeMounts': [
-                            {
-                                'name': 'docker-sock-dir',
-                                'mountPath': '/var/run/dind',
-                            },
-                            {
-                                'name': cache_vol_name,
-                                'mountPath': defaults['cache_mount'],
-                            },
-                        ],
+                        'volumeMounts': [{
+                            'name': 'docker-sock-dir',
+                            'mountPath': '/var/run/dind',
+                        }],
                     },
                 ],
-                'volumes': [
-                    {
-                        'name': 'docker-sock-dir',
-                        'emptyDir': {}
-                    },
-                    {
-                        'name': cache_vol_name,
-                        'emptyDir': {}
-                    },
-                ],
+                'volumes': [{
+                    'name': 'docker-sock-dir',
+                    'emptyDir': {}
+                }],
             }
         }
     else:
@@ -3017,28 +3008,16 @@ def _image_builder_to_pod_config(
                             'runAsUser': 1000,
                             'runAsGroup': 1000,
                         },
-                        'volumeMounts': [
-                            {
-                                'name': 'buildkit-sock',
-                                'mountPath': '/run/buildkit',
-                            },
-                            {
-                                'name': cache_vol_name,
-                                'mountPath': defaults['cache_mount'],
-                            },
-                        ],
+                        'volumeMounts': [{
+                            'name': 'buildkit-sock',
+                            'mountPath': '/run/buildkit',
+                        }],
                     },
                 ],
-                'volumes': [
-                    {
-                        'name': 'buildkit-sock',
-                        'emptyDir': {}
-                    },
-                    {
-                        'name': cache_vol_name,
-                        'emptyDir': {}
-                    },
-                ],
+                'volumes': [{
+                    'name': 'buildkit-sock',
+                    'emptyDir': {}
+                }],
             }
         }
     return pod_cfg
@@ -3991,7 +3970,7 @@ def get_pod_primary_container(
 ):
     """Return the primary workload container for a SkyPilot pod.
 
-    Pods may include image_builders (e.g., log shippers). Kubernetes preserves the
+    Pods may include sidecars (e.g., log shippers). Kubernetes preserves the
     ordering of the `containers` list as authored, but mutating webhooks can
     inject additional containers. Callers should not rely on containers[0].
     """
