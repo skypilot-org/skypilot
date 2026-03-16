@@ -936,8 +936,37 @@ def check_server_healthy_or_start(func: Callable[P, T]) -> Callable[P, T]:
     return cast(Callable[P, T], wrapper)
 
 
-def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
-                                         workdir_only: bool) -> 'dag_lib.Dag':
+def resolve_blob_dir(blob_id: str, user_hash: str) -> str:
+    """Resolve the shared extraction directory for a blob.
+
+    Returns the extraction directory path. The extraction dir is created
+    at upload time by the server handler (/upload_v2).
+
+    Args:
+        blob_id: The content-addressed blob ID (64-char hex string).
+        user_hash: The user hash for locating the client directory.
+
+    Raises:
+        ValueError: If blob_id is not a valid 64-char hex string.
+        FileNotFoundError: If the blob directory does not exist.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise ValueError(f'Invalid file_mounts_blob_id: {blob_id}')
+    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+                  'file_mounts')
+    extraction_dir = client_dir / 'blobs' / blob_id
+    if not extraction_dir.is_dir():
+        raise FileNotFoundError(
+            f'Blob not found: {extraction_dir}. The file mounts blob may '
+            'have been garbage collected before execution started.')
+    return str(extraction_dir)
+
+
+def process_mounts_in_task_on_api_server(
+        task: str,
+        env_vars: Dict[str, str],
+        workdir_only: bool,
+        file_mounts_blob_id: Optional[str] = None) -> 'dag_lib.Dag':
     """Translates the file mounts path in a task to the path on API server.
 
     When a task involves file mounts, the client will invoke
@@ -951,6 +980,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
         env_vars: The environment variables of the task.
         workdir_only: Whether to only translate the workdir, which is used for
             `exec`, as it does not need other files/folders in file_mounts.
+        file_mounts_blob_id: If set, resolve file mount paths relative to the
+            blob directory instead of the default client_file_mounts_dir.
 
     Returns:
         The translated task as a single-task dag.
@@ -974,9 +1005,17 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     client_file_mounts_dir = client_dir / 'file_mounts'
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
+    # Use the blob directory for file mounts, if a blob ID is provided.
+    if file_mounts_blob_id is not None:
+        file_mounts_base = pathlib.Path(
+            resolve_blob_dir(file_mounts_blob_id, user_hash))
+    else:
+        file_mounts_base = client_file_mounts_dir
+    file_mounts_base.mkdir(parents=True, exist_ok=True)
+
     def _get_client_file_mounts_path(
             original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
-        return str(client_file_mounts_dir /
+        return str(file_mounts_base /
                    file_mounts_mapping[original_path].lstrip('/'))
 
     task_configs = yaml_utils.read_yaml_all(str(client_task_path))
@@ -992,8 +1031,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
             workdir = task_config['workdir']
             if isinstance(workdir, str):
                 task_config['workdir'] = str(
-                    client_file_mounts_dir /
-                    file_mounts_mapping[workdir].lstrip('/'))
+                    file_mounts_base / file_mounts_mapping[workdir].lstrip('/'))
         if workdir_only:
             continue
         if 'file_mounts' in task_config:

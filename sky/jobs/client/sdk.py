@@ -120,13 +120,15 @@ def launch(
                               abort=True,
                               show_default=True)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
+        dag, file_mounts_blob_id = (
+            client_common.upload_mounts_to_api_server(dag))
         dag_str = dag_utils.dump_dag_to_yaml_str(dag)
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
             pool=pool,
             num_jobs=num_jobs,
+            file_mounts_blob_id=file_mounts_blob_id,
         )
         response = server_common.make_authenticated_request(
             'POST',

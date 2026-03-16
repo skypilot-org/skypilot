@@ -759,16 +759,18 @@ async def prepare_request_async(
             models.User(id=user_id,
                         name=user_id,
                         user_type=models.UserType.SYSTEM.value))
-    request = api_requests.Request(request_id=request_id,
-                                   name=server_constants.REQUEST_NAME_PREFIX +
-                                   request_name,
-                                   entrypoint=func,
-                                   request_body=request_body,
-                                   status=api_requests.RequestStatus.PENDING,
-                                   created_at=time.time(),
-                                   schedule_type=schedule_type,
-                                   user_id=user_id,
-                                   cluster_name=request_cluster_name)
+    request = api_requests.Request(
+        request_id=request_id,
+        name=server_constants.REQUEST_NAME_PREFIX + request_name,
+        entrypoint=func,
+        request_body=request_body,
+        status=api_requests.RequestStatus.PENDING,
+        created_at=time.time(),
+        schedule_type=schedule_type,
+        user_id=user_id,
+        cluster_name=request_cluster_name,
+        file_mounts_blob_id=getattr(request_body, 'file_mounts_blob_id', None),
+    )
 
     if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
