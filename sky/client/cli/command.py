@@ -1072,7 +1072,7 @@ def _handle_infra_cloud_region_zone_options(infra: Optional[str],
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
-              default=False,
+              default=backends.CloudVmRayBackend.NAME,
               hidden=True,
               help=('(Deprecated) Local docker support is deprecated. '
                     'To run locally, create a local Kubernetes cluster with '
