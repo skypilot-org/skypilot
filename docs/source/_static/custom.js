@@ -62,3 +62,44 @@ document.addEventListener("DOMContentLoaded", function () {
         document.head.appendChild(style);
     }
 });
+
+// Copy page as Markdown for LLMs.
+document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('copy-markdown-btn');
+    if (!btn) return;
+
+    btn.addEventListener('click', function () {
+        // Build the .html.md URL for the current page.
+        var path = window.location.pathname;
+        // Normalize: /path/ -> /path/index.html
+        if (path.endsWith('/')) path += 'index.html';
+        var mdUrl = path + '.md';
+
+        var label = btn.querySelector('.copy-markdown-label');
+        var originalText = label.textContent;
+        label.textContent = 'Copying...';
+
+        fetch(mdUrl)
+            .then(function (resp) {
+                if (!resp.ok) throw new Error('Not found');
+                return resp.text();
+            })
+            .then(function (text) {
+                return navigator.clipboard.writeText(text);
+            })
+            .then(function () {
+                label.textContent = 'Copied!';
+                btn.classList.add('copy-markdown-success');
+                setTimeout(function () {
+                    label.textContent = originalText;
+                    btn.classList.remove('copy-markdown-success');
+                }, 2000);
+            })
+            .catch(function () {
+                label.textContent = 'Failed to copy';
+                setTimeout(function () {
+                    label.textContent = originalText;
+                }, 2000);
+            });
+    });
+});

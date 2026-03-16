@@ -132,6 +132,7 @@ html_theme_options = {
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',
+        'copy-markdown',
     ],
     'navigation_depth': 4,
     'pygment_light_style': 'tango',

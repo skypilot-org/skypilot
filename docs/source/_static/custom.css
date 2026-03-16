@@ -193,6 +193,35 @@ active tab to be moved up. */
   border-bottom: none;
 }
 
+/* Copy page as Markdown button */
+.copy-markdown-container {
+  padding: 0.5rem 0;
+}
+
+.copy-markdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: 1px solid var(--pst-color-border);
+  border-radius: 4px;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
+  color: var(--pst-color-text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.copy-markdown-btn:hover {
+  color: var(--pst-color-primary);
+  border-color: var(--pst-color-primary);
+}
+
+.copy-markdown-btn.copy-markdown-success {
+  color: #28a745;
+  border-color: #28a745;
+}
+
 /* Assuming your breakpoints are defined in pixels */
 @media (min-width: 959.98px) {
 
