@@ -33,9 +33,8 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         self.replica3.version = 1
         self.replica3.status = serve_state.ReplicaStatus.READY
 
-    @mock.patch(
-        'sky.serve.autoscalers.managed_job_state.'
-        'get_nonterminal_job_counts_by_pool')
+    @mock.patch('sky.serve.autoscalers.managed_job_state.'
+                'get_nonterminal_job_counts_by_pool')
     def test_select_replicas_with_job_counts(self, mock_get_counts):
         """Test that replicas with fewer jobs are selected first."""
 
@@ -62,9 +61,8 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         # Verify the function was called once with the service name
         mock_get_counts.assert_called_once_with(self.service_name)
 
-    @mock.patch(
-        'sky.serve.autoscalers.managed_job_state.'
-        'get_nonterminal_job_counts_by_pool')
+    @mock.patch('sky.serve.autoscalers.managed_job_state.'
+                'get_nonterminal_job_counts_by_pool')
     def test_select_replicas_with_same_job_counts(self, mock_get_counts):
         """Test that when job counts are equal, other sorting criteria apply."""
         # All replicas have the same number of jobs
@@ -86,9 +84,8 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result, [3, 2])
 
-    @mock.patch(
-        'sky.serve.autoscalers.managed_job_state.'
-        'get_nonterminal_job_counts_by_pool')
+    @mock.patch('sky.serve.autoscalers.managed_job_state.'
+                'get_nonterminal_job_counts_by_pool')
     def test_select_replicas_with_status_priority(self, mock_get_counts):
         """Test that status priority is still respected."""
         # Create replicas with different statuses
@@ -121,9 +118,8 @@ class TestSelectNonterminalReplicasToScaleDown(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result, [1])
 
-    @mock.patch(
-        'sky.serve.autoscalers.managed_job_state.'
-        'get_nonterminal_job_counts_by_pool')
+    @mock.patch('sky.serve.autoscalers.managed_job_state.'
+                'get_nonterminal_job_counts_by_pool')
     def test_select_replicas_with_version_priority(self, mock_get_counts):
         """Test that version priority is still respected."""
         # Create replicas with different versions

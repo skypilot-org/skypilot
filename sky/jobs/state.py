@@ -2022,8 +2022,7 @@ def get_nonterminal_job_ids_by_pool(pool: str,
         return job_ids
 
 
-def get_nonterminal_job_counts_by_pool(
-        pool: str) -> Dict[str, int]:
+def get_nonterminal_job_counts_by_pool(pool: str) -> Dict[str, int]:
     """Get the number of nonterminal jobs per cluster in a pool.
 
     Returns a dict mapping cluster_name to the count of nonterminal jobs
