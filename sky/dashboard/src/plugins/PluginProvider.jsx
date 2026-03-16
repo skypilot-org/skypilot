@@ -23,6 +23,7 @@ const PluginContext = createContext({
   dataEnhancements: {},
   tableColumns: {},
   dataProviders: {},
+  recipeTypes: [],
 });
 
 const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
@@ -63,6 +64,7 @@ const initialState = {
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
+  recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
 };
 
 const actions = {
@@ -73,6 +75,7 @@ const actions = {
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
   CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
+  REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
 };
 
 function pluginReducer(state, action) {
@@ -159,6 +162,11 @@ function pluginReducer(state, action) {
       return {
         ...state,
         topNavLinks: state.topNavLinks.filter((link) => !link._cached),
+      };
+    case actions.REGISTER_RECIPE_TYPE:
+      return {
+        ...state,
+        recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
     default:
       return state;
@@ -700,6 +708,30 @@ function createPluginApi(dispatch) {
       // eslint-disable-next-line no-undef
       return require('@/components/ui');
     },
+    registerRecipeType(config) {
+      if (!config || !config.id || !config.label) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid recipe type registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        label: String(config.label),
+        fullLabel: config.fullLabel
+          ? String(config.fullLabel)
+          : String(config.label),
+        icon: config.icon || null,
+        color: config.color ? String(config.color) : 'gray',
+        template: config.template ? String(config.template) : '',
+      };
+      dispatch({
+        type: actions.REGISTER_RECIPE_TYPE,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
@@ -869,6 +901,11 @@ export function useGroupedNavLinks() {
 export function usePluginRoutes() {
   const { routes } = usePluginState();
   return routes;
+}
+
+export function usePluginRecipeTypes() {
+  const { recipeTypes } = usePluginState();
+  return recipeTypes;
 }
 
 export function usePluginRoute(pathname) {
