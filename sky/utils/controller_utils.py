@@ -1461,8 +1461,8 @@ def get_max_services_error_message(pool: bool) -> str:
     consolidation = _is_consolidation_mode(pool)
     controller_type = 'jobs' if pool else 'serve'
 
-    msg = (f'Max number of services reached: {current}/{maximum} '
-           f'services are running.')
+    msg = (f'{serve_constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR}: '
+           f'{current}/{maximum} services are running.')
     msg += ' To spin up more services, please tear down some existing ones.'
 
     docs_link = ('https://skypilot.readthedocs.io/en/latest/serving/'

@@ -625,5 +625,7 @@ The following tables show the approximate minimum memory required for different 
 
 If you encounter the "Max number of services reached" error, you can increase the limit by:
 
-- **Non-consolidation mode**: Configuring a controller VM with more memory via ``serve.controller.resources`` above.
-- **Consolidation mode**: Increasing the API server pod memory.
+- **Non-consolidation mode**: Configuring a controller VM with more memory via ``serve.controller.resources``;
+  see :ref:`Customizing SkyServe controller resources <customizing-sky-serve-controller-resources>`.
+- **Consolidation mode**: Increasing the API server pod memory;
+  see :ref:`Tuning API server resources <sky-api-server-resources-tuning>`.
