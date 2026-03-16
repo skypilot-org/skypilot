@@ -92,7 +92,12 @@ def run_event_loop():
 
 
 def _handle_sigterm(signum, frame):
-    """Handle SIGTERM by running autostop hook before exit."""
+    """Handle SIGTERM by running autostop hook before exit.
+
+    On Kubernetes, this handler is not registered because the container
+    entrypoint traps SIGTERM to keep the pod alive (for HA). SIGTERM
+    from pod termination never reaches the skylet process.
+    """
     del signum, frame  # Unused.
     if autostop_lib.is_preemption_hook_triggered():
         sys.exit(0)
@@ -122,8 +127,25 @@ def _handle_sigterm(signum, frame):
     sys.exit(0)
 
 
+def _is_kubernetes() -> bool:
+    """Check if the current cluster is running on Kubernetes."""
+    try:
+        config_path = os.path.abspath(
+            os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
+        cluster_config = yaml_utils.read_yaml(config_path)
+        provider_name = cluster_utils.get_provider_name(cluster_config)
+        return provider_name == 'kubernetes'
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
 def main():
-    signal.signal(signal.SIGTERM, _handle_sigterm)
+    # On Kubernetes, the container entrypoint traps SIGTERM to keep the pod
+    # alive for HA. SIGTERM from pod termination never reaches the skylet,
+    # so registering the handler is unnecessary (and would cause the skylet
+    # to exit on any direct SIGTERM, e.g. from attempt_skylet restarts).
+    if not _is_kubernetes():
+        signal.signal(signal.SIGTERM, _handle_sigterm)
 
     parser = argparse.ArgumentParser(description='Start skylet daemon')
     parser.add_argument('--port',

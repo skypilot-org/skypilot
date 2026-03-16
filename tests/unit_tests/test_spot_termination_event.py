@@ -43,7 +43,10 @@ class TestPreemptionGraceSeconds:
     def test_azure_grace_period(self):
         assert autostop_lib.get_preemption_grace_seconds('azure') == 25
 
-    def test_kubernetes_grace_period(self):
+    def test_kubernetes_uses_default(self):
+        # Kubernetes is not supported for preemption hooks (SIGTERM is
+        # swallowed by the container entrypoint trap), so it falls through
+        # to the conservative default.
         assert autostop_lib.get_preemption_grace_seconds('kubernetes') == 25
 
     def test_unknown_provider_default(self):
@@ -162,6 +165,28 @@ class TestSpotTerminationEventStart:
             event = events.SpotTerminationEvent()
             event.start()
             mock_thread_cls.assert_not_called()
+
+
+class TestIsKubernetes:
+    """Tests for the _is_kubernetes check in skylet.py."""
+
+    @mock.patch('sky.utils.cluster_utils.get_provider_name',
+                return_value='kubernetes')
+    @mock.patch('sky.utils.yaml_utils.read_yaml', return_value={})
+    def test_returns_true_on_k8s(self, mock_read_yaml, mock_get_provider):
+        from sky.skylet import skylet
+        assert skylet._is_kubernetes() is True
+
+    @mock.patch('sky.utils.cluster_utils.get_provider_name', return_value='aws')
+    @mock.patch('sky.utils.yaml_utils.read_yaml', return_value={})
+    def test_returns_false_on_aws(self, mock_read_yaml, mock_get_provider):
+        from sky.skylet import skylet
+        assert skylet._is_kubernetes() is False
+
+    @mock.patch('sky.utils.yaml_utils.read_yaml', side_effect=FileNotFoundError)
+    def test_returns_false_on_error(self, mock_read_yaml):
+        from sky.skylet import skylet
+        assert skylet._is_kubernetes() is False
 
 
 class TestSigtermHandler:

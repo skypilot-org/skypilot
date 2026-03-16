@@ -264,7 +264,7 @@ def get_preemption_grace_seconds(provider_name: str) -> int:
 
     Args:
         provider_name: Lower-case cloud provider name, e.g. 'aws',
-            'gcp', 'azure', 'kubernetes'.
+            'gcp', 'azure'.
 
     Returns:
         Number of seconds available for the preemption hook to run.
@@ -276,9 +276,9 @@ def get_preemption_grace_seconds(provider_name: str) -> int:
         'gcp': 25,
         # Azure gives ~30s notice; reserve 5s buffer.
         'azure': 25,
-        # Kubernetes default terminationGracePeriodSeconds is 30s;
-        # reserve 5s buffer.
-        'kubernetes': 25,
+        # Kubernetes is not supported for preemption hooks: on K8s the
+        # container entrypoint traps SIGTERM to keep the pod alive (for
+        # HA), so SIGTERM from pod termination never reaches the skylet.
     }
     # Conservative default for unknown providers.
     return grace_periods.get(provider_name, 25)
