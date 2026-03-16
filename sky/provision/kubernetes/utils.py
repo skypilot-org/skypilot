@@ -2906,15 +2906,13 @@ _CONTAINER_TOOLS_DEFAULTS = {
     'buildkit': {
         'image': 'moby/buildkit:v0.28.0-rootless',
         'cache_vol_name': 'buildkit-cache',
-        # rootless buildkitd (uid 1000) stores data under the XDG data dir;
-        # /var/lib/buildkit is the root-mode path and is not used here.
         'cache_mount': '/home/user/.local/share/buildkit',
     },
 }
 
 
 def get_container_tools_defaults(container_tools_type: str) -> Dict[str, str]:
-    """Return a copy of the default config for the given image builder type."""
+    """Return a copy of the default config for the given container tools type."""
     defaults = _CONTAINER_TOOLS_DEFAULTS.get(container_tools_type)
     if defaults is None:
         raise ValueError(
@@ -2930,7 +2928,7 @@ def inject_container_tools_cache_volume(
     context: Optional[str],
     namespace: str,
 ) -> None:
-    """Inject a cache volume + volumeMount into the image-builder container.
+    """Inject a cache volume + volumeMount into the container tools container.
 
     Mutates *pod_spec* in place.
 
