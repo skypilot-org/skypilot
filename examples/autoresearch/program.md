@@ -80,53 +80,70 @@ track, not by experiment number. Use names like `gpu-a`, `gpu-b`, `arch-track`,
 `opt-track`, etc. Experiment IDs (sequential like `exp-01`, `exp-02`) identify
 individual runs and are passed via `--env EXPERIMENT_ID`.
 
-**First experiment on a new cluster** — use `sky launch`:
+**First experiment on a new cluster** — use `sky launch -d` (detached):
 ```
 # Edit train.py with your experimental change, then:
-sky launch experiment.yaml -c gpu-a \
+sky launch experiment.yaml -c gpu-a -d \
   --env EXPERIMENT_ID=exp-01 \
   --env EXPERIMENT_DESC="baseline run"
 ```
 
-**Subsequent experiments on the same cluster** — use `sky exec`:
+**Subsequent experiments on the same cluster** — use `sky exec -d`:
 ```
 # Edit train.py with a new idea, then:
-sky exec gpu-a experiment.yaml \
+sky exec gpu-a experiment.yaml -d \
   --env EXPERIMENT_ID=exp-02 \
   --env EXPERIMENT_DESC="increase LR to 0.04"
 ```
 
+Jobs queue on the cluster and run sequentially (each experiment uses the full GPU).
+Submit the next experiment right away — it starts as soon as the current one finishes,
+eliminating idle time between runs.
+
+**Pipeline experiments** — queue 2-3 experiments per cluster to keep GPUs saturated:
+```
+# Queue two experiments back-to-back on the same cluster:
+sky exec gpu-a experiment.yaml -d \
+  --env EXPERIMENT_ID=exp-05 --env EXPERIMENT_DESC="idea A"
+sky exec gpu-a experiment.yaml -d \
+  --env EXPERIMENT_ID=exp-06 --env EXPERIMENT_DESC="idea B"
+# exp-06 starts automatically when exp-05 finishes — no idle gap.
+```
+
 **Parallel experiments on separate clusters:**
 ```
-sky launch experiment.yaml -c arch-track \
+sky launch experiment.yaml -c arch-track -d \
   --env EXPERIMENT_ID=exp-03 \
   --env EXPERIMENT_DESC="double model width"
 
-sky launch experiment.yaml -c opt-track \
+sky launch experiment.yaml -c opt-track -d \
   --env EXPERIMENT_ID=exp-04 \
   --env EXPERIMENT_DESC="muon LR 0.05"
 ```
 
 **Avoiding workdir conflicts**: Since `sky launch` and `sky exec` sync the working
-directory, parallel experiments need separate folders to avoid one launch picking up
-another's code. Create a folder per cluster and copy the code before submitting:
+directory at submission time, parallel experiments need separate folders to avoid one
+submission picking up another's code. Create a folder **per queued job** and copy the
+code before submitting:
 ```
 # For each parallel experiment, create a separate workdir:
 mkdir -p /tmp/autoresearch/gpu-a
 cp train.py prepare.py pyproject.toml experiment.yaml /tmp/autoresearch/gpu-a/
 # Edit /tmp/autoresearch/gpu-a/train.py with idea A, then:
-sky launch experiment.yaml -c gpu-a --workdir /tmp/autoresearch/gpu-a \
+sky launch experiment.yaml -c gpu-a -d --workdir /tmp/autoresearch/gpu-a \
   --env EXPERIMENT_ID=exp-03 --env EXPERIMENT_DESC="idea A"
 
 # Meanwhile, a different folder for a different cluster:
 mkdir -p /tmp/autoresearch/gpu-b
 cp train.py prepare.py pyproject.toml experiment.yaml /tmp/autoresearch/gpu-b/
 # Edit /tmp/autoresearch/gpu-b/train.py with idea B, then:
-sky launch experiment.yaml -c gpu-b --workdir /tmp/autoresearch/gpu-b \
+sky launch experiment.yaml -c gpu-b -d --workdir /tmp/autoresearch/gpu-b \
   --env EXPERIMENT_ID=exp-04 --env EXPERIMENT_DESC="idea B"
 ```
-For sequential experiments on the same cluster, `sky exec` syncs immediately so you
-can reuse the same folder — just edit and submit.
+**Important**: When pipelining multiple jobs on the same cluster, each queued job
+needs its own workdir folder too, since the workdir is snapshotted at submission time.
+For example, to queue two jobs on `gpu-a`, use `/tmp/autoresearch/gpu-a-exp05/` and
+`/tmp/autoresearch/gpu-a-exp06/`.
 
 **Cluster limit**: Keep at most **4 clusters** running at a time (default). Before
 launching a new cluster, check `sky status` — if 4 are already up, either reuse one
@@ -146,15 +163,16 @@ for f in $(aws s3 ls s3://<YOUR-BUCKET>/status/ | awk '{print $4}'); do
 done
 ```
 
-Check SkyPilot cluster status:
+Check SkyPilot cluster and job queue status:
 ```
-sky status
-sky queue gpu-a   # see job queue for a specific cluster
+sky status          # cluster overview
+sky queue gpu-a     # see all queued/running/finished jobs on a cluster
+sky logs gpu-a 3    # stream logs for job ID 3 (from sky queue output)
 ```
 
-**Note**: `sky launch` may exit with an error when trying to tail logs on a cluster
-that is still initializing. This is cosmetic — the job itself runs fine. Use
-`sky queue` and S3 polling to check actual experiment status.
+Since all jobs are submitted detached (`-d`), `sky queue` is your primary way to see
+what's running, queued, and completed on each cluster. Use S3 polling for experiment
+results (val_bpb, crash status).
 
 ## Logging results
 
@@ -201,8 +219,8 @@ LOOP FOREVER:
 1. **Check shared state**: Download `results.tsv` and poll `status/` in the bucket to see what's running and what's been tried.
 2. **Pick an idea** that hasn't been tried and isn't currently running.
 3. **Prepare the experiment**: Copy code to a per-cluster folder (see "Avoiding workdir conflicts"), edit `train.py` there with the experimental change.
-4. **Submit** the experiment: Use `sky launch` (new cluster) or `sky exec` (existing cluster) with a unique EXPERIMENT_ID.
-5. **Don't wait** — once submitted, move on to the next idea immediately.
+4. **Submit** the experiment with `-d` (detached): Use `sky launch -d` (new cluster) or `sky exec -d` (existing cluster) with a unique EXPERIMENT_ID. Pipeline 2-3 jobs per cluster when you have ideas ready — they queue and run back-to-back with no idle gap.
+5. **Don't wait** — detached mode returns immediately. Move on to the next idea or check results.
 6. **Periodically check** S3 for completed experiments. Record results in `results.tsv`.
    - If val_bpb improved (lower than current best): copy the winning `train.py` back to the repo, commit it to `autoresearch/<tag>`. This becomes the new baseline for future ideas.
    - If val_bpb is equal or worse: log as `discard` and move on.

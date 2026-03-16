@@ -11,15 +11,15 @@ SkyPilot-based parallel submission and S3 coordination.
 ```
 Local Agent (Claude Code, Codex, etc.)
   |
-  |-- edits train.py with idea A --> sky launch -c gpu-a experiment.yaml
-  |-- edits train.py with idea B --> sky launch -c gpu-b experiment.yaml
-  |-- edits train.py with idea C --> sky exec gpu-a experiment.yaml
+  |-- edits train.py with idea A --> sky launch -c gpu-a -d experiment.yaml
+  |-- edits train.py with idea B --> sky launch -c gpu-b -d experiment.yaml
+  |-- edits train.py with idea C --> sky exec gpu-a -d experiment.yaml  (queues behind A)
   |
-  +-- polls s3://<your-bucket>/status/* for results
+  +-- polls s3://<your-bucket>/status/* and sky queue for results
 ```
 
-- **Agent** runs locally, generates hypotheses, edits `train.py`, submits jobs
-- **SkyPilot clusters** run the 5-min training experiments on cloud GPUs
+- **Agent** runs locally, generates hypotheses, edits `train.py`, submits jobs in detached mode (`-d`)
+- **SkyPilot clusters** run the 5-min training experiments on cloud GPUs; jobs queue and pipeline automatically via the [job queue](https://docs.skypilot.co/en/latest/reference/job-queue.html)
 - **S3 bucket** mounted at `/bucket` on every VM via [SkyPilot storage](https://docs.skypilot.co/en/latest/reference/storage.html) —
   experiments write status/logs as regular files, no AWS CLI needed on VMs
 
