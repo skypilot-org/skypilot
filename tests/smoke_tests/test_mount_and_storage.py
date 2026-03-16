@@ -149,6 +149,10 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_seeweb
 def test_concurrent_file_mounts_launch(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'Skipping because file mount uploads will be skipped for local server.'
+        )
     name = smoke_tests_utils.get_cluster_name()
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
@@ -191,6 +195,10 @@ def test_concurrent_file_mounts_launch(generic_cloud: str):
 @pytest.mark.no_hyperbolic
 @pytest.mark.no_seeweb
 def test_concurrent_file_mounts_jobs_launch(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'Skipping because file mount uploads will be skipped for local server.'
+        )
     name = smoke_tests_utils.get_cluster_name()
     job1_name = f'{name}-job1'
     job2_name = f'{name}-job2'
