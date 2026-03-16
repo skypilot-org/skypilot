@@ -1326,7 +1326,12 @@ async def _receive_and_assemble_chunks(
     chunk_index: int,
     total_chunks: int,
 ) -> Optional[payloads.UploadZipFileResponse]:
-    """Receive chunks, assemble into a zip file, and extract."""
+    """Receive chunks, assemble into a zip file, and extract.
+
+    Returns:
+        None if the upload is completed,
+        A response to tell the client to upload more chunks otherwise.
+    """
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
     # test.
@@ -1436,13 +1441,14 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
 
     base_dir = await _prepare_client_mount_dir(user_hash, request)
-    result = await _receive_and_assemble_chunks(base_dir=base_dir,
-                                                zip_name=upload_id,
-                                                request=request,
-                                                chunk_index=chunk_index,
-                                                total_chunks=total_chunks)
-    if result is not None:
-        return result
+    missing_chunks = await _receive_and_assemble_chunks(
+        base_dir=base_dir,
+        zip_name=upload_id,
+        request=request,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks)
+    if missing_chunks is not None:
+        return missing_chunks
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 

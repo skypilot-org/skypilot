@@ -285,8 +285,9 @@ def _compute_zip_blob_id(zip_path: str) -> str:
     """Compute a stable content hash from a zip file.
 
     Iterates over zip entries in sorted order and hashes
-    (filename, content) pairs. Ignores zip metadata (timestamps, OS)
-    so the hash is stable across re-zips of identical content.
+    (filename, content) pairs. Ignores zip metadata (timestamps, OS).
+
+    Compared to common_utils.hash_file, this hash is stable across re-zips.
     """
     entries: list = []
     with zipfile.ZipFile(zip_path, 'r') as zipf:
