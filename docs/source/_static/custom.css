@@ -197,8 +197,7 @@ active tab to be moved up. */
 .copy-page-wrapper {
   position: absolute;
   right: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 0.15em;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-end;
