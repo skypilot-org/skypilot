@@ -274,12 +274,8 @@ def setup_consolidation_mode_on_startup(deploy: bool) -> None:
 
     if enabled:
         signal_file.touch()
-        return
-
-    # not enabled:
-    if signal_file.exists():
+    elif signal_file.exists():
         signal_file.unlink()
-    return
 
 
 # Whether to use consolidation mode or not. When this is enabled, the managed
