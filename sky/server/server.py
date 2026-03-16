@@ -568,6 +568,8 @@ async def cleanup_upload_ids():
 async def cleanup_unreferenced_file_mounts():
     """Delete file mounts not referenced by any active request."""
 
+    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
+    # blocking the event loop.
     def _do_cleanup():
         clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
         # Get all blob_id referenced by active requests.
@@ -577,32 +579,36 @@ async def cleanup_unreferenced_file_mounts():
         for user_dir in clients_dir.iterdir():
             if not user_dir.is_dir():
                 continue
-            blobs_dir = user_dir / 'file_mounts' / 'blobs'
-            if not blobs_dir.exists():
-                continue
-            # Delete unreferenced extraction dirs older than grace period.
-            grace_cutoff = time.time() - 3600  # 1 hour grace
-            for entry in blobs_dir.iterdir():
-                if not entry.is_dir():
+            try:
+                blobs_dir = user_dir / 'file_mounts' / 'blobs'
+                if not blobs_dir.exists():
                     continue
-                if entry.name in ('.locks', '.staging'):
-                    continue
-                blob_id = entry.name
-                if (blob_id not in active_blob_ids and
-                        entry.stat().st_mtime < grace_cutoff):
-                    logger.info(f'GC: removing unreferenced blob '
-                                f'{blob_id} for user {user_dir.name}')
-                    shutil.rmtree(entry, ignore_errors=True)
-            # Clean up stale staging directories from interrupted uploads.
-            staging_base = blobs_dir / '.staging'
-            if staging_base.exists():
-                for staging in staging_base.iterdir():
-                    if staging.is_dir():
-                        try:
-                            if staging.stat().st_mtime < grace_cutoff:
-                                shutil.rmtree(staging, ignore_errors=True)
-                        except FileNotFoundError:
-                            pass
+                # Delete unreferenced extraction dirs older than grace period.
+                grace_cutoff = time.time() - 3600  # 1 hour grace
+                for entry in blobs_dir.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    if entry.name in ('.locks', '.staging'):
+                        continue
+                    blob_id = entry.name
+                    if (blob_id not in active_blob_ids and
+                            entry.stat().st_mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_dir.name}')
+                        shutil.rmtree(entry, ignore_errors=True)
+                # Clean up stale staging directories from interrupted uploads.
+                staging_base = blobs_dir / '.staging'
+                if staging_base.exists():
+                    for staging in staging_base.iterdir():
+                        if staging.is_dir():
+                            try:
+                                if staging.stat().st_mtime < grace_cutoff:
+                                    shutil.rmtree(staging, ignore_errors=True)
+                            except FileNotFoundError:
+                                pass
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
+                             f'{common_utils.format_exception(e)}')
 
     while True:
         await asyncio.sleep(3600)  # Run every hour

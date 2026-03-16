@@ -278,7 +278,7 @@ def _setup_upload_logger(
         handler.close()
 
 
-_HASH_CHUNK_SIZE = 65536
+_HASH_CHUNK_SIZE = 2**18
 
 
 def _compute_zip_blob_id(zip_path: str) -> str:

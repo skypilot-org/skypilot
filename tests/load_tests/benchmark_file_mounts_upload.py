@@ -1,7 +1,7 @@
 """Benchmark concurrent upload_mounts_to_api_server calls.
 
 Usage:
-    python tests/load_test/benchmark_file_mounts_upload.py <dir> <concurrency>
+    python tests/load_tests/benchmark_file_mounts_upload.py <dir> <concurrency>
 """
 
 import argparse
