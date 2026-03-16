@@ -15,7 +15,11 @@ To set up a new experiment, work with the user to:
    - `train.py` — the file you modify. Model architecture, optimizer, training loop.
 4. **Ask for S3 bucket name**: Ask the user which S3 bucket to use for sharing results between experiments (e.g. `s3://my-autoresearch-bucket`). Use this bucket everywhere below instead of the placeholder. Update `experiment.yaml` to reference the chosen bucket under `file_mounts`.
 5. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
-6. **Verify SkyPilot**: Use the SkyPilot skill to confirm SkyPilot is installed and cloud credentials are configured. The skill handles installation and credential setup if needed.
+6. **Load the SkyPilot skill**: Fetch and follow the SkyPilot skill reference at
+   https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/agent/skills/skypilot/SKILL.md
+   This is a reference document that teaches you how to use SkyPilot — read it,
+   then follow its "Before You Start" bootstrap to confirm SkyPilot is installed
+   and cloud credentials are configured.
 7. **Ask about infra preference**: Ask the user if they have a preference for a specific cloud or infra (e.g. `--infra nebius`, `--infra aws`, `--infra kubernetes`). If they do, set `infra:` in the YAML for every launch. If not, omit it — SkyPilot will automatically pick the cheapest available option.
 8. **Initialize shared results**: Create the results header in S3:
    ```
@@ -28,11 +32,11 @@ Once you get confirmation, kick off the experimentation.
 
 ## Experimentation
 
-Experiments run on cloud GPUs via SkyPilot. Use the **SkyPilot skill** for all
-infrastructure operations — launching clusters, submitting jobs, checking
-status, reading logs, tearing down clusters. The skill knows SkyPilot's CLI,
-YAML format, and best practices. You don't need to memorize commands; just tell
-the skill what you want to do and it will handle it.
+Experiments run on cloud GPUs via SkyPilot. Use the **SkyPilot skill** (the
+reference you fetched in setup step 6) for all infrastructure operations —
+launching clusters, submitting jobs, checking status, reading logs, tearing
+down clusters. It covers the CLI, YAML format, and common patterns. Refer
+back to it whenever you need to run a SkyPilot command.
 
 A template YAML (`experiment.yaml`) is provided in this directory. It launches
 a VM with a GPU, mounts the S3 bucket at `/bucket`, runs training, and writes
@@ -75,31 +79,23 @@ depth:            8
 The key metric is `val_bpb`. Experiment jobs write this to `status/<id>.txt` in
 the shared S3 bucket automatically.
 
-## Submitting experiments with the SkyPilot skill
+## Submitting experiments
 
-Use the SkyPilot skill for all cluster and job operations. Here's the workflow:
+Use the SkyPilot skill for all cluster and job operations. Launch
+`experiment.yaml` on named clusters, passing `EXPERIMENT_ID` and
+`EXPERIMENT_DESC` as `--env` flags. Always submit detached (`-d`).
 
-**Launching experiments**: Tell the skill to launch `experiment.yaml` on a
-named cluster with the appropriate `EXPERIMENT_ID` and `EXPERIMENT_DESC` env
-vars. The skill will use `sky launch` for new clusters and `sky exec` for
-existing ones. Always submit in detached mode (`-d`) so you can move on
-immediately.
+Keep at most **4 clusters** running at a time. You can run parallel experiments
+on separate clusters, or pipeline 2-3 experiments on the same cluster so they
+run back-to-back with no idle gap.
 
-**Parallel experiments**: Launch on separate clusters. The skill handles
-cluster naming and provisioning. Keep at most **4 clusters** running at a time.
+**Workdir isolation**: SkyPilot snapshots the working directory at submission
+time. To avoid one submission picking up another's edits, create a separate
+folder per queued job, copy the relevant files (`train.py`, `prepare.py`,
+`pyproject.toml`, `experiment.yaml`), edit `train.py` there, and pass
+`--workdir /tmp/autoresearch/<folder>` when launching.
 
-**Pipelining**: Queue 2-3 experiments on the same cluster — they run
-back-to-back with no idle gap. The skill uses `sky exec` for this.
-
-**Avoiding workdir conflicts**: Since SkyPilot syncs the working directory at
-submission time, parallel experiments need separate folders to avoid one
-submission picking up another's code. Create a folder per queued job, copy the
-relevant files (`train.py`, `prepare.py`, `pyproject.toml`, `experiment.yaml`),
-edit `train.py` there, and tell the skill to use that folder as the workdir
-(`--workdir /tmp/autoresearch/<folder>`).
-
-**Checking status**: Use the skill to check cluster status, job queues, and
-logs. Poll S3 for experiment results:
+**Checking results**: Poll S3 for experiment output:
 ```
 aws s3 cp s3://<YOUR-BUCKET>/status/exp-01.txt -
 
@@ -107,8 +103,7 @@ for f in $(aws s3 ls s3://<YOUR-BUCKET>/status/ | awk '{print $4}'); do
   echo "=== $f ===" && aws s3 cp s3://<YOUR-BUCKET>/status/$f -
 done
 ```
-
-**Cleanup**: Use the skill to tear down idle clusters.
+Use the SkyPilot skill to check cluster status, job queues, and logs.
 
 ## Logging results
 
@@ -165,13 +160,10 @@ LOOP FOREVER:
 
 **Timeout**: Each experiment takes ~5 minutes (+ startup overhead). If a run exceeds 10 minutes, treat it as a failure.
 
-**Crashes**: If a run crashes (OOM, bug, etc.), check the logs via the SkyPilot skill or look at `logs/<id>_error.txt` in the bucket. If it's a trivial fix (typo, missing import), fix and resubmit. If the idea is fundamentally broken, log "crash" and move on.
+**Crashes**: If a run crashes (OOM, bug, etc.), check the logs (use the SkyPilot skill, or look at `logs/<id>_error.txt` in the bucket). If it's a trivial fix (typo, missing import), fix and resubmit. If the idea is fundamentally broken, log "crash" and move on.
 
 **NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
 
 ## Cleanup
 
-Use the SkyPilot skill to tear down all clusters when done:
-```
-sky down -a
-```
+Tear down all clusters when done (use the SkyPilot skill).
