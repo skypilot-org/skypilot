@@ -1500,7 +1500,9 @@ async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
     # Per-blob filelock to prevent concurrent uploads of the same blob.
     locks_dir = blobs_dir / '.locks'
     await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
-    lock = filelock.AsyncFileLock(str(locks_dir / f'{upload_id}.lock'))
+    lock = filelock.AsyncFileLock(
+        lock_file=str(locks_dir / f'{upload_id}.lock'),
+        executor=executor.get_request_thread_executor())
 
     async with lock:
         # Re-check after acquiring the lock: another upload may have
