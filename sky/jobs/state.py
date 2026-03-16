@@ -160,6 +160,15 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
 )
 
+# Separate table for API access token IDs associated with managed jobs.
+# Maps job_id -> token_id for cleanup when the job completes.
+api_access_token_table = sqlalchemy.Table(
+    'api_access_tokens',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('token_id', sqlalchemy.Text, nullable=False),
+)
+
 # TODO(cooperc): drop the table in a migration
 ha_recovery_script_table = sqlalchemy.Table(
     'ha_recovery_script',
@@ -1844,6 +1853,28 @@ async def get_pool_submit_info_async(
         if info is None:
             return None, None
         return info[0], info[1]
+
+
+def set_api_access_token_id(job_id: int, token_id: str) -> None:
+    """Store the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.insert(api_access_token_table).values(job_id=job_id,
+                                                             token_id=token_id))
+        session.commit()
+
+
+def get_api_access_token_id(job_id: int) -> Optional[str]:
+    """Get the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(api_access_token_table.c.token_id).where(
+                api_access_token_table.c.job_id == job_id)).fetchone()
+        if result is None:
+            return None
+        return result[0]
 
 
 async def scheduler_set_launching_async(job_id: int):
