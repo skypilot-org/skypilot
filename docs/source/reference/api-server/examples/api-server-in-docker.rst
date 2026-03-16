@@ -50,7 +50,7 @@ Then, run the following command to deploy the API server:
       * The state of API server can be persisted on the host;
     * ``-e SKYPILOT_GLOBAL_CONFIG=/root/.api-server-config.yaml``: Override the default :ref:`configuration file<config-yaml>` from ``~/.sky/config.yaml`` to ``~/.api-server-config.yaml`` in the container to avoid conflicts between the server config and the user config. The configuration set via dashboard will also be persisted to this file on the host machine;
     * ``--entrypoint tini``: Run the container with tini as the entrypoint to handle the signals;
-    * ``-- sky api start --deploy --foreground``: Start the API server in the container.
+    * ``-- sky api start --deploy --foreground``: Start the API server in the container. The ``--deploy`` flag automatically enables :ref:`consolidation mode <jobs-consolidation-mode>` for managed jobs, running the jobs controller within the API server.
 
 After the container is started, you can monitor the logs of the API server using the following command:
 

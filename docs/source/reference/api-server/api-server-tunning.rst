@@ -10,7 +10,13 @@ This page describes performance best practices for remote SkyPilot API server in
 Tuning API server resources
 ---------------------------
 
-The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it. Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
+The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it.
+
+.. note::
+
+    When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), the API server also runs the managed jobs controller. In this mode, the API server's resources determine both the request handling capacity **and** the number of managed jobs that can run concurrently. You may need to allocate additional memory to support both workloads. See :ref:`jobs-controller-sizing` for details on jobs controller memory requirements.
+
+Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
 
 * ``Long-running requests``: requests that take longer time and more resources to run, including ``launch``, ``exec``, ``jobs.launch``, etc.
 * ``Short-running requests``: requests that take shorter time or less resources to run, including ``status``, ``logs``, etc.
