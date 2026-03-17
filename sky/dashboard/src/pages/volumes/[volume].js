@@ -164,7 +164,7 @@ function UsedBySection({ clusters, pods }) {
             <span key={name}>
               <Link
                 href={`/clusters/${encodeURIComponent(name)}`}
-                className="text-sky-blue hover:underline"
+                className="text-blue-600 hover:underline"
               >
                 {name}
               </Link>
@@ -331,14 +331,7 @@ function VolumeDetailCard({ volumeData }) {
                   Name on Cloud
                 </div>
                 <div className="text-base mt-1">
-                  <NonCapitalizedTooltip
-                    content={volumeData.name_on_cloud || 'N/A'}
-                    className="text-sm text-muted-foreground"
-                  >
-                    <span className="border-b border-dotted border-gray-400 cursor-help">
-                      {volumeData.name_on_cloud || 'N/A'}
-                    </span>
-                  </NonCapitalizedTooltip>
+                  {volumeData.name_on_cloud || 'N/A'}
                 </div>
               </div>
               <div>
