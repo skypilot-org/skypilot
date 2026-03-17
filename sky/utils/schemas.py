@@ -2150,6 +2150,9 @@ def get_config_schema():
                 'domain': {
                     'type': 'string',
                 },
+                'use_personal_pricing': {
+                    'type': 'boolean',
+                },
                 'security_group_name':
                     (_PROPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
                 'region_configs': {

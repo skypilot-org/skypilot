@@ -2,6 +2,7 @@
 
 This script takes about 1 minute to finish.
 """
+import asyncio
 import csv
 from dataclasses import dataclass
 import decimal
@@ -10,6 +11,8 @@ import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
+
+from nebius.api.nebius.billing.v1alpha1 import OfferType
 
 from sky.adaptors import nebius
 from sky.adaptors.nebius import billing
@@ -37,7 +40,7 @@ class PresetInfo:
         platform_name (str): The name of the platform the preset belongs to.
         gpu (int): The number of GPUs in the preset.
         vcpu (int): The number of virtual CPUs in the preset.
-        gpu_memory_gibibytes (int): size of gpu memory in GiB.
+        gpu_memory_gigabytes (int): size of gpu memory in GB.
         memory_gib (int): The amount of memory in GiB in the preset.
         accelerator_manufacturer (str | None): The manufacturer of the
             accelerator (e.g., "NVIDIA"), or None if no accelerator.
@@ -54,7 +57,7 @@ class PresetInfo:
     platform_name: str
     gpu: int
     vcpu: int
-    gpu_memory_gibibytes: int
+    gpu_memory_gigabytes: int
     memory_gib: int
     accelerator_manufacturer: Optional[str]
     accelerator_name: Optional[str]
@@ -81,8 +84,9 @@ def _format_decimal(value: decimal.Decimal) -> str:
     return f'{integer_part}.{decimal_part}'
 
 
-def _estimate_platforms(platforms: List[Any], parent_id: str,
-                        region: str) -> List[PresetInfo]:
+def estimate_platforms(
+        platforms: List[Any], parent_id: str, region: str,
+        offer_types: Optional[List[OfferType]]) -> List[PresetInfo]:
     """Collects specifications for all presets on the given platforms to form a
     batch price request. It then sends the request and processes the responses
     to create a list of PresetInfo objects.
@@ -98,13 +102,19 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
         List[PresetInfo]: A list of PresetInfo objects containing details and
         estimated prices for each preset.
     """
+    return asyncio.run(
+        _estimate_platforms_async(platforms, parent_id, region, offer_types))
+
+
+async def _estimate_platforms_async(
+        platforms: List[Any], parent_id: str, region: str,
+        offer_types: Optional[List[OfferType]]) -> List[PresetInfo]:
 
     calculator_service = billing().CalculatorServiceClient(nebius.sdk())
     futures = []
 
     for platform in platforms:
         platform_name = platform.metadata.name
-
         for preset in platform.spec.presets:
             # Form the specification for the price request
             estimate_spec = billing().ResourceSpec(
@@ -118,7 +128,7 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                         )),
                 ))
             price_request = billing().EstimateBatchRequest(
-                resource_specs=[estimate_spec])
+                resource_specs=[estimate_spec], offer_types=offer_types)
 
             # Form the specification for the spot price request
             spot_estimate_spec = billing().ResourceSpec(
@@ -134,7 +144,7 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                     ),
                 ))
             spot_price_request = billing().EstimateBatchRequest(
-                resource_specs=[spot_estimate_spec])
+                resource_specs=[spot_estimate_spec], offer_types=offer_types)
 
             # Start future for each preset
             futures.append((
@@ -146,9 +156,20 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                                                   timeout=TIMEOUT),
             ))
 
+    normal_requests = []
+    spot_requests = []
+    for _, _, req, spot_req in futures:
+        normal_requests.append(req)
+        spot_requests.append(spot_req)
+
+    normal, spot = await asyncio.gather(
+        asyncio.gather(*normal_requests),
+        asyncio.gather(*spot_requests),
+    )
+
     # wait all futures to complete and collect results
     result = []
-    for platform, preset, future, future_spot in futures:
+    for (platform, preset, _, _), normal, spot in zip(futures, normal, spot):
         platform_name = platform.metadata.name
         result.append(
             PresetInfo(
@@ -158,22 +179,20 @@ def _estimate_platforms(platforms: List[Any], parent_id: str,
                 platform_name=platform_name,
                 gpu=preset.resources.gpu_count or 0,
                 vcpu=preset.resources.vcpu_count,
-                gpu_memory_gibibytes=platform.spec.gpu_memory_gibibytes,
+                gpu_memory_gigabytes=platform.spec.gpu_memory_gigabytes,
                 memory_gib=preset.resources.memory_gibibytes,
                 accelerator_manufacturer=ACCELERATOR_MANUFACTURER
                 if platform_name.startswith('gpu-') else '',
                 accelerator_name=platform_name.split('-')[1].upper()
                 if platform_name.startswith('gpu-') else '',
                 price_hourly=decimal.Decimal(
-                    future.wait().hourly_cost.general.total.cost),
-                spot_price=decimal.Decimal(
-                    future_spot.wait().hourly_cost.general.total.cost),
+                    normal.hourly_cost.general.total.cost),
+                spot_price=decimal.Decimal(spot.hourly_cost.general.total.cost),
             ))
-
     return result
 
 
-def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
+def write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
     """Writes the provided preset information to a CSV file.
 
     Args:
@@ -196,13 +215,14 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
         ]
         writer = csv.DictWriter(out, fieldnames=header)
         writer.writeheader()
-        # logger.info(presets)
         for preset in sorted(presets,
                              key=lambda x:
                              (bool(x.gpu), x.region, x.platform_name, x.vcpu)):
             gpu_info = ''
             if preset.gpu > 0 and preset.accelerator_name:
-                vram = preset.gpu_memory_gibibytes * 1024
+                # This is incorrect (GB instead as GiB), but
+                # every other vendor does this conversion incorrectly as well
+                vram = preset.gpu_memory_gigabytes * 1024
                 gpu_info_dict = {
                     'Gpus': [{
                         'Name': preset.accelerator_name,
@@ -230,7 +250,7 @@ def _write_preset_prices(presets: List[PresetInfo], output_file: str) -> None:
             })
 
 
-def _fetch_platforms_for_project(project_id: str) -> List[Any]:
+def fetch_platforms_for_project(project_id: str) -> List[Any]:
     """Fetches all available compute platforms for a given project.
 
     Args:
@@ -278,7 +298,8 @@ def _get_regions_map() -> Dict[str, str]:
     return result
 
 
-def _get_all_platform_prices() -> List[PresetInfo]:
+def _get_all_platform_prices(
+        offer_types: Optional[List[OfferType]] = None) -> List[PresetInfo]:
     """Orchestrates fetching specifications and prices for all platforms across
      all regions.
 
@@ -303,15 +324,16 @@ def _get_all_platform_prices() -> List[PresetInfo]:
         logger.info('Processing region: %s (project: %s)...', region,
                     project_id)
 
-        platforms = _fetch_platforms_for_project(project_id)
+        platforms = fetch_platforms_for_project(project_id)
         if not platforms:
             logger.warning('No platforms found in region %s', region)
             continue
 
         presets.extend(
-            _estimate_platforms(platforms=platforms,
-                                parent_id=project_id,
-                                region=region))
+            estimate_platforms(platforms=platforms,
+                               parent_id=project_id,
+                               region=region,
+                               offer_types=offer_types))
 
     return presets
 
@@ -329,7 +351,7 @@ def main() -> None:
     presets = _get_all_platform_prices()
 
     # Write CSV
-    _write_preset_prices(presets, output_file)
+    write_preset_prices(presets, output_file)
 
     logger.info('Done!')
 
