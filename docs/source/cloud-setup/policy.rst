@@ -595,20 +595,31 @@ Route Slurm jobs to clusters based on mounted filesystems
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This policy routes Slurm jobs only to clusters where the required filesystem
-paths are mounted. Users declare required paths via the
-``SKYPILOT_REQUIRED_FILESYSTEMS`` environment variable in their task YAML
-(comma-separated). The policy SSHes into each candidate cluster at optimization
-time (server-side only) and checks that all required paths exist via
-``test -d``. Results are cached per cluster to avoid repeated SSH calls.
+paths are accessible. Users declare required paths via the
+``SKYPILOT_REQUIRED_FILESYSTEMS`` environment variable in their task
+(comma-separated). The policy connects to each candidate cluster over SSH
+at optimization time and checks that all required paths exist. Results are
+cached per cluster to avoid repeated SSH calls.
 
-This solves scheduling for cases where the same dataset lives at different
-paths on different clusters (e.g. ``/data/MNIST`` on one cluster and
+This is useful when the same dataset is stored at different paths on
+different clusters (e.g. ``/mnt/data/MNIST`` on one cluster and
 ``/home/$USER/data/MNIST`` on another).
 
-.. note::
+Users can set the environment variable via the ``envs`` field in a :ref:`task YAML <yaml-spec>`:
 
-    This policy only takes effect server-side during ``OPTIMIZE`` requests.
-    It is a no-op on the client side.
+.. code-block:: yaml
+
+   envs:
+     SKYPILOT_REQUIRED_FILESYSTEMS: /mnt/home,/mnt/data
+
+   resources:
+     cloud: slurm
+
+Or via the ``--env`` flag in ``sky launch`` :ref:`CLI <cli>`:
+
+.. code-block:: console
+
+   $ sky launch --infra slurm --env SKYPILOT_REQUIRED_FILESYSTEMS=/home/ubuntu
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
