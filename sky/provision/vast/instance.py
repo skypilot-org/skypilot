@@ -123,7 +123,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                                           created_instance_ids=[])
 
         secure_only = config.provider_config.get('secure_only', False)
-        post_launch_delay = config.provider_config['post_launch_delay']
+        post_launch_delay = config.provider_config.get('post_launch_delay', 1)
         for _ in range(to_start_count):
             node_type = 'head' if head_instance_id is None else 'worker'
             try:
@@ -153,7 +153,7 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
     # Wait for instances to be ready.  If any instance fails to become
     # ready within the timeout, raise so the provisioner's except handler
     # terminates the cluster and retries on a fresh set of offers.
-    launch_timeout = config.provider_config['launch_timeout']
+    launch_timeout = config.provider_config.get('launch_timeout', 600)
     deadline = time.time() + launch_timeout
     while True:
         instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
