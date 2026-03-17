@@ -16,8 +16,6 @@ if typing.TYPE_CHECKING:
     from sky.utils import volume as volume_lib
 
 _CREDENTIAL_PATH = '~/.config/vastai/vast_api_key'
-_DEFAULT_LAUNCH_TIMEOUT = 600
-_DEFAULT_POST_LAUNCH_DELAY = 1
 
 
 @registry.CLOUD_REGISTRY.register
@@ -225,14 +223,14 @@ class Vast(clouds.Cloud):
             cloud='vast',
             region=region.name,
             keys=('launch_timeout',),
-            default_value=_DEFAULT_LAUNCH_TIMEOUT,
+            default_value=600,  # 10 minutes
             override_configs=resources.cluster_config_overrides,
         )
         post_launch_delay = skypilot_config.get_effective_region_config(
             cloud='vast',
             region=region.name,
             keys=('post_launch_delay',),
-            default_value=_DEFAULT_POST_LAUNCH_DELAY,
+            default_value=1,  # seconds
             override_configs=resources.cluster_config_overrides,
         )
 
