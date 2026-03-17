@@ -603,31 +603,16 @@ class SlurmPartitionRoutingPolicy(sky.AdminPolicy):
 
 
 class SlurmFilesystemRoutingPolicy(sky.AdminPolicy):
-    """Routes Slurm jobs to clusters where required filesystem paths exist.
+    """Routes Slurm jobs to clusters where required filesystem paths are accessible.
 
-    Analogous to :class:`DynamicKubernetesContextsUpdatePolicy`: instead of
-    directly mutating task resources, this policy sets ``slurm.allowed_clusters``
-    in the SkyPilot config so the optimizer only considers clusters that have
-    the required paths mounted.
+    Users declare required paths via ``SKYPILOT_REQUIRED_FILESYSTEMS`` in
+    their task ``envs`` (comma-separated). The policy only takes effect
+    server-side, when SkyPilot is selecting which cluster to run the job on.
+    It connects to each candidate cluster over SSH and checks that all required
+    paths exist, narrowing ``slurm.allowed_clusters`` to only the qualifying
+    ones. Results are cached per cluster for ``CACHE_TTL_SECONDS`` seconds.
 
-    Users declare required paths via a task env var (comma-separated):
-
-    .. code-block:: yaml
-
-        envs:
-          SKYPILOT_REQUIRED_FILESYSTEMS: /data/MNIST,/scratch/models
-
-        resources:
-          cloud: slurm
-
-    The policy runs only on ``OPTIMIZE`` requests (when the scheduler picks a
-    cluster). It SSHes into each currently-allowed Slurm cluster and checks
-    that all required paths exist (``test -d <path>``), then narrows
-    ``slurm.allowed_clusters`` to only the qualifying ones. SSH results are
-    cached per cluster for ``CACHE_TTL_SECONDS`` to avoid repeated SSH calls.
-
-    If the task declares no ``SKYPILOT_REQUIRED_FILESYSTEMS``, the policy is
-    a no-op and the config is returned unchanged.
+    If no ``SKYPILOT_REQUIRED_FILESYSTEMS`` is set, the policy is a no-op.
 
     Raises:
         RuntimeError: If no Slurm cluster has all required paths.
