@@ -1,13 +1,17 @@
 """Unit tests for the jobs server queue."""
 import time
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
+import fastapi
 import pytest
 
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as jobs_utils
 # Target under test
 from sky.jobs.server import core as jobs_core
+from sky.jobs.server import server as jobs_server
+from sky.server.requests import payloads
 from sky.skylet import constants as skylet_constants
 
 
@@ -181,6 +185,20 @@ class TestFilterJobs:
 
 
 class TestQueue:
+
+    @pytest.mark.asyncio
+    async def test_legacy_queue_endpoint_raises_deprecation_error(self):
+        with pytest.raises(fastapi.HTTPException,
+                           match='deprecated and removed') as exc_info:
+            await jobs_server.queue(mock.MagicMock(),
+                                    payloads.JobsQueueBody(refresh=False))
+        assert exc_info.value.status_code == 410
+
+    def test_legacy_queue_raises_deprecation_error(self):
+        raw_queue = jobs_core.queue.__wrapped__
+
+        with pytest.raises(ValueError, match='deprecated and removed'):
+            raw_queue(refresh=False)
 
     def _patch_backend_and_utils(self, monkeypatch: pytest.MonkeyPatch,
                                  jobs: List[Dict[str, Any]]):

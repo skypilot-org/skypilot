@@ -1018,7 +1018,7 @@ def _maybe_restart_controller(
 
 
 # For backwards compatibility
-# TODO(hailong): Remove before 0.12.0.
+# TODO(lloyd): Remove before 0.13.0.
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
@@ -1053,9 +1053,10 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
-
-    return jobs
+    del refresh, skip_finished, all_users, job_ids
+    raise ValueError('Managed jobs queue v1 has been deprecated and removed. '
+                     'Use sky.jobs.queue(version=2) or sky.jobs.queue_v2() '
+                     'instead.')
 
 
 @usage_lib.entrypoint
