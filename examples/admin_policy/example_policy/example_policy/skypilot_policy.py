@@ -1,10 +1,14 @@
 """Example prebuilt admin policies."""
 import logging
+import shlex
 import subprocess
 import threading
 from typing import Dict, List, Set
 
 import cachetools
+
+from sky.adaptors import slurm as slurm_adaptor
+from sky.provision.slurm import utils as slurm_utils
 
 logger = logging.getLogger(__name__)
 
@@ -700,12 +704,6 @@ class SlurmFilesystemRoutingPolicy(sky.AdminPolicy):
     @classmethod
     def _check_paths_via_ssh(cls, cluster: str, paths: List[str]) -> List[str]:
         """SSHes into ``cluster`` and returns the subset of paths that exist."""
-        # pylint: disable=import-outside-toplevel
-        import shlex
-
-        from sky.adaptors import slurm as slurm_adaptor
-        from sky.provision.slurm import utils as slurm_utils
-
         ssh_config = slurm_utils.get_slurm_ssh_config()
         cfg = ssh_config.lookup(cluster)
         client = slurm_adaptor.SlurmClient(
