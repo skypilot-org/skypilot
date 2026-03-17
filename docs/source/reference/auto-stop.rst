@@ -304,6 +304,14 @@ same hook script on preemption.
   a spot instance.
 - **GCP / Azure**: SkyPilot catches the ``SIGTERM`` signal sent by
   the cloud before termination.  The grace period is typically ~30 seconds.
+
+.. note::
+
+   On GCP and Azure the underlying mechanism is a ``SIGTERM`` handler.
+   ``SIGTERM`` is also sent on other teardown paths such as ``sky down``,
+   ``sky cancel``, and autostop idle timeout.  This means the hook may fire
+   on those paths as well, not only on cloud preemption.  Keep hooks
+   idempotent and safe to run on any shutdown path.
 - **Kubernetes**: Preemption hooks are **not supported**. On Kubernetes the
   container entrypoint traps ``SIGTERM`` to keep pods alive for HA recovery,
   so the termination signal never reaches the skylet process.
