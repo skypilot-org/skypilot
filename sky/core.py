@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import concurrent.futures
 import shlex
 import typing
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
@@ -42,6 +43,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.kubernetes import kubernetes_deploy_utils
+from sky.workspaces import core as workspaces_core
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -1474,6 +1476,32 @@ def enabled_clouds(workspace: Optional[str] = None,
             enabled_k8s_infras) + enabled_slurm_infras + sorted(
                 enabled_cloud_infras)
         return all_infras
+
+
+@usage_lib.entrypoint
+def enabled_clouds_batch(workspaces: List[str],
+                         expand: bool = False) -> Dict[str, List[str]]:
+    """Returns enabled clouds for multiple workspaces in a single call.
+
+    Args:
+        workspaces: List of workspace names to query.
+        expand: Whether to expand Kubernetes and SSH to list of resource pools.
+
+    Returns:
+        A dict mapping each workspace name to its list of enabled clouds/infras.
+        Workspaces the caller is not authorized to access are silently omitted.
+    """
+    accessible = set(
+        workspaces_core.workspaces_for_user(
+            common_utils.get_current_user().id).keys())
+    allowed = [ws for ws in workspaces if ws in accessible]
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {
+            ws: executor.submit(enabled_clouds, workspace=ws, expand=expand)
+            for ws in allowed
+        }
+        return {ws: future.result() for ws, future in futures.items()}
 
 
 @usage_lib.entrypoint

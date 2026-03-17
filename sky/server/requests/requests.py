@@ -48,10 +48,7 @@ COL_USER_ID = 'user_id'
 COL_STATUS_MSG = 'status_msg'
 COL_SHOULD_RETRY = 'should_retry'
 COL_FINISHED_AT = 'finished_at'
-# Request logs are stored in ~/.sky/api_server/request_logs/ to avoid NFS
-# performance issues in Kubernetes deployments where ~/sky_logs/ may be on
-# shared storage.
-REQUEST_LOG_PATH_PREFIX = '~/.sky/api_server/request_logs'
+COL_FILE_MOUNTS_BLOB_ID = 'file_mounts_blob_id'
 # Legacy path for backward compatibility - GC will clean up logs from both
 # the new and legacy paths to handle server upgrades gracefully.
 LEGACY_REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
@@ -110,6 +107,7 @@ REQUEST_COLUMNS = [
     COL_STATUS_MSG,
     COL_SHOULD_RETRY,
     COL_FINISHED_AT,
+    COL_FILE_MOUNTS_BLOB_ID,
 ]
 
 
@@ -144,11 +142,13 @@ class Request:
     should_retry: bool = False
     # When the request finished.
     finished_at: Optional[float] = None
+    # Blob ID of uploaded file mounts
+    file_mounts_blob_id: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
         log_path_prefix = pathlib.Path(
-            REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
+            server_constants.REQUEST_LOG_PATH_PREFIX).expanduser().absolute()
         log_path_prefix.mkdir(parents=True, exist_ok=True)
         log_path = (log_path_prefix / self.request_id).with_suffix('.log')
         return log_path
@@ -231,6 +231,7 @@ class Request:
             status_msg=self.status_msg,
             should_retry=self.should_retry,
             finished_at=self.finished_at,
+            file_mounts_blob_id=self.file_mounts_blob_id,
         )
 
     def encode(self) -> payloads.RequestPayload:
@@ -257,6 +258,7 @@ class Request:
                 status_msg=self.status_msg,
                 should_retry=self.should_retry,
                 finished_at=self.finished_at,
+                file_mounts_blob_id=self.file_mounts_blob_id,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -290,6 +292,7 @@ class Request:
                 status_msg=payload.status_msg,
                 should_retry=payload.should_retry,
                 finished_at=payload.finished_at,
+                file_mounts_blob_id=payload.file_mounts_blob_id,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -399,6 +402,8 @@ def _update_request_row_fields(
         content['should_retry'] = False
     if 'finished_at' not in fields:
         content['finished_at'] = None
+    if COL_FILE_MOUNTS_BLOB_ID not in fields:
+        content[COL_FILE_MOUNTS_BLOB_ID] = None
 
     # Convert back to tuple in the same order as REQUEST_COLUMNS
     return tuple(content[col] for col in REQUEST_COLUMNS)
@@ -445,6 +450,8 @@ def create_table(cursor, conn):
                                  'INTEGER')
     db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_FINISHED_AT,
                                  'REAL')
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE,
+                                 COL_FILE_MOUNTS_BLOB_ID, 'TEXT')
 
     # Add an index on (status, name) to speed up queries
     # that filter on these columns.
@@ -510,10 +517,10 @@ def reset_db_and_logs():
     """Create the database."""
     logger.debug('clearing local API server database')
     server_common.clear_local_api_server_database()
-    logger.debug(
-        f'clearing local API server logs directory at {REQUEST_LOG_PATH_PREFIX}'
-    )
-    shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
+    logger.debug('clearing local API server logs directory at '
+                 f'{server_constants.REQUEST_LOG_PATH_PREFIX}')
+    shutil.rmtree(pathlib.Path(
+        server_constants.REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     # Also clear legacy path for backward compatibility cleanup
     logger.debug('clearing legacy API server logs directory at '
@@ -547,7 +554,7 @@ def reset_db_and_logs():
 
 
 def request_lock_path(request_id: str) -> str:
-    lock_path = os.path.expanduser(REQUEST_LOG_PATH_PREFIX)
+    lock_path = os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX)
     os.makedirs(lock_path, exist_ok=True)
     return os.path.join(lock_path, f'.{request_id}.lock')
 
@@ -1043,6 +1050,21 @@ async def get_api_request_ids_start_with(incomplete: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+@init_db
+def get_active_file_mounts_blob_ids() -> set:
+    """Get file_mounts_blob_ids referenced by active requests."""
+    assert _DB is not None
+    with _DB.conn:
+        cursor = _DB.conn.cursor()
+        cursor.execute(
+            f'SELECT DISTINCT {COL_FILE_MOUNTS_BLOB_ID} '
+            f'FROM {REQUEST_TABLE} '
+            f'WHERE status IN (?, ?) '
+            f'AND {COL_FILE_MOUNTS_BLOB_ID} IS NOT NULL',
+            (RequestStatus.PENDING.value, RequestStatus.RUNNING.value))
+        return {row[0] for row in cursor.fetchall()}
+
+
 _add_or_update_request_sql = (f'INSERT OR REPLACE INTO {REQUEST_TABLE} '
                               f'({", ".join(REQUEST_COLUMNS)}) VALUES '
                               f'({", ".join(["?"] * len(REQUEST_COLUMNS))})')
@@ -1209,6 +1231,7 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             requests older than the retention period will be deleted
             regardless of the batch size.
     """
+    debug_log_dir = pathlib.Path(sky_logging.DEBUG_LOG_DIR)
     total_deleted = 0
     while True:
         reqs = await get_request_tasks_async(
@@ -1234,6 +1257,12 @@ async def clean_finished_requests_with_retention(retention_seconds: int,
             futs.append(
                 asyncio.create_task(
                     anyio.Path(legacy_log_path).unlink(missing_ok=True)))
+            # Delete debug log if it exists
+            debug_log_path = (debug_log_dir /
+                              req.request_id).with_suffix('.log')
+            futs.append(
+                asyncio.create_task(
+                    anyio.Path(debug_log_path).unlink(missing_ok=True)))
         await asyncio.gather(*futs)
 
         await _delete_requests([req.request_id for req in reqs])

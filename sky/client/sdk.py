@@ -193,7 +193,7 @@ def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
     workspace: Optional[str] = None
-) -> server_common.RequestId[Dict[str, List[str]]]:
+) -> server_common.RequestId[Dict[str, Dict[str, List[str]]]]:
     """Checks the credentials to enable clouds.
 
     Args:
@@ -206,7 +206,8 @@ def check(
         The request ID of the check request.
 
     Request Returns:
-        None
+        Dict mapping workspace name to a dict of cloud name to list of
+        enabled capability strings (e.g. 'compute', 'storage').
     """
     if infra_list is None:
         clouds = None
@@ -468,15 +469,11 @@ def validate(
 
     # TODO(kevin): remove this in v0.13.0
     omit_user_specified_yaml = _omit(15)
-    # TODO (kyuds): remove this in v0.13.0
+    # TODO (kyuds): remove these in v0.13.0
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
-    if omit_local_disk:
-        logger.debug('`local_disk` is ignored because the server does '
-                     'not support it yet.')
-    if omit_mount_cached_config:
-        logger.debug('`mount_cached_config` is ignored because the server '
-                     'does not support it yet.')
+    omit_file_mount_type = _omit(40)
+
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -488,9 +485,18 @@ def validate(
             for resource in task.resources:
                 # pylint: disable=protected-access
                 resource._set_local_disk(None)
+            logger.debug('`local_disk` is ignored because the server does '
+                         'not support it yet.')
         if omit_mount_cached_config:
             for storage in task.storage_mounts.values():
                 storage.mount_cached_config = None
+            logger.debug('`mount_cached_config` is ignored because the server '
+                         'does not support it yet.')
+        if omit_file_mount_type:
+            for storage in task.storage_mounts.values():
+                storage.file_mount_type = None
+            logger.debug('`type` is ignored because the server does not '
+                         'support it yet.')
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
@@ -788,7 +794,7 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -808,6 +814,7 @@ def _launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -880,7 +887,8 @@ def exec(  # pylint: disable=redefined-builtin
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
-    dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
+        dag, workdir_only=True)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
@@ -888,6 +896,7 @@ def exec(  # pylint: disable=redefined-builtin
         dryrun=dryrun,
         down=down,
         backend=backend.NAME if backend else None,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
 
     response = server_common.make_authenticated_request(
@@ -2387,7 +2396,6 @@ def api_status(
 
 # === API server management APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.

@@ -23,7 +23,39 @@ const PluginContext = createContext({
   dataEnhancements: {},
   tableColumns: {},
   dataProviders: {},
+  recipeTypes: [],
 });
+
+const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
+
+function loadCachedNavLinks() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(NAV_LINKS_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        return parsed.map((link) => ({ ...link, _cached: true }));
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveCachedNavLinks(links) {
+  if (typeof window === 'undefined') return;
+  try {
+    // Strip _cached flag before persisting
+    const toCache = links
+      .filter((link) => !link._cached)
+      .map(({ _cached, ...rest }) => rest);
+    localStorage.setItem(NAV_LINKS_CACHE_KEY, JSON.stringify(toCache));
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 const initialState = {
   topNavLinks: [],
@@ -32,6 +64,7 @@ const initialState = {
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
+  recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
 };
 
 const actions = {
@@ -41,6 +74,8 @@ const actions = {
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
+  CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
+  REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
 };
 
 function pluginReducer(state, action) {
@@ -122,6 +157,16 @@ function pluginReducer(state, action) {
           ...state.dataProviders,
           [action.payload.id]: action.payload,
         },
+      };
+    case actions.CLEAR_CACHED_NAV_LINKS:
+      return {
+        ...state,
+        topNavLinks: state.topNavLinks.filter((link) => !link._cached),
+      };
+    case actions.REGISTER_RECIPE_TYPE:
+      return {
+        ...state,
+        recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
     default:
       return state;
@@ -663,6 +708,30 @@ function createPluginApi(dispatch) {
       // eslint-disable-next-line no-undef
       return require('@/components/ui');
     },
+    registerRecipeType(config) {
+      if (!config || !config.id || !config.label) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid recipe type registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        label: String(config.label),
+        fullLabel: config.fullLabel
+          ? String(config.fullLabel)
+          : String(config.label),
+        icon: config.icon || null,
+        color: config.color ? String(config.color) : 'gray',
+        template: config.template ? String(config.template) : '',
+      };
+      dispatch({
+        type: actions.REGISTER_RECIPE_TYPE,
+        payload: normalized,
+      });
+      return normalized.id;
+    },
     registerDataProvider(config) {
       if (!config?.id) {
         console.warn(
@@ -687,9 +756,13 @@ function createPluginApi(dispatch) {
 }
 
 export function PluginProvider({ children }) {
-  const [state, dispatch] = useReducer(pluginReducer, initialState);
+  const [state, dispatch] = useReducer(pluginReducer, null, () => ({
+    ...initialState,
+    topNavLinks: loadCachedNavLinks(),
+  }));
   const router = useRouter();
   const routerRef = useRef(router);
+  const pluginsLoadedRef = useRef(false);
 
   // Keep router ref up to date
   useEffect(() => {
@@ -720,6 +793,13 @@ export function PluginProvider({ children }) {
     }
   }, [state]);
 
+  // Persist nav links to localStorage after plugins have fully loaded
+  useEffect(() => {
+    if (pluginsLoadedRef.current) {
+      saveCachedNavLinks(state.topNavLinks);
+    }
+  }, [state.topNavLinks]);
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -740,14 +820,27 @@ export function PluginProvider({ children }) {
       if (cancelled) {
         return;
       }
+      const loadPromises = [];
       manifest.forEach((pluginDescriptor) => {
         const jsPath = extractJsPath(pluginDescriptor);
         if (jsPath && !cancelled) {
           const requiresEarlyInit =
             pluginDescriptor.requires_early_init === true;
-          loadPluginScript(jsPath, requiresEarlyInit);
+          const promise = loadPluginScript(jsPath, requiresEarlyInit);
+          if (promise) {
+            loadPromises.push(promise);
+          }
         }
       });
+      // After all plugin scripts have loaded and registered,
+      // clear stale cached nav links and enable cache persistence
+      if (loadPromises.length > 0) {
+        await Promise.all(loadPromises);
+      }
+      if (!cancelled) {
+        pluginsLoadedRef.current = true;
+        dispatch({ type: actions.CLEAR_CACHED_NAV_LINKS });
+      }
     };
     void bootstrapPlugins();
 
@@ -808,6 +901,11 @@ export function useGroupedNavLinks() {
 export function usePluginRoutes() {
   const { routes } = usePluginState();
   return routes;
+}
+
+export function usePluginRecipeTypes() {
+  const { recipeTypes } = usePluginState();
+  return recipeTypes;
 }
 
 export function usePluginRoute(pathname) {

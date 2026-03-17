@@ -7,7 +7,10 @@ import {
   getManagedJobs,
   getManagedJobsWithClientPagination,
 } from '@/data/connectors/jobs';
-import { getWorkspaces, getEnabledClouds } from '@/data/connectors/workspaces';
+import {
+  getWorkspaces,
+  getEnabledCloudsBatch,
+} from '@/data/connectors/workspaces';
 import { getUsers } from '@/data/connectors/users';
 import { getVolumes } from '@/data/connectors/volumes';
 import {
@@ -49,7 +52,10 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
 
   // Functions with arguments (require dynamic data)
   dynamic: {
-    getEnabledClouds: { fn: getEnabledClouds, requiresWorkspaces: true },
+    getEnabledCloudsBatch: {
+      fn: getEnabledCloudsBatch,
+      requiresWorkspaces: true,
+    },
     getContextGPUDataForAllContexts: {
       fn: getContextGPUData,
       requiresContexts: true,
@@ -68,7 +74,7 @@ export const DASHBOARD_CACHE_FUNCTIONS = {
       'getWorkspaces',
       'getClusters',
       'getManagedJobsForOtherPages',
-      'getEnabledClouds',
+      'getEnabledCloudsBatch',
     ],
     users: ['getUsers', 'getClusters', 'getManagedJobsForOtherPages'],
     volumes: ['getVolumes'],
@@ -173,7 +179,7 @@ class CachePreloader {
             return result;
           })
         );
-      } else if (functionName === 'getEnabledClouds') {
+      } else if (functionName === 'getEnabledCloudsBatch') {
         // Dynamic function that requires workspace data
         promises.push(this._loadEnabledCloudsForAllWorkspaces(force));
       } else if (functionName === 'getContextGPUDataForAllContexts') {
@@ -192,22 +198,16 @@ class CachePreloader {
    */
   async _loadEnabledCloudsForAllWorkspaces(force = false) {
     try {
-      // First get workspaces
       if (force) {
         dashboardCache.invalidate(getWorkspaces);
       }
       const workspacesData = await dashboardCache.get(getWorkspaces);
       const workspaceNames = Object.keys(workspacesData || {});
 
-      // Then load enabled clouds for each workspace
-      const promises = workspaceNames.map((wsName) => {
-        if (force) {
-          dashboardCache.invalidate(getEnabledClouds, [wsName]);
-        }
-        return dashboardCache.get(getEnabledClouds, [wsName]);
-      });
-
-      await Promise.allSettled(promises);
+      if (force) {
+        dashboardCache.invalidateFunction(getEnabledCloudsBatch);
+      }
+      await dashboardCache.get(getEnabledCloudsBatch, [workspaceNames, false]);
     } catch (error) {
       console.error('[CachePreloader] Error loading enabled clouds:', error);
     }
@@ -304,7 +304,7 @@ class CachePreloader {
             await dashboardCache.get(fn, args);
             // Mark this function as recently preloaded
             this._markAsPreloaded(fn, args);
-          } else if (functionName === 'getEnabledClouds') {
+          } else if (functionName === 'getEnabledCloudsBatch') {
             // Dynamic function that requires workspace data
             await this._loadEnabledCloudsForAllWorkspaces(false);
           } else if (functionName === 'getContextGPUDataForAllContexts') {

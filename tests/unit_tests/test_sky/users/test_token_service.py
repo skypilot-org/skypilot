@@ -223,6 +223,37 @@ class TestTokenService:
         assert isinstance(token_service.token_service,
                           token_service.TokenService)
 
+    def test_token_preserves_user_identity_for_nested_jobs(self):
+        """Test that a token created for a managed job preserves user identity.
+
+        When api_access: true is set, _create_job_api_token creates a token
+        where both creator_user_id and service_account_user_id are the same
+        user. This ensures nested jobs launched via the token authenticate as
+        the original user.
+        """
+        with mock.patch('sky.users.token_service.global_user_state'
+                       ) as mock_global_state:
+            mock_global_state.get_system_config.return_value = 'test_secret_key'
+
+            service = token_service.TokenService()
+
+            # Mirror _create_job_api_token: both IDs are the same user
+            user_hash = 'user_abc123'
+            token_data = service.create_token(
+                creator_user_id=user_hash,
+                service_account_user_id=user_hash,
+                token_name='managed-job-test-12345678',
+                expires_in_days=7)
+
+            # Verify the token carries the original user's identity
+            payload = service.verify_token(token_data['token'])
+            assert payload is not None
+            assert payload['sub'] == user_hash, (
+                'Token subject should be the original user so nested jobs '
+                'authenticate with the same identity')
+            assert payload['token_id'] == token_data['token_id']
+            assert payload['type'] == 'service_account'
+
     def test_jwt_payload_format(self):
         """Test that JWT payload uses correct format."""
         with mock.patch('sky.users.token_service.global_user_state'

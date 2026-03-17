@@ -1,0 +1,34 @@
+resources:
+  cpus: 2+
+  memory: 4+
+
+api_access: true
+
+setup: |
+  pip install "skypilot-nightly[remote]" > /dev/null 2>&1
+
+run: |
+  # Verify API access env vars are set
+  echo "API endpoint: $SKYPILOT_API_SERVER_ENDPOINT"
+  test -n "$SKYPILOT_API_SERVER_ENDPOINT" || (echo "FAIL: no endpoint" && exit 1)
+  test -n "$SKYPILOT_SERVICE_ACCOUNT_TOKEN" || (echo "FAIL: no token" && exit 1)
+
+  # Verify we can authenticate to the API server
+  sky api info
+
+  # Launch a nested job and wait for it
+  sky jobs launch --cpus 2+ --memory 4+ -n nested-job -y -d "echo nested-job-success"
+
+  # Wait for nested job to complete
+  for i in $(seq 1 60); do
+    # Strip ANSI codes and debug lines before parsing status
+    status=$(sky jobs queue 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep nested-job | grep -oE 'SUCCEEDED|FAILED[A-Z_]*|RUNNING|STARTING|CANCELLED' | head -1)
+    echo "Poll $i: status=$status"
+    if [ "$status" = "SUCCEEDED" ]; then
+      echo "NESTED_JOB_SUCCESS"
+      exit 0
+    fi
+    sleep 10
+  done
+  echo "FAIL: nested job did not succeed"
+  exit 1

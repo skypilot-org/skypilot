@@ -787,7 +787,9 @@ Consolidating the API server and the jobs controller has a few advantages:
 - Persistent managed job state using the same database as the API server, e.g., PostgreSQL.
 - No extra VM/pod is needed for the jobs controller, saving cost.
 
-To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config.
+For deploy-mode API servers (``--deploy``), consolidation mode is **automatically enabled** when no existing jobs controller clusters are found. No configuration is needed.
+
+To explicitly control this behavior, set :ref:`consolidation_mode <config-yaml-jobs-controller-consolidation-mode>` in the API server config:
 
 .. code-block:: yaml
 
@@ -797,7 +799,7 @@ To enable the consolidated deployment, set :ref:`consolidation_mode <config-yaml
       # any specified resources will be ignored
 
 .. note::
-  You must **restart the API server** after making this change for it to take effect.
+  You must **restart the API server** after changing this setting for it to take effect.
 
   .. code-block:: bash
 

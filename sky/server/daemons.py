@@ -2,6 +2,8 @@
 import atexit
 import dataclasses
 import os
+import shutil
+import sys
 import time
 import typing
 from typing import Callable
@@ -26,6 +28,38 @@ else:
     pathlib = adaptors_common.LazyImport('pathlib')
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _rotate_daemon_log(log_path: str) -> None:
+    """Rotate the daemon log if it exceeds the size threshold.
+
+    Uses the copytruncate pattern: copy current log to a backup file,
+    then truncate the original. This keeps one backup for external log
+    collectors and debugging.
+
+    The threshold is configurable via api_server.daemon_log_max_bytes in
+    ~/.sky/config.yaml, defaulting to DAEMON_LOG_MAX_BYTES.
+    """
+    try:
+        max_bytes = skypilot_config.get_nested(
+            ('api_server', 'daemon_log_max_bytes'),
+            server_constants.DEFAULT_DAEMON_LOG_MAX_BYTES)
+        if max_bytes <= 0:
+            return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        fd = sys.stdout.fileno()
+        if os.fstat(fd).st_size < max_bytes:
+            return
+        # Copy current log to backup before truncating.
+        backup_path = log_path + '.1'
+        shutil.copy2(log_path, backup_path)
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+    except Exception:  # pylint: disable=broad-except
+        # Never crash the daemon on rotation failure.
+        pass
+
 
 # Snapshot at import time, before run_event() overrides DISABLE_LOGGING.
 # Each executor process imports this module during executor_initializer(),
@@ -80,6 +114,10 @@ class InternalRequestDaemon:
         # sent multiple times.
         os.environ[env_options.Options.DISABLE_LOGGING.env_key] = '1'
 
+        log_path = os.path.join(
+            os.path.expanduser(server_constants.REQUEST_LOG_PATH_PREFIX),
+            self.id + '.log')
+
         level = self.refresh_log_level()
         while True:
             try:
@@ -107,6 +145,7 @@ class InternalRequestDaemon:
                 # kill all children processes related to this request.
                 subprocess_utils.kill_children_processes()
                 common_utils.release_memory()
+                _rotate_daemon_log(log_path)
 
 
 def refresh_cluster_status_event():
@@ -262,6 +301,14 @@ def should_skip_pool_status_refresh():
     return _should_skip_serve_status_refresh_event(pool=True)
 
 
+def should_skip_server_heartbeat():
+    """Skip server heartbeat when running as a controller."""
+    if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
+        # We are running as a controller.
+        return True
+    return False
+
+
 def server_heartbeat_event():
     """Periodically send server-side plugin metrics to Loki."""
     # pylint: disable=import-outside-toplevel
@@ -323,14 +370,17 @@ INTERNAL_REQUEST_DAEMONS = [
     InternalRequestDaemon(
         id='server-heartbeat-daemon',
         name=request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT,
-        event_fn=server_heartbeat_event),
+        event_fn=server_heartbeat_event,
+        should_skip=should_skip_server_heartbeat),
 ]
 
 HIDDEN_REQUEST_NAMES = [
     request_names.RequestName.REQUEST_DAEMON_SERVER_HEARTBEAT
 ]
 
+_DAEMON_IDS = set(d.id for d in INTERNAL_REQUEST_DAEMONS)
+
 
 def is_daemon_request_id(request_id: str) -> bool:
     """Returns whether a specific request_id is an internal daemon."""
-    return any([d.id == request_id for d in INTERNAL_REQUEST_DAEMONS])
+    return request_id in _DAEMON_IDS

@@ -5,13 +5,11 @@ import asyncio
 import collections
 import datetime
 import enum
-import ipaddress
 import json
 import time
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
                     Union)
-import urllib.parse
 
 import colorama
 import sqlalchemy
@@ -25,7 +23,6 @@ from sqlalchemy.ext import declarative
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.dag import DagExecution
 from sky.skylet import constants
@@ -163,6 +160,15 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('node_names', sqlalchemy.Text, server_default=None),
 )
 
+# Separate table for API access token IDs associated with managed jobs.
+# Maps job_id -> token_id for cleanup when the job completes.
+api_access_token_table = sqlalchemy.Table(
+    'api_access_tokens',
+    Base.metadata,
+    sqlalchemy.Column('job_id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('token_id', sqlalchemy.Text, nullable=False),
+)
+
 # TODO(cooperc): drop the table in a migration
 ha_recovery_script_table = sqlalchemy.Table(
     'ha_recovery_script',
@@ -213,27 +219,6 @@ def create_table(engine: sqlalchemy.engine.Engine):
     migration_utils.safe_alembic_upgrade(engine,
                                          migration_utils.SPOT_JOBS_DB_NAME,
                                          migration_utils.SPOT_JOBS_VERSION)
-
-
-def force_no_postgres() -> bool:
-    """Force no postgres.
-
-    If the db is localhost on the api server, and we are not in consolidation
-    mode, we must force using sqlite and not using the api server on the jobs
-    controller.
-    """
-    conn_string = skypilot_config.get_nested(('db',), None)
-
-    if conn_string:
-        parsed = urllib.parse.urlparse(conn_string)
-        # it freezes if we use the normal get_consolidation_mode function
-        consolidation_mode = skypilot_config.get_nested(
-            ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-        if ((parsed.hostname == 'localhost' or
-             ipaddress.ip_address(parsed.hostname).is_loopback) and
-                not consolidation_mode):
-            return True
-    return False
 
 
 _db_manager = db_utils.DatabaseManager('spot_jobs', create_table)
@@ -1088,6 +1073,23 @@ def get_num_tasks(job_id: int) -> int:
     return len(_get_all_task_ids_statuses(job_id))
 
 
+def get_latest_task_id_from_statuses(
+    id_statuses: List[Tuple[int, ManagedJobStatus]]
+) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
+    """Returns the (task_id, status) of the latest non-terminal task.
+
+    If all tasks are terminal, returns the last task. If the list is empty,
+    returns (None, None).
+    """
+    if not id_statuses:
+        return None, None
+    task_id, status = next(
+        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
+        id_statuses[-1],
+    )
+    return task_id, status
+
+
 def get_latest_task_id_status(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job.
@@ -1100,15 +1102,7 @@ def get_latest_task_id_status(
     If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
-    if not id_statuses:
-        return None, None
-    task_id, status = next(
-        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
-        id_statuses[-1],
-    )
-    # Unpack the tuple first, or it triggers a Pylint's bug on recognizing
-    # the return type.
-    return task_id, status
+    return get_latest_task_id_from_statuses(id_statuses)
 
 
 def get_job_controller_process(job_id: int) -> Optional[ControllerPidRecord]:
@@ -1430,6 +1424,25 @@ def get_status_count_with_filters(
         for status_value, count in rows:
             # status_value is already a string (enum value)
             results[str(status_value)] = int(count)
+    return results
+
+
+def get_status_counts() -> Dict[str, int]:
+    """Get count of tasks grouped by ManagedJobStatus.
+
+    This is used by the Prometheus ManagedJobsCollector.
+    """
+    query = sqlalchemy.select(
+        spot_table.c.status,
+        sqlalchemy.func.count().label('cnt'),  # pylint: disable=not-callable
+    ).group_by(spot_table.c.status)
+
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        rows = session.execute(query).fetchall()
+    results: Dict[str, int] = {}
+    for status_value, count in rows:
+        results[str(status_value)] = int(count)
     return results
 
 
@@ -1842,6 +1855,28 @@ async def get_pool_submit_info_async(
         return info[0], info[1]
 
 
+def set_api_access_token_id(job_id: int, token_id: str) -> None:
+    """Store the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.insert(api_access_token_table).values(job_id=job_id,
+                                                             token_id=token_id))
+        session.commit()
+
+
+def get_api_access_token_id(job_id: int) -> Optional[str]:
+    """Get the API access token ID for a managed job."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(api_access_token_table.c.token_id).where(
+                api_access_token_table.c.job_id == job_id)).fetchone()
+        if result is None:
+            return None
+        return result[0]
+
+
 async def scheduler_set_launching_async(job_id: int):
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
@@ -2151,6 +2186,13 @@ def get_workspace(job_id: int) -> str:
 async def get_latest_task_id_status_async(
         job_id: int) -> Tuple[Optional[int], Optional[ManagedJobStatus]]:
     """Returns the (task id, status) of the latest task of a job."""
+    id_statuses = await get_all_task_ids_statuses_async(job_id)
+    return get_latest_task_id_from_statuses(id_statuses)
+
+
+async def get_all_task_ids_statuses_async(
+        job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
+    """Returns all (task_id, status) pairs for a job (async version)."""
     engine = await _db_manager.get_async_engine()
     async with sql_async.AsyncSession(engine) as session:
         result = await session.execute(
@@ -2159,17 +2201,7 @@ async def get_latest_task_id_status_async(
                 spot_table.c.status,
             ).where(spot_table.c.spot_job_id == job_id).order_by(
                 spot_table.c.task_id.asc()))
-        id_statuses = [
-            (row[0], ManagedJobStatus(row[1])) for row in result.fetchall()
-        ]
-
-    if not id_statuses:
-        return None, None
-    task_id, status = next(
-        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
-        id_statuses[-1],
-    )
-    return task_id, status
+        return [(row[0], ManagedJobStatus(row[1])) for row in result.fetchall()]
 
 
 async def set_starting_async(job_id: int,

@@ -1,12 +1,14 @@
 """Volume utilities."""
 from dataclasses import dataclass
 import enum
+import re
 import time
 from typing import Any, Dict, Optional
 
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -44,6 +46,7 @@ class VolumeInfo:
     path: str
     volume_name_on_cloud: Optional[str] = None
     volume_id_on_cloud: Optional[str] = None
+    sub_path: Optional[str] = None
 
 
 class VolumeMount:
@@ -53,11 +56,13 @@ class VolumeMount:
                  path: str,
                  volume_name: str,
                  volume_config: models.VolumeConfig,
-                 is_ephemeral: bool = False):
+                 is_ephemeral: bool = False,
+                 sub_path: Optional[str] = None):
         self.path: str = path
         self.volume_name: str = volume_name
         self.volume_config: models.VolumeConfig = volume_config
         self.is_ephemeral: bool = is_ephemeral
+        self.sub_path: Optional[str] = sub_path
 
     def pre_mount(self) -> None:
         """Update the volume status before actual mounting."""
@@ -72,8 +77,23 @@ class VolumeMount:
                                         status=status_lib.VolumeStatus.IN_USE)
 
     @classmethod
-    def resolve(cls, path: str, volume_name: str) -> 'VolumeMount':
+    def resolve(cls,
+                path: str,
+                volume_name: str,
+                sub_path: Optional[str] = None) -> 'VolumeMount':
         """Resolve the volume mount by populating metadata of volume."""
+        if sub_path is not None:
+            if not re.match(constants.SUB_PATH_PATTERN, sub_path):
+                raise ValueError(
+                    f'sub_path contains invalid characters: {sub_path!r}. '
+                    'Must be a relative path containing only '
+                    'alphanumeric characters, dots, slashes, '
+                    'underscores and hyphens, and must not start '
+                    'with a slash.')
+            if '..' in sub_path.split('/'):
+                raise ValueError(
+                    f'sub_path must not contain directory traversal '
+                    f'(..): {sub_path!r}')
         record = global_user_state.get_volume_by_name(volume_name)
         if record is None:
             raise exceptions.VolumeNotFoundError(
@@ -86,7 +106,7 @@ class VolumeMount:
             raise exceptions.VolumeNotReadyError(msg)
         assert 'handle' in record, 'Volume handle is None.'
         volume_config: models.VolumeConfig = record['handle']
-        return cls(path, volume_name, volume_config)
+        return cls(path, volume_name, volume_config, sub_path=sub_path)
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'VolumeMount':
@@ -96,9 +116,14 @@ class VolumeMount:
         path = config.pop('path', None)
         volume_name = config.pop('volume_name', None)
         is_ephemeral = config.pop('is_ephemeral', False)
+        sub_path = config.pop('sub_path', None)
         volume_config: models.VolumeConfig = models.VolumeConfig.model_validate(
             config.pop('volume_config', None))
-        return cls(path, volume_name, volume_config, is_ephemeral)
+        return cls(path,
+                   volume_name,
+                   volume_config,
+                   is_ephemeral,
+                   sub_path=sub_path)
 
     @classmethod
     def resolve_ephemeral_config(cls, path: str,
@@ -151,12 +176,15 @@ class VolumeMount:
         return cls(path, '', volume_config, is_ephemeral=True)
 
     def to_yaml_config(self) -> Dict[str, Any]:
-        return {
+        config = {
             'path': self.path,
             'volume_name': self.volume_name,
             'volume_config': self.volume_config.model_dump(),
             'is_ephemeral': self.is_ephemeral,
         }
+        if self.sub_path is not None:
+            config['sub_path'] = self.sub_path
+        return config
 
     @property
     def name(self) -> str:
@@ -168,4 +196,5 @@ class VolumeMount:
                 f'\n\tpath={self.path},'
                 f'\n\tvolume_name={self.volume_name},'
                 f'\n\tis_ephemeral={self.is_ephemeral},'
+                f'\n\tsub_path={self.sub_path},'
                 f'\n\tvolume_config={self.volume_config})')

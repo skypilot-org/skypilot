@@ -572,6 +572,12 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            'type': {
+                'type': 'string',
+                'case_insensitive_enum': [
+                    t.value for t in storage.FileMountType
+                ]
+            },
             'config': {
                 'type': 'object',
                 'properties': {
@@ -664,6 +670,10 @@ def get_volume_mount_schema():
             },
             'is_ephemeral': {
                 'type': 'boolean',
+            },
+            'sub_path': {
+                'type': 'string',
+                'pattern': constants.SUB_PATH_PATTERN,
             },
             'volume_config': {
                 'type': 'object',
@@ -1017,6 +1027,9 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
+            'api_access': {
+                'type': 'boolean',
+            },
             '_metadata': {
                 'type': 'object',
             },
@@ -1178,6 +1191,30 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
                 'type': 'string'
             }
         }]
+    },
+}
+
+_SBATCH_OPTIONS_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': {
+        'oneOf': [
+            {
+                'type': 'string',
+                # Disallow newlines to prevent script injection in
+                # #SBATCH directives.
+                'pattern': r'^[^\n]*$'
+            },
+            {
+                'type': 'number'
+            },
+            {
+                'type': 'boolean'
+            },
+            {
+                'type': 'null'
+            },
+        ]
     },
 }
 
@@ -1347,7 +1384,9 @@ def get_config_schema():
                         'autostop': _AUTOSTOP_SCHEMA,
                         'consolidation_mode': {
                             'type': 'boolean',
-                            'default': False,
+                            # When unset, automatically enabled for deploy-mode
+                            # servers (--deploy) if no existing controller
+                            # clusters are found.
                         },
                         'controller_logs_gc_retention_hours': {
                             'type': 'integer',
@@ -1597,6 +1636,7 @@ def get_config_schema():
                     'type': 'integer',
                 },
                 'pricing': _PRICING_SCHEMA,
+                'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                 'cluster_configs': {
                     'type': 'object',
                     'required': [],
@@ -1613,6 +1653,7 @@ def get_config_schema():
                                 'type': 'string',
                             },
                             'pricing': _PRICING_SCHEMA,
+                            'sbatch_options': _SBATCH_OPTIONS_SCHEMA,
                             'partition_configs': {
                                 'type': 'object',
                                 'required': [],
@@ -1623,6 +1664,7 @@ def get_config_schema():
                                     'additionalProperties': False,
                                     'properties': {
                                         'pricing': _PRICING_SCHEMA,
+                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
                                     },
                                 },
                             },
@@ -1639,7 +1681,8 @@ def get_config_schema():
                     'type': 'object',
                     'required': [],
                     'properties': {},
-                    # Properties are either 'default' or a region name.
+                    # Properties are either 'default' or a region
+                    # name.
                     'additionalProperties': {
                         'type': 'object',
                         'required': [],
@@ -1758,7 +1801,7 @@ def get_config_schema():
         'items': {
             'type': 'string',
             'case_insensitive_enum':
-                (list(constants.ALL_CLOUDS) + ['cloudflare'])
+                (list(constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS)
         }
     }
 
@@ -1845,6 +1888,10 @@ def get_config_schema():
             'cluster_terminal_event_retention_hours': {
                 'type': 'number',
             },
+            'daemon_log_max_bytes': {
+                'type': 'integer',
+                'minimum': 0,
+            },
         }
     }
 
@@ -1862,7 +1909,8 @@ def get_config_schema():
 
     workspace_schema = {'type': 'string'}
 
-    allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
+    allowed_workspace_cloud_names = list(
+        constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS
     # Create pattern for not supported clouds, i.e.
     # all clouds except aws, gcp, kubernetes, ssh, nebius
     not_supported_clouds = [

@@ -208,6 +208,89 @@ This allows you to:
   $ sky volumes apply volume.yaml
   # SkyPilot finds the existing PVC by its skypilot-name label
 
+Using existing file systems
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you have an existing file system (e.g., AWS FSx for Lustre) accessible in your Kubernetes cluster, you can use it as a SkyPilot volume. This requires creating a `PersistentVolume <https://kubernetes.io/docs/concepts/storage/persistent-volumes/>`_ (PV) backed by the file system and a StorageClass with a CSI driver for the file system.
+
+The following example walks through the setup using AWS FSx for Lustre.
+
+**Step 1: Install the CSI driver and create a StorageClass**
+
+Install the CSI driver for your file system and create the corresponding StorageClass in your Kubernetes cluster. For AWS FSx for Lustre, see the `AWS documentation <https://docs.aws.amazon.com/eks/latest/userguide/fsx-csi-create.html>`_.
+
+**Step 2: Create a PersistentVolume for the existing file system**
+
+Create a PV that maps to your file system. The ``storageClassName`` must match the StorageClass created in Step 1:
+
+.. code-block:: yaml
+
+  apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    name: fsx-pv
+  spec:
+    capacity:
+      storage: 1200Gi
+    volumeMode: Filesystem
+    accessModes:
+      - ReadWriteMany
+    persistentVolumeReclaimPolicy: Retain
+    csi:
+      driver: fsx.csi.aws.com
+      volumeHandle: fs-08d8c731a01074d61
+      volumeAttributes:
+        dnsname: fs-08d8c731a01074d61.fsx.us-east-1.amazonaws.com
+        mountname: okdipamv
+    storageClassName: fsx-sc
+
+.. tip::
+
+  The values for ``csi.volumeHandle``, ``csi.volumeAttributes.dnsname``, and ``csi.volumeAttributes.mountname`` can be retrieved with ``aws fsx describe-file-systems``.
+
+**Step 3: Create a SkyPilot volume**
+
+Create a SkyPilot volume. Its ``config.storage_class_name`` and ``config.access_mode`` must match the PV, and its ``size`` must be less than or equal to the PV's capacity. SkyPilot will create a PVC with these specifications, and the Kubernetes CSI driver will automatically bind it to the matching PV:
+
+.. code-block:: yaml
+
+  name: fsx-volume
+  type: k8s-pvc
+  infra: k8s
+  size: 1200Gi
+  config:
+    storage_class_name: fsx-sc
+    access_mode: ReadWriteMany
+
+You can then mount the volume in your task YAML as described in :ref:`Quickstart <volumes-quickstart>`.
+
+Mounting a subdirectory of a volume
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+You can mount a specific subdirectory of a persistent volume using the ``sub_path`` option. This maps to Kubernetes' `subPath <https://kubernetes.io/docs/concepts/storage/volumes/#using-subpath>`_ field on the volume mount.
+
+When using ``sub_path``, the volume must be specified using the dict form with the ``name`` key:
+
+.. code-block:: yaml
+
+  # task.yaml
+  resources:
+    infra: kubernetes
+
+  volumes:
+    /mnt/models:
+      name: my-volume
+      sub_path: models/v1  # Only mount the models/v1 subdirectory
+
+  run: |
+    ls /mnt/models  # Contents of my-volume/models/v1
+
+This is useful when a single volume contains multiple datasets or projects and you want to mount only a specific subdirectory to the container.
+
+.. note::
+
+  ``sub_path`` is only supported for persistent volumes (not ephemeral volumes).
+
 .. _ephemeral-volumes:
 
 Ephemeral volumes

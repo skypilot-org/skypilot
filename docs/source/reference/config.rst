@@ -31,6 +31,7 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`requests_retention_hours <config-yaml-api-server-requests-gc-retention-hours>`: 24
     :ref:`cluster_event_retention_hours <config-yaml-api-server-cluster-event-retention-hours>`: 24
     :ref:`cluster_debug_event_retention_hours <config-yaml-api-server-cluster-debug-event-retention-hours>`: 720
+    :ref:`daemon_log_max_bytes <config-yaml-api-server-daemon-log-max-bytes>`: 134217728
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
@@ -336,6 +337,26 @@ Example:
   api_server:
     cluster_debug_event_retention_hours: -1 # Disable all cluster event GC
 
+.. _config-yaml-api-server-daemon-log-max-bytes:
+
+``api_server.daemon_log_max_bytes``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Maximum size (in bytes) of a daemon log file before it is rotated (optional).
+
+Daemon request logs (e.g., for the status refresh daemon) grow unbounded because daemon requests never finish and are not subject to request GC. When a daemon log exceeds this threshold, it is backed up to ``.log.1`` and then truncated. One backup is kept per daemon.
+
+Set to ``0`` to disable truncation.
+
+Default: ``134217728`` (128 MB).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    daemon_log_max_bytes: 268435456 # 256 MB
+
 .. _config-yaml-jobs:
 
 ``jobs``
@@ -366,6 +387,7 @@ Supported bucket types:
     # bucket: gs://my-bucket/
     # bucket: https://<azure_storage_account>.blob.core.windows.net/<container>
     # bucket: r2://my-bucket/
+    # bucket: vastdata://my-bucket/
     # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-force-disable-cloud-bucket:
@@ -396,7 +418,7 @@ Example:
 
 Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
 
-Default: ``false``.
+Default: when unset, automatically enabled for deploy-mode API servers (``--deploy``). Otherwise disabled. Changes require an API server restart to take effect.
 
 Example:
 

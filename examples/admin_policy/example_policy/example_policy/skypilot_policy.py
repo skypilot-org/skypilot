@@ -94,7 +94,7 @@ class UseSpotForGpuPolicy(sky.AdminPolicy):
             else:
                 new_resources.append(r)
 
-        task.set_resources(type(task.resources)(new_resources))
+        task.set_resources(new_resources)
 
         return sky.MutatedUserRequest(
             task=task, skypilot_config=user_request.skypilot_config)
@@ -530,3 +530,63 @@ class RejectOldClientsPolicy(sky.AdminPolicy):
         return sky.MutatedUserRequest(
             task=user_request.task,
             skypilot_config=user_request.skypilot_config)
+
+
+class SlurmPartitionRoutingPolicy(sky.AdminPolicy):
+    """Example policy: route Slurm jobs to the appropriate partition
+    based on requested resources.
+
+    This policy automatically sets the Slurm partition (zone) for tasks
+    targeting Slurm clusters based on the type of resources requested:
+
+    - GPU tasks are routed to the 'gpu' partition.
+    - High-memory CPU tasks (>64GB) are routed to the 'highmem' partition.
+    - All other CPU tasks are routed to the 'cpu' partition.
+
+    The policy only applies to Slurm resources that do not already have a
+    partition (zone) specified by the user, so explicit user choices are
+    always respected.
+
+    Admins should customize the partition names, routing rules, and memory
+    threshold to match their Slurm cluster configuration.
+    """
+
+    # Partition routing rules - customize these for your cluster.
+    GPU_PARTITION = 'gpu'
+    HIGHMEM_PARTITION = 'highmem'
+    CPU_PARTITION = 'cpu'
+    # Memory threshold (in GB) for routing to the high-memory partition.
+    HIGHMEM_THRESHOLD_GB = 64
+
+    @classmethod
+    def validate_and_mutate(
+            cls, user_request: sky.UserRequest) -> sky.MutatedUserRequest:
+        """Routes Slurm tasks to partitions based on resource type."""
+        task = user_request.task
+        new_resources = []
+        for r in task.resources:
+            # Only apply to Slurm resources that don't already have a
+            # partition (zone) specified by the user.
+            if isinstance(r.cloud, sky.clouds.Slurm) and r.zone is None:
+                new_resources.append(r.copy(zone=cls._get_partition(r)))
+            else:
+                new_resources.append(r)
+
+        task.set_resources(new_resources)
+        return sky.MutatedUserRequest(
+            task=task, skypilot_config=user_request.skypilot_config)
+
+    @classmethod
+    def _get_partition(cls, r: 'sky.Resources') -> str:
+        """Determines the target partition for a resource request."""
+        # GPU requests go to the GPU partition.
+        if r.accelerators:
+            return cls.GPU_PARTITION
+        # High-memory CPU requests go to the high-memory partition.
+        memory = r.memory
+        if memory is not None:
+            mem_val = float(str(memory).rstrip('+'))
+            if mem_val > cls.HIGHMEM_THRESHOLD_GB:
+                return cls.HIGHMEM_PARTITION
+        # Default: standard CPU partition.
+        return cls.CPU_PARTITION

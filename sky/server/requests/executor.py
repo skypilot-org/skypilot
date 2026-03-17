@@ -39,10 +39,12 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.metrics import utils as metrics_utils
 from sky.server import common as server_common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import daemons
 from sky.server import metrics as metrics_lib
 from sky.server import plugins
 from sky.server.requests import payloads
@@ -356,6 +358,15 @@ def override_request_env_and_config(
         # Remove the db connection uri from client supplied env vars, as the
         # client should not set the db string on server side.
         request_body.env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+        # Remove the in-cluster context name from client supplied env vars.
+        # When a client runs inside a Kubernetes pod (e.g., a managed job with
+        # api_access), its env has SKYPILOT_IN_CLUSTER_CONTEXT_NAME set by the
+        # pod template. If this leaks into the server's os.environ, it causes
+        # the server to attempt in-cluster auth (load_incluster_config) instead
+        # of using its own kubeconfig, which fails when the server is not
+        # running in a Kubernetes pod.
+        request_body.env_vars.pop(
+            kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
         os.environ.update(request_body.env_vars)
         # Note: may be overridden by AuthProxyMiddleware.
         # TODO(zhwu): we need to make the entire request a context available to
@@ -496,7 +507,13 @@ def _request_execution_wrapper(request_id: str,
             # captured in the log file.
             _redirect_output(f)
 
-            with sky_logging.add_debug_log_handler(request_id), \
+            # Skip debug logging for daemon requests since the daemon
+            # requests has its own log level config and we don't want to
+            # duplicate the daemon logs.
+            debug_log_ctx = (contextlib.nullcontext()
+                             if daemons.is_daemon_request_id(request_id) else
+                             sky_logging.add_debug_log_handler(request_id))
+            with debug_log_ctx, \
                 override_request_env_and_config(
                     request_body, request_id, request_name), \
                 tempstore.tempdir():
@@ -752,16 +769,18 @@ async def prepare_request_async(
             models.User(id=user_id,
                         name=user_id,
                         user_type=models.UserType.SYSTEM.value))
-    request = api_requests.Request(request_id=request_id,
-                                   name=server_constants.REQUEST_NAME_PREFIX +
-                                   request_name,
-                                   entrypoint=func,
-                                   request_body=request_body,
-                                   status=api_requests.RequestStatus.PENDING,
-                                   created_at=time.time(),
-                                   schedule_type=schedule_type,
-                                   user_id=user_id,
-                                   cluster_name=request_cluster_name)
+    request = api_requests.Request(
+        request_id=request_id,
+        name=server_constants.REQUEST_NAME_PREFIX + request_name,
+        entrypoint=func,
+        request_body=request_body,
+        status=api_requests.RequestStatus.PENDING,
+        created_at=time.time(),
+        schedule_type=schedule_type,
+        user_id=user_id,
+        cluster_name=request_cluster_name,
+        file_mounts_blob_id=getattr(request_body, 'file_mounts_blob_id', None),
+    )
 
     if not await api_requests.create_if_not_exists_async(request):
         raise exceptions.RequestAlreadyExistsError(
