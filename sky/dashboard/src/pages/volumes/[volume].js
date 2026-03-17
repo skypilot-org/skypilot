@@ -193,15 +193,19 @@ function VolumeDetailCard({ volumeData }) {
   const [isCopied, setIsCopied] = useState(false);
   const [isCommandCopied, setIsCommandCopied] = useState(false);
 
+  const formattedYaml = React.useMemo(
+    () =>
+      volumeData.creation_yaml ? formatYaml(volumeData.creation_yaml) : null,
+    [volumeData.creation_yaml]
+  );
+
   const toggleYamlExpanded = () => {
     setIsYamlExpanded(!isYamlExpanded);
   };
 
   const copyYamlToClipboard = async () => {
     try {
-      const yamlContent = volumeData.creation_yaml;
-      if (!yamlContent) return;
-      const formattedYaml = formatYaml(yamlContent);
+      if (!formattedYaml) return;
       await navigator.clipboard.writeText(formattedYaml);
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 2000);
@@ -222,7 +226,7 @@ function VolumeDetailCard({ volumeData }) {
     }
   };
 
-  const hasCreationYaml = Boolean(volumeData.creation_yaml);
+  const hasCreationYaml = Boolean(formattedYaml);
   const hasCreationArtifacts = hasCreationYaml || volumeData.last_use;
 
   return (
@@ -445,7 +449,7 @@ function VolumeDetailCard({ volumeData }) {
                       {isYamlExpanded && (
                         <div className="bg-gray-50 border border-gray-200 rounded-md p-3 max-h-96 overflow-y-auto">
                           <YamlHighlighter className="whitespace-pre-wrap">
-                            {formatYaml(volumeData.creation_yaml)}
+                            {formattedYaml}
                           </YamlHighlighter>
                         </div>
                       )}
