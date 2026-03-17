@@ -1,5 +1,8 @@
 .. _cloud-account-setup:
 
+.. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
+   :alt: Community Maintained
+
 Setup Credentials
 =================
 
