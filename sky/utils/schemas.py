@@ -1717,6 +1717,9 @@ def get_config_schema():
                 'launch_timeout': {
                     'type': 'number',
                 },
+                'post_launch_delay': {
+                    'type': 'number',
+                },
             }
         },
         'nebius': {

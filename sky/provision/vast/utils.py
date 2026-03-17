@@ -53,7 +53,8 @@ def launch(name: str,
            private_docker_registry: Optional[bool] = None,
            login: Optional[str] = None,
            create_instance_kwargs: Optional[Dict[str, Any]] = None,
-           ssh_public_key: Optional[str] = None) -> str:
+           ssh_public_key: Optional[str] = None,
+           post_launch_delay: float = 1) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -244,7 +245,7 @@ def launch(name: str,
         new_instance_contract = vast.vast().create_instance(**launch_params)
         # Give the Vast API time to remove the purchased offer from
         # search results before the next worker searches.
-        time.sleep(1)
+        time.sleep(post_launch_delay)
 
     new_instance = vast.vast().show_instance(
         id=new_instance_contract['new_contract'])
