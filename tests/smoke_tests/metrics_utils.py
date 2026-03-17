@@ -135,6 +135,9 @@ def compare_metrics(baseline: Dict[MetricKey, TimeSeries],
     failed_checks = []
     total_baseline = 0
     total_actual = 0
+    # Track keys present in baseline vs new keys for separate reporting
+    new_keys_total_actual = 0
+    num_new_keys = 0
 
     for key_label, data in comparison.items():
         baseline_val = data['baseline']
@@ -153,8 +156,14 @@ def compare_metrics(baseline: Dict[MetricKey, TimeSeries],
         increase_pct_fmt = f"{increase_pct:+.1f}%" if increase_pct != float(
             'inf') else "+inf%"
 
+        # Check if this key was present in the baseline by reconstructing
+        # the original key tuple from the key_label
+        is_new_key = baseline_val == 0 and increase_pct == float('inf')
+
+        suffix = " (new)" if is_new_key else ""
         table.add_row([
-            key_label, baseline_fmt, actual_fmt, increase_fmt, increase_pct_fmt
+            key_label + suffix, baseline_fmt, actual_fmt, increase_fmt,
+            increase_pct_fmt
         ])
 
         if per_key_checker:
@@ -164,8 +173,17 @@ def compare_metrics(baseline: Dict[MetricKey, TimeSeries],
             for failure in key_failures:
                 failed_checks.append(f"{key_label}: {failure}")
 
-        total_baseline += baseline_val
-        total_actual += actual_val
+        # Only include keys that existed in the baseline for the aggregate
+        # comparison. New processes that spawned during the test are normal
+        # server behavior (e.g., long-running worker processes or server
+        # restarts) and should not inflate the aggregate memory increase
+        # percentage.
+        if is_new_key:
+            new_keys_total_actual += actual_val
+            num_new_keys += 1
+        else:
+            total_baseline += baseline_val
+            total_actual += actual_val
 
     total_increase = total_actual - total_baseline
     total_increase_pct = ((total_actual - total_baseline) / total_baseline *
@@ -177,9 +195,16 @@ def compare_metrics(baseline: Dict[MetricKey, TimeSeries],
     total_increase_pct_fmt = f"{total_increase_pct:+.1f}%"
 
     table.add_row([
-        "TOTAL", total_baseline_fmt, total_actual_fmt, total_increase_fmt,
-        total_increase_pct_fmt
+        "TOTAL (existing)", total_baseline_fmt, total_actual_fmt,
+        total_increase_fmt, total_increase_pct_fmt
     ])
+
+    if num_new_keys > 0:
+        table.add_row([
+            f"NEW PROCESSES ({num_new_keys})", f"0.0 {unit}",
+            f"{new_keys_total_actual:.1f} {unit}",
+            f"+{new_keys_total_actual:.1f} {unit}", "N/A"
+        ])
 
     if aggregate_checker:
         aggregate_failures = aggregate_checker(
