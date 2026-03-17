@@ -2232,6 +2232,20 @@ Set to ``true`` to use static IPs.
 
 Default: ``false``.
 
+.. _config-yaml-nebius-use-personal-pricing:
+
+``nebius.use_personal_pricing``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Should cost estimates consider different contract prices if available? (optional).
+
+Set to ``false`` to use only publicly available pricing information.
+
+**Note:** This feature only takes into account a different per-unit price of compute instances to give a more accurate estimate.
+Pricing tiers and free quotas are ignored in this estimate, and the final cost could be lower or higher.
+
+Default: ``true``.
+
 .. _config-yaml-nebius-ssh-proxy-command:
 
 ``nebius.ssh_proxy_command``

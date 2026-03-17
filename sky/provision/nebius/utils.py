@@ -37,17 +37,17 @@ def retry(func):
 
 
 def get_project_by_region(region: str) -> str:
-    service = nebius.iam().ProjectServiceClient(nebius.sdk())
-    projects = nebius.sync_call(
-        service.list(
-            nebius.iam().ListProjectsRequest(parent_id=nebius.get_tenant_id()),
-            timeout=nebius.READ_TIMEOUT))
-
     #  Check is there project if in config
     project_id = skypilot_config.get_effective_region_config(
         cloud='nebius', region=region, keys=('project_id',), default_value=None)
     if project_id is not None:
         return project_id
+
+    service = nebius.iam().ProjectServiceClient(nebius.sdk())
+    projects = nebius.sync_call(
+        service.list(
+            nebius.iam().ListProjectsRequest(parent_id=nebius.get_tenant_id()),
+            timeout=nebius.READ_TIMEOUT))
     for project in projects.items:
         if project.status.region == region:
             return project.metadata.id
