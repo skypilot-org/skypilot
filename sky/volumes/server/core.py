@@ -231,6 +231,7 @@ def volume_list(
                 'usedby_fetch_failed': False,
                 'is_ephemeral': volume.get('is_ephemeral', False),
                 'error_message': volume.get('error_message'),
+                'creation_yaml': volume.get('creation_yaml'),
                 'type': config.type,
                 'cloud': config.cloud,
                 'region': config.region,
@@ -310,6 +311,7 @@ def volume_apply(
     labels: Optional[Dict[str, str]] = None,
     use_existing: Optional[bool] = None,
     is_ephemeral: bool = False,
+    creation_yaml: Optional[str] = None,
 ) -> None:
     """Creates or registers a volume.
 
@@ -324,6 +326,7 @@ def volume_apply(
         labels: The labels of the volume.
         use_existing: Whether to use an existing volume.
         is_ephemeral: Whether the volume is ephemeral.
+        creation_yaml: The YAML config used to create this volume.
     """
     with rich_utils.safe_status(ux_utils.spinner_message('Creating volume')):
         # Reuse the method for cluster name on cloud to
@@ -362,6 +365,7 @@ def volume_apply(
                 config,
                 status_lib.VolumeStatus.READY,
                 is_ephemeral,
+                creation_yaml=creation_yaml,
             )
         logger.info(f'Created volume {name} on cloud {cloud}')
 

@@ -5196,6 +5196,7 @@ def volumes_apply(
     from sky.volumes import volume as volume_lib
 
     volume_config_dict: Dict[str, Any] = {}
+    creation_yaml: Optional[str] = None
     if entrypoint is not None and len(entrypoint) > 0:
         entrypoint_str = ' '.join(entrypoint)
 
@@ -5215,6 +5216,12 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
+            # Read the original YAML file content for storage in the database.
+            try:
+                with open(entrypoint_str, 'r', encoding='utf-8') as f:
+                    creation_yaml = f.read()
+            except OSError:
+                pass
     override_config = _build_volume_override_config(name, infra, type, size,
                                                     use_existing)
     volume_config_dict.update(override_config)
@@ -5239,7 +5246,7 @@ def volumes_apply(
 
     # Call SDK to create volume
     try:
-        request_id = volumes_sdk.apply(volume)
+        request_id = volumes_sdk.apply(volume, creation_yaml=creation_yaml)
         _async_call_or_wait(request_id, async_call, 'sky.volumes.apply')
     except RuntimeError as e:
         logger.error(f'{colorama.Fore.RED}Error applying volume: '
