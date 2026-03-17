@@ -264,6 +264,15 @@ service_account_token_table = sqlalchemy.Table(
                       sqlalchemy.Text),  # Service account's own user ID
 )
 
+# Separate table for API access token IDs associated with clusters.
+# Maps cluster_name -> token_id for cleanup when the cluster is terminated.
+cluster_api_access_token_table = sqlalchemy.Table(
+    'cluster_api_access_tokens',
+    Base.metadata,
+    sqlalchemy.Column('cluster_name', sqlalchemy.Text, primary_key=True),
+    sqlalchemy.Column('token_id', sqlalchemy.Text, nullable=False),
+)
+
 cluster_yaml_table = sqlalchemy.Table(
     'cluster_yaml',
     Base.metadata,
@@ -2661,6 +2670,39 @@ def delete_service_account_token(token_id: str) -> bool:
             token_id=token_id).delete()
         session.commit()
     return result > 0
+
+
+def set_cluster_api_access_token_id(cluster_name: str, token_id: str) -> None:
+    """Store the API access token ID for a cluster."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.insert(cluster_api_access_token_table).values(
+                cluster_name=cluster_name, token_id=token_id))
+        session.commit()
+
+
+def get_cluster_api_access_token_id(cluster_name: str) -> Optional[str]:
+    """Get the API access token ID for a cluster, if any."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        result = session.execute(
+            sqlalchemy.select(cluster_api_access_token_table.c.token_id).where(
+                cluster_api_access_token_table.c.cluster_name ==
+                cluster_name)).fetchone()
+        if result is None:
+            return None
+        return result[0]
+
+
+def delete_cluster_api_access_token_id(cluster_name: str) -> None:
+    """Remove the API access token record for a cluster."""
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(cluster_api_access_token_table).where(
+                cluster_api_access_token_table.c.cluster_name == cluster_name))
+        session.commit()
 
 
 @metrics_lib.time_me

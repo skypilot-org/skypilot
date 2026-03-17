@@ -504,3 +504,39 @@ def upload_mounts_to_api_server(
         if use_v2:
             return dag, blob_id
     return dag, None
+
+
+def maybe_inject_api_access_endpoint(dag: 'sky.Dag') -> 'sky.Dag':
+    """Inject API server endpoint for tasks with api_access enabled.
+
+    Done client-side because get_server_url() returns the externally
+    reachable endpoint here, whereas the server sees 127.0.0.1.
+    """
+    any_api_access = any(t.api_access for t in dag.tasks)
+    if not any_api_access:
+        return dag
+
+    remote_api_version = versions.get_remote_api_version()
+    if (remote_api_version is not None and
+            remote_api_version < server_constants.MIN_API_ACCESS_API_VERSION):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('api_access: true requires a newer API server. '
+                             'Please upgrade the server to use this feature.')
+
+    endpoint = server_common.get_server_url()
+    if server_common.is_api_server_local(endpoint):
+        # Warn instead of raising an error to allow local testing and CI
+        # environments where the server may be accessible via Docker
+        # networking or port forwarding despite appearing local.
+        logger.warning('api_access: true is set but the API server '
+                       f'appears to be local ({endpoint}). The task '
+                       'may not be able to reach the API server from '
+                       'remote VMs.')
+
+    for task_ in dag.tasks:
+        if task_.api_access:
+            task_.update_envs({
+                constants.SKY_API_SERVER_URL_ENV_VAR: endpoint,
+            })
+
+    return dag

@@ -3376,3 +3376,32 @@ def test_cancel_logs_does_not_break_process_pool(generic_cloud: str):
         timeout=10 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+def test_cluster_api_access(generic_cloud: str):
+    """Test cluster launch with api_access: nested job launch from a cluster.
+
+    This test only works with kubernetes and remote server enabled. It is the
+    only test configuration that gives us an API server that is accessible from
+    within the entity running the job since the kind cluster can access the
+    remote server container via the docker bridge network. If this assumption
+    changes then this test will not work.
+    """
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Requires a remote API server (--remote-server)')
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cluster-api-access',
+        [
+            f'sky launch -c {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_api_access.yaml -y',
+            # Verify the job succeeded by checking exit code
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}; sky jobs cancel -y -n nested-job',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

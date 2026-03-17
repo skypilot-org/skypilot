@@ -794,6 +794,7 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
+    dag = client_common.maybe_inject_api_access_endpoint(dag)
     dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
@@ -887,6 +888,7 @@ def exec(  # pylint: disable=redefined-builtin
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
+    dag = client_common.maybe_inject_api_access_endpoint(dag)
     dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
         dag, workdir_only=True)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)

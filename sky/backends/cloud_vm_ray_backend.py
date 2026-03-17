@@ -5121,6 +5121,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         cloud = handle.launched_resources.cloud
 
+        # Clean up API access token for this cluster, if any.
+        # Done on both stop and terminate since a stopped cluster no longer
+        # needs API access; a fresh token is created on restart.
+        try:
+            token_id = global_user_state.get_cluster_api_access_token_id(
+                handle.cluster_name)
+            if token_id is not None:
+                global_user_state.delete_service_account_token(token_id)
+                global_user_state.delete_cluster_api_access_token_id(
+                    handle.cluster_name)
+                logger.info('Revoked API access token for cluster '
+                            f'{handle.cluster_name}')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.warning(
+                f'Failed to revoke API access token for cluster '
+                f'{handle.cluster_name}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
         if terminate and handle.launched_resources.is_image_managed is True:
             # Delete the image when terminating a "cloned" cluster, i.e.,
             # whose image is created by SkyPilot (--clone-disk-from)

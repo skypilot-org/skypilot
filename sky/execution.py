@@ -4,6 +4,7 @@ See `Stage` for a Task's life cycle.
 """
 import enum
 import logging
+import os
 import time
 import typing
 from typing import Callable, List, Optional, Tuple, Union
@@ -38,6 +39,69 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _inject_cluster_api_access_token(task: 'task_lib.Task',
+                                     cluster_name: str) -> None:
+    """Create and inject an API access token for a cluster task.
+
+    Creates a service account token and injects it as a secret env var
+    into the task. Revokes any existing token for this cluster first
+    (since we cannot retrieve the plaintext from the stored hash).
+    """
+    # Lazy imports to avoid circular dependencies.
+    # pylint: disable=import-outside-toplevel
+    from pydantic import SecretStr as _SecretStr
+
+    from sky.skylet import constants as skylet_constants
+    from sky.users.token_service import token_service
+
+    # pylint: enable=import-outside-toplevel
+
+    sa_enabled = os.environ.get(
+        skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS, 'false').lower()
+    if sa_enabled != 'true':
+        with ux_utils.print_exception_no_traceback():
+            env_var = skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS
+            raise ValueError('api_access: true requires service accounts to be '
+                             f'enabled on the API server. Set {env_var}=true '
+                             'environment variable on the server.')
+
+    user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
+    if user_id is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Cannot determine user identity for '
+                               'api_access credential injection.')
+
+    # Revoke any existing token for this cluster since we cannot
+    # retrieve the plaintext from the stored hash.
+    existing_token_id = global_user_state.get_cluster_api_access_token_id(
+        cluster_name)
+    if existing_token_id is not None:
+        global_user_state.delete_service_account_token(existing_token_id)
+        global_user_state.delete_cluster_api_access_token_id(cluster_name)
+
+    token_name = f'cluster-{cluster_name}'
+    token_data = token_service.create_token(creator_user_id=user_id,
+                                            service_account_user_id=user_id,
+                                            token_name=token_name,
+                                            expires_in_days=30)
+
+    global_user_state.add_service_account_token(
+        token_id=token_data['token_id'],
+        token_name=token_name,
+        token_hash=token_data['token_hash'],
+        creator_user_hash=user_id,
+        service_account_user_id=user_id,
+        expires_at=token_data['expires_at'])
+
+    global_user_state.set_cluster_api_access_token_id(cluster_name,
+                                                      token_data['token_id'])
+
+    task._secrets[  # pylint: disable=protected-access
+        skylet_constants.SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(
+            token_data['token'])
+    logger.info(f'Injected API access token for cluster {cluster_name}')
 
 
 class Stage(enum.Enum):
@@ -522,6 +586,9 @@ def _execute_dag(
                                      down,
                                      hook=hook,
                                      hook_timeout=hook_timeout)
+
+        if task.api_access and not dryrun:
+            _inject_cluster_api_access_token(task, handle.get_cluster_name())
 
         job_id = None
         if Stage.EXEC in stages:
