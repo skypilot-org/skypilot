@@ -7,12 +7,19 @@
 """Vast library wrapper for SkyPilot."""
 from pathlib import Path
 import shlex
+import time
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import vast
+from sky.utils import locks
 
 logger = sky_logging.init_logger(__name__)
+
+# Cross-process lock for the search+buy critical section.  Prevents
+# concurrent pool worker processes from purchasing the same Vast offer
+# before it is removed from the search results.
+_launch_lock = locks.get_lock('vast-launch')
 
 
 def list_instances() -> Dict[str, Dict[str, Any]]:
@@ -125,22 +132,12 @@ def launch(name: str,
         query.append('hosting_type>=1')
     query_str = ' '.join(query)
 
-    instance_list = vast.vast().search_offers(query=query_str)
-
-    if isinstance(instance_list, int) or len(instance_list) == 0:
-        raise RuntimeError('Failed to create instances, could not find an '
-                           'offer that satisfies the requirements '
-                           f'"{query_str}".')
-
-    instance_touse = instance_list[0]
-
     # Start with user-provided kwargs as the base
     launch_params: Dict[str, Any] = dict(create_instance_kwargs or {})
     # Remove None values to avoid overriding defaults
     launch_params = {k: v for k, v in launch_params.items() if v is not None}
 
     # Required skypilot parameters
-    launch_params['id'] = instance_touse['id']
     launch_params['direct'] = True
     launch_params['ssh'] = True
     # Use user's label if provided, otherwise use skypilot name
@@ -177,8 +174,6 @@ def launch(name: str,
     if 'price' in launch_params:
         # Normalize to bid_price for SDK compatibility
         launch_params['bid_price'] = launch_params.pop('price')
-    if 'bid_price' not in launch_params and preemptible:
-        launch_params['bid_price'] = instance_touse.get('min_bid')
 
     # Handle onstart_cmd - read from file if onstart path provided
     user_onstart_cmd = launch_params.pop('onstart_cmd', None)
@@ -231,7 +226,25 @@ def launch(name: str,
         env_parts.append(user_env)
     launch_params['env'] = ' '.join(env_parts).strip()
 
-    new_instance_contract = vast.vast().create_instance(**launch_params)
+    # Lock the search+buy critical section so concurrent workers cannot
+    # purchase the same offer before it disappears from search results.
+    with _launch_lock:
+        instance_list = vast.vast().search_offers(query=query_str)
+
+        if isinstance(instance_list, int) or len(instance_list) == 0:
+            raise RuntimeError('Failed to create instances, could not find an '
+                               'offer that satisfies the requirements '
+                               f'"{query_str}".')
+
+        instance_touse = instance_list[0]
+        launch_params['id'] = instance_touse['id']
+        if 'bid_price' not in launch_params and preemptible:
+            launch_params['bid_price'] = instance_touse.get('min_bid')
+
+        new_instance_contract = vast.vast().create_instance(**launch_params)
+        # Give the Vast API time to remove the purchased offer from
+        # search results before the next worker searches.
+        time.sleep(1)
 
     new_instance = vast.vast().show_instance(
         id=new_instance_contract['new_contract'])
