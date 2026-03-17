@@ -32,6 +32,7 @@ from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
+from sky.adaptors import kubernetes as kubernetes_adaptor
 from sky.server import common
 from sky.skylet import autostop_lib
 from sky.skylet import constants
@@ -102,6 +103,10 @@ def request_body_env_vars() -> dict:
     # Any new environment variables that are server-specific should
     # use SKYPILOT_SERVER_ENV_VAR_PREFIX.
     env_vars.pop(constants.ENV_VAR_DB_CONNECTION_URI, None)
+    # Remove the in-cluster context name - this is only meaningful for the
+    # local Kubernetes environment and should not be forwarded to the server,
+    # which has its own cluster context configuration.
+    env_vars.pop(kubernetes_adaptor.IN_CLUSTER_CONTEXT_NAME_ENV_VAR, None)
     return env_vars
 
 
@@ -150,6 +155,8 @@ class RequestBody(BasePayload):
     using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
     override_skypilot_config_path: Optional[str] = None
+    # Blob ID for uploaded file mounts
+    file_mounts_blob_id: Optional[str] = None
 
     def __init__(self, **data):
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
@@ -182,6 +189,7 @@ class RequestBody(BasePayload):
         kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
         kwargs.pop('override_skypilot_config_path')
+        kwargs.pop('file_mounts_blob_id')
         return kwargs
 
     @property
@@ -289,9 +297,11 @@ class LaunchBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
 
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
@@ -318,9 +328,11 @@ class ExecBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=True)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=True,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
@@ -556,7 +568,10 @@ class JobsLaunchBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
         kwargs['task'] = common.process_mounts_in_task_on_api_server(
-            self.task, self.env_vars, workdir_only=False)
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         return kwargs
 
 
@@ -635,9 +650,11 @@ class ServeUpBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -653,9 +670,11 @@ class ServeUpdateBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(
+            self.task,
+            self.env_vars,
+            workdir_only=False,
+            file_mounts_blob_id=self.file_mounts_blob_id)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -791,7 +810,10 @@ class JobsPoolApplyBody(RequestBody):
         kwargs = super().to_kwargs()
         if self.task is not None:
             dag = common.process_mounts_in_task_on_api_server(
-                self.task, self.env_vars, workdir_only=False)
+                self.task,
+                self.env_vars,
+                workdir_only=False,
+                file_mounts_blob_id=self.file_mounts_blob_id)
             assert len(
                 dag.tasks) == 1, ('Must only specify one task in the DAG for '
                                   'a pool.', dag)
@@ -896,6 +918,7 @@ class RequestPayload(BasePayload):
     status_msg: Optional[str] = None
     should_retry: bool = False
     finished_at: Optional[float] = None
+    file_mounts_blob_id: Optional[str] = None
 
 
 class SlurmGpuAvailabilityRequestBody(RequestBody):

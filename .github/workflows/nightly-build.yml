@@ -162,7 +162,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot-nightly"
       pipeline: "quicktest-core"
-      build_env_vars: '{"ARGS": "--base-branch pypi/skypilot-nightly"}'
+      build_env_vars: '{"ARGS": "--kubernetes --base-branch pypi/skypilot-nightly"}'
       timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}

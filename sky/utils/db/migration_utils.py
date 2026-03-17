@@ -34,7 +34,7 @@ GLOBAL_USER_STATE_VERSION = '015'  # add node_names column
 GLOBAL_USER_STATE_LOCK_PATH = f'~/.sky/locks/.{GLOBAL_USER_STATE_DB_NAME}.lock'
 
 SPOT_JOBS_DB_NAME = 'spot_jobs_db'
-SPOT_JOBS_VERSION = '015'  # add node_names column
+SPOT_JOBS_VERSION = '016'  # add api_access_token_id column
 SPOT_JOBS_LOCK_PATH = f'~/.sky/locks/.{SPOT_JOBS_DB_NAME}.lock'
 
 SERVE_DB_NAME = 'serve_db'
