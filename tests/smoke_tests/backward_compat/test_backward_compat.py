@@ -702,28 +702,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky exec {cluster_name} "echo from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from current"',
             f'{self.ACTIVATE_BASE} && result="$(sky status)"; echo "$result"; echo "$result" | grep "{cluster_name}"',
-            # Test AUTOSTOPPING backward compat: set autostop with a
-            # long-running hook so the cluster stays in AUTOSTOPPING long
-            # enough to observe. Old clients (< 29) should see UP; newer
-            # clients should see AUTOSTOPPING.
-            # Set autostop with hook via SDK (CLI doesn't expose --hook).
-            f'{self.ACTIVATE_CURRENT} && python -c "'
-            'import sky; '
-            f'rid = sky.autostop(\\\"{cluster_name}\\\", '
-            'idle_minutes=1, hook=\\\"sleep 120\\\"); '
-            'sky.get(rid)"',
-            # Wait for AUTOSTOPPING (new server understands this)
-            f'{self.ACTIVATE_CURRENT} && ' +
-            smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
-                cluster_name=cluster_name,
-                cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
-                timeout=300),
-            # Old client: sky status should show INIT (mapped from
-            # AUTOSTOPPING) for clients < 29, or AUTOSTOPPING for >= 29.
-            f'{self.ACTIVATE_BASE} && result="$(sky status '
-            f'{cluster_name})"; echo "$result"; '
-            f'echo "$result" | grep {cluster_name} | grep '
-            f'{"INIT" if self.BASE_API_VERSION < 29 else "AUTOSTOPPING"}',
             # serve test
             f'{self.ACTIVATE_CURRENT} && {smoke_tests_utils.SKY_API_RESTART} && '
             f'sky serve up --infra {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
@@ -736,6 +714,38 @@ class TestBackwardCompatibility:
         ]
 
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+
+        if generic_cloud != 'kubernetes':
+            # Test AUTOSTOPPING backward compat: set autostop with a
+            # long-running hook so the cluster stays in AUTOSTOPPING long
+            # enough to observe. Old clients (< 29) should see UP; newer
+            # clients should see AUTOSTOPPING.
+            # Skipped on Kubernetes as autostop is not supported.
+            autostop_cmds = [
+                # Set autostop with hook via SDK (CLI doesn't expose --hook).
+                f'{self.ACTIVATE_CURRENT} && python -c "'
+                'import sky; '
+                f'rid = sky.autostop(\\\"{cluster_name}\\\", '
+                'idle_minutes=1, hook=\\\"sleep 120\\\"); '
+                'sky.get(rid)"',
+                # Wait for AUTOSTOPPING (new server understands this)
+                f'{self.ACTIVATE_CURRENT} && ' +
+                smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=cluster_name,
+                    cluster_status=[sky.ClusterStatus.AUTOSTOPPING],
+                    timeout=300),
+                # Old client: sky status should show INIT (mapped from
+                # AUTOSTOPPING) for clients < 29, or AUTOSTOPPING for >= 29.
+                f'{self.ACTIVATE_BASE} && result="$(sky status '
+                f'{cluster_name})"; echo "$result"; '
+                f'echo "$result" | grep {cluster_name} | grep '
+                f'{"INIT" if self.BASE_API_VERSION < 29 else "AUTOSTOPPING"}',
+            ]
+            # Insert autostop commands before the serve test section
+            serve_test_idx = next(
+                i for i, cmd in enumerate(commands)
+                if 'serve up' in cmd and 'SKY_API_RESTART' in cmd)
+            commands[serve_test_idx:serve_test_idx] = autostop_cmds
 
         if generic_cloud == 'kubernetes':
             commands.extend([
