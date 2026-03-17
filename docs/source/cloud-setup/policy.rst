@@ -18,6 +18,7 @@ Example usage:
 - :ref:`add-volumes-policy`
 - :ref:`reject-old-clients-policy`
 - :ref:`slurm-partition-routing-policy`
+- :ref:`slurm-filesystem-routing-policy`
 
 Overview
 --------
@@ -587,3 +588,33 @@ This policy automatically routes Slurm jobs to the appropriate partition based o
 .. literalinclude:: ../../../examples/admin_policy/slurm_partition_routing.yaml
     :language: yaml
     :caption: `Config YAML for using SlurmPartitionRoutingPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/slurm_partition_routing.yaml>`_
+
+.. _slurm-filesystem-routing-policy:
+
+Route Slurm jobs to clusters based on mounted filesystems
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This policy routes Slurm jobs only to clusters where the required filesystem
+paths are mounted. Users declare required paths via the
+``SKYPILOT_REQUIRED_FILESYSTEMS`` environment variable in their task YAML
+(comma-separated). The policy SSHes into each candidate cluster at optimization
+time (server-side only) and checks that all required paths exist via
+``test -d``. Results are cached per cluster to avoid repeated SSH calls.
+
+This solves scheduling for cases where the same dataset lives at different
+paths on different clusters (e.g. ``/data/MNIST`` on one cluster and
+``/home/$USER/data/MNIST`` on another).
+
+.. note::
+
+    This policy only takes effect server-side during ``OPTIMIZE`` requests.
+    It is a no-op on the client side.
+
+.. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
+    :language: python
+    :pyobject: SlurmFilesystemRoutingPolicy
+    :caption: `SlurmFilesystemRoutingPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/example_policy/example_policy/skypilot_policy.py>`_
+
+.. literalinclude:: ../../../examples/admin_policy/slurm_filesystem_routing.yaml
+    :language: yaml
+    :caption: `Config YAML for using SlurmFilesystemRoutingPolicy <https://github.com/skypilot-org/skypilot/blob/master/examples/admin_policy/slurm_filesystem_routing.yaml>`_
