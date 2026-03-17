@@ -31,6 +31,11 @@ Local Agent (Claude Code, Codex, etc.)
 
 The original `program.md` from the [autoresearch repo](https://github.com/karpathy/autoresearch) is fetched automatically during setup. It contains the experiment rules (what to modify, goals, constraints).
 
+## Prerequisites
+
+1. **SkyPilot** — Install following the [SkyPilot installation guide](https://docs.skypilot.co/en/latest/getting-started/installation.html).
+2. **Cloud credentials** — Configure at least one cloud provider by running `sky check`. See the [cloud setup docs](https://docs.skypilot.co/en/latest/getting-started/installation.html#appendix-cloud-access-for-local-skypilot) for details.
+
 ## Quick Start
 
 ```bash
