@@ -76,6 +76,8 @@ secrets:
   MY_HF_TOKEN: my-secret-value
   WANDB_API_KEY: my-secret-value-2
 
+api_server_access: true
+
 volumes:
   /mnt/data: volume-name
   /mnt/cache:
@@ -976,6 +978,20 @@ secrets:
   HF_TOKEN: my-huggingface-token
   WANDB_API_KEY: my-wandb-api-key
 ```
+
+
+### ``api_server_access``
+
+Whether to inject API server credentials into the task's environment so that it can call `sky` CLI/SDK to launch nested SkyPilot operations. Defaults to `true`. Set to `false` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+```yaml
+# Opt out of API server access injection
+api_server_access: false
+```
+
+See Nested SkyPilot from managed jobs for details.
 
 
 ### ``volumes``
