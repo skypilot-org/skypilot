@@ -219,6 +219,13 @@ class Vast(clouds.Cloud):
             default_value={},
             override_configs=resources.cluster_config_overrides,
         )
+        launch_timeout = skypilot_config.get_effective_region_config(
+            cloud='vast',
+            region=region.name,
+            keys=('launch_timeout',),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides,
+        )
 
         return {
             'instance_type': resources.instance_type,
@@ -227,6 +234,7 @@ class Vast(clouds.Cloud):
             'image_id': image_id,
             'secure_only': secure_only,
             'create_instance_kwargs': create_instance_kwargs or {},
+            'launch_timeout': launch_timeout,
         }
 
     def _get_feasible_launchable_resources(

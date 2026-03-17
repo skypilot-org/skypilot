@@ -12,6 +12,9 @@ from sky.utils import status_lib
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 10
+# Default launch timeout in seconds.  Can be overridden via the
+# ``vast.launch_timeout`` config key.
+_DEFAULT_LAUNCH_TIMEOUT = 600
 
 logger = sky_logging.init_logger(__name__)
 # a much more convenient method
@@ -148,7 +151,13 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
             if head_instance_id is None:
                 head_instance_id = instance_id
 
-    # Wait for instances to be ready.
+    # Wait for instances to be ready.  If any instance fails to become
+    # ready within the timeout, raise so the provisioner's except handler
+    # terminates the cluster and retries on a fresh set of offers.
+    launch_timeout = config.provider_config.get('launch_timeout')
+    if launch_timeout is None:
+        launch_timeout = _DEFAULT_LAUNCH_TIMEOUT
+    deadline = time.time() + launch_timeout
     while True:
         instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
         ready_instance_cnt = 0
@@ -159,6 +168,11 @@ def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                     f'({ready_instance_cnt}/{config.count}).')
         if ready_instance_cnt == config.count:
             break
+
+        if time.time() >= deadline:
+            raise RuntimeError(f'Timed out after {launch_timeout}s waiting for '
+                               f'{config.count} instance(s) to be ready '
+                               f'(only {ready_instance_cnt} ready).')
 
         time.sleep(POLL_INTERVAL)
 
