@@ -338,7 +338,7 @@ def volume_apply(
             name_on_cloud = common_utils.make_cluster_name_on_cloud(
                 name, max_length=cloud_obj.max_cluster_name_length())
             name_on_cloud += '-' + name_uuid
-        config = models.VolumeConfig(
+        volume_config = models.VolumeConfig(
             name=name,
             type=volume_type,
             cloud=str(cloud_obj),
@@ -349,21 +349,75 @@ def volume_apply(
             name_on_cloud=name_on_cloud,
             labels=labels,
         )
-        logger.debug(
-            f'Creating volume {name} on cloud {cloud} with config {config}')
+        logger.debug(f'Creating volume {name} on cloud {cloud} with config '
+                     f'{volume_config}')
         with _volume_lock(name):
             current_volume = global_user_state.get_volume_by_name(name)
             if current_volume is not None:
                 logger.info(f'Volume {name} already exists.')
                 return
-            config = provision.apply_volume(cloud, config)
+            volume_config = provision.apply_volume(cloud, volume_config)
+            # Only check for duplicates when registering an existing
+            # resource. Newly created volumes have a UUID suffix in
+            # name_on_cloud so they cannot collide.
+            if use_existing:
+                _check_duplicate_backend_resource(name, volume_config)
             global_user_state.add_volume(
                 name,
-                config,
+                volume_config,
                 status_lib.VolumeStatus.READY,
                 is_ephemeral,
             )
         logger.info(f'Created volume {name} on cloud {cloud}')
+
+
+def _same_backend_resource(a: models.VolumeConfig,
+                           b: models.VolumeConfig) -> bool:
+    """Return True if two VolumeConfigs reference the same backend resource."""
+    if a.cloud != b.cloud:
+        return False
+
+    cloud_lower = a.cloud.lower()
+
+    if cloud_lower == 'kubernetes':
+        return (a.name_on_cloud == b.name_on_cloud and a.region == b.region and
+                a.config.get('namespace') == b.config.get('namespace'))
+
+    if cloud_lower == 'runpod':
+        # If both have id_on_cloud, compare by id (most reliable).
+        if a.id_on_cloud is not None and b.id_on_cloud is not None:
+            return a.id_on_cloud == b.id_on_cloud
+        # Fallback: compare by (name_on_cloud, zone).
+        return (a.name_on_cloud == b.name_on_cloud and a.zone == b.zone)
+
+    # Generic fallback for future cloud types.
+    return (a.name_on_cloud == b.name_on_cloud and a.region == b.region and
+            a.zone == b.zone)
+
+
+def _check_duplicate_backend_resource(name: str,
+                                      config: models.VolumeConfig) -> None:
+    """Check if another volume already references the same backend resource.
+
+    Raises:
+        ValueError: If a duplicate is found.
+    """
+    existing_volumes = global_user_state.get_volumes()
+    for vol in existing_volumes:
+        vol_name = vol.get('name')
+        if vol_name == name:
+            continue
+        vol_config = vol.get('handle')
+        if vol_config is None:
+            continue
+        if _same_backend_resource(config, vol_config):
+            raise ValueError(
+                f'Volume {name!r} maps to the same backend resource '
+                f'as existing volume {vol_name!r} '
+                f'(cloud={config.cloud}, '
+                f'name_on_cloud={config.name_on_cloud!r}). '
+                f'Use the existing volume {vol_name!r} instead, or '
+                f'delete it first with: sky volumes delete {vol_name}')
 
 
 @contextlib.contextmanager
