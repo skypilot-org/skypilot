@@ -357,7 +357,11 @@ def volume_apply(
                 logger.info(f'Volume {name} already exists.')
                 return
             volume_config = provision.apply_volume(cloud, volume_config)
-            _check_duplicate_backend_resource(name, volume_config)
+            # Only check for duplicates when registering an existing
+            # resource. Newly created volumes have a UUID suffix in
+            # name_on_cloud so they cannot collide.
+            if use_existing:
+                _check_duplicate_backend_resource(name, volume_config)
             global_user_state.add_volume(
                 name,
                 volume_config,
