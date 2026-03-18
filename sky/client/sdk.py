@@ -413,7 +413,6 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
-    dag_utils.strip_priority_class_if_unsupported_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -474,6 +473,7 @@ def validate(
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
     omit_file_mount_type = _omit(40)
+    omit_priority_class = _omit(43)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -498,8 +498,13 @@ def validate(
                 storage.file_mount_type = None
             logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
-
-    dag_utils.strip_priority_class_if_unsupported_server(dag)
+        if omit_priority_class:
+            for resource in task.resources:
+                if resource.priority_class:
+                    # pylint: disable=protected-access
+                    resource._set_priority_class(None)
+            logger.debug('`priority_class` is ignored because the server '
+                         'does not support it yet.')
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
