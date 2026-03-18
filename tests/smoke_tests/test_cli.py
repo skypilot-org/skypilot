@@ -219,12 +219,12 @@ def test_storage_delete(generic_cloud: str):
 
 
 def test_debug_dump_recent(generic_cloud: str):
-    """Test sky debug-dump --recent flag creates a valid dump."""
+    """Test sky debug-dump --recent-minutes flag creates a valid dump."""
     test = smoke_tests_utils.Test(
         'debug_dump_recent',
         [
-            # Create a debug dump with --recent (no clusters/jobs needed)
-            'sky debug-dump --recent 1 --output /tmp/test_debug_dump_recent.zip',
+            # Create a debug dump with --recent-minutes (no clusters/jobs needed)
+            'sky debug-dump --recent-minutes 60 --output /tmp/test_debug_dump_recent.zip',
             # Verify the zip file was created and is a valid zip
             'test -f /tmp/test_debug_dump_recent.zip',
             's=$(unzip -l /tmp/test_debug_dump_recent.zip) && echo "$s" && '

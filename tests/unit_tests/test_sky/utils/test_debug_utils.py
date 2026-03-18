@@ -640,7 +640,7 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, hours=1.0)
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
 
         assert 'req-recent' in ctx['request_ids']
 
@@ -655,13 +655,13 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, hours=2.0)
+        debug_utils._populate_recent_context(ctx, minutes=120.0)
 
         call_args = mock_get_tasks.call_args
         task_filter = call_args[0][0]
         assert task_filter.finished_after is not None
-        # finished_after should be approximately now - 2*3600
-        expected_cutoff = time.time() - (2.0 * 3600)
+        # finished_after should be approximately now - 120*60
+        expected_cutoff = time.time() - (120.0 * 60)
         assert abs(task_filter.finished_after - expected_cutoff) < 5
 
     @mock.patch('sky.jobs.server.core.queue_v2')
@@ -687,7 +687,7 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, hours=1.0)
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
 
         assert 'active-cluster' in ctx['cluster_names']
         assert 'old-cluster' not in ctx['cluster_names']
@@ -715,7 +715,7 @@ class TestPopulateRecentContext:
         ], 2, {}, 2)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, hours=1.0)
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
 
         assert 1 in ctx['managed_job_ids']
         assert 2 not in ctx['managed_job_ids']
@@ -734,7 +734,7 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, hours=1.0)
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
 
         assert 'req-running' in ctx['request_ids']
 
@@ -750,7 +750,7 @@ class TestPopulateRecentContext:
 
         ctx = _make_context()
         # Should not raise
-        debug_utils._populate_recent_context(ctx, hours=1.0)
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
 
         assert ctx['request_ids'] == set()
         assert ctx['cluster_names'] == set()
@@ -774,7 +774,7 @@ class TestPopulateRecentContext:
         mock_queue_v2.return_value = ([], 0, {}, 0)
 
         ctx = _make_context()
-        debug_utils._populate_recent_context(ctx, hours=1.0)
+        debug_utils._populate_recent_context(ctx, minutes=60.0)
 
         assert 'newly-launched' in ctx['cluster_names']
 
@@ -783,6 +783,12 @@ class TestPopulateRecentContext:
 # Tests for create_debug_dump (end-to-end)
 # ---------------------------------------------------------------------------
 class TestCreateDebugDump:
+
+    @pytest.fixture(autouse=True)
+    def _mock_resolve_prefixes(self):
+        with mock.patch('sky.utils.debug_utils._resolve_request_id_prefixes',
+                        side_effect=lambda ids, errors: ids):
+            yield
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -922,17 +928,17 @@ class TestCreateDebugDump:
             mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
             mock_dump_server, mock_dump_requests, mock_dump_clusters,
             mock_dump_jobs, tmp_path):
-        """When recent_hours is provided, _populate_recent_context should be
+        """When recent_minutes is provided, _populate_recent_context should be
         called."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')), \
              mock.patch('sky.utils.debug_utils._populate_recent_context') \
              as mock_populate:
-            debug_utils.create_debug_dump(recent_hours=2.0)
+            debug_utils.create_debug_dump(recent_minutes=120.0)
 
         mock_populate.assert_called_once()
-        # Second argument should be the hours
-        assert mock_populate.call_args[0][1] == 2.0
+        # Second argument should be the minutes
+        assert mock_populate.call_args[0][1] == 120.0
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
     @mock.patch('sky.utils.debug_utils._dump_cluster_info')
@@ -943,18 +949,18 @@ class TestCreateDebugDump:
     @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
     @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
     @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
-    def test_does_not_call_populate_without_recent_hours(
+    def test_does_not_call_populate_without_recent_minutes(
             self, mock_req_from_clusters, mock_req_from_jobs,
             mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
             mock_dump_server, mock_dump_requests, mock_dump_clusters,
             mock_dump_jobs, tmp_path):
-        """When recent_hours is None, _populate_recent_context should NOT
+        """When recent_minutes is None, _populate_recent_context should NOT
         be called."""
         with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
                         str(tmp_path / 'debug_dumps')), \
              mock.patch('sky.utils.debug_utils._populate_recent_context') \
              as mock_populate:
-            debug_utils.create_debug_dump(recent_hours=None)
+            debug_utils.create_debug_dump(recent_minutes=None)
 
         mock_populate.assert_not_called()
 
@@ -1108,6 +1114,68 @@ class TestCreateDebugDump:
 
         # No new handlers should remain on the logger
         assert dbg_logger.handlers == handlers_before
+
+
+# ---------------------------------------------------------------------------
+# Tests for _resolve_request_id_prefixes
+# ---------------------------------------------------------------------------
+class TestResolveRequestIdPrefixes:
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
+    def test_exact_match(self, mock_get_prefix):
+        """An exact match should return the full request ID."""
+        mock_get_prefix.return_value = [
+            mock.MagicMock(request_id='abc-123-def-456')
+        ]
+        errors: list = []
+        result = debug_utils._resolve_request_id_prefixes(['abc-123-def-456'],
+                                                          errors)
+        assert result == ['abc-123-def-456']
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
+    def test_unique_prefix(self, mock_get_prefix):
+        """A unique prefix should resolve to one request ID."""
+        mock_get_prefix.return_value = [
+            mock.MagicMock(request_id='abc-123-def-456')
+        ]
+        errors: list = []
+        result = debug_utils._resolve_request_id_prefixes(['abc'], errors)
+        assert result == ['abc-123-def-456']
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
+    def test_ambiguous_prefix_includes_all(self, mock_get_prefix):
+        """An ambiguous prefix should include all matching request IDs."""
+        mock_get_prefix.return_value = [
+            mock.MagicMock(request_id='abc-111'),
+            mock.MagicMock(request_id='abc-222'),
+        ]
+        errors: list = []
+        result = debug_utils._resolve_request_id_prefixes(['abc'], errors)
+        assert result == ['abc-111', 'abc-222']
+        assert not errors
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
+    def test_no_match_records_error(self, mock_get_prefix):
+        """A prefix matching nothing should record an error."""
+        mock_get_prefix.return_value = None
+        errors: list = []
+        result = debug_utils._resolve_request_id_prefixes(['nonexistent'],
+                                                          errors)
+        assert result == []
+        assert len(errors) == 1
+        assert 'nonexistent' in errors[0]['error']
+
+    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
+    def test_db_error_falls_back_to_original(self, mock_get_prefix):
+        """A DB error should fall back to the original ID."""
+        mock_get_prefix.side_effect = RuntimeError('DB unavailable')
+        errors: list = []
+        result = debug_utils._resolve_request_id_prefixes(['abc-123'], errors)
+        assert result == ['abc-123']
+        assert len(errors) == 1
+        assert 'DB unavailable' in errors[0]['error']
 
 
 # ---------------------------------------------------------------------------

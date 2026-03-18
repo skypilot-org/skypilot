@@ -16,7 +16,6 @@ import logging
 import os
 import platform
 import subprocess
-import sys
 import typing
 from typing import (Any, Dict, Iterator, List, Literal, Optional, Tuple,
                     TypeVar, Union)
@@ -3061,11 +3060,7 @@ def slurm_node_info(
 
 def _build_client_info() -> Dict[str, Any]:
     """Build client-side info for debug dumps."""
-    # Cannot import sky at module level because sky/__init__.py imports
-    # from this file (sdk.py), creating a circular import at import time.
-    # By the time this function is called at runtime, sky is fully loaded,
-    # so sys.modules lookup is safe.
-    sky_mod = sys.modules['sky']
+    import sky as sky_mod  # pylint: disable=import-outside-toplevel
 
     # Get configs
     user_config: Dict[str, Any] = {}
@@ -3103,16 +3098,18 @@ def create_debug_dump(
     request_ids: Optional[List[str]] = None,
     cluster_names: Optional[List[str]] = None,
     managed_job_ids: Optional[List[int]] = None,
-    recent_hours: Optional[float] = None,
+    recent_minutes: Optional[float] = None,
 ) -> server_common.RequestId[str]:
     """Create a debug dump for troubleshooting.
 
     Args:
-        request_ids: List of request IDs to include in the dump.
+        request_ids: List of request IDs or prefixes to include in the
+            dump. Prefixes are resolved to all matching request IDs on
+            the server.
         cluster_names: List of cluster names to include in the dump.
         managed_job_ids: List of managed job IDs to include in the dump.
-        recent_hours: If specified, include all resources active within
-            this many hours.
+        recent_minutes: If specified, include all resources active within
+            this many minutes.
 
     Returns:
         The request ID of the debug dump creation request.
@@ -3124,7 +3121,7 @@ def create_debug_dump(
         request_ids=request_ids,
         cluster_names=cluster_names,
         managed_job_ids=managed_job_ids,
-        recent_hours=recent_hours,
+        recent_minutes=recent_minutes,
         client_info=_build_client_info(),
     )
     response = server_common.make_authenticated_request(

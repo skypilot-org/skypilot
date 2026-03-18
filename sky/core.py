@@ -1749,16 +1749,16 @@ def get_all_contexts() -> List[str]:
 def create_debug_dump(request_ids: Optional[List[str]] = None,
                       cluster_names: Optional[List[str]] = None,
                       managed_job_ids: Optional[List[int]] = None,
-                      recent_hours: Optional[float] = None,
+                      recent_minutes: Optional[float] = None,
                       client_info: Optional[Dict[str, Any]] = None) -> str:
     """Create a debug dump for troubleshooting.
 
     Args:
-        request_ids: List of request IDs to include in the dump.
+        request_ids: List of request IDs or prefixes to include in the dump.
         cluster_names: List of cluster names to include in the dump.
         managed_job_ids: List of managed job IDs to include in the dump.
-        recent_hours: If specified, include all resources active within
-            this many hours.
+        recent_minutes: If specified, include all resources active within
+            this many minutes.
         client_info: Optional client-side info to include in the dump.
 
     Returns:
@@ -1768,15 +1768,15 @@ def create_debug_dump(request_ids: Optional[List[str]] = None,
         ValueError: If no resources are specified.
     """
     if (not request_ids and not cluster_names and not managed_job_ids and
-            recent_hours is None):
+            recent_minutes is None):
         raise ValueError('At least one of request_ids, cluster_names, '
-                         'managed_job_ids, or recent_hours must be provided.')
+                         'managed_job_ids, or recent_minutes must be provided.')
 
     debug_dump_path = debug_utils.create_debug_dump(
         request_ids=request_ids,
         cluster_names=cluster_names,
         managed_job_ids=managed_job_ids,
-        recent_hours=recent_hours,
+        recent_minutes=recent_minutes,
         client_info=client_info)
     logger.info(f'Debug dump created at {debug_dump_path}')
     return str(debug_dump_path)

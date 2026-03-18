@@ -399,10 +399,11 @@ def _get_clusters_from_managed_jobs(
 
 
 def _populate_recent_context(debug_dump_context: DebugDumpContext,
-                             hours: float) -> None:
+                             minutes: float) -> None:
     """Populate context with resources active within the given time window."""
-    logger.debug(f'Populating context with resources from last {hours} hours')
-    cutoff_time = time.time() - (hours * 3600)
+    logger.debug(
+        f'Populating context with resources from last {minutes} minutes')
+    cutoff_time = time.time() - (minutes * 60)
 
     # Get recent requests (cluster names are handled by
     # _get_clusters_from_requests during cross-linking)
@@ -1048,7 +1049,7 @@ def _collect_controller_debug_data(
 def _build_debug_dump(
     dump_dir: str,
     debug_dump_context: DebugDumpContext,
-    recent_hours: Optional[float],
+    recent_minutes: Optional[float],
     client_info: Optional[Dict[str, Any]],
 ) -> None:
     """Build the debug dump contents in dump_dir.
@@ -1062,12 +1063,12 @@ def _build_debug_dump(
         'request_ids': sorted(debug_dump_context['request_ids']),
         'cluster_names': sorted(debug_dump_context['cluster_names']),
         'managed_job_ids': sorted(debug_dump_context['managed_job_ids']),
-        'recent_hours': recent_hours,
+        'recent_minutes': recent_minutes,
     }
 
     # Populate from recent activity if requested
-    if recent_hours is not None:
-        _populate_recent_context(debug_dump_context, recent_hours)
+    if recent_minutes is not None:
+        _populate_recent_context(debug_dump_context, recent_minutes)
 
     # Collect all related resources (cross-linking)
     logger.debug('Cross-linking related resources')
@@ -1130,21 +1131,73 @@ def _build_debug_dump(
         json.dump(summary, f, indent=2)
 
 
+def _resolve_request_id_prefixes(
+    request_ids: List[str],
+    errors: List[Dict[str, str]],
+) -> List[str]:
+    """Resolve request ID prefixes to full request IDs.
+
+    For each user-provided request ID, checks if it's an exact match or
+    a prefix. All matching requests are included (unlike ``sky api logs``
+    which errors on ambiguity, debug-dump benefits from collecting more
+    data).
+
+    Args:
+        request_ids: List of request IDs or prefixes.
+        errors: List to append error dicts to.
+
+    Returns:
+        List of resolved full request IDs.
+    """
+    resolved: List[str] = []
+    for rid in request_ids:
+        try:
+            matches = requests_lib.get_requests_with_prefix(
+                rid, fields=['request_id'])
+            if matches is None or len(matches) == 0:
+                msg = f'No requests found matching prefix {rid!r}'
+                logger.warning(msg)
+                errors.append({
+                    'component': 'resolve_request_id_prefixes',
+                    'error': msg,
+                })
+                continue
+            if len(matches) == 1:
+                logger.debug(f'Prefix {rid!r} resolved to '
+                             f'{matches[0].request_id}')
+            else:
+                logger.debug(f'Prefix {rid!r} matched '
+                             f'{len(matches)} requests')
+            for match in matches:
+                resolved.append(match.request_id)
+        except Exception as e:  # pylint: disable=broad-except
+            msg = f'Error resolving request ID prefix {rid!r}: {e}'
+            logger.warning(msg)
+            errors.append({
+                'component': 'resolve_request_id_prefixes',
+                'error': msg,
+            })
+            # Fall back to using the original ID
+            resolved.append(rid)
+    return resolved
+
+
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
     cluster_names: Optional[List[str]] = None,
     managed_job_ids: Optional[List[int]] = None,
-    recent_hours: Optional[float] = None,
+    recent_minutes: Optional[float] = None,
     client_info: Optional[Dict[str, Any]] = None,
 ) -> pathlib.Path:
     """Create a debug dump for troubleshooting.
 
     Args:
-        request_ids: List of request IDs to include in the dump.
+        request_ids: List of request IDs or prefixes to include in the
+            dump. Prefixes are resolved to all matching request IDs.
         cluster_names: List of cluster names to include in the dump.
         managed_job_ids: List of managed job IDs to include in the dump.
-        recent_hours: If specified, include all resources active within
-            this many hours.
+        recent_minutes: If specified, include all resources active within
+            this many minutes.
         client_info: Optional client-side info to include in the dump.
 
     Returns:
@@ -1154,13 +1207,18 @@ def create_debug_dump(
     logger.debug(f'Initial inputs: request_ids={request_ids}, '
                  f'cluster_names={cluster_names}, '
                  f'managed_job_ids={managed_job_ids}, '
-                 f'recent_hours={recent_hours}')
+                 f'recent_minutes={recent_minutes}')
+
+    # Resolve request ID prefixes to full IDs
+    errors: List[Dict[str, str]] = []
+    if request_ids:
+        request_ids = _resolve_request_id_prefixes(request_ids, errors)
 
     debug_dump_context = DebugDumpContext(
         request_ids=set(request_ids or []),
         cluster_names=set(cluster_names or []),
         managed_job_ids=set(managed_job_ids or []),
-        errors=[],
+        errors=errors,
     )
 
     # Create persistent output directory
@@ -1198,7 +1256,7 @@ def create_debug_dump(
         try:
             sky_root_logger.addHandler(debug_handler)
             provision_logger.addHandler(debug_handler)
-            _build_debug_dump(dump_dir, debug_dump_context, recent_hours,
+            _build_debug_dump(dump_dir, debug_dump_context, recent_minutes,
                               client_info)
         finally:
             sky_root_logger.removeHandler(debug_handler)
