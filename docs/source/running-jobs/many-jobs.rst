@@ -374,7 +374,22 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
 Best practices for scaling
 --------------------------
 
-By default, roughly 600 jobs can run in parallel (with about 24 launching at once). Increasing the controller's resources bumps those ceilings proportionally, and large controllers can reliably manage thousands of jobs in parallel. See :ref:`the best practices <jobs-controller-sizing>` for more info.
+By default, roughly 600 jobs can run in parallel (with about 24 launching at once). Increasing the available memory bumps those ceilings proportionally, and large deployments can reliably manage thousands of jobs in parallel.
 
-.. tip::
-  When using a deploy-mode API server, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default and the jobs controller runs within the API server. In this case, scale the API server's resources to increase job capacity. See :ref:`sky-api-server-resources-tuning`.
+How you increase the available memory depends on your deployment:
+
+.. tab-set::
+
+    .. tab-item:: Consolidation mode (default for remote API servers)
+        :sync: consolidation
+
+        When using a deploy-mode API server, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default and the jobs controller runs within the API server. In this case, scale the **API server's** resources to increase job capacity.
+
+        See :ref:`sky-api-server-resources-tuning` for how to tune API server resources, and :ref:`consolidation-mode-resource-planning` for how memory is shared between request handling and job management.
+
+    .. tab-item:: Separate controller cluster
+        :sync: separate
+
+        When using a local API server or when consolidation mode is disabled, the jobs controller runs on a :ref:`separate cluster <jobs-controller-separate>`. Scale the **controller's** resources to increase job capacity.
+
+        See :ref:`jobs-controller-sizing` for detailed scaling guidance and per-cloud resource configurations.
