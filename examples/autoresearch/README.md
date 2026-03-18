@@ -2,6 +2,10 @@
 
 Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). A local coding agent uses the skill to spin up GPU clusters, submit experiments, and parallelize work across multiple clusters.
 
+## SkyPilot Dashboard
+
+![SkyPilot Dashboard with 4 GPU clusters](https://i.imgur.com/g05SFUR.png)
+
 ## Architecture
 
 ```
