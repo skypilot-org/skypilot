@@ -77,10 +77,6 @@ The above command will install a SkyPilot API server and ingress-nginx controlle
 
     The API server deployed will be configured to use the hosting Kubernetes cluster to launch tasks by default. Refer to :ref:`sky-api-server-configure-credentials` to configure credentials for more clouds and Kubernetes clusters.
 
-.. tip::
-
-    The deployed API server runs in deploy mode, which automatically enables :ref:`consolidation mode <jobs-consolidation-mode>` for managed jobs. This means the jobs controller runs within the API server pod -- no separate VM or pod is launched. To opt out, explicitly set ``jobs.controller.consolidation_mode: false`` in the :ref:`API server config <sky-api-server-config>`.
-
 After the API server is deployed, you can inspect the API server pod status with:
 
 .. code-block:: bash
@@ -1769,10 +1765,6 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 .. note::
 
     API server deployment using the above YAML does not have any authentication by default. We recommend adding a authentication layer (e.g., nginx reverse proxy) or using the :ref:`SkyPilot helm chart <sky-api-server-deploy>` on a Kubernetes cluster for a more secure deployment.
-
-.. tip::
-
-    Since the API server runs with ``--deploy``, :ref:`consolidation mode <jobs-consolidation-mode>` is automatically enabled for managed jobs. The jobs controller will run within the API server instead of on a separate VM.
 
 .. tip::
 

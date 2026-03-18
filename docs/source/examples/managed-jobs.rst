@@ -576,7 +576,7 @@ In either mode, the controller is fully managed by SkyPilot and **no user action
 Consolidation mode (default for remote API servers)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using a :ref:`remote API server <sky-api-server>`, the jobs controller runs **within the API server** by default. We call this "consolidation mode", as the API server and jobs controller are consolidated onto the same process.
+When using a :ref:`remote API server <sky-api-server>`, the jobs controller runs **within the API server** by default. We call this "consolidation mode", as the API server and jobs controller are consolidated onto the same machine.
 
 .. image:: ../images/jobs-consolidation-mode.svg
   :width: 800

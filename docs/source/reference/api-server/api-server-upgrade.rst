@@ -192,8 +192,12 @@ Upgrade strategy
 By default, the API server is upgraded with the ``Recreate`` strategy, which introduces waiting time for new requests during upgrade. To eliminate the waiting time, you can upgrade the API server with the ``RollingUpdate`` strategy.
 
 .. note::
-    
+
     ``RollingUpdate`` is an experimental feature. There is a known limitation that some running commands might fail when the old version of the API server gets removed from the ingress backend. It is recommended to schedule the upgrade during a maintenance window.
+
+.. warning::
+
+    When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), any file mounts or workdirs that upload local files/folders for managed jobs will be lost during a rolling update. To avoid this, use :ref:`bucket <sky-storage>`, :ref:`volume <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>` for file mounts; or configure a cloud bucket for all local files via :ref:`jobs.bucket <config-yaml-jobs-bucket>`.
 
 The following table compares the two upgrade strategies:
 
