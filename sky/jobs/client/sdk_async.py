@@ -79,8 +79,13 @@ async def queue(
 ) -> Union[List[responses.ManagedJobRecord], Tuple[
         List[responses.ManagedJobRecord], int, Dict[str, int], int]]:
     """Async version of queue() that gets statuses of managed jobs."""
-    request_id = await asyncio.to_thread(sdk.queue, refresh, skip_finished,
-                                         all_users, job_ids, version)
+    request_id = await asyncio.to_thread(
+        sdk.queue,  # type: ignore[arg-type]
+        refresh,
+        skip_finished,
+        all_users,
+        job_ids,
+        version)
     if stream_logs is not None:
         return await sdk_async._stream_and_get(request_id, stream_logs)  # pylint: disable=protected-access
     else:

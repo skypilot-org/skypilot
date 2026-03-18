@@ -1,7 +1,8 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (Any, Dict, List, Literal, Optional, overload, Sequence,
+                    Tuple, Union)
 
 import click
 
@@ -264,7 +265,32 @@ def queue_v2(
 # In https://github.com/skypilot-org/skypilot/pull/8015, we revert the change
 # and add a new function `queue_v2` to return the new typed data.
 # TODO(lloyd): Remove before 0.13.
-@usage_lib.entrypoint
+
+
+@overload
+def queue(
+    refresh: bool,
+    skip_finished: bool = ...,
+    all_users: bool = ...,
+    job_ids: Optional[List[int]] = ...,
+    version: Literal[1] = ...,
+) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
+    ...
+
+
+@overload
+def queue(
+    refresh: bool,
+    skip_finished: bool = ...,
+    all_users: bool = ...,
+    job_ids: Optional[List[int]] = ...,
+    version: Literal[2] = ...,
+) -> server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int, Dict[
+        str, int], int]]:
+    ...
+
+
+@usage_lib.entrypoint  # type: ignore[misc]
 @server_common.check_server_healthy_or_start
 def queue(
     refresh: bool,
