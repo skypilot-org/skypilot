@@ -130,6 +130,8 @@ class StatusResponse(ResponseBaseModel):
     labels: Optional[Dict[str, str]] = None
     cluster_name_on_cloud: Optional[str] = None
     node_names: Optional[str] = None
+    priority: Optional[int] = None
+    priority_class: Optional[str] = None
 
 
 class ClusterJobRecord(ResponseBaseModel):
@@ -203,6 +205,7 @@ class ManagedJobRecord(ResponseBaseModel):
     last_recovered_at: Optional[float] = None
     run_timestamp: Optional[str] = None
     priority: Optional[int] = None
+    priority_class: Optional[str] = None
     original_user_yaml_path: Optional[str] = None
     pool: Optional[str] = None
     pool_hash: Optional[str] = None
