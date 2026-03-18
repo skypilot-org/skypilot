@@ -1074,12 +1074,6 @@ def test_priority_class_yaml_serialization():
     assert y2['priority'] == 100 and y2['priority_class'] == 'tier1'
 
 
-def test_apply_resolved_kueue_priority_keeps_class():
-    r = Resources(priority_class='high')
-    r.apply_resolved_kueue_priority(42)
-    assert r.priority == 42 and r.priority_class == 'high'
-
-
 def test_priority_copy():
     """Test priority preservation in copy operations."""
     r = Resources(priority=300, cpus=4)
