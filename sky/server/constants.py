@@ -10,7 +10,10 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 42  # api_access support for managed jobs
+API_VERSION = 43  # resources.priority_class (Kueue)
+
+# Minimum API version that accepts resources.priority_class in task YAML.
+PRIORITY_CLASS_API_VERSION = 43
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

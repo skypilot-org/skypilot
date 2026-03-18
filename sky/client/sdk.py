@@ -413,6 +413,7 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    dag_utils.strip_priority_class_if_unsupported_server(dag)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(dag=dag_str,
@@ -497,6 +498,8 @@ def validate(
                 storage.file_mount_type = None
             logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
+
+    dag_utils.strip_priority_class_if_unsupported_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,

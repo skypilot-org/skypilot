@@ -372,6 +372,9 @@ def _get_single_resources_schema():
                 'minimum': constants.MIN_PRIORITY,
                 'maximum': constants.MAX_PRIORITY,
             },
+            'priority_class': {
+                'type': 'string',
+            },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {

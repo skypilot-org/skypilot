@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from sky import dag as dag_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.server import constants as server_constants
+from sky.server import versions
 from sky.skylet import constants
 from sky.utils import cluster_utils
 from sky.utils import registry
@@ -41,6 +43,30 @@ The command can then be run as:
 
   sky.jobs.launch(task, ...)
 """.strip()
+
+
+def strip_priority_class_if_unsupported_server(dag: dag_lib.Dag) -> None:
+    """Remove resources.priority_class if the remote API server is too old."""
+    remote = versions.get_remote_api_version()
+    if (remote is not None and
+            remote >= server_constants.PRIORITY_CLASS_API_VERSION):
+        return
+    stripped = False
+    for task in dag.tasks:
+        new_resources = []
+        for resource in task.resources:
+            if resource.priority_class:
+                stripped = True
+                new_resources.append(resource.copy(priority_class=None))
+            else:
+                new_resources.append(resource)
+        task.set_resources(type(task.resources)(new_resources))
+    if stripped:
+        logger.debug(
+            'Omitted resources.priority_class because the API server is '
+            'older than %s.',
+            server_constants.PRIORITY_CLASS_API_VERSION,
+        )
 
 
 def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
