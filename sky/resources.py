@@ -706,7 +706,7 @@ class Resources:
 
     @property
     def priority_class(self) -> Optional[str]:
-        """Logical priority class name (e.g. Kueue), if set."""
+        """Logical priority class name, if set."""
         return self._priority_class
 
     @property
@@ -925,16 +925,11 @@ class Resources:
         self._priority = priority
 
     def _set_priority_class(self, priority_class: Optional[str]) -> None:
-        if priority_class is not None and not str(priority_class).strip():
-            priority_class = None
-        elif priority_class is not None:
+        if priority_class is not None:
             priority_class = str(priority_class).strip()
+            if not priority_class:
+                priority_class = None
         self._priority_class = priority_class
-
-    def apply_resolved_kueue_priority(self, priority_value: int) -> None:
-        """Sets numeric priority after Kueue priority_class
-        resolution (server-side)."""
-        self._set_priority(priority_value)
 
     def _set_volumes(
         self,
