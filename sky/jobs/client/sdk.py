@@ -263,7 +263,7 @@ def queue_v2(
 # server supports it, which breaks the backward compatibility.
 # In https://github.com/skypilot-org/skypilot/pull/8015, we revert the change
 # and add a new function `queue_v2` to return the new typed data.
-# TODO(lloyd): Remove before 0.13.
+# TODO(lloyd): Remove version=1 support before 0.13.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def queue(
