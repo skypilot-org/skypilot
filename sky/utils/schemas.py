@@ -1453,6 +1453,18 @@ def get_config_schema():
                         }
                     }],
                 },
+                'subnet_ids': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
+                    }],
+                },
                 'use_ssm': {
                     'type': 'boolean',
                 },
