@@ -284,6 +284,29 @@ class TestPermissionService:
         mock_enforcer.save_policy.assert_called_once()
 
     @mock.patch('sky.users.permission._policy_lock')
+    def test_update_role_no_existing_roles(self, mock_policy_lock):
+        """Test updating role for a user who has no existing roles."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = []  # No current roles
+        mock_enforcer.add_grouping_policy.return_value = True
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.update_role('user1', 'user')
+
+        # Verify no removal was attempted (no existing role to remove)
+        mock_enforcer.remove_grouping_policy.assert_not_called()
+        # Verify new role was added and policy saved
+        mock_enforcer.add_grouping_policy.assert_called_once_with(
+            'user1', 'user')
+        mock_enforcer.save_policy.assert_called_once()
+
+    @mock.patch('sky.users.permission._policy_lock')
     def test_update_role_same_role(self, mock_policy_lock):
         """Test updating user role to the same role (no-op)."""
         mock_policy_lock.return_value.__enter__ = mock.Mock()
@@ -303,6 +326,29 @@ class TestPermissionService:
         mock_enforcer.remove_grouping_policy.assert_not_called()
         mock_enforcer.add_grouping_policy.assert_not_called()
         mock_enforcer.save_policy.assert_not_called()
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_update_role_invalidates_cache(self, mock_policy_lock,
+                                           mock_kv_cache):
+        """Test that update_role invalidates user permission cache."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.get_roles_for_user.return_value = ['user']
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.update_role('user1', 'admin')
+
+        # Verify cache invalidation was called
+        mock_kv_cache.delete_cache_entries_by_pattern.assert_called_once()
+        pattern = (
+            mock_kv_cache.delete_cache_entries_by_pattern.call_args[0][0])
+        assert 'user1' in pattern
 
     def test_get_user_roles(self):
         """Test getting user roles."""
@@ -398,6 +444,76 @@ class TestPermissionService:
         mock_enforcer.add_policy.assert_any_call('user2', 'test-workspace', '*')
         mock_enforcer.save_policy.assert_called_once()
 
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_add_workspace_policy_invalidates_cache(self, mock_policy_lock,
+                                                    mock_kv_cache):
+        """Test that add_workspace_policy invalidates stale cached denials."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.add_policy.return_value = True
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+
+        service.add_workspace_policy('test-workspace', ['user1', 'user2'])
+
+        # Verify cache invalidation was called
+        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
+        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
+            0]
+        assert 'test-workspace' in prefix_arg
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_update_workspace_policy_invalidates_cache(self, mock_policy_lock,
+                                                       mock_kv_cache):
+        """Test that update_workspace_policy invalidates permission cache."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+        mock_enforcer.add_policy.return_value = True
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+        service._load_policy_no_lock = mock.Mock()
+
+        service.update_workspace_policy('test-workspace', ['user1', 'user2'])
+
+        # Verify cache invalidation was called
+        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
+        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
+            0]
+        assert 'test-workspace' in prefix_arg
+
+    @mock.patch('sky.users.permission.kv_cache')
+    @mock.patch('sky.users.permission._policy_lock')
+    def test_remove_workspace_policy_invalidates_cache(self, mock_policy_lock,
+                                                       mock_kv_cache):
+        """Test that remove_workspace_policy invalidates permission cache."""
+        mock_policy_lock.return_value.__enter__ = mock.Mock()
+        mock_policy_lock.return_value.__exit__ = mock.Mock()
+
+        mock_enforcer = mock.Mock()
+
+        service = permission.PermissionService()
+        service.enforcer = mock_enforcer
+
+        service.remove_workspace_policy('test-workspace')
+
+        # Verify enforcer policy removal
+        mock_enforcer.remove_filtered_policy.assert_called_once_with(
+            1, 'test-workspace')
+        mock_enforcer.save_policy.assert_called_once()
+        # Verify cache invalidation was called
+        mock_kv_cache.delete_cache_entries_by_prefix.assert_called_once()
+        prefix_arg = mock_kv_cache.delete_cache_entries_by_prefix.call_args[0][
+            0]
+        assert 'test-workspace' in prefix_arg
+
     @mock.patch('sky.users.permission.filelock.FileLock')
     def test_policy_lock_context_manager(self, mock_filelock):
         """Test the policy lock context manager."""
@@ -432,7 +548,8 @@ class TestPermissionService:
         assert 'Failed to reload policy due to a timeout' in str(exc_info.value)
         assert 'policy_update.lock' in str(exc_info.value)
 
-    def test_delete_user_with_role(self):
+    @mock.patch('sky.users.permission.kv_cache')
+    def test_delete_user_with_role(self, mock_kv_cache):
         """Test deleting a user who has a role."""
         mock_enforcer = mock.Mock()
         # User has a role
@@ -451,8 +568,14 @@ class TestPermissionService:
             mock_enforcer.remove_grouping_policy.assert_called_once_with(
                 'user1', 'user')
             mock_enforcer.save_policy.assert_called_once()
+            # Verify cache invalidation
+            mock_kv_cache.delete_cache_entries_by_pattern.assert_called_once()
+            pattern = (
+                mock_kv_cache.delete_cache_entries_by_pattern.call_args[0][0])
+            assert 'user1' in pattern
 
-    def test_delete_user_without_role(self):
+    @mock.patch('sky.users.permission.kv_cache')
+    def test_delete_user_without_role(self, mock_kv_cache):
         """Test deleting a user who has no roles."""
         mock_enforcer = mock.Mock()
         # User has no roles
@@ -469,6 +592,8 @@ class TestPermissionService:
             mock_enforcer.get_roles_for_user.assert_called_once_with('user2')
             mock_enforcer.remove_grouping_policy.assert_not_called()
             mock_enforcer.save_policy.assert_not_called()
+            # No cache invalidation for user without role (early return)
+            mock_kv_cache.delete_cache_entries_by_pattern.assert_not_called()
 
     @mock.patch('sky.users.permission._policy_lock')
     @mock.patch('sky.users.permission.sqlalchemy_adapter.Adapter')

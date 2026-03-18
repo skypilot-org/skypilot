@@ -104,3 +104,36 @@ def get_cache_entry(key: str) -> Optional[str]:
                 kv_cache_table.c.key == key).where(
                     kv_cache_table.c.expires_at > time.time()))
         return result.scalar()
+
+
+@metrics_lib.time_me
+def delete_cache_entries_by_prefix(prefix: str) -> None:
+    """Delete all cache entries whose key starts with the given prefix.
+
+    Args:
+        prefix: The prefix to match against cache keys.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(kv_cache_table).where(
+                kv_cache_table.c.key.like(f'{prefix}%')))
+        session.commit()
+
+
+@metrics_lib.time_me
+def delete_cache_entries_by_pattern(pattern: str) -> None:
+    """Delete all cache entries whose key matches a SQL LIKE pattern.
+
+    Supports '%' (any sequence) and '_' (single char) wildcards anywhere
+    in the pattern.
+
+    Args:
+        pattern: The SQL LIKE pattern to match against cache keys.
+    """
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.delete(kv_cache_table).where(
+                kv_cache_table.c.key.like(pattern)))
+        session.commit()
