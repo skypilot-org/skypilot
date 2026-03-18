@@ -1075,6 +1075,9 @@ def write_cluster_config(
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
             'runcmd': runcmd,
+
+            # Priority class
+            'priority_class': to_provision.priority_class,
         },
     )
     if cloud_specific_failover_overrides is not None:
