@@ -290,7 +290,7 @@ def queue(
     ...
 
 
-@usage_lib.entrypoint  # type: ignore[misc]
+@usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def queue(
     refresh: bool,
@@ -298,8 +298,9 @@ def queue(
     all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     version: int = 1,
-) -> server_common.RequestId[Union[List[responses.ManagedJobRecord], Tuple[
-        List[responses.ManagedJobRecord], int, Dict[str, int], int]]]:
+) -> Union[server_common.RequestId[List[responses.ManagedJobRecord]],
+           server_common.RequestId[Tuple[List[responses.ManagedJobRecord], int,
+                                         Dict[str, int], int]]]:
     """Gets statuses of managed jobs.
 
     Deprecated. Please use queue_v2 instead for better performance.

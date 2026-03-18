@@ -79,6 +79,8 @@ async def queue(
 ) -> Union[List[responses.ManagedJobRecord], Tuple[
         List[responses.ManagedJobRecord], int, Dict[str, int], int]]:
     """Async version of queue() that gets statuses of managed jobs."""
+    # mypy cannot resolve overloaded functions passed as callable arguments
+    # to asyncio.to_thread.
     request_id = await asyncio.to_thread(
         sdk.queue,  # type: ignore[arg-type]
         refresh,
