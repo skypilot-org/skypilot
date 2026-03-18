@@ -87,7 +87,8 @@ def bootstrap_instances(
         config.provider_config['region'],
         availability_zone=config.provider_config.get('availability_zone'),
         use_internal_ips=config.provider_config.get('use_internal_ips', False),
-        vpc_name=config.provider_config.get('vpc_name'))
+        vpc_name=config.provider_config.get('vpc_name'),
+        subnet_ids=config.provider_config.get('subnet_ids'))
 
     max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
     enable_efa = max_efa_interfaces > 0
@@ -582,8 +583,12 @@ def get_vpc_id_by_name(ec2: 'mypy_boto3_ec2.ServiceResource', vpc_name: str,
 def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
                            security_group_ids: Optional[List[str]], region: str,
                            availability_zone: Optional[str],
-                           use_internal_ips: bool,
-                           vpc_name: Optional[str]) -> Tuple[Any, str]:
+                           use_internal_ips: bool, vpc_name: Optional[str],
+                           subnet_ids: Optional[List[str]]) -> Tuple[Any, str]:
+
+    if isinstance(subnet_ids, str):
+        subnet_ids = [subnet_ids]
+
     if vpc_name is not None:
         vpc_id_of_sg = get_vpc_id_by_name(ec2, vpc_name, region)
     elif security_group_ids:
@@ -592,6 +597,26 @@ def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
+
+    # If the user specified subnet IDs, resolve them and use as
+    # user_specified_subnets
+    user_specified_subnets = None
+    if subnet_ids:
+        user_specified_subnets = [
+            s for s in all_subnets if s.subnet_id in subnet_ids
+        ]
+        missing = set(subnet_ids) - {
+            s.subnet_id for s in user_specified_subnets
+        }
+        if missing:
+            _skypilot_log_error_and_exit_for_failover(
+                f'Subnet(s) {missing} not found in {region}. '
+                'Please check the subnet IDs in your config.')
+        # When subnets are explicitly specified we can infer the VPC from
+        # the subnets themselves, so a vpc_name is not required.
+        if vpc_id_of_sg is None:
+            vpc_id_of_sg = user_specified_subnets[0].vpc_id
+
     # If no VPC is specified, use the default VPC.
     # We filter only for default VPCs to avoid using subnets that users may
     # not want SkyPilot to use.
@@ -604,7 +629,7 @@ def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
 
     subnets, vpc_id = _usable_subnets(
         ec2,
-        user_specified_subnets=None,
+        user_specified_subnets=user_specified_subnets,
         all_subnets=all_subnets,
         azs=availability_zone,
         vpc_id_of_sg=vpc_id_of_sg,
