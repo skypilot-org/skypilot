@@ -52,11 +52,16 @@ async def launch(request: fastapi.Request,
 @router.post('/queue')
 async def queue(request: fastapi.Request,
                 jobs_queue_body: payloads.JobsQueueBody) -> None:
-    del request, jobs_queue_body
-    raise fastapi.HTTPException(
-        status_code=410,
-        detail='Managed jobs queue v1 has been deprecated and removed. '
-        'Use sky.jobs.queue(version=2) or sky.jobs.queue_v2() instead.')
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_QUEUE,
+        request_body=jobs_queue_body,
+        func=core.queue,
+        schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
+                       else api_requests.ScheduleType.SHORT),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
+    )
 
 
 @router.post('/queue/v2')

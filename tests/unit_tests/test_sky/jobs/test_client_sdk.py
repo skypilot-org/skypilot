@@ -43,7 +43,8 @@ def test_queue_version_1_warns_and_uses_legacy_endpoint():
 
     assert result == 'request-id-v1'
     mock_warning.assert_called_once()
-    assert 'deprecated in v0.13' in mock_warning.call_args.args[0]
+    assert 'is deprecated and will be removed in v0.13' in mock_warning.call_args.args[
+        0]
     mock_request.assert_called_once()
     args, kwargs = mock_request.call_args
     assert args == ('POST', '/jobs/queue')

@@ -329,9 +329,9 @@ def queue(
                         all_users=all_users,
                         job_ids=job_ids)
 
-    logger.warning('sky.jobs.queue(version=1) will be deprecated in v0.13. '
-                   'Use sky.jobs.queue(version=2) or sky.jobs.queue_v2() '
-                   'instead.')
+    logger.warning('sky.jobs.queue(version=1) is deprecated and will be '
+                   'removed in v0.13. Use sky.jobs.queue(version=2) or '
+                   'sky.jobs.queue_v2() instead.')
 
     body = payloads.JobsQueueBody(
         refresh=refresh,

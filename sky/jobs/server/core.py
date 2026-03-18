@@ -1053,10 +1053,9 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    del refresh, skip_finished, all_users, job_ids
-    raise ValueError('Managed jobs queue v1 has been deprecated and removed. '
-                     'Use sky.jobs.queue(version=2) or sky.jobs.queue_v2() '
-                     'instead.')
+    jobs, _, _, _ = queue_v2(refresh, skip_finished, all_users, job_ids)
+
+    return jobs
 
 
 @usage_lib.entrypoint
