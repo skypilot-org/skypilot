@@ -5219,15 +5219,10 @@ def volumes_apply(
                     f'{entrypoint_str!r} needs to be a YAML file')
         if yaml_config is not None:
             volume_config_dict = yaml_config.copy()
-            # Read the original YAML file content for storage in the database.
-            try:
-                with open(entrypoint_str, 'r', encoding='utf-8') as f:
-                    creation_yaml = f.read(_MAX_YAML_SIZE)
-            except OSError as e:
-                logger.warning(
-                    'Failed to read the original YAML file for storage. '
-                    'The volume will be created, but the YAML content '
-                    f'will not be saved. Error: {e}')
+            creation_yaml = yaml.dump(yaml_config,
+                                      default_flow_style=False,
+                                      sort_keys=False)
+            creation_yaml = creation_yaml[:_MAX_YAML_SIZE]
     override_config = _build_volume_override_config(name, infra, type, size,
                                                     use_existing)
     volume_config_dict.update(override_config)
