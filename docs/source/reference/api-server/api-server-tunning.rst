@@ -12,9 +12,12 @@ Tuning API server resources
 
 The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it.
 
-.. note::
+When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), the API server also runs the managed jobs controller. In this mode, the API server's resources determine both:
 
-    When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), the API server also runs the managed jobs controller. In this mode, the API server's resources determine both the request handling capacity **and** the number of managed jobs that can run concurrently. You may need to allocate additional memory to support both workloads. See :ref:`jobs-controller-sizing` for details on jobs controller memory requirements.
+- **Request handling capacity** -- how many ``launch``, ``exec``, ``status``, etc. requests can run concurrently.
+- **Managed jobs capacity** -- how many managed jobs can run and launch concurrently.
+
+Both workloads share the same CPU and memory pool, so you may need to allocate more resources than you would for request handling alone. See :ref:`consolidation-mode-resource-planning` below for guidance.
 
 Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
 
@@ -94,6 +97,26 @@ The following table shows the maximum concurrency for different resource configu
    * - 128
      - 256Gi
      - 256 Long requests, 505 Short requests
+
+.. _consolidation-mode-resource-planning:
+
+Resource planning with consolidation mode
+-----------------------------------------
+
+When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), the API server pod also runs the managed jobs controller. This means the pod's memory must cover both request handling **and** job management.
+
+The jobs controller reserves a portion of the API server's memory. The remaining memory is used for request handling concurrency (as shown in the table above). The jobs controller memory determines:
+
+- **Actively launching job count**: ``8 * floor((memory - 2GiB) / 3.59GiB)``, max 512.
+- **Running job count**: ``200 * floor((memory - 2GiB) / 3.59GiB)``, max 2000.
+
+See :ref:`jobs-controller-sizing` for more details on these formulas.
+
+For example, with 32 GiB of memory allocated to the API server pod, you can expect capacity for both moderate request concurrency (32 long-running requests) and several hundred concurrent managed jobs. If you need to support more concurrent jobs while maintaining request throughput, increase the API server's memory allocation.
+
+.. tip::
+
+    When consolidation mode is **not** active (e.g., local API server or ``consolidation_mode: false``), the jobs controller runs on a :ref:`separate cluster <jobs-controller-separate>` with its own resources. In that case, the API server resources only need to cover request handling, and the concurrency table above applies directly.
 
 Use asynchronous requests to avoid blocking
 -------------------------------------------
