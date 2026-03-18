@@ -34,7 +34,10 @@ POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 _enforcer_instance: Optional['PermissionService'] = None
 
 # KV cache constants for workspace permission checks.
-# The cache key format is: perm:ws:<workspace_name>:<user_id>
+# The cache key format is: perm:ws:\x00<workspace_name>\x00<user_id>
+# We use \x00 (null byte) as the internal separator so that workspace names
+# or user IDs containing ':' (or any other printable character) cannot cause
+# key collisions or ambiguous LIKE patterns.
 _WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
 _WORKSPACE_PERM_CACHE_KEY_SEP = ':'
 # Long TTL as safety net; primary freshness is explicit invalidation on
@@ -260,10 +263,11 @@ class PermissionService:
                 return
             enforcer.remove_grouping_policy(user_id, current_roles[0])
             enforcer.save_policy()
-        self.invalidate_user_permission_cache(user_id)
+            self.invalidate_user_permission_cache(user_id)
 
     def update_role(self, user_id: str, new_role: str) -> None:
         """Update user role relationship."""
+        role_changed = False
         with _policy_lock():
             self._load_policy_no_lock()
             enforcer = self._ensure_enforcer()
@@ -277,11 +281,13 @@ class PermissionService:
                     logger.debug(f'User {user_id} already has role {new_role}')
                     return
                 enforcer.remove_grouping_policy(user_id, current_role)
-                self.invalidate_user_permission_cache(user_id)
+                role_changed = True
 
             # Update user role
             enforcer.add_grouping_policy(user_id, new_role)
             enforcer.save_policy()
+            if role_changed:
+                self.invalidate_user_permission_cache(user_id)
 
     def get_user_roles(self, user_id: str) -> List[str]:
         """Get all roles for a user.
@@ -374,11 +380,9 @@ class PermissionService:
 
     def invalidate_user_permission_cache(self, user_id: str) -> None:
         """Invalidate all cached permission entries for a user."""
-        pattern = (f'{_WORKSPACE_PERM_CACHE_PREFIX}'
-                   f'%'
-                   f'{_WORKSPACE_PERM_CACHE_KEY_SEP}'
-                   f'{user_id}')
-        kv_cache.delete_cache_entries_by_pattern(pattern)
+        kv_cache.delete_cache_entries_by_prefix_suffix(
+            prefix=_WORKSPACE_PERM_CACHE_PREFIX,
+            suffix=f'{_WORKSPACE_PERM_CACHE_KEY_SEP}{user_id}')
 
     def check_workspace_permission(self, user_id: str,
                                    workspace_name: str) -> bool:
@@ -477,9 +481,9 @@ class PermissionService:
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
             enforcer.save_policy()
-        # Invalidate stale cached denials (e.g. from checks between a
-        # workspace deletion and its re-creation with the same name).
-        self.invalidate_workspace_permission_cache(workspace_name)
+            # Invalidate stale cached denials (e.g. from checks between a
+            # workspace deletion and its re-creation with the same name).
+            self.invalidate_workspace_permission_cache(workspace_name)
 
     def update_workspace_policy(self, workspace_name: str,
                                 users: List[str]) -> None:
@@ -502,9 +506,10 @@ class PermissionService:
                              f'workspace={workspace_name}')
                 enforcer.add_policy(user, workspace_name, '*')
             enforcer.save_policy()
-        # Invalidate cached permission entries after the policy is persisted
-        # so other processes re-compute permissions on next check.
-        self.invalidate_workspace_permission_cache(workspace_name)
+            # Invalidate cached permission entries after the policy is
+            # persisted so other processes re-compute permissions on next
+            # check.
+            self.invalidate_workspace_permission_cache(workspace_name)
 
     def remove_workspace_policy(self, workspace_name: str) -> None:
         """Remove workspace policy."""
@@ -512,9 +517,10 @@ class PermissionService:
             enforcer = self._ensure_enforcer()
             enforcer.remove_filtered_policy(1, workspace_name)
             enforcer.save_policy()
-        # Invalidate cached permission entries after the policy is persisted
-        # so other processes re-compute permissions on next check.
-        self.invalidate_workspace_permission_cache(workspace_name)
+            # Invalidate cached permission entries after the policy is
+            # persisted so other processes re-compute permissions on next
+            # check.
+            self.invalidate_workspace_permission_cache(workspace_name)
 
 
 @contextlib.contextmanager
