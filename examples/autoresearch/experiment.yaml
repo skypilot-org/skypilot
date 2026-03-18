@@ -1,5 +1,5 @@
 resources:
-  accelerators: H100:1
+  accelerators: {H100:1, H200:1}
   image_id: docker:nvcr.io/nvidia/pytorch:24.07-py3
 
 workdir: .
