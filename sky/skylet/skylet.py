@@ -3,8 +3,6 @@
 import argparse
 import concurrent.futures
 import os
-import signal
-import sys
 import time
 
 import grpc
@@ -15,12 +13,9 @@ from sky.schemas.generated import autostopv1_pb2_grpc
 from sky.schemas.generated import jobsv1_pb2_grpc
 from sky.schemas.generated import managed_jobsv1_pb2_grpc
 from sky.schemas.generated import servev1_pb2_grpc
-from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import events
 from sky.skylet import services
-from sky.utils import cluster_utils
-from sky.utils import yaml_utils
 
 # Use the explicit logger name so that the logger is under the
 # `sky.skylet.skylet` namespace when executed directly, so as
@@ -30,7 +25,6 @@ logger.info(f'Skylet started with version {constants.SKYLET_VERSION}; '
             f'SkyPilot v{sky.__version__} (commit: {sky.__commit__})')
 
 EVENTS = [
-    events.SpotTerminationEvent(),  # Must be first for early detection
     events.AutostopEvent(),
     events.JobSchedulerEvent(),
     # The managed job update event should be after the job update event.
@@ -91,61 +85,7 @@ def run_event_loop():
             event.run()
 
 
-def _handle_sigterm(signum, frame):
-    """Handle SIGTERM by running autostop hook before exit.
-
-    On Kubernetes, this handler is not registered because the container
-    entrypoint traps SIGTERM to keep the pod alive (for HA). SIGTERM
-    from pod termination never reaches the skylet process.
-    """
-    del signum, frame  # Unused.
-    if not autostop_lib.set_preemption_hook_if_not_set():
-        sys.exit(0)
-
-    config = autostop_lib.get_autostop_config()
-    if config.hook:
-        # Determine cloud provider for grace period
-        try:
-            config_path = os.path.abspath(
-                os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
-            cluster_config = yaml_utils.read_yaml(config_path)
-            provider_name = cluster_utils.get_provider_name(cluster_config)
-        except Exception:  # pylint: disable=broad-except
-            provider_name = 'unknown'
-
-        grace = autostop_lib.get_preemption_grace_seconds(provider_name)
-        capped_timeout = min(config.hook_timeout, grace)
-        if capped_timeout < config.hook_timeout:
-            logger.warning(
-                f'Hook timeout capped from {config.hook_timeout}s to '
-                f'{capped_timeout}s due to cloud grace period.')
-        logger.info(f'SIGTERM received. Running preemption hook '
-                    f'(timeout: {capped_timeout}s)...')
-        autostop_lib.execute_autostop_hook(config.hook, capped_timeout)
-
-    sys.exit(0)
-
-
-def _is_kubernetes() -> bool:
-    """Check if the current cluster is running on Kubernetes."""
-    try:
-        config_path = os.path.abspath(
-            os.path.expanduser(cluster_utils.SKY_CLUSTER_YAML_REMOTE_PATH))
-        cluster_config = yaml_utils.read_yaml(config_path)
-        provider_name = cluster_utils.get_provider_name(cluster_config)
-        return provider_name == 'kubernetes'
-    except Exception:  # pylint: disable=broad-except
-        return False
-
-
 def main():
-    # On Kubernetes, the container entrypoint traps SIGTERM to keep the pod
-    # alive for HA. SIGTERM from pod termination never reaches the skylet,
-    # so registering the handler is unnecessary (and would cause the skylet
-    # to exit on any direct SIGTERM, e.g. from attempt_skylet restarts).
-    if not _is_kubernetes():
-        signal.signal(signal.SIGTERM, _handle_sigterm)
-
     parser = argparse.ArgumentParser(description='Start skylet daemon')
     parser.add_argument('--port',
                         type=int,
