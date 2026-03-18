@@ -151,39 +151,33 @@ function UsedBySection({ clusters, pods }) {
   const clusterList = Array.isArray(clusters) ? clusters : [];
   const podList = Array.isArray(pods) ? pods : [];
 
-  if (clusterList.length === 0 && podList.length === 0) {
+  // Prioritize clusters over pods, matching UsedByCell in volumes table
+  const isCluster = clusterList.length > 0;
+  const items = isCluster ? clusterList : podList;
+
+  if (items.length === 0) {
     return <span>N/A</span>;
   }
 
   return (
     <div className="space-y-1">
-      {clusterList.length > 0 && (
-        <div>
-          <span className="text-gray-500 text-sm mr-1">Clusters:</span>
-          {clusterList.map((name, idx) => (
-            <span key={name}>
+      <div>
+        {items.map((name, idx) => (
+          <span key={name}>
+            {isCluster ? (
               <Link
                 href={`/clusters/${encodeURIComponent(name)}`}
                 className="text-blue-600 hover:underline"
               >
                 {name}
               </Link>
-              {idx < clusterList.length - 1 ? ', ' : ''}
-            </span>
-          ))}
-        </div>
-      )}
-      {podList.length > 0 && (
-        <div>
-          <span className="text-gray-500 text-sm mr-1">Pods:</span>
-          {podList.map((name, idx) => (
-            <span key={name}>
-              {name}
-              {idx < podList.length - 1 ? ', ' : ''}
-            </span>
-          ))}
-        </div>
-      )}
+            ) : (
+              name
+            )}
+            {idx < items.length - 1 ? ', ' : ''}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
