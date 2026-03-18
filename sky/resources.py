@@ -126,6 +126,44 @@ class AutostopConfig:
         return None
 
 
+@dataclasses.dataclass
+class PreemptionConfig:
+    """Configuration for preemption hooks on Kubernetes."""
+    hook: Optional[str] = None
+    hook_timeout: int = 300  # default 5 min
+
+    @property
+    def effective_grace_period(self) -> int:
+        """terminationGracePeriodSeconds = hook_timeout if hook, else 30."""
+        if self.hook:
+            return self.hook_timeout
+        return 30  # K8s default
+
+    def to_yaml_config(self) -> Optional[Dict[str, Any]]:
+        if self.hook is None:
+            return None
+        config: Dict[str, Any] = {'hook': self.hook}
+        if self.hook_timeout != 300:
+            config['hook_timeout'] = self.hook_timeout
+        return config
+
+    @classmethod
+    def from_yaml_config(
+            cls, config: Optional[Dict[str,
+                                       Any]]) -> Optional['PreemptionConfig']:
+        if config is None:
+            return None
+        if not isinstance(config, dict):
+            return None
+        hook = config.get('hook')
+        if hook is None:
+            return None
+        return cls(
+            hook=hook,
+            hook_timeout=config.get('hook_timeout', 300),
+        )
+
+
 class Resources:
     """Resources: compute requirements of Tasks.
 
@@ -143,7 +181,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 29
+    _VERSION = 30
 
     def __init__(
         self,
@@ -167,6 +205,7 @@ class Resources:
         ports: Optional[Union[int, str, List[str], Tuple[str]]] = None,
         labels: Optional[Dict[str, str]] = None,
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
+        preemption: Optional[Dict[str, Any]] = None,
         priority: Optional[int] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
@@ -413,6 +452,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
         self._set_autostop_config(autostop)
+        self._set_preemption_config(preemption)
         self._set_priority(priority)
         self._set_volumes(volumes)
         self._set_local_disk(local_disk)
@@ -690,6 +730,11 @@ class Resources:
         return self._autostop_config
 
     @property
+    def preemption_config(self) -> Optional[PreemptionConfig]:
+        """The requested preemption config for K8s preStop hooks."""
+        return self._preemption_config
+
+    @property
     def priority(self) -> Optional[int]:
         """The priority for this resource configuration.
 
@@ -896,6 +941,12 @@ class Resources:
         autostop: Union[bool, int, str, Dict[str, Any], None],
     ) -> None:
         self._autostop_config = AutostopConfig.from_yaml_config(autostop)
+
+    def _set_preemption_config(
+        self,
+        preemption: Optional[Dict[str, Any]],
+    ) -> None:
+        self._preemption_config = PreemptionConfig.from_yaml_config(preemption)
 
     def _set_priority(self, priority: Optional[int]) -> None:
         """Sets the priority for this resource configuration.
@@ -2002,6 +2053,10 @@ class Resources:
         if self.autostop_config is not None:
             current_autostop_config = self.autostop_config.to_yaml_config()
 
+        current_preemption_config = None
+        if self.preemption_config is not None:
+            current_preemption_config = self.preemption_config.to_yaml_config()
+
         override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
@@ -2026,6 +2081,7 @@ class Resources:
             ports=override.pop('ports', self.ports),
             labels=override.pop('labels', self.labels),
             autostop=override.pop('autostop', current_autostop_config),
+            preemption=override.pop('preemption', current_preemption_config),
             priority=override.pop('priority', self.priority),
             volumes=override.pop('volumes', self.volumes),
             infra=override.pop('infra', None),
@@ -2433,6 +2489,10 @@ class Resources:
             config['volumes'] = volumes
         if self._autostop_config is not None:
             config['autostop'] = self._autostop_config.to_yaml_config()
+        if self._preemption_config is not None:
+            preemption_yaml = self._preemption_config.to_yaml_config()
+            if preemption_yaml is not None:
+                config['preemption'] = preemption_yaml
 
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
@@ -2616,6 +2676,9 @@ class Resources:
 
         if version < 29:
             self._local_disk = None
+
+        if version < 30:
+            self._preemption_config = None
 
         self.__dict__.update(state)
 

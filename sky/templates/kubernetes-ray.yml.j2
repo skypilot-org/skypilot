@@ -382,6 +382,7 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
+        terminationGracePeriodSeconds: {{k8s_termination_grace_period | default(30)}}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -1156,6 +1157,17 @@ available_node_types:
               log_tail &
               while true; do sleep infinity & wait $!; done
 
+          {% if preemption_hook %}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                - sh
+                - -c
+                - |
+                  export SKYPILOT_PREEMPTION=1
+                  timeout {{preemption_hook_timeout | default(300)}} bash -c {{preemption_hook | tojson}}
+          {% endif %}
           ports:
           - containerPort: 22  # Used for SSH
           - containerPort: {{ray_port}}  # Redis port

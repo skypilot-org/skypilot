@@ -282,3 +282,53 @@ Common use cases for autostop hooks:
            hook: |
              # Upload the trained model to Hugging Face Hub
              huggingface-cli upload my-org/my-model /workspace/model-output .
+
+.. _preemption-hooks:
+
+Preemption hooks (Kubernetes)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Kubernetes, you can configure a **preemption hook** that runs when a pod is about
+to be terminated due to preemption, node drain, or pod eviction. The hook is implemented
+as a Kubernetes-native ``preStop`` lifecycle hook, embedded in the pod spec at launch time.
+
+.. code-block:: yaml
+
+   resources:
+     cloud: kubernetes
+     preemption:
+       hook: |
+         echo "Saving checkpoint before preemption"
+         cp checkpoint.pt s3://bucket/checkpoints/
+       hook_timeout: 600  # seconds (default: 300)
+
+**How it works:**
+
+- The hook runs on **all nodes** (head + workers) via the Kubernetes ``preStop`` lifecycle hook
+- ``hook_timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
+  (default: 300s when a hook is configured, 30s when no hook is set)
+- The ``SKYPILOT_PREEMPTION=1`` environment variable is set during hook execution
+- The hook is embedded in the pod spec at launch time; updating the hook requires
+  ``sky down`` followed by ``sky launch``
+
+**When the hook fires:**
+
+- Kubernetes preemption (higher-priority pod needs resources)
+- Node drain (e.g., during cluster maintenance)
+- Pod eviction (e.g., resource pressure)
+
+**When the hook does NOT fire:**
+
+- ``sky down`` / ``sky stop`` (SkyPilot uses force delete, bypassing ``preStop``)
+
+.. note::
+
+   Cloud providers may kill the node before the grace period expires. For example,
+   GKE spot instances give ~25 seconds, and EKS spot instances give ~2 minutes.
+   Set ``hook_timeout`` accordingly.
+
+.. note::
+
+   Preemption hooks are separate from :ref:`autostop hooks <auto-stop-hooks>`.
+   Setting an autostop hook does **not** enable a preemption hook, and vice versa.
+   Each must be configured independently.

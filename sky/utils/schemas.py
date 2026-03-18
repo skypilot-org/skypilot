@@ -35,6 +35,21 @@ def _check_not_both_fields_present(field1: str, field2: str):
     }
 
 
+_PREEMPTION_SCHEMA = {
+    'type': 'object',
+    'required': [],
+    'additionalProperties': False,
+    'properties': {
+        'hook': {
+            'type': 'string',
+        },
+        'hook_timeout': {
+            'type': 'integer',
+            'minimum': 1,
+        },
+    },
+}
+
 _AUTOSTOP_SCHEMA = {
     'anyOf': [
         {
@@ -367,6 +382,7 @@ def _get_single_resources_schema():
                 }]
             },
             'autostop': _AUTOSTOP_SCHEMA,
+            'preemption': _PREEMPTION_SCHEMA,
             'priority': {
                 'type': 'integer',
                 'minimum': constants.MIN_PRIORITY,

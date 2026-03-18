@@ -1071,6 +1071,16 @@ def write_cluster_config(
             # runcmd to run before any of the SkyPilot runtime setup commands.
             # This is currently only used by AWS and Kubernetes.
             'runcmd': runcmd,
+
+            # Preemption hook for K8s preStop lifecycle hook.
+            'preemption_hook': (to_provision.preemption_config.hook
+                                if to_provision.preemption_config else None),
+            'preemption_hook_timeout':
+                (to_provision.preemption_config.hook_timeout
+                 if to_provision.preemption_config else 300),
+            'k8s_termination_grace_period':
+                (to_provision.preemption_config.effective_grace_period
+                 if to_provision.preemption_config else 30),
         },
     )
     if cloud_specific_failover_overrides is not None:
