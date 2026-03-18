@@ -34,14 +34,9 @@ POLICY_UPDATE_LOCK_TIMEOUT_SECONDS = 20
 _enforcer_instance: Optional['PermissionService'] = None
 
 # KV cache constants for workspace permission checks.
-# The cache key format is: perm:ws:\x00<workspace_name>\x00<user_id>
-# We use \x00 (null byte) as the internal separator so that workspace names
-# or user IDs containing ':' (or any other printable character) cannot cause
-# key collisions or ambiguous LIKE patterns.
 _WORKSPACE_PERM_CACHE_PREFIX = 'perm:ws:'
 _WORKSPACE_PERM_CACHE_KEY_SEP = ':'
-# Long TTL as safety net; primary freshness is explicit invalidation on
-# update_workspace_policy.
+# Long TTL as safety net; primary freshness is explicit invalidation on update.
 _WORKSPACE_PERM_CACHE_TTL_SECONDS = 30 * 86400  # 30 days
 
 
