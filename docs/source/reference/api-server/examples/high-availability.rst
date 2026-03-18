@@ -7,7 +7,7 @@ High Availability Controller
 Overview
 --------
 
-This page describes high availability (HA) mode for **separate controller clusters** -- the standalone VM or pod that SkyPilot launches to manage jobs or services.
+This page describes high availability (HA) mode for **remote controller clusters** -- the standalone VM or pod that SkyPilot launches to manage jobs or services.
 
 .. tip::
 
@@ -15,8 +15,8 @@ This page describes high availability (HA) mode for **separate controller cluste
 
     HA mode is relevant when:
 
-    - You have explicitly disabled consolidation mode (``consolidation_mode: false``) and want a resilient separate jobs controller.
-    - You want a resilient **Sky Serve** controller (Sky Serve always uses a separate controller cluster).
+    - You have explicitly disabled consolidation mode (``consolidation_mode: false``) and want a resilient remote jobs controller.
+    - You want a resilient **Sky Serve** controller (Sky Serve always uses a remote controller cluster).
 
 By default, the controller for both Managed Jobs and Sky Serve runs as a single instance (either a VM or a Kubernetes Pod). If this instance fails due to node issues, pod crashes, or other unexpected events, the controller plane becomes unavailable, impacting service management capabilities until the controller is manually recovered or relaunched.
 
@@ -75,7 +75,7 @@ To enable high availability for the controller, set the ``high_availability`` fl
 
     jobs:
       controller:
-        consolidation_mode: false  # Use a separate controller cluster (required for HA)
+        consolidation_mode: false  # Use a remote controller cluster (required for HA)
         resources:
           cloud: kubernetes  # High availability mode requires Kubernetes
         high_availability: true
@@ -87,7 +87,7 @@ To enable high availability for the controller, set the ``high_availability`` fl
         high_availability: true
 
 .. note::
-    For deploy-mode API servers, you must explicitly set ``consolidation_mode: false`` for managed jobs (as shown above) to use a separate controller cluster with HA mode. Without this, the jobs controller runs inside the API server and the ``high_availability`` setting has no effect. This is not needed for the Sky Serve controller, which always uses a separate cluster.
+    For deploy-mode API servers, you must explicitly set ``consolidation_mode: false`` for managed jobs (as shown above) to use a remote controller cluster with HA mode. Without this, the jobs controller runs inside the API server and the ``high_availability`` setting has no effect. This is not needed for the Sky Serve controller, which always uses a remote cluster.
 
 .. note::
     Enabling or disabling ``high_availability`` only affects **new** controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first cancel all running jobs, or terminate all services, and then tear down the existing controller using ``sky down <controller-name>``. See `Important considerations`_ below.

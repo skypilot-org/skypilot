@@ -116,7 +116,7 @@ For example, with 32 GiB of memory allocated to the API server pod, you can expe
 
 .. tip::
 
-    When consolidation mode is **not** active (e.g., local API server or ``consolidation_mode: false``), the jobs controller runs on a :ref:`separate cluster <jobs-controller-separate>` with its own resources. In that case, the API server resources only need to cover request handling, and the concurrency table above applies directly.
+    When consolidation mode is **not** active (e.g., local API server or ``consolidation_mode: false``), the jobs controller runs on a :ref:`remote cluster <jobs-controller-remote>` with its own resources. In that case, the API server resources only need to cover request handling, and the concurrency table above applies directly.
 
 Use asynchronous requests to avoid blocking
 -------------------------------------------

@@ -567,7 +567,7 @@ How it works
 SkyPilot uses a **jobs controller** to manage all managed jobs -- provisioning temporary clusters, monitoring job health, recovering from failures, and cleaning up resources when done. The controller runs in one of two modes:
 
 - **Consolidation mode** (:ref:`details <jobs-consolidation-mode>`): The controller runs within the API server process. This is the default for :ref:`deploy-mode API servers <sky-api-server-remote>` (Helm, Docker, or ``sky api start --deploy``).
-- **Separate controller cluster** (:ref:`details <jobs-controller-separate>`): The controller runs on its own dedicated VM or Kubernetes pod. This is used for local API servers and when consolidation mode is explicitly disabled.
+- **Remote controller cluster** (:ref:`details <jobs-controller-remote>`): The controller runs on its own dedicated VM or Kubernetes pod. This is used for local API servers and when consolidation mode is explicitly disabled.
 
 In either mode, the controller is fully managed by SkyPilot and **no user action is needed** to manage its lifecycle.
 
@@ -629,12 +629,12 @@ To explicitly control this behavior, set :ref:`consolidation_mode <config-yaml-j
 
 **Scaling:** The jobs controller reserves memory within the API server process. The amount of memory available determines how many jobs can run concurrently (see :ref:`jobs-controller-sizing` for the formulas). To increase capacity, allocate more CPU and memory to the API server: see :ref:`sky-api-server-resources-tuning`.
 
-.. _jobs-controller-separate:
+.. _jobs-controller-remote:
 
-Separate controller cluster
+Remote controller cluster
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using a local API server, or when consolidation mode is explicitly disabled (``consolidation_mode: false``), SkyPilot launches a **separate controller cluster** to manage all jobs. This is a small on-demand CPU VM or Kubernetes pod.
+When using a local API server, or when consolidation mode is explicitly disabled (``consolidation_mode: false``), SkyPilot launches a **remote controller cluster** to manage all jobs. This is a small on-demand CPU VM or Kubernetes pod.
 
 The controller cluster is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
@@ -655,7 +655,7 @@ To adjust the size of the jobs controller instance, see :ref:`jobs-controller-cu
 High availability controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-High availability mode ensures the separate controller cluster remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
+High availability mode ensures the remote controller cluster remains resilient to failures by running it as a Kubernetes Deployment with automatic restarts and persistent storage. This helps maintain management capabilities even if the controller pod crashes or the node fails.
 
 To enable high availability for Managed Jobs, simply set the ``high_availability`` flag to ``true`` under ``jobs.controller`` in your ``~/.sky/config.yaml``, and ensure the controller runs on Kubernetes:
 
@@ -671,7 +671,7 @@ To enable high availability for Managed Jobs, simply set the ``high_availability
 This will deploy the controller as a Kubernetes Deployment with persistent storage, allowing automatic recovery on failures. For prerequisites, setup steps, and recovery behavior, see the detailed page: :ref:`high-availability-controller`.
 
 .. note::
-  High availability mode applies to the separate controller cluster only. When using :ref:`consolidation mode <jobs-consolidation-mode>`, the jobs controller already inherits the resilience of the API server deployment.
+  High availability mode applies to the remote controller cluster only. When using :ref:`consolidation mode <jobs-consolidation-mode>`, the jobs controller already inherits the resilience of the API server deployment.
 
 
 Setup and best practices
@@ -682,7 +682,7 @@ Setup and best practices
 Using long-lived credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using a :ref:`separate controller cluster <jobs-controller-separate>`, the controller is a long-lived instance that manages other cloud instances. It's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks. For this reason, it's preferred to set up long-lived credential access, such as a ``~/.aws/credentials`` file on AWS, or a service account json key file on GCP.
+When using a :ref:`remote controller cluster <jobs-controller-remote>`, the controller is a long-lived instance that manages other cloud instances. It's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks. For this reason, it's preferred to set up long-lived credential access, such as a ``~/.aws/credentials`` file on AWS, or a service account json key file on GCP.
 
 To use long-lived static credentials for the jobs controller, just make sure the right credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller. **If you're already using local credentials that don't expire, no action is needed.**
 
@@ -709,8 +709,8 @@ Customizing controller resources
 
         To increase the number of jobs that can run concurrently, allocate more CPU and memory to the API server. See :ref:`sky-api-server-resources-tuning`.
 
-    .. tab-item:: Separate controller cluster
-        :sync: separate
+    .. tab-item:: Remote controller cluster
+        :sync: remote
 
         You may want to customize the jobs controller resources for several reasons:
 
@@ -788,18 +788,18 @@ Best practices for scaling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
-  When using a :ref:`separate controller cluster <jobs-controller-separate>`, it's highly recommended to use :ref:`long-lived credentials for cloud authentication <managed-jobs-creds>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
+  When using a :ref:`remote controller cluster <jobs-controller-remote>`, it's highly recommended to use :ref:`long-lived credentials for cloud authentication <managed-jobs-creds>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
 
 The number of active jobs that the controller supports is based on available memory. The same formulas apply in both modes -- what changes is *where* the memory comes from (the API server pod in consolidation mode, or the controller cluster in separate mode). There are two limits:
 
 - **Actively launching job count**: limit is ``8 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 512 jobs.
   A job counts towards this limit when it is first starting, launching instances, or recovering.
 
-  - The default separate controller size has 16 GiB memory, meaning **24 jobs** can be actively launching at once.
+  - The default remote controller size has 16 GiB memory, meaning **24 jobs** can be actively launching at once.
 
 - **Running job count**: limit is ``200 * floor((memory - 2GiB) / 3.59GiB)``, with a maximum of 2000 jobs.
 
-  - The default separate controller supports up to **600 jobs** running in parallel.
+  - The default remote controller supports up to **600 jobs** running in parallel.
 
 The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the available memory. Each additional ~3.6 GiB of memory adds capacity for 8 concurrent launches and 200 concurrently running jobs.
 
@@ -812,8 +812,8 @@ The default size is appropriate for most moderate use cases, but if you need to 
 
         Note that the API server uses some memory for request handling, so not all allocated memory is available for job management.
 
-    .. tab-item:: Separate controller cluster
-        :sync: separate
+    .. tab-item:: Remote controller cluster
+        :sync: remote
 
         Increase CPU modestly as memory grows to keep controller responsiveness high, but note that the hard parallelism limits are driven by available memory.
         A ratio of 4 GiB memory per CPU works well in our testing.

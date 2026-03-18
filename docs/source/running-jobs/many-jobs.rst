@@ -387,9 +387,9 @@ How you increase the available memory depends on your deployment:
 
         See :ref:`sky-api-server-resources-tuning` for how to tune API server resources, and :ref:`consolidation-mode-resource-planning` for how memory is shared between request handling and job management.
 
-    .. tab-item:: Separate controller cluster
-        :sync: separate
+    .. tab-item:: Remote controller cluster
+        :sync: remote
 
-        When using a local API server or when consolidation mode is disabled, the jobs controller runs on a :ref:`separate cluster <jobs-controller-separate>`. Scale the **controller's** resources to increase job capacity.
+        When using a local API server or when consolidation mode is disabled, the jobs controller runs on a :ref:`remote cluster <jobs-controller-remote>`. Scale the **controller's** resources to increase job capacity.
 
         See :ref:`jobs-controller-sizing` for detailed scaling guidance and per-cloud resource configurations.
