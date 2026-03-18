@@ -62,6 +62,7 @@ const DEFAULT_FIELDS = [
   'is_primary_in_job_group',
   'links',
   'node_names',
+  'priority_class',
 ];
 
 /**
