@@ -517,6 +517,7 @@ class VolumeApplyBody(RequestBody):
     config: Optional[Dict[str, Any]] = None
     labels: Optional[Dict[str, str]] = None
     use_existing: Optional[bool] = None
+    creation_yaml: Optional[str] = None
 
 
 class VolumeDeleteBody(RequestBody):

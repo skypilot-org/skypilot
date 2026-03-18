@@ -397,7 +397,14 @@ function VolumesTable({
               ) : paginatedData.length > 0 ? (
                 paginatedData.map((volume) => (
                   <TableRow key={volume.name}>
-                    <TableCell className="font-medium">{volume.name}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link
+                        href={`/volumes/${encodeURIComponent(volume.name)}`}
+                        className="text-sky-blue hover:underline"
+                      >
+                        {volume.name}
+                      </Link>
+                    </TableCell>
                     <TableCell>{volume.infra || 'N/A'}</TableCell>
                     <TableCell>
                       <StatusBadge
