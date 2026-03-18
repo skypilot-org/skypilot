@@ -3,11 +3,10 @@ import logging
 import shlex
 import subprocess
 import threading
-from typing import Dict, List, Set
+from typing import Dict, List
 
 import cachetools
 
-from sky.adaptors import slurm as slurm_adaptor
 from sky.provision.slurm import utils as slurm_utils
 
 logger = logging.getLogger(__name__)
@@ -625,7 +624,7 @@ class SlurmFilesystemRoutingPolicy(sky.AdminPolicy):
 
     # (cluster_name, frozenset(paths)) -> bool (all paths exist on cluster).
     # TTLCache handles expiry and caps memory; not thread-safe on its own.
-    _path_cache: cachetools.TTLCache = cachetools.TTLCache(
+    _path_cache: 'cachetools.TTLCache[tuple, bool]' = cachetools.TTLCache(
         maxsize=128, ttl=CACHE_TTL_SECONDS)
     _cache_lock = threading.Lock()
 
@@ -680,29 +679,38 @@ class SlurmFilesystemRoutingPolicy(sky.AdminPolicy):
                 return cls._path_cache[key]
 
         # Cache miss or expired — SSH into the cluster and check.
-        existing = set(cls._check_paths_via_ssh(cluster, paths))
-        result = all(p in existing for p in paths)
+        result = cls._check_paths_via_ssh(cluster, paths)
         with cls._cache_lock:
             cls._path_cache[key] = result
         return result
 
     @classmethod
-    def _check_paths_via_ssh(cls, cluster: str, paths: List[str]) -> List[str]:
-        """SSHes into ``cluster`` and returns the subset of paths that exist."""
-        ssh_config = slurm_utils.get_slurm_ssh_config()
-        cfg = ssh_config.lookup(cluster)
-        client = slurm_adaptor.SlurmClient(
-            cfg['hostname'],
-            int(cfg.get('port', 22)),
-            cfg['user'],
-            slurm_utils.get_identity_file(cfg),
-            ssh_proxy_command=cfg.get('proxycommand'),
-            ssh_proxy_jump=cfg.get('proxyjump'),
-            identities_only=slurm_utils.get_identities_only(cfg),
+    def _check_paths_via_ssh(cls, cluster: str, paths: List[str]) -> bool:
+        """SSHes into ``cluster`` once and returns True if all paths exist."""
+        cfg = slurm_utils.get_slurm_ssh_config().lookup(cluster)
+        hostname = cfg['hostname']
+        user = cfg['user']
+        port = str(cfg.get('port', 22))
+
+        ssh_cmd = [
+            'ssh', '-p', port, '-o', 'BatchMode=yes', '-o',
+            'StrictHostKeyChecking=no'
+        ]
+        identity_file = slurm_utils.get_identity_file(cfg)
+        if identity_file:
+            ssh_cmd += ['-i', identity_file]
+        proxy_command = cfg.get('proxycommand')
+        if proxy_command:
+            ssh_cmd += ['-o', f'ProxyCommand={proxy_command}']
+        proxy_jump = cfg.get('proxyjump')
+        if proxy_jump:
+            ssh_cmd += ['-J', proxy_jump]
+
+        # Check all paths in a single SSH call by chaining with &&.
+        remote_cmd = ' && '.join(f'test -d {shlex.quote(p)}' for p in paths)
+        result = subprocess.run(
+            ssh_cmd + [f'{user}@{hostname}', remote_cmd],
+            capture_output=True,
+            check=False,
         )
-        existing = []
-        for path in paths:
-            rc, _, _ = client._run_slurm_cmd(f'test -d {shlex.quote(path)}')
-            if rc == 0:
-                existing.append(path)
-        return existing
+        return result.returncode == 0
