@@ -96,48 +96,40 @@ The following table shows the maximum concurrency for different resource configu
 Resource planning for managed jobs
 -----------------------------------
 
-By default, deploy-mode API servers manage jobs directly (see :ref:`How it works <jobs-controller>`). The API server's total memory determines both request handling capacity **and** how many managed jobs can run concurrently. Increasing the API server's memory increases both.
-
-The following table shows the combined capacity at different memory sizes:
+The API server's total memory also controls how many managed jobs can run concurrently. A job counts as **launching** while it is provisioning instances or recovering from a failure, and as **running** once it is executing on a cluster.
 
 .. list-table::
-   :widths: 1 1 1 1 1
+   :widths: 1 1 1 1
    :header-rows: 1
 
    * - CPU
      - Memory
-     - Max request concurrency
      - Max launching jobs
      - Max running jobs
    * - 4
      - 8Gi
-     - 5 Long, 6 Short
-     - 8
-     - 200
+     - 16
+     - 400
    * - 16
-     - 16Gi
-     - 12 Long, 11 Short
-     - 32
-     - 800
-   * - 32
      - 32Gi
-     - 29 Long, 26 Short
-     - 88
+     - 104
+     - 2000
+   * - 32
+     - 64Gi
+     - 200
      - 2000
    * - 64
-     - 64Gi
-     - 62 Long, 57 Short
-     - 184
+     - 128Gi
+     - 400
      - 2000
    * - 128
-     - 128Gi
-     - 130 Long, 116 Short
-     - 376
+     - 256Gi
+     - 512
      - 2000
 
 .. note::
 
-    Request concurrency is lower than in the table above because the API server shares memory with managed job processes. If you are using a :ref:`remote jobs controller <jobs-controller-remote>` instead, the request concurrency table above applies directly.
+    This applies when the API server manages jobs directly (the default for deploy-mode servers). If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, the API server resources only affect request handling and the table above does not apply.
 
 Use asynchronous requests to avoid blocking
 -------------------------------------------
