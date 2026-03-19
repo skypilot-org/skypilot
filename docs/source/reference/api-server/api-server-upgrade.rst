@@ -197,11 +197,12 @@ By default, the API server is upgraded with the ``Recreate`` strategy, which int
 
 .. warning::
 
-    **Consolidation mode and local file mounts:** When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode servers), local ``file_mounts`` and ``workdir`` for managed jobs are stored on the pod's ephemeral filesystem and will be lost when the old pod is replaced. Mitigations:
+    **Managed jobs and local file mounts:** Local ``file_mounts`` and ``workdir`` for managed jobs are stored on the pod's ephemeral filesystem and will be lost when the old pod is replaced during a rolling update. To avoid this:
 
-    - Use :ref:`cloud buckets <sky-storage>`, :ref:`volumes <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>` instead of local paths.
-    - Set :ref:`jobs.bucket <config-yaml-jobs-bucket>` to redirect all local file uploads to a cloud bucket.
     - Enable :ref:`persistent storage <helm-values-storage-enabled>` with a ``ReadWriteMany`` (RWX) PVC so both pods can access the files during the transition.
+    - Alternatively, use :ref:`cloud buckets <sky-storage>`, :ref:`volumes <volumes-on-kubernetes>`, or :ref:`git <sync-code-and-project-files-git>` instead of local paths; or set :ref:`jobs.bucket <config-yaml-jobs-bucket>` to redirect all local file uploads to a cloud bucket.
+
+    This does not apply if you are using a :ref:`remote jobs controller <jobs-controller-remote>`.
 
 The following table compares the two upgrade strategies:
 
