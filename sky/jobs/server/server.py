@@ -80,6 +80,20 @@ async def queue_v2(request: fastapi.Request,
     )
 
 
+@router.post('/wait')
+async def wait(request: fastapi.Request,
+               jobs_wait_body: payloads.JobsWaitBody) -> None:
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.JOBS_WAIT,
+        request_body=jobs_wait_body,
+        func=core.wait,
+        schedule_type=api_requests.ScheduleType.LONG,
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
+        auth_user=request.state.auth_user,
+    )
+
+
 @router.post('/cancel')
 async def cancel(request: fastapi.Request,
                  jobs_cancel_body: payloads.JobsCancelBody) -> None:

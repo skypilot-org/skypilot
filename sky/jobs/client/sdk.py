@@ -475,6 +475,63 @@ def tail_logs(name: Optional[str] = None,
                                get_result=follow)
 
 
+@context.contextual
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+@versions.minimal_api_version(43)
+def wait(
+    name: Optional[str] = None,
+    job_id: Optional[int] = None,
+    timeout: Optional[int] = None,
+    poll_interval: int = 15,
+    task: Optional[Union[str, int]] = None,
+) -> server_common.RequestId[int]:
+    """Waits for a managed job to reach a terminal state.
+
+    Blocks until the specified managed job finishes (succeeds, fails, or is
+    cancelled), or until the timeout is exceeded.
+
+    You can provide either a job name or a job ID. If a name is provided and
+    multiple jobs share that name, the most recent one is used.
+
+    For JobGroups (jobs with multiple tasks), if ``task`` is specified, waits
+    only for that specific task. Otherwise, waits until all tasks in the job
+    are in a terminal state.
+
+    Args:
+        name: Name of the managed job to wait for.
+        job_id: ID of the managed job to wait for.
+        timeout: Maximum time to wait in seconds. None means wait forever.
+        poll_interval: Time between status polls in seconds. Minimum 5,
+            default 15.
+        task: Task identifier to wait for a specific task in a JobGroup.
+            If an int, it is treated as a task ID. If a str, it is treated
+            as a task name. If None, waits for all tasks.
+
+    Returns:
+        The request ID of the wait request. The result is an exit code (int)
+        based on the terminal job status. 0 if success, 100 if failed.
+        See exceptions.JobExitCode for possible exit codes.
+
+    Request Raises:
+        ValueError: if arguments are invalid or job/task is not found.
+        TimeoutError: if the timeout is exceeded before the job finishes.
+    """
+    body = payloads.JobsWaitBody(
+        name=name,
+        job_id=job_id,
+        timeout=timeout,
+        poll_interval=poll_interval,
+        task=task,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/jobs/wait',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None))
+    return server_common.get_request_id(response=response)
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def download_logs(
