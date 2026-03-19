@@ -3061,8 +3061,7 @@ def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     The returned pod_config includes:
     - A sidecar container (dind or buildkitd) with shared socket volume.
-    - An init container that copies the docker CLI (and buildx plugin for
-      build mode) from the ``docker:cli`` image into a shared emptyDir.
+    - An init container that copies the docker CLI and buildx plugin from the ``docker:cli`` image into a shared emptyDir.
     - A ``postStart`` lifecycle hook on the ``ray-node`` container that
       symlinks the extracted binaries into ``/usr/local/bin`` (and configures
       ``docker buildx`` for build mode).

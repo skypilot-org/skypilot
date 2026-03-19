@@ -896,14 +896,11 @@ class Task:
         # access-mode check will run on it via the normal task-volume path).
         if docker_vol_name and not any(vm.volume_name == docker_vol_name
                                        for vm in volume_mounts):
-            try:
-                docker_vol_mounts.append(
-                    volume_lib.VolumeMount.resolve(
-                        path='',
-                        volume_name=docker_vol_name,
-                    ))
-            except exceptions.VolumeNotFoundError:
-                pass  # Will be surfaced later during provisioning.
+            docker_vol_mounts.append(
+                volume_lib.VolumeMount.resolve(
+                    path='',
+                    volume_name=docker_vol_name,
+                ))
         all_vols_to_validate = volume_mounts + docker_vol_mounts
 
         # Disable certain access modes

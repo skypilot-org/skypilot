@@ -1369,9 +1369,8 @@ def test_enable_docker_volume_task_override():
         assert len(t.volume_mounts) == 1
 
 
-def test_enable_docker_volume_not_found_is_ignored():
-    """VolumeNotFoundError for enable_docker cache_volume is silently
-    caught."""
+def test_enable_docker_volume_not_found_raises():
+    """VolumeNotFoundError for enable_docker cache_volume is raised."""
     t = task.Task()
     t._volumes = {'/mnt': 'task-vol'}
     t.resources = [make_mock_resource()]
@@ -1389,9 +1388,8 @@ def test_enable_docker_volume_not_found_is_ignored():
          mock.patch('sky.skypilot_config.get_nested',
                     return_value={'enabled': True,
                                   'cache_volume': 'missing-vol'}):
-        # Should NOT raise even though enable_docker vol doesn't exist.
-        t.resolve_and_validate_volumes()
-        assert len(t.volume_mounts) == 1
+        with pytest.raises(exceptions.VolumeNotFoundError):
+            t.resolve_and_validate_volumes()
 
 
 def test_enable_docker_volume_skip_if_already_in_task_volumes():
