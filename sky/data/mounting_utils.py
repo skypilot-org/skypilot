@@ -114,8 +114,7 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
         mount_path: Local path to mount the bucket at.
         _bucket_sub_path: Optional sub-path within the bucket.
         endpoint_url: S3-compatible endpoint URL. If None, uses the
-            default AWS S3 endpoint and adds --s3-env-auth=true for
-            rclone.
+            default AWS S3 endpoint.
         cred_env: Credential environment variable prefix string
             (e.g., 'AWS_SHARED_CREDENTIALS_FILE=... AWS_PROFILE=... ').
         rclone_extra_flags: Extra flags for rclone mount command
@@ -136,12 +135,10 @@ def _get_s3_compatible_mount_cmd(bucket_name: str,
     if goofys_extra_flags and not goofys_extra_flags.endswith(' '):
         goofys_extra_flags += ' '
 
-    # Add endpoint flags, or env-auth fallback for plain S3.
+    # Add endpoint flags for S3-compatible providers.
     if endpoint_url:
         rclone_extra_flags += f'--s3-endpoint {endpoint_url} '
         goofys_extra_flags += f'--endpoint {endpoint_url} '
-    else:
-        rclone_extra_flags += '--s3-env-auth=true '
 
     arch_check = 'ARCH=$(uname -m) && '
     rclone_mount = (
@@ -172,9 +169,11 @@ def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an S3 bucket."""
-    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
-                                        mount_path=mount_path,
-                                        _bucket_sub_path=_bucket_sub_path)
+    return _get_s3_compatible_mount_cmd(
+        bucket_name=bucket_name,
+        mount_path=mount_path,
+        _bucket_sub_path=_bucket_sub_path,
+        rclone_extra_flags='--s3-env-auth=true')
 
 
 # Backward-compatible wrappers for existing callers.
