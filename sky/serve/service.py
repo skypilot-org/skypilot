@@ -379,10 +379,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                         service_name, load_balancer_port)
             else:
                 # Pools don't need a load balancer — batch coordination
-                # runs as a managed job.  Set a dummy port so
-                # wait_service_registration() can detect registration.
-                if not is_recovery:
-                    serve_state.set_service_load_balancer_port(service_name, 0)
+                # runs as a managed job.  Leave lb port as None; the
+                # registration check handles this.
+                pass
 
         while True:
             _handle_signal(service_name)

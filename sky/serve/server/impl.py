@@ -140,7 +140,7 @@ def up(
     task: 'task_lib.Task',
     service_name: Optional[str] = None,
     pool: bool = False,
-) -> Tuple[str, str]:
+) -> Tuple[str, Optional[str]]:
     """Spins up a service or a pool."""
     task.validate()
     serve_utils.validate_service_task(task, pool=pool)
@@ -402,22 +402,31 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
-            if not serve_utils.is_consolidation_mode(pool):
+            if pool and lb_port is None:
+                # Pools don't expose an external endpoint — workers
+                # are accessed directly via sky.exec().
+                endpoint = None
+            elif not serve_utils.is_consolidation_mode(pool):
+                assert lb_port is not None
                 socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     lb_port,
                     skip_status_check=True).get(lb_port)
+                assert socket_endpoint is not None, (
+                    'Did not get endpoint for controller.')
+                assert task.service is not None
+                protocol = ('http'
+                            if task.service.tls_credential is None else 'https')
+                socket_endpoint = socket_endpoint.replace('https://',
+                                                          '').replace(
+                                                              'http://', '')
+                endpoint = f'{protocol}://{socket_endpoint}'
             else:
                 socket_endpoint = f'localhost:{lb_port}'
-            assert socket_endpoint is not None, (
-                'Did not get endpoint for controller.')
-            # Already checked by validate_service_task
-            assert task.service is not None
-            protocol = ('http'
-                        if task.service.tls_credential is None else 'https')
-            socket_endpoint = socket_endpoint.replace('https://', '').replace(
-                'http://', '')
-            endpoint = f'{protocol}://{socket_endpoint}'
+                assert task.service is not None
+                protocol = ('http'
+                            if task.service.tls_credential is None else 'https')
+                endpoint = f'{protocol}://{socket_endpoint}'
 
         if pool:
             logger.info(
@@ -801,10 +810,14 @@ def status(
                                'due to network error.') from e
 
     controller_type = controller_utils.get_controller_for_pool(pool)
-    handle = backend_utils.is_controller_accessible(
-        controller=controller_type,
-        stopped_message=controller_type.value.default_hint_if_non_existent.
-        replace('service', noun))
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=controller_type.value.default_hint_if_non_existent.
+            replace('service', noun))
+    except exceptions.ClusterNotUpError:
+        # Controller not up yet — no services/pools exist.
+        return []
 
     assert isinstance(handle, backends.CloudVmRayResourceHandle)
     use_legacy = not handle.is_grpc_enabled_with_flag
@@ -842,7 +855,7 @@ def status(
 
     # Get the endpoint for each service
     for service_record in service_records:
-        service_record['endpoint'] = None
+        service_record['endpoint'] = endpoint = None
         if service_record['load_balancer_port'] is not None:
             try:
                 lb_port = service_record['load_balancer_port']

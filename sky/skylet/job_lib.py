@@ -1223,7 +1223,8 @@ class JobLibCodeGen:
                                     metadata_jsons: List[str],
                                     is_primary_in_job_groups: List[bool],
                                     execution: str,
-                                    num_jobs: int = 1) -> str:
+                                    num_jobs: int = 1,
+                                    is_batch: bool = False) -> str:
         pool_str = f'{pool!r}' if pool is not None else 'None'
         pool_hash_str = f'{pool_hash!r}' if pool_hash is not None else 'None'
         user_hash_str = f'{user_hash!r}' if user_hash is not None else 'None'
@@ -1253,7 +1254,8 @@ class JobLibCodeGen:
             f'pool={pool_str},'
             f'pool_hash={pool_hash_str},'
             f'user_hash={user_hash_str},'
-            f'execution={execution!r})',
+            f'execution={execution!r},'
+            f'is_batch={is_batch!r})',
             '\n  job_ids.append(job_id)',
             '\n  # Set pending state for all tasks',
             '\n  for task_id, task_name, metadata_json, is_primary_in_job_group in zip('  # pylint: disable=line-too-long

@@ -309,7 +309,8 @@ function JobDetails() {
             >
               {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
             </Link>
-            {(detailJobData?.is_batch === true || detailJobData?.batch_total_batches != null) && (
+            {(detailJobData?.is_batch === true ||
+              detailJobData?.batch_total_batches != null) && (
               <BatchBadge className="ml-2" />
             )}
             {isMultiTask && (
@@ -1172,9 +1173,8 @@ function JobDetailsContent({
             {jobData.id} {jobData.name ? `(${jobData.name})` : ''}
           </span>
           {/* Badge for batch job */}
-          {(jobData.is_batch === true || jobData.batch_total_batches != null) && (
-            <BatchBadge />
-          )}
+          {(jobData.is_batch === true ||
+            jobData.batch_total_batches != null) && <BatchBadge />}
           {/* Badge for job group */}
           {jobData.is_job_group && (
             <span className="px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-700">
@@ -1187,13 +1187,15 @@ function JobDetailsContent({
         <div className="text-gray-600 font-medium text-base">Status</div>
         <div className="text-base mt-1">
           {(() => {
-            const isBatchRunning = jobData.status === 'RUNNING' &&
+            const isBatchRunning =
+              jobData.status === 'RUNNING' &&
               jobData.batch_total_batches != null;
             if (isBatchRunning) {
               const completed = jobData.batch_completed_batches || 0;
               const total = jobData.batch_total_batches;
               const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-              const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+              const barColor =
+                completed >= total ? 'bg-green-500' : 'bg-blue-500';
               return (
                 <div className="flex items-center gap-3">
                   <div className="w-32 bg-gray-200 rounded-full h-2.5">
@@ -1347,17 +1349,26 @@ function JobDetailsContent({
       {/* Batch Progress section - only for batch jobs */}
       {jobData.batch_total_batches != null && (
         <div>
-          <div className="text-gray-600 font-medium text-base">Batch Progress</div>
+          <div className="text-gray-600 font-medium text-base">
+            Batch Progress
+          </div>
           <div className="text-base mt-1">
             {(() => {
               const completed = jobData.batch_completed_batches || 0;
               const total = jobData.batch_total_batches;
               const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-              const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+              const barColor =
+                completed >= total ? 'bg-green-500' : 'bg-blue-500';
               const failed = total - completed;
-              const isTerminal = ['SUCCEEDED', 'FAILED', 'CANCELLED',
-                'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE',
-                'FAILED_CONTROLLER'].includes(jobData.status);
+              const isTerminal = [
+                'SUCCEEDED',
+                'FAILED',
+                'CANCELLED',
+                'FAILED_SETUP',
+                'FAILED_PRECHECKS',
+                'FAILED_NO_RESOURCE',
+                'FAILED_CONTROLLER',
+              ].includes(jobData.status);
               return (
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-3">

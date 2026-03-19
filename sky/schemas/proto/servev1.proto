@@ -69,7 +69,7 @@ message WaitServiceRegistrationRequest {
 }
 
 message WaitServiceRegistrationResponse {
-    int64 lb_port = 1;
+    optional int64 lb_port = 1;
 }
 
 message UpdateServiceRequest {

@@ -42,7 +42,9 @@ def up(
             argument.
         endpoint: str; The service endpoint.
     """
-    return impl.up(task, service_name, pool=False)
+    name, endpoint = impl.up(task, service_name, pool=False)
+    assert endpoint is not None, 'Service endpoint should not be None'
+    return name, endpoint
 
 
 @usage_lib.entrypoint

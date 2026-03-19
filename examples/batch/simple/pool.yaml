@@ -5,7 +5,7 @@ pool:
   workers: 2  # Number of parallel workers
 
 resources:
-  cpus: 1  # CPU count per worker
+  cpus: 1+  # CPU count per worker
 
 setup: echo "Setup complete!"
 

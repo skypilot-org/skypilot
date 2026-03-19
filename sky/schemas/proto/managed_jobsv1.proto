@@ -137,6 +137,12 @@ message ManagedJobInfo {
   map<string, string> labels = 33;
   // Name of the cluster on the cloud provider (populated from cluster handle)
   optional string cluster_name_on_cloud = 34;
+  // Whether this job is a batch coordinator (ds.map()).
+  optional bool is_batch = 35;
+  // Batch progress: total number of batches (NULL for non-batch jobs).
+  optional int32 batch_total_batches = 36;
+  // Batch progress: number of completed batches (NULL for non-batch jobs).
+  optional int32 batch_completed_batches = 37;
 }
 
 message GetJobTableResponse {

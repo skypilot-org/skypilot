@@ -723,9 +723,7 @@ export function ManagedJobsTable({
     );
   }, [data]);
 
-  const effectiveRefreshInterval = hasRunningBatches
-    ? 1000
-    : refreshInterval;
+  const effectiveRefreshInterval = hasRunningBatches ? 1000 : refreshInterval;
 
   // Set up periodic refresh interval only after preloading is complete
   useEffect(() => {
@@ -1157,7 +1155,8 @@ export function ManagedJobsTable({
             ctx || {};
 
           // Detect batch job via is_batch field or batch_total_batches presence
-          const isBatch = item.is_batch === true || item.batch_total_batches != null;
+          const isBatch =
+            item.is_batch === true || item.batch_total_batches != null;
 
           if (renderMode === 'groupParent') {
             return (
@@ -1166,9 +1165,7 @@ export function ManagedJobsTable({
                   <Link href={`/jobs/${jobId}`} className="text-blue-600">
                     {item.name}
                   </Link>
-                  {isBatch && (
-                    <BatchBadge className="ml-2" />
-                  )}
+                  {isBatch && <BatchBadge className="ml-2" />}
                   <button
                     onClick={() => toggleJobGroup(jobId)}
                     className="ml-2 text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 px-1.5 py-0.5 rounded cursor-pointer whitespace-nowrap"
@@ -1209,9 +1206,7 @@ export function ManagedJobsTable({
                 <Link href={`/jobs/${item.id}`} className="text-blue-600">
                   {item.name}
                 </Link>
-                {isBatch && (
-                  <BatchBadge className="ml-2" />
-                )}
+                {isBatch && <BatchBadge className="ml-2" />}
               </div>
             </TableCell>
           );
@@ -1320,13 +1315,14 @@ export function ManagedJobsTable({
 
           // For batch jobs that are RUNNING with progress data,
           // show the progress bar instead of the status badge.
-          const isBatchRunning = item.status === 'RUNNING' &&
-            item.batch_total_batches != null;
+          const isBatchRunning =
+            item.status === 'RUNNING' && item.batch_total_batches != null;
           if (isBatchRunning) {
             const completed = item.batch_completed_batches || 0;
             const total = item.batch_total_batches;
             const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-            const barColor = completed >= total ? 'bg-green-500' : 'bg-blue-500';
+            const barColor =
+              completed >= total ? 'bg-green-500' : 'bg-blue-500';
             return (
               <TableCell>
                 <NonCapitalizedTooltip

@@ -445,6 +445,9 @@ def _submit_remotely(controller: controller_utils.Controllers,
     assert dag.name is not None, 'dag name is not set'
     execution_mode = (dag.execution.value
                       if dag.execution else DEFAULT_EXECUTION.value)
+    # Detect batch coordinator jobs (ds.map()) via task metadata.
+    is_batch = any(
+        t.metadata.get('batch_coordinator', False) for t in dag.tasks)
     job_ids = backend.set_job_info_without_job_id(
         handle=local_handle,
         name=dag.name,
@@ -459,7 +462,8 @@ def _submit_remotely(controller: controller_utils.Controllers,
         metadata_jsons=metadata_jsons,
         num_jobs=num_jobs,
         execution=execution_mode,
-        is_primary_in_job_groups=(is_primary_in_job_groups))
+        is_primary_in_job_groups=(is_primary_in_job_groups),
+        is_batch=is_batch)
     return job_ids
 
 

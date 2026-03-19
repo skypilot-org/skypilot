@@ -1,5 +1,6 @@
 """gRPC service implementations for skylet."""
 
+import json
 import os
 from typing import List, Optional
 
@@ -225,6 +226,11 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                 'pool_hash') else None
             user_hash = request.user_hash if request.HasField(
                 'user_hash') else None
+            # Detect batch coordinator jobs from task metadata so the
+            # scheduler can serialize them one-at-a-time per pool.
+            is_batch = any(
+                json.loads(md).get('batch_coordinator', False)
+                for md in request.metadata_jsons)
             job_ids = []
             execution = request.execution
             for i in range(request.num_jobs):
@@ -236,7 +242,8 @@ class JobsServiceImpl(jobsv1_pb2_grpc.JobsServiceServicer):
                     pool=pool,
                     pool_hash=pool_hash,
                     user_hash=user_hash,
-                    execution=execution)
+                    execution=execution,
+                    is_batch=is_batch)
                 job_ids.append(job_id)
                 # Set pending state for all tasks
                 for task_id, task_name, metadata_json in zip(
@@ -523,7 +530,11 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                     # Fields populated from cluster handle
                     zone=job.get('zone'),
                     labels=job.get('labels'),
-                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'))
+                    cluster_name_on_cloud=job.get('cluster_name_on_cloud'),
+                    # Batch progress fields
+                    is_batch=job.get('is_batch'),
+                    batch_total_batches=job.get('batch_total_batches'),
+                    batch_completed_batches=job.get('batch_completed_batches'))
                 jobs_info.append(job_info)
 
             return managed_jobsv1_pb2.GetJobTableResponse(

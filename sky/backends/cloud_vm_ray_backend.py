@@ -4044,22 +4044,22 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f'Returncode: {returncode}') from e
         return job_id, log_dir
 
-    def set_job_info_without_job_id(
-            self,
-            handle: CloudVmRayResourceHandle,
-            name: str,
-            workspace: str,
-            entrypoint: str,
-            pool: Optional[str],
-            pool_hash: Optional[str],
-            user_hash: Optional[str],
-            task_ids: List[int],
-            task_names: List[str],
-            resources_str: str,
-            metadata_jsons: List[str],
-            is_primary_in_job_groups: List[bool],
-            num_jobs: int = 1,
-            execution: str = DEFAULT_EXECUTION.value) -> List[int]:
+    def set_job_info_without_job_id(self,
+                                    handle: CloudVmRayResourceHandle,
+                                    name: str,
+                                    workspace: str,
+                                    entrypoint: str,
+                                    pool: Optional[str],
+                                    pool_hash: Optional[str],
+                                    user_hash: Optional[str],
+                                    task_ids: List[int],
+                                    task_names: List[str],
+                                    resources_str: str,
+                                    metadata_jsons: List[str],
+                                    is_primary_in_job_groups: List[bool],
+                                    num_jobs: int = 1,
+                                    execution: str = DEFAULT_EXECUTION.value,
+                                    is_batch: bool = False) -> List[int]:
         """Set job info without creating entries in the jobs table.
 
         This creates entries in job_info_table and spot_table without creating
@@ -4105,7 +4105,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 metadata_jsons=metadata_jsons,
                 is_primary_in_job_groups=is_primary_in_job_groups,
                 num_jobs=num_jobs,
-                execution=execution)
+                execution=execution,
+                is_batch=is_batch)
             returncode, result_str, stderr = self.run_on_head(
                 handle,
                 code,

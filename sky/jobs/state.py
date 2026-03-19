@@ -468,6 +468,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'region': r.get('region'),
         'zone': r.get('zone'),
         # Batch progress columns
+        'is_batch': r.get('is_batch'),
         'batch_total_batches': r.get('batch_total_batches'),
         'batch_completed_batches': r.get('batch_completed_batches'),
     }
