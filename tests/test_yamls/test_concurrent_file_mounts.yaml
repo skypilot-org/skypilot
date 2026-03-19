@@ -1,0 +1,12 @@
+# Minimal task with local-only file mounts for testing concurrent uploads.
+# Uses files created by STORAGE_SETUP_COMMANDS in smoke_tests_utils.py.
+
+file_mounts:
+  ~/tmpfile: ~/tmpfile
+  /tmp/workdir: ~/tmp-workdir
+
+run: |
+  set -ex
+  ls -lthr ~/tmpfile
+  ls -lthr /tmp/workdir/foo
+  echo "file mounts OK"

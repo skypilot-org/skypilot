@@ -22,6 +22,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
@@ -34,6 +35,7 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
+import filelock
 import jwt as pyjwt
 import starlette.middleware.base
 import uvloop
@@ -561,6 +563,57 @@ async def cleanup_upload_ids():
                 (client_file_mounts_dir /
                  upload_id).with_suffix('.zip').unlink(missing_ok=True)
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
+
+
+async def cleanup_unreferenced_file_mounts():
+    """Delete file mounts not referenced by any active request."""
+
+    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
+    # blocking the event loop.
+    def _do_cleanup():
+        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        # Get all blob_id referenced by active requests.
+        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
+        if not clients_dir.exists():
+            return
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            try:
+                blobs_dir = user_dir / 'file_mounts' / 'blobs'
+                if not blobs_dir.exists():
+                    continue
+                # Delete unreferenced extraction dirs older than grace period.
+                grace_cutoff = time.time() - 3600  # 1 hour grace
+                for entry in blobs_dir.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    if entry.name in ('.locks', '.staging'):
+                        continue
+                    blob_id = entry.name
+                    if (blob_id not in active_blob_ids and
+                            entry.stat().st_mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_dir.name}')
+                        shutil.rmtree(entry, ignore_errors=True)
+                # Clean up stale staging directories from interrupted uploads.
+                staging_base = blobs_dir / '.staging'
+                if staging_base.exists():
+                    for staging in staging_base.iterdir():
+                        if staging.is_dir():
+                            if staging.stat().st_mtime < grace_cutoff:
+                                shutil.rmtree(staging, ignore_errors=True)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
+                             f'{common_utils.format_exception(e)}')
+
+    while True:
+        await asyncio.sleep(3600)  # Run every hour
+        try:
+            await asyncio.to_thread(_do_cleanup)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error in cleanup_unreferenced_file_mounts: '
+                         f'{common_utils.format_exception(e)}')
 
 
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
@@ -1248,25 +1301,33 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
-@app.post('/upload')
-async def upload_zip_file(request: fastapi.Request, user_hash: str,
-                          upload_id: str, chunk_index: int,
-                          total_chunks: int) -> payloads.UploadZipFileResponse:
-    """Uploads a zip file to the API server.
+async def _prepare_client_mount_dir(user_hash: str,
+                                    request: fastapi.Request) -> pathlib.Path:
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
-    This endpoints can be called multiple times for the same upload_id with
-    different chunk_index. The server will merge the chunks and unzip the file
-    when all chunks are uploaded.
+    client_file_mounts_dir = (
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+        'file_mounts')
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
+    return client_file_mounts_dir
 
-    This implementation is simplified and may need to be improved in the future,
-    e.g., adopting S3-style multipart upload.
 
-    Args:
-        user_hash: The user hash.
-        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
-            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-        chunk_index: The chunk index, starting from 0.
-        total_chunks: The total number of chunks.
+async def _receive_and_assemble_chunks(
+    base_dir: pathlib.Path,
+    zip_name: str,
+    request: fastapi.Request,
+    chunk_index: int,
+    total_chunks: int,
+) -> Optional[payloads.UploadZipFileResponse]:
+    """Receive chunks, assemble into a zip file, and extract.
+
+    Returns:
+        None if the upload is completed,
+        A response to tell the client to upload more chunks otherwise.
     """
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
@@ -1277,29 +1338,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # Add the upload id to the cleanup list.
-    upload_ids_to_cleanup[(upload_id,
-                           user_hash)] = (datetime.datetime.now() +
-                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
-    # For anonymous access, use the user hash from client
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        # Otherwise, the authenticated identity should be used.
-        user_id = request.state.auth_user.id
-
     # TODO(SKY-1271): We need to double check security of uploading zip file.
-    client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-        'file_mounts')
-    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
-
-    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
-    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-    if not re.match(
-            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
-            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
-        raise ValueError(
-            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -1309,11 +1348,11 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
-
     if total_chunks == 1:
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        zip_file_path = base_dir / f'{zip_name}.zip'
     else:
-        chunk_dir = client_file_mounts_dir / upload_id
+        chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
@@ -1347,22 +1386,141 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        zip_file_path = base_dir / f'{zip_name}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
                 async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
                     while True:
-                        # Use 64KB buffer to avoid memory overflow, same size as
-                        # shutil.copyfileobj.
+                        # Use 64KB buffer to avoid memory overflow, same size
+                        # as shutil.copyfileobj.
                         data = await f.read(64 * 1024)
                         if not data:
                             break
                         await zip_file.write(data)
-
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
+    await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
+    return None
+
+
+# TODO(aylei): for backward compatibility, remove after v0.14.0
+@app.post('/upload')
+async def upload_zip_file(request: fastapi.Request, user_hash: str,
+                          upload_id: str, chunk_index: int,
+                          total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Uploads a zip file to the API server.
+
+    This endpoints can be called multiple times for the same upload_id with
+    different chunk_index. The server will merge the chunks and unzip the file
+    when all chunks are uploaded.
+
+    This implementation is simplified and may need to be improved in the future,
+    e.g., adopting S3-style multipart upload.
+
+    Args:
+        user_hash: The user hash.
+        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
+            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+        chunk_index: The chunk index, starting from 0.
+        total_chunks: The total number of chunks.
+    """
+    # Add the upload id to the cleanup list.
+    upload_ids_to_cleanup[(upload_id,
+                           user_hash)] = (datetime.datetime.now() +
+                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
+    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+    if not re.match(
+            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
+            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
+        raise ValueError(
+            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
+
+    base_dir = await _prepare_client_mount_dir(user_hash, request)
+    missing_chunks = await _receive_and_assemble_chunks(
+        base_dir=base_dir,
+        zip_name=upload_id,
+        request=request,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks)
+    if missing_chunks is not None:
+        return missing_chunks
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
+
+
+@app.get('/upload_v2/blob')
+async def check_blob_exists(request: fastapi.Request, user_hash: str,
+                            blob_id: str) -> Dict[str, bool]:
+    """Check if a file mount blob already exists."""
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid blob_id: {blob_id}')
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+                'file_mounts' / 'blobs' / blob_id)
+    if blob_dir.is_dir():
+        # Refresh mtime to claim a longer lifetime of the blob cache
+        os.utime(blob_dir)
+        return {'exists': True}
+    return {'exists': False}
+
+
+@app.post('/upload_v2')
+async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
+                      chunk_index: int,
+                      total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Upload a file mount blob (chunked).
+
+    Unlike /upload, this endpoint receives chunks, assembles and extracts
+    into a staging directory, then atomically renames to a shared extraction
+    directory (blobs/{upload_id}/) so all requests can reuse it.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', upload_id):
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
+    # Here we still isolate the blobs between users, as the upload_id is
+    # provided by the client and we want to be careful about cross-user
+    # blob sharing.
+    mount_dir = await _prepare_client_mount_dir(user_hash, request)
+    blobs_dir = mount_dir / 'blobs'
+    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
+    target_dir = blobs_dir / upload_id
+
+    if target_dir.exists():
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.COMPLETED.value)
+
+    # Per-blob filelock to prevent concurrent uploads of the same blob.
+    locks_dir = blobs_dir / '.locks'
+    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
+    lock = filelock.AsyncFileLock(
+        lock_file=str(locks_dir / f'{upload_id}.lock'),
+        executor=executor.get_request_thread_executor())
+
+    async with lock:
+        # Re-check after acquiring the lock: another upload may have
+        # completed while we were waiting.
+        if target_dir.exists():
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.COMPLETED.value)
+
+        # Receive chunks, assemble, and extract into staging dir.
+        staging_dir = blobs_dir / '.staging' / upload_id
+        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                    zip_name='staging',
+                                                    request=request,
+                                                    chunk_index=chunk_index,
+                                                    total_chunks=total_chunks)
+        if result is not None:
+            return result
+        # Atomic rename of the extracted staging dir to the final
+        # directory (same filesystem).
+        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -2926,19 +3084,6 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
-    # Maybe touch the signal file on API server startup. Do it again here even
-    # if we already touched it in the sky/server/common.py::_start_api_server.
-    # This is because the sky/server/common.py::_start_api_server function call
-    # is running outside the skypilot API server process tree. The process tree
-    # starts within that function (see the `subprocess.Popen` call in
-    # sky/server/common.py::_start_api_server). When pg is used, the
-    # _start_api_server function will not load the config file from db, which
-    # will ignore the consolidation mode config. Here, inside the process tree,
-    # we already reload the config as a server (with env var _start_api_server),
-    # so we will respect the consolidation mode config.
-    # Refers to #7717 for more details.
-    managed_job_utils.is_consolidation_mode(on_api_restart=True)
-
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -2953,6 +3098,10 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Set up consolidation mode signal file. Needs global user state DB access
+    # to check for existing controller clusters. Placed after user hash restore
+    # to avoid accidentally using the wrong server hash.
+    managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
     # Pre-load plugin RBAC rules before initializing permission service.
     # This ensures plugin RBAC rules are available when policies are created.
     logger.info('Pre-loading plugin RBAC rules')
@@ -3000,6 +3149,10 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 managed_job_state.job_event_retention_daemon()))
+        # Unreferenced file mounts cleanup is based on database so should
+        # be a singleton task.
+        global_tasks.append(
+            background.create_task(cleanup_unreferenced_file_mounts()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

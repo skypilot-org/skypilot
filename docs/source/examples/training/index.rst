@@ -16,6 +16,7 @@ Training
    nanochat <nanochat.md>
    NeMo <nemo.md>
    NeMo RL <nemorl.md>
+   OpenRLHF <openrlhf.md>
    PyTorch Monarch <https://github.com/meta-pytorch/monarch/tree/main/examples/skypilot>
    Ray <ray.md>
    TorchTitan <torchtitan.md>
