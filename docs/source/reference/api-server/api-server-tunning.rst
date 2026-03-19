@@ -12,13 +12,6 @@ Tuning API server resources
 
 The number of requests that the API server can handle concurrently is proportional to the resources (CPU cores and memory) allocated to it.
 
-When :ref:`consolidation mode <jobs-consolidation-mode>` is active (the default for deploy-mode API servers), the API server also runs the managed jobs controller. In this mode, the API server's resources determine both:
-
-- **Request handling capacity** -- how many ``launch``, ``exec``, ``status``, etc. requests can run concurrently.
-- **Managed jobs capacity** -- how many managed jobs can run and launch concurrently.
-
-Both workloads share the same CPU and memory pool, so you may need to allocate more resources than you would for request handling alone. See :ref:`consolidation-mode-resource-planning` below for guidance.
-
 Internally, requests are categorized into two different types and handled in a first-in-first-out manner:
 
 * ``Long-running requests``: requests that take longer time and more resources to run, including ``launch``, ``exec``, ``jobs.launch``, etc.
