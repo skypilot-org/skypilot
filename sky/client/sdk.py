@@ -3075,7 +3075,7 @@ def _build_client_info() -> Dict[str, Any]:
 
     return {
         'skypilot_version': sky.__version__,
-        'skypilot_commit': getattr(sky_mod, '__commit__', 'unknown'),
+        'skypilot_commit': sky.__commit__,
         'api_version': server_constants.API_VERSION,
         'python_version': platform.python_version(),
         'platform': platform.platform(),
