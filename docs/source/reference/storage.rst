@@ -232,6 +232,14 @@ See the :ref:`Storage YAML reference <storage-yaml-reference>` for the full list
         mount_cached:
           transfers: 16  # Override the default number of parallel transfers
 
+.. note::
+    Workload types do not set ``vfs_cache_max_size``, as the optimal value depends on
+    the size of your data and the available disk space on your VM. This parameter controls the
+    maximum total size of the local VFS cache on disk (e.g., ``"10G"``, ``"100G"``).
+    Ideally, it should be roughly equal to the size of the data being accessed. Ensure
+    the underlying machine has enough disk space to accommodate the cache — if the cache
+    exceeds available storage, writes may fail. You can set it via ``config.mount_cached.vfs_cache_max_size``.
+
 
 Common patterns
 ---------------
@@ -255,9 +263,9 @@ remote VM.
     improve the I/O performance of your task. See :ref:`storage-mounting-modes` for more details.
 
 .. tip::
-    For read-only dataset access with :code:`MOUNT_CACHED` mode, use
-    :code:`type: DATASET_RO` for pre-tuned performance. For read-write access, use
-    :code:`type: DATASET_RW`.
+    When using :code:`MOUNT_CACHED` mode for datasets, specify
+    :code:`type: DATASET_RO` for read-only access or :code:`type: DATASET_RW` for
+    read-write access to get pre-tuned performance settings.
 
 Storing task outputs
 ~~~~~~~~~~~~~~~~~~~~
