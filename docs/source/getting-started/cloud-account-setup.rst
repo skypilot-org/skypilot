@@ -1444,7 +1444,7 @@ Seeweb |community-badge|
       # From source
       pip install -e ".[seeweb]"
 
-2. Log into your `Seeweb dashboard : <https://cloudcenter.seeweb.it/>`__.
+2. Log into your `Seeweb dashboard: <https://cloudcenter.seeweb.it/>`__.
 3. Navigate to *Compute → API Token* in the control panel, and create **New TOKEN**.
 4. Create the file :code:`~/.seeweb_cloud/seeweb_keys` with the following contents:
 
