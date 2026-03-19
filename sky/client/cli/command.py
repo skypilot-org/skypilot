@@ -41,6 +41,7 @@ import traceback
 import typing
 from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
                     TypeVar, Union)
+import urllib.parse
 
 import click
 import colorama
@@ -102,7 +103,6 @@ from sky.utils.cli_utils import status_utils
 from sky.volumes.client import sdk as volumes_sdk
 
 if typing.TYPE_CHECKING:
-    import types
 
     import prettytable
 
@@ -5595,10 +5595,25 @@ def jobs_launch(
             # and query all job ids with the same group id.
             # Sort job ids to ensure consistent ordering.
             job_ids_str = ','.join(map(str, sorted(job_ids)))
+            dashboard_hint = ''
+            if not server_common.is_api_server_local():
+                query = urllib.parse.urlencode({
+                    'property': 'name',
+                    'operator': ':',
+                    'value': dag.name,
+                })
+                dashboard_url = server_common.get_dashboard_url(
+                    server_common.get_server_url(),
+                    starting_page=f'jobs?{query}')
+                dashboard_hint = (
+                    f'\n{ux_utils.INDENT_SYMBOL}To view on dashboard:'
+                    f'\t\t{ux_utils.BOLD}{dashboard_url}'
+                    f'{ux_utils.RESET_BOLD}')
             click.secho(
                 f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
                 f'{job_ids_str}{colorama.Style.RESET_ALL}.'
                 f'\n📋 Useful Commands'
+                f'{dashboard_hint}'
                 f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
                 f'{ux_utils.BOLD}sky jobs logs <job-id>'
                 f'{ux_utils.RESET_BOLD}'
