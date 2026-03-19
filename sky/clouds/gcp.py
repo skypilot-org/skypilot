@@ -882,8 +882,8 @@ class GCP(clouds.Cloud):
             from google import auth  # type: ignore
             import googleapiclient
 
-            # Check the installation of google-cloud-sdk.
-            shutil.which('gcloud')
+            if shutil.which('gcloud') is None:
+                raise RuntimeError('Missing `gcloud` cli dependency.')
         except (ImportError, subprocess.CalledProcessError) as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
