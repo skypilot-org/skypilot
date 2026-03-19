@@ -1316,7 +1316,6 @@ class Resources:
         Raises:
             ValueError: if the attribute is invalid.
         """
-
         if self._network_tier == resources_utils.NetworkTier.BEST:
             if isinstance(self._cloud, clouds.GCP):
                 # Handle GPU Direct TCPX requirement for docker images

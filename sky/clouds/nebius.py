@@ -4,6 +4,9 @@ import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
+from grpc import StatusCode
+from nebius.aio.service_error import RequestError
+
 from sky import catalog
 from sky import clouds
 from sky import exceptions
@@ -11,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import nebius
 from sky.provision.nebius import constants as nebius_constants
+from sky.provision.nebius import utils
 from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -262,12 +266,20 @@ class Nebius(clouds.Cloud):
         # Selecting image_family by platform
         # https://docs.nebius.com/compute/storage/boot-disk-images
         if platform.startswith('cpu'):
-            image_family = 'ubuntu24.04-driverless'
+            default_image_family = 'ubuntu24.04-driverless'
         elif platform.startswith('gpu'):
-            image_family = 'ubuntu24.04-cuda12'
+            default_image_family = 'ubuntu24.04-cuda13'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
+
+        if resources.image_id is None:
+            image_id = default_image_family
+        else:
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                image_id = resources.image_id[region.name]
 
         config_fs = skypilot_config.get_effective_region_config(
             cloud='nebius',
@@ -296,7 +308,7 @@ class Nebius(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_static_ip_address': use_static_ip_address,
             'region': region.name,
-            'image_id': image_family,
+            'image_id': image_id,
             # Nebius does not support specific zones.
             'zones': None,
             'use_spot': resources.use_spot,
@@ -535,3 +547,37 @@ class Nebius(clouds.Cloud):
         unknown_profile_type = profile.which_field_in_oneof('profile')
         raise exceptions.CloudUserIdentityError(
             f'Nebius profile is of an unknown type - {unknown_profile_type}')
+
+    @classmethod
+    def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
+        """Check the image size from the cloud.
+
+        Returns: the image size in GB.
+        Raises: ValueError if the image cannot be found.
+        """
+        sdk = nebius.sdk()
+        compute = nebius.compute()
+        image_client = compute.ImageServiceClient(sdk)
+        if image_id.startswith('computeimage-'):
+            try:
+                image = image_client.get(
+                    compute.GetImageRequest(id=image_id)).wait()
+            except RequestError as e:
+                if e.status.code == StatusCode.NOT_FOUND:
+                    raise ValueError(f'Image {image_id} does not exist') from e
+                raise e
+        else:
+            parent_id = None
+            if region is not None:
+                parent_id = utils.get_project_by_region(region)
+            request = compute.GetImageLatestByFamilyRequest(
+                image_family=image_id, parent_id=parent_id)
+            try:
+                image = image_client.get_latest_by_family(request).wait()
+            except RequestError as e:
+                if e.status.code == StatusCode.NOT_FOUND:
+                    raise ValueError(
+                        f'Image family {image_id} does not exist') from e
+                raise e
+
+        return image.status.min_disk_size_bytes / 1024**3
