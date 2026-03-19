@@ -131,7 +131,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@annotations.lru_cache(scope='global', maxsize=1)
+@annotations.ttl_cache(scope='global', timer=time.time, maxsize=1, ttl=5)
 def _get_default():
     # pylint: disable=import-outside-toplevel
     import google.auth
@@ -139,7 +139,7 @@ def _get_default():
     return google.auth.default()
 
 
-@annotations.lru_cache(scope='request', maxsize=5)
+@annotations.ttl_cache(scope='request', timer=time.time, maxsize=1, ttl=5)
 def _list_enabled_services(project_id: str) -> Set[str]:
     # requires serviceusage.services.list
     proc = subprocess.run(
