@@ -569,13 +569,13 @@ class TestBackwardCompatibility:
         where the API server is running an older version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
-            if self.BASE_API_VERSION < 11:
+            if self.BASE_API_VERSION < 24:
                 pytest.skip(
-                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
-            if self.CURRENT_API_VERSION < 11:
+            if self.CURRENT_API_VERSION < 24:
                 pytest.skip(
-                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
@@ -653,13 +653,13 @@ class TestBackwardCompatibility:
         where the API server is running a newer version than the client."""
         if self.BASE_API_VERSION < self.CURRENT_MIN_COMPATIBLE_API_VERSION or \
                 self.CURRENT_API_VERSION < self.BASE_MIN_COMPATIBLE_API_VERSION:
-            if self.BASE_API_VERSION < 11:
+            if self.BASE_API_VERSION < 24:
                 pytest.skip(
-                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Base API version: {self.BASE_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
-            if self.CURRENT_API_VERSION < 11:
+            if self.CURRENT_API_VERSION < 24:
                 pytest.skip(
-                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 11(release 0.10.0)'
+                    f'Current API version: {self.CURRENT_API_VERSION} is too old, the enforce compatibility is supported after 24(release 0.11.0)'
                 )
             # This test runs against the master branch or the latest release
             # version, which must enforce compatibility in this test based on
