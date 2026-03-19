@@ -2632,12 +2632,13 @@ def test_gcp_network_tier_with_gpu():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky launch -y -c {name} --cloud gcp '
             f'--gpus H100:8 --network-tier best '
+            f'--region asia-southeast1 '
             f'echo "Testing network tier best with GPU"',
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        timeout=25 * 60,  # 25 mins for GPU provisioning
+        timeout=35 * 60,  # 35 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
 
