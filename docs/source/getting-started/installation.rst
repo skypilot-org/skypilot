@@ -6,7 +6,7 @@
 Installation
 ============
 
-Step 1: Install SkyPilot
+Install SkyPilot
 --------------------------
 
 .. tip::
@@ -127,7 +127,7 @@ Step 1: Install SkyPilot
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
-Step 2: Connect to a remote API server or run locally
+Connect to a remote API server or run locally
 ------------------------------------------------------
 
 SkyPilot can connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration, or run as a :ref:`standalone application <sky-api-server-local>`
@@ -174,7 +174,7 @@ Refer to the :ref:`credential setup page <cloud-account-setup>` to download the 
 
 .. _verify-cloud-access:
 
-Step 3: Verify cloud access
+Verify cloud access
 -----------------------------
 
 After installation, run :code:`sky check` to verify that credentials are correctly set up:
@@ -239,7 +239,7 @@ output hints on how to resolve them. You can also refer to the
 
 .. _docker-image:
 
-Using SkyPilot in Docker
+Appendix: Using SkyPilot in Docker
 ----------------------------------
 
 A Docker image is available for quickly trying out SkyPilot:

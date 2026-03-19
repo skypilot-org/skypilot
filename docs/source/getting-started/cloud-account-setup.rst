@@ -3,7 +3,7 @@
 .. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
-Setup Credentials
+Credential Setup
 =================
 
 SkyPilot can be run as a :ref:`standalone application <sky-api-server-local>`, or connect to a :ref:`remote API server <sky-api-server-remote>` for multi-user collaboration.
