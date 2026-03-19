@@ -169,11 +169,10 @@ def get_s3_mount_cmd(bucket_name: str,
                      mount_path: str,
                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an S3 bucket."""
-    return _get_s3_compatible_mount_cmd(
-        bucket_name=bucket_name,
-        mount_path=mount_path,
-        _bucket_sub_path=_bucket_sub_path,
-        rclone_extra_flags='--s3-env-auth=true')
+    return _get_s3_compatible_mount_cmd(bucket_name=bucket_name,
+                                        mount_path=mount_path,
+                                        _bucket_sub_path=_bucket_sub_path,
+                                        rclone_extra_flags='--s3-env-auth=true')
 
 
 # Backward-compatible wrappers for existing callers.
