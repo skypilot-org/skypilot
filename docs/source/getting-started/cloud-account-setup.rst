@@ -1458,7 +1458,7 @@ Verda |community-badge|
 
 `Verda <https://www.verda.com/>`_ is the sovereign European GPU Cloud Provider. To use Verda with SkyPilot:
 
-1. Log into your `Verda Console : <https://console.verda.com/>`__.
+1. Log into your `Verda Console: <https://console.verda.com/>`__.
 2. Navigate to *Credentials → Cloud API Credentials* in the console, and press **Create**.
 3. Create the file :code:`~/.verda/config.json` with the following contents:
 
