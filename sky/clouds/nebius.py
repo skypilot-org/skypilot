@@ -4,9 +4,6 @@ import os
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
-from grpc import StatusCode
-from nebius.aio.service_error import RequestError
-
 from sky import catalog
 from sky import clouds
 from sky import exceptions
@@ -548,13 +545,12 @@ class Nebius(clouds.Cloud):
         raise exceptions.CloudUserIdentityError(
             f'Nebius profile is of an unknown type - {unknown_profile_type}')
 
+    # pylint: disable=import-outside-toplevel
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
-        """Check the image size from the cloud.
+        from grpc import StatusCode
+        from nebius.aio.service_error import RequestError
 
-        Returns: the image size in GB.
-        Raises: ValueError if the image cannot be found.
-        """
         sdk = nebius.sdk()
         compute = nebius.compute()
         image_client = compute.ImageServiceClient(sdk)

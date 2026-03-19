@@ -641,7 +641,7 @@ resources:
 ### ``resources.image_id``
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM, Verda and Nebius. IBM, Verda and Nebius only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -764,7 +764,18 @@ resources:
   image_id:
     us-east-1: ami-123
     us-west-2: ami-456
+```
 
+**Nebius**
+
+The `image_id` parameter supports specifying an image by ID, or by image family.
+
+```yaml
+resources:
+  # Specify an image by ID
+  image_id: computeimage-e00d6q343kqz6ayd63
+  # Or use the latest image from a family
+  image_id: ubuntu24.04-cuda13.0
 ```
 
 **RunPod**
