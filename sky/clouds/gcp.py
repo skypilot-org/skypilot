@@ -139,7 +139,7 @@ def _get_default():
     return google.auth.default()
 
 
-@annotations.ttl_cache(scope='request', timer=time.time, maxsize=1, ttl=5)
+@annotations.ttl_cache(scope='request', timer=time.time, maxsize=10, ttl=5)
 def _list_enabled_services(project_id: str) -> Set[str]:
     # requires serviceusage.services.list
     proc = subprocess.run(
