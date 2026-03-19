@@ -262,6 +262,7 @@ class Task:
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
         # Internal use only.
+        api_access: bool = False,
         _file_mounts_mapping: Optional[Dict[str, str]] = None,
         _volume_mounts: Optional[List[volume_lib.VolumeMount]] = None,
         _metadata: Optional[Dict[str, Any]] = None,
@@ -345,6 +346,9 @@ class Task:
           event_callback: A bash script that will be executed when the task
             changes state.
           blocked_resources: A set of resources that this task cannot run on.
+          api_access: If True, auto-inject API server credentials (endpoint
+            and service account token) into the job's environment so that the
+            job can call ``sky`` SDK / CLI to launch nested jobs.
           _file_mounts_mapping: (Internal use only) A dictionary of file mounts
             mapping.
           _volume_mounts: (Internal use only) A list of volume mounts.
@@ -362,6 +366,7 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        self._api_access = api_access
 
         # concatenate commands if given as list
         def _concat(commands: Optional[Union[str, List[str]]]) -> Optional[str]:
@@ -645,6 +650,7 @@ class Task:
             secrets=config.pop('secrets', None),
             volumes=config.pop('volumes', None),
             event_callback=config.pop('event_callback', None),
+            api_access=config.pop('api_access', False),
             _file_mounts_mapping=config.pop('file_mounts_mapping', None),
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
@@ -964,6 +970,10 @@ class Task:
     @property
     def secrets(self) -> Dict[str, SecretStr]:
         return self._secrets
+
+    @property
+    def api_access(self) -> bool:
+        return self._api_access
 
     @property
     def volumes(self) -> Dict[str, Union[str, Dict[str, Any]]]:
@@ -1790,6 +1800,7 @@ class Task:
                 volume_mount.to_yaml_config()
                 for volume_mount in self.volume_mounts
             ]
+        add_if_not_none('api_access', self._api_access or None)
         # we manually check if its empty to not clog up the generated yaml
         add_if_not_none('_metadata', self._metadata if self._metadata else None)
         add_if_not_none('_user_specified_yaml', self._user_specified_yaml)

@@ -144,6 +144,108 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_seeweb
+def test_concurrent_file_mounts_launch(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'Skipping because file mount uploads will be skipped for local server.'
+        )
+    name = smoke_tests_utils.get_cluster_name()
+    test_commands = [
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        # Launch two clusters concurrently with the same file mounts.
+        (f'sky launch -y -c {name}-1 --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-1.log 2>&1 & PID1=$!; '
+         f'sky launch -y -c {name}-2 --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-2.log 2>&1 & PID2=$!; '
+         f'RC1=0; wait $PID1 || RC1=$?; '
+         f'RC2=0; wait $PID2 || RC2=$?; '
+         f'cat /tmp/{name}-1.log; cat /tmp/{name}-2.log; '
+         f'echo "Exit codes: $RC1 $RC2"; '
+         f'[ $RC1 -eq 0 ] && [ $RC2 -eq 0 ]'),
+        f'sky logs {name}-1 1 --status',
+        f'sky logs {name}-2 1 --status',
+        # Verify that only one actual upload occurred (the other should be
+        # deduplicated). Upload logs are in ~/sky_logs/file_uploads/*.log.
+        ('UPLOADED=$(grep -rl "Uploaded files:" ~/sky_logs/file_uploads/ | wc -l); '
+         'SKIPPED=$(grep -rl "Blob already exists, skipping" ~/sky_logs/file_uploads/ | wc -l); '
+         'echo "Uploaded: $UPLOADED, Skipped: $SKIPPED"; '
+         '[ "$UPLOADED" -ge 1 ] && [ "$SKIPPED" -ge 1 ]'),
+    ]
+    test = smoke_tests_utils.Test(
+        'concurrent_file_mounts_launch',
+        test_commands,
+        f'sky down -y {name}-1 {name}-2; '
+        f'rm -f /tmp/{name}-1.log /tmp/{name}-2.log',
+        smoke_tests_utils.get_timeout(generic_cloud, 30 * 60),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast
+@pytest.mark.no_shadeform
+@pytest.mark.no_fluidstack
+@pytest.mark.no_hyperbolic
+@pytest.mark.no_seeweb
+def test_concurrent_file_mounts_jobs_launch(generic_cloud: str):
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip(
+            'Skipping because file mount uploads will be skipped for local server.'
+        )
+    name = smoke_tests_utils.get_cluster_name()
+    job1_name = f'{name}-job1'
+    job2_name = f'{name}-job2'
+    test_commands = [
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        # Launch two managed jobs concurrently with the same file mounts.
+        (f'sky jobs launch -y -d -n {job1_name} --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-job1.log 2>&1 & PID1=$!; '
+         f'sky jobs launch -y -d -n {job2_name} --infra {generic_cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+         f'tests/test_yamls/test_concurrent_file_mounts.yaml '
+         f'> /tmp/{name}-job2.log 2>&1 & PID2=$!; '
+         f'RC1=0; wait $PID1 || RC1=$?; '
+         f'RC2=0; wait $PID2 || RC2=$?; '
+         f'cat /tmp/{name}-job1.log; cat /tmp/{name}-job2.log; '
+         f'echo "Exit codes: $RC1 $RC2"; '
+         f'[ $RC1 -eq 0 ] && [ $RC2 -eq 0 ]'),
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=job1_name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=600),
+        smoke_tests_utils.
+        get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=job2_name,
+            job_status=[sky.ManagedJobStatus.SUCCEEDED],
+            timeout=600),
+        # Verify that only one actual upload occurred (the other should be
+        # deduplicated). Upload logs are in ~/sky_logs/file_uploads/*.log.
+        ('UPLOADED=$(grep -rl "Uploaded files:" ~/sky_logs/file_uploads/ | wc -l); '
+         'SKIPPED=$(grep -rl "Blob already exists, skipping" ~/sky_logs/file_uploads/ | wc -l); '
+         'echo "Uploaded: $UPLOADED, Skipped: $SKIPPED"; '
+         '[ "$UPLOADED" -ge 1 ] && [ "$SKIPPED" -ge 1 ]'),
+    ]
+    test = smoke_tests_utils.Test(
+        'concurrent_file_mounts_jobs_launch',
+        test_commands,
+        f'sky jobs cancel -y -n {job1_name}; sky jobs cancel -y -n {job2_name}; '
+        f'rm -f /tmp/{name}-job1.log /tmp/{name}-job2.log',
+        smoke_tests_utils.get_timeout(generic_cloud, 30 * 60),
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # ---------- storage ----------
 def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
                                        storage_name: str,

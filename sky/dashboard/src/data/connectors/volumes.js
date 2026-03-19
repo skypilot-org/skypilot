@@ -37,7 +37,9 @@ export async function getVolumes() {
           name_on_cloud: volume.name_on_cloud,
           usedby_pods: volume.usedby_pods,
           usedby_clusters: volume.usedby_clusters,
+          last_use: volume.last_use || null,
           error_message: volume.error_message || null,
+          creation_yaml: volume.creation_yaml || null,
         };
       }) || [];
 

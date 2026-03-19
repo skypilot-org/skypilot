@@ -51,7 +51,9 @@ import {
   getRecipeTypeInfo,
   getLaunchCommand,
 } from '@/data/constants/recipeTypes';
+import { usePluginRecipeTypes } from '@/plugins/PluginProvider';
 import { TimestampWithTooltip } from '@/components/utils';
+import { PluginSlot } from '@/plugins/PluginSlot';
 
 // Parse recipe name from URL slug
 // Names are the unique identifiers for recipes (no UUID parsing needed)
@@ -243,6 +245,7 @@ export function RecipeDetail() {
   // Support both old 'yaml' and new 'recipe' query params for backwards compatibility
   const { recipe: recipeSlug } = router.query;
   const slug = recipeSlug;
+  const pluginRecipeTypes = usePluginRecipeTypes();
 
   const [template, setTemplate] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -410,7 +413,7 @@ export function RecipeDetail() {
     return null;
   }
 
-  const typeInfo = getRecipeTypeInfo(template.recipe_type);
+  const typeInfo = getRecipeTypeInfo(template.recipe_type, pluginRecipeTypes);
   const TypeIcon = typeInfo.icon;
 
   return (
@@ -596,30 +599,47 @@ export function RecipeDetail() {
             </div>
           )}
 
-          {/* Launch Command */}
-          <div className="mb-6">
-            <div className="flex items-center">
-              <div className="text-gray-600 font-medium text-base">
-                Launch Command
+          {/* Launch section - PluginSlot for plugin types, CLI command for built-in */}
+          {!getLaunchCommand(template.recipe_type, template.name) ? (
+            <div className="mb-6">
+              <PluginSlot
+                name={`recipes.detail.${template.recipe_type}-launcher`}
+                context={{
+                  recipeContent: template.content,
+                  recipeName: template.name,
+                }}
+                fallback={
+                  <div className="text-sm text-gray-500 italic">
+                    A plugin is required to launch this recipe type.
+                  </div>
+                }
+              />
+            </div>
+          ) : (
+            <div className="mb-6">
+              <div className="flex items-center">
+                <div className="text-gray-600 font-medium text-base">
+                  Launch Command
+                </div>
+                <button
+                  onClick={copyCommandToClipboard}
+                  className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
+                  title={commandCopied ? 'Copied!' : 'Copy command'}
+                >
+                  {commandCopied ? (
+                    <CheckIcon className="w-4 h-4 text-green-600" />
+                  ) : (
+                    <CopyIcon className="w-4 h-4" />
+                  )}
+                </button>
               </div>
-              <button
-                onClick={copyCommandToClipboard}
-                className="flex items-center text-gray-500 hover:text-gray-700 transition-colors duration-200 p-1 ml-2"
-                title={commandCopied ? 'Copied!' : 'Copy command'}
-              >
-                {commandCopied ? (
-                  <CheckIcon className="w-4 h-4 text-green-600" />
-                ) : (
-                  <CopyIcon className="w-4 h-4" />
-                )}
-              </button>
+              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
+                <code className="text-sm text-gray-800 font-mono break-all">
+                  {getLaunchCommand(template.recipe_type, template.name)}
+                </code>
+              </div>
             </div>
-            <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mt-2">
-              <code className="text-sm text-gray-800 font-mono break-all">
-                {getLaunchCommand(template.recipe_type, template.name)}
-              </code>
-            </div>
-          </div>
+          )}
 
           {/* YAML Content */}
           <div>
