@@ -785,9 +785,15 @@ class TestPopulateRecentContext:
 class TestCreateDebugDump:
 
     @pytest.fixture(autouse=True)
-    def _mock_resolve_prefixes(self):
-        with mock.patch('sky.utils.debug_utils._resolve_request_id_prefixes',
-                        side_effect=lambda ids, errors: ids):
+    def _mock_prefix_lookup(self):
+        """Mock prefix lookup to return exact matches for test IDs."""
+
+        def _fake_prefix_lookup(prefix, fields=None):
+            return [mock.MagicMock(request_id=prefix)]
+
+        with mock.patch(
+                'sky.utils.debug_utils.requests_lib.get_requests_with_prefix',
+                side_effect=_fake_prefix_lookup):
             yield
 
     @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
@@ -1117,65 +1123,73 @@ class TestCreateDebugDump:
 
 
 # ---------------------------------------------------------------------------
-# Tests for _resolve_request_id_prefixes
+# Tests for request ID prefix resolution in create_debug_dump
 # ---------------------------------------------------------------------------
-class TestResolveRequestIdPrefixes:
+class TestRequestIdPrefixResolution:
 
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
-    def test_exact_match(self, mock_get_prefix):
-        """An exact match should return the full request ID."""
-        mock_get_prefix.return_value = [
-            mock.MagicMock(request_id='abc-123-def-456')
-        ]
-        errors: list = []
-        result = debug_utils._resolve_request_id_prefixes(['abc-123-def-456'],
-                                                          errors)
-        assert result == ['abc-123-def-456']
-        assert not errors
-
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
-    def test_unique_prefix(self, mock_get_prefix):
-        """A unique prefix should resolve to one request ID."""
-        mock_get_prefix.return_value = [
-            mock.MagicMock(request_id='abc-123-def-456')
-        ]
-        errors: list = []
-        result = debug_utils._resolve_request_id_prefixes(['abc'], errors)
-        assert result == ['abc-123-def-456']
-        assert not errors
-
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
-    def test_ambiguous_prefix_includes_all(self, mock_get_prefix):
-        """An ambiguous prefix should include all matching request IDs."""
+    def test_prefix_resolves_to_all_matches(
+            self, mock_get_prefix, mock_req_from_clusters, mock_req_from_jobs,
+            mock_jobs_from_req, mock_clusters_from_req, mock_clusters_from_jobs,
+            mock_dump_server, mock_dump_requests, mock_dump_clusters,
+            mock_dump_jobs, tmp_path):
+        """A prefix matching multiple requests should include all."""
         mock_get_prefix.return_value = [
             mock.MagicMock(request_id='abc-111'),
             mock.MagicMock(request_id='abc-222'),
         ]
-        errors: list = []
-        result = debug_utils._resolve_request_id_prefixes(['abc'], errors)
-        assert result == ['abc-111', 'abc-222']
-        assert not errors
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            result = debug_utils.create_debug_dump(request_ids=['abc'])
 
+        with zipfile.ZipFile(result, 'r') as zf:
+            summary = json.loads(
+                zf.read([
+                    n for n in zf.namelist() if n.endswith('summary.json')
+                ][0]))
+        collected_ids = summary['collected']['request_ids']
+        assert 'abc-111' in collected_ids
+        assert 'abc-222' in collected_ids
+
+    @mock.patch('sky.utils.debug_utils._dump_managed_job_info')
+    @mock.patch('sky.utils.debug_utils._dump_cluster_info')
+    @mock.patch('sky.utils.debug_utils._dump_request_id_info')
+    @mock.patch('sky.utils.debug_utils._dump_server_info')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_clusters_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_managed_jobs_from_requests')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_managed_jobs')
+    @mock.patch('sky.utils.debug_utils._get_requests_from_clusters')
     @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
-    def test_no_match_records_error(self, mock_get_prefix):
-        """A prefix matching nothing should record an error."""
+    def test_no_match_skips_prefix(self, mock_get_prefix,
+                                   mock_req_from_clusters, mock_req_from_jobs,
+                                   mock_jobs_from_req, mock_clusters_from_req,
+                                   mock_clusters_from_jobs, mock_dump_server,
+                                   mock_dump_requests, mock_dump_clusters,
+                                   mock_dump_jobs, tmp_path):
+        """A prefix matching nothing should be skipped."""
         mock_get_prefix.return_value = None
-        errors: list = []
-        result = debug_utils._resolve_request_id_prefixes(['nonexistent'],
-                                                          errors)
-        assert result == []
-        assert len(errors) == 1
-        assert 'nonexistent' in errors[0]['error']
+        with mock.patch('sky.utils.debug_utils.DEBUG_DUMP_DIR',
+                        str(tmp_path / 'debug_dumps')):
+            result = debug_utils.create_debug_dump(request_ids=['nonexistent'])
 
-    @mock.patch('sky.utils.debug_utils.requests_lib.get_requests_with_prefix')
-    def test_db_error_falls_back_to_original(self, mock_get_prefix):
-        """A DB error should fall back to the original ID."""
-        mock_get_prefix.side_effect = RuntimeError('DB unavailable')
-        errors: list = []
-        result = debug_utils._resolve_request_id_prefixes(['abc-123'], errors)
-        assert result == ['abc-123']
-        assert len(errors) == 1
-        assert 'DB unavailable' in errors[0]['error']
+        with zipfile.ZipFile(result, 'r') as zf:
+            summary = json.loads(
+                zf.read([
+                    n for n in zf.namelist() if n.endswith('summary.json')
+                ][0]))
+        # The unmatched prefix should not appear in collected IDs
+        # (only system request IDs should be present)
+        assert 'nonexistent' not in summary['collected']['request_ids']
 
 
 # ---------------------------------------------------------------------------

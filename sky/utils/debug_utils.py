@@ -1131,57 +1131,6 @@ def _build_debug_dump(
         json.dump(summary, f, indent=2)
 
 
-def _resolve_request_id_prefixes(
-    request_ids: List[str],
-    errors: List[Dict[str, str]],
-) -> List[str]:
-    """Resolve request ID prefixes to full request IDs.
-
-    For each user-provided request ID, checks if it's an exact match or
-    a prefix. All matching requests are included (same as
-    ``sky api status``, rather than erroring on ambiguity like
-    ``sky api logs``).
-
-    Args:
-        request_ids: List of request IDs or prefixes.
-        errors: List to append error dicts to.
-
-    Returns:
-        List of resolved full request IDs.
-    """
-    resolved: List[str] = []
-    for rid in request_ids:
-        try:
-            matches = requests_lib.get_requests_with_prefix(
-                rid, fields=['request_id'])
-            if matches is None or len(matches) == 0:
-                msg = f'No requests found matching prefix {rid!r}'
-                logger.warning(msg)
-                errors.append({
-                    'component': 'resolve_request_id_prefixes',
-                    'error': msg,
-                })
-                continue
-            if len(matches) == 1:
-                logger.debug(f'Prefix {rid!r} resolved to '
-                             f'{matches[0].request_id}')
-            else:
-                logger.debug(f'Prefix {rid!r} matched '
-                             f'{len(matches)} requests')
-            for match in matches:
-                resolved.append(match.request_id)
-        except Exception as e:  # pylint: disable=broad-except
-            msg = f'Error resolving request ID prefix {rid!r}: {e}'
-            logger.warning(msg)
-            errors.append({
-                'component': 'resolve_request_id_prefixes',
-                'error': msg,
-            })
-            # Fall back to using the original ID
-            resolved.append(rid)
-    return resolved
-
-
 def create_debug_dump(
     request_ids: Optional[List[str]] = None,
     cluster_names: Optional[List[str]] = None,
@@ -1209,16 +1158,24 @@ def create_debug_dump(
                  f'managed_job_ids={managed_job_ids}, '
                  f'recent_minutes={recent_minutes}')
 
-    # Resolve request ID prefixes to full IDs
-    errors: List[Dict[str, str]] = []
+    # Resolve request ID prefixes to full IDs (same pattern as
+    # sky api status in server.py)
+    resolved_request_ids: Set[str] = set()
     if request_ids:
-        request_ids = _resolve_request_id_prefixes(request_ids, errors)
+        for rid in request_ids:
+            matches = requests_lib.get_requests_with_prefix(
+                rid, fields=['request_id'])
+            if not matches:
+                logger.warning(f'No requests found matching prefix {rid!r}')
+                continue
+            for match in matches:
+                resolved_request_ids.add(match.request_id)
 
     debug_dump_context = DebugDumpContext(
-        request_ids=set(request_ids or []),
+        request_ids=resolved_request_ids,
         cluster_names=set(cluster_names or []),
         managed_job_ids=set(managed_job_ids or []),
-        errors=errors,
+        errors=[],
     )
 
     # Create persistent output directory
