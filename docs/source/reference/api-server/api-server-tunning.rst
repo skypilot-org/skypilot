@@ -99,31 +99,25 @@ Resource planning for managed jobs
 The API server's total memory also controls how many managed jobs can run concurrently. A job counts as **launching** while it is provisioning instances or recovering from a failure, and as **running** once it is executing on a cluster.
 
 .. list-table::
-   :widths: 1 1 1 1
+   :widths: 1 1 1
    :header-rows: 1
 
-   * - CPU
-     - Memory
+   * - Memory
      - Max launching jobs
      - Max running jobs
-   * - 4
-     - 8Gi
+   * - 8Gi
      - 16
      - 400
-   * - 16
-     - 32Gi
+   * - 32Gi
      - 104
      - 2000
-   * - 32
-     - 64Gi
+   * - 64Gi
      - 200
      - 2000
-   * - 64
-     - 128Gi
+   * - 128Gi
      - 400
      - 2000
-   * - 128
-     - 256Gi
+   * - 256Gi
      - 512
      - 2000
 
