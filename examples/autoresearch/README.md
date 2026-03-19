@@ -64,7 +64,7 @@ The SkyPilot skill handles installation, credential setup, and all cluster opera
 ## Results
 
 <p align="center">
-  <img src="https://blog.skypilot.co/scaling-autoresearch/assets/results_wallclock.png" alt="Wall-clock time comparison: parallel vs sequential" width="600"/>
+  <img src="https://blog.skypilot.co/scaling-autoresearch/assets/results_wallclock.png" alt="Wall-clock time comparison: parallel vs sequential" width="800"/>
   <br/>
   <em>Parallel agent (16 GPUs) reaches the same best validation loss 9x faster than sequential (1 GPU).</em>
 </p>
@@ -78,7 +78,7 @@ In an 8-hour run across 16 GPUs, the parallel agent:
 Parallelism changes the agent's search strategy. Instead of greedy sequential hill-climbing, it explores a grid — testing multiple hyperparameters simultaneously and cross-referencing results. The agent also independently discovered a two-tier strategy: screening hypotheses on cheaper H100s, then promoting winners to faster H200s, without being told to do so.
 
 <p align="center">
-  <img src="https://i.imgur.com/g05SFUR.png" alt="SkyPilot Dashboard with 4 GPU clusters" width="600"/>
+  <img src="https://i.imgur.com/g05SFUR.png" alt="SkyPilot Dashboard with 4 GPU clusters" width="800"/>
   <br/>
-  <em>SkyPilot dashboard showing 4 GPU clusters running parallel experiments.</em>
+  <em>SkyPilot dashboard showing Claude running parallel experiments.</em>
 </p>
