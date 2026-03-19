@@ -182,6 +182,7 @@ class Verda(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
         use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
     ) -> Optional[str]:
         """Returns the default instance type for Verda."""
         return catalog.get_default_instance_type(
@@ -192,6 +193,7 @@ class Verda(clouds.Cloud):
             region=region,
             zone=zone,
             use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
             clouds='verda',
         )
 
@@ -298,6 +300,7 @@ class Verda(clouds.Cloud):
                 region=resources.region,
                 zone=resources.zone,
                 use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost,
             )
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
@@ -317,6 +320,7 @@ class Verda(clouds.Cloud):
              cpus=resources.cpus,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='verda',
          ))
         if instance_list is None:

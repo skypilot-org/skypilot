@@ -373,15 +373,17 @@ class Cloud:
         return None
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None,
-                                  use_spot: bool = False) -> Optional[str]:
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
         """Returns the default instance type with the given #vCPUs, memory,
         disk tier, local disk, region, and zone.
 

@@ -163,16 +163,19 @@ class Shadeform(clouds.Cloud):
         region: Optional[str] = None,
         zone: Optional[str] = None,
         use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
     ) -> Optional[str]:
         """Get default instance type."""
         del disk_tier, local_disk  # Not supported
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=None,
-                                                 region=region,
-                                                 zone=zone,
-                                                 use_spot=use_spot,
-                                                 clouds='shadeform')
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=None,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='shadeform')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -332,9 +335,11 @@ class Shadeform(clouds.Cloud):
             for accelerator_name, accelerator_count in accelerators.items():
                 # Get instance types that provide this accelerator
                 func = shadeform_catalog.get_instance_type_for_accelerator
-                instance_types, errors = func(accelerator_name,
-                                              accelerator_count,
-                                              use_spot=resources.use_spot)
+                instance_types, errors = func(
+                    accelerator_name,
+                    accelerator_count,
+                    use_spot=resources.use_spot,
+                    max_hourly_cost=resources.max_hourly_cost)
 
                 if instance_types:
                     # Create separate resource objects for each instance type
@@ -378,7 +383,8 @@ class Shadeform(clouds.Cloud):
                 disk_tier=resources.disk_tier,
                 region=resources.region,
                 zone=resources.zone,
-                use_spot=resources.use_spot)
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 # TODO: Add hints to all return values in this method to help
                 #  users understand why the resources are not launchable.

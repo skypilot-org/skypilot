@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 42  # api_access support for managed jobs
+API_VERSION = 43  # max_hourly_cost support for resources
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):

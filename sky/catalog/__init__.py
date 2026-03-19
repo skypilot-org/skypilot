@@ -222,6 +222,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
                               region: Optional[str] = None,
                               zone: Optional[str] = None,
                               use_spot: bool = False,
+                              max_hourly_cost: Optional[float] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
     """Returns the cloud's default instance type for given #vCPUs and memory.
 
@@ -236,7 +237,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
     """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus,
                                memory, disk_tier, local_disk, region, zone,
-                               use_spot)
+                               use_spot, max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
@@ -271,6 +272,7 @@ def get_instance_type_for_accelerator(
     local_disk: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
@@ -280,7 +282,7 @@ def get_instance_type_for_accelerator(
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
                                acc_name, acc_count, cpus, memory, use_spot,
-                               local_disk, region, zone)
+                               local_disk, region, zone, max_hourly_cost)
 
 
 def get_accelerator_hourly_cost(

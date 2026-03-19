@@ -688,23 +688,27 @@ class AWS(clouds.Cloud):
         return cost
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  cpus: Optional[str] = None,
-                                  memory: Optional[str] = None,
-                                  disk_tier: Optional[
-                                      resources_utils.DiskTier] = None,
-                                  local_disk: Optional[str] = None,
-                                  region: Optional[str] = None,
-                                  zone: Optional[str] = None,
-                                  use_spot: bool = False) -> Optional[str]:
-        return catalog.get_default_instance_type(cpus=cpus,
-                                                 memory=memory,
-                                                 disk_tier=disk_tier,
-                                                 local_disk=local_disk,
-                                                 region=region,
-                                                 zone=zone,
-                                                 use_spot=use_spot,
-                                                 clouds='aws')
+    def get_default_instance_type(
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
+    ) -> Optional[str]:
+        return catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            region=region,
+            zone=zone,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -920,7 +924,8 @@ class AWS(clouds.Cloud):
                 local_disk=resources.local_disk,
                 region=resources.region,
                 zone=resources.zone,
-                use_spot=resources.use_spot)
+                use_spot=resources.use_spot,
+                max_hourly_cost=resources.max_hourly_cost)
             if default_instance_type is None:
                 return resources_utils.FeasibleResources([], [], None)
             else:
@@ -939,6 +944,7 @@ class AWS(clouds.Cloud):
              local_disk=resources.local_disk,
              region=resources.region,
              zone=resources.zone,
+             max_hourly_cost=resources.max_hourly_cost,
              clouds='aws')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,

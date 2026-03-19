@@ -310,6 +310,10 @@ def _get_single_resources_schema():
             'local_disk': {
                 'type': 'string',
             },
+            'max_hourly_cost': {
+                'type': 'number',
+                'exclusiveMinimum': 0,
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',

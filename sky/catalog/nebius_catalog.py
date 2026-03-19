@@ -51,14 +51,15 @@ def get_vcpus_mem_from_instance_type(
     return common.get_vcpus_mem_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              local_disk: Optional[str] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None,
-                              use_spot: bool = False) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del local_disk  # unused
 
     def _filter_disk_type(instance_type: str) -> bool:
@@ -67,7 +68,8 @@ def get_default_instance_type(cpus: Optional[str] = None,
 
     df = _df.loc[_df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus, memory, region,
-                                                      zone, use_spot)
+                                                      zone, use_spot,
+                                                      max_hourly_cost)
 
 
 def get_accelerators_from_instance_type(
@@ -76,14 +78,16 @@ def get_accelerators_from_instance_type(
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str,
-        acc_count: int,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        use_spot: bool = False,
-        local_disk: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
+    acc_name: str,
+    acc_count: int,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    use_spot: bool = False,
+    local_disk: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None
+) -> Tuple[Optional[List[str]], List[str]]:
     """Filter the instance types based on resource requirements.
 
     Returns a list of instance types satisfying the required count of
@@ -93,14 +97,16 @@ def get_instance_type_for_accelerator(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Nebius does not support zones.')
-    return common.get_instance_type_for_accelerator_impl(df=_df,
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count,
-                                                         cpus=cpus,
-                                                         memory=memory,
-                                                         use_spot=use_spot,
-                                                         region=region,
-                                                         zone=zone)
+    return common.get_instance_type_for_accelerator_impl(
+        df=_df,
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        region=region,
+        zone=zone,
+        max_hourly_cost=max_hourly_cost)
 
 
 def regions() -> List['cloud.Region']:
