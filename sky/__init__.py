@@ -117,6 +117,7 @@ from sky.client.sdk import stream_and_get
 from sky.client.sdk import tail_logs
 from sky.dag import Dag
 from sky.dag import DagExecution
+from sky.data import FileMountType
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
@@ -191,6 +192,7 @@ __all__ = [
     'backends',
     'list_accelerators',
     '__root_dir__',
+    'FileMountType',
     'Storage',
     'StorageMode',
     'StoreType',

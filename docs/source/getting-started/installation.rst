@@ -236,6 +236,7 @@ This will produce a summary like:
     Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
+    VastData: enabled
     Kubernetes: enabled
     Slurm: enabled
 
@@ -1562,6 +1563,82 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 .. note::
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
+
+.. _vastdata-installation:
+
+VastData object storage
+~~~~~~~~~~~~~~~~~~~~~~~
+
+`VastData <https://vastdata.com/>`__ offers S3-compatible object storage. SkyPilot can download/upload data to VastData buckets and mount them as a local filesystem on clusters launched by SkyPilot. To set up VastData support:
+
+.. note::
+
+  VastData (object storage) is a separate company from Vast.ai (GPU compute). This integration is for VastData's S3-compatible object storage only.
+
+Install the necessary dependencies for VastData:
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[vastdata]"
+      # From nightly build
+      uv pip install "skypilot-nightly[vastdata]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[vastdata]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[vastdata]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[vastdata]"
+      # From nightly build
+      pip install "skypilot-nightly[vastdata]"
+      # From source
+      pip install -e ".[vastdata]"
+
+SkyPilot uses separate configuration files for VastData to avoid conflicts with your AWS credentials. Run the following command to configure your VastData access credentials:
+
+.. code-block:: shell
+
+  AWS_SHARED_CREDENTIALS_FILE=~/.vastdata/vastdata.credentials aws configure --profile vastdata
+
+When prompted, enter your VastData credentials:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+Next, configure the endpoint URL for VastData Object Storage. Replace ``<your_vastdata_endpoint>`` with your VastData S3 endpoint (e.g., ``https://s3.example.vastdata.com``):
+
+.. code-block:: shell
+
+  AWS_CONFIG_FILE=~/.vastdata/vastdata.config aws configure set endpoint_url <your_vastdata_endpoint> --profile vastdata
+
+You can verify your credentials are set up correctly by running:
+
+.. code-block:: shell
+
+  sky check vastdata
 
 
 Prime Intellect |community-badge|

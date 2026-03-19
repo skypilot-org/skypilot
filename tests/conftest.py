@@ -96,6 +96,7 @@ all_clouds_in_smoke_tests = [
     'seeweb',
     'shadeform',
     'coreweave',
+    'vastdata',
     'slurm',
     'mithril',
     'verda',
@@ -128,6 +129,7 @@ cloud_to_pytest_keyword = {
     'shadeform': 'shadeform',
     'seeweb': 'seeweb',
     'coreweave': 'coreweave',
+    'vastdata': 'vastdata',
     'slurm': 'slurm',
     'mithril': 'mithril',
     'verda': 'verda',
@@ -298,6 +300,13 @@ def pytest_configure(config):
             'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
     # Validate incompatible option combinations
+    # TODO(cooperc): --remote-server now auto-enables consolidation mode
+    # (deploy-mode Docker servers). The --jobs-consolidation flag is redundant
+    # for remote servers. To test --remote-server without consolidation, we
+    # need a --no-jobs-consolidation flag that writes consolidation_mode: false
+    # into the Docker container's ~/.sky/config.yaml before the API server
+    # starts (the entrypoint runs `sky api start --deploy`). This would also
+    # let us lift this block and allow --remote-server --jobs-consolidation.
     if config.getoption('--remote-server'):
         if config.getoption('--jobs-consolidation'):
             raise ValueError(
@@ -326,7 +335,7 @@ def _get_cloud_to_run(config) -> List[str]:
 
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
-            if cloud in ['cloudflare', 'coreweave']:
+            if cloud in ['cloudflare', 'coreweave', 'vastdata']:
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
@@ -392,6 +401,8 @@ def pytest_collection_modifyitems(config, items):
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
                     continue
                 if config.getoption('--coreweave') and cloud == 'coreweave':
+                    continue
+                if config.getoption('--vastdata') and cloud == 'vastdata':
                     continue
                 item.add_marker(skip_marks[cloud])
 
