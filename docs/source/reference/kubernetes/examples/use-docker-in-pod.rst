@@ -43,14 +43,12 @@ Approaches
    Use BuildKit (``enable_docker: build``) if you only need image build/push.
    Use DinD (``enable_docker: true``) if you need full ``docker run`` capabilities.
 
-Option 1: Docker-in-Docker (DinD)
----------------------------------
+Option 1: Full Docker (``enable_docker: true``)
+------------------------------------------------
 
-A ``docker:dind`` sidecar container starts its own isolated ``dockerd``
-process. The main container communicates with it over a shared Unix socket.
-The host node does **not** need Docker installed — the sidecar is entirely
-self-contained. The ``docker`` CLI and ``docker buildx``
-plugin are automatically installed in the main container.
+Set ``enable_docker: true`` to make the full ``docker`` CLI available inside
+the pod — you can build images, push them, and run containers
+(``docker run``).
 
 **Cluster prerequisite:** The cluster must allow pods with ``privileged: true``.
 
@@ -104,16 +102,15 @@ Launch and verify
    docker build -t myregistry/myimage:latest .
    docker push myregistry/myimage:latest
 
-Option 2: Rootless BuildKit
-----------------------------
+Option 2: Build-only (``enable_docker: build``)
+------------------------------------------------
 
-Running `BuildKit <https://github.com/moby/buildkit>`_ as a rootless sidecar provides
-OCI-compliant image build and push without a privileged Docker daemon and
-without requiring Docker on the host node. The ``docker`` CLI and ``docker buildx``
-plugin are automatically installed and configured in the main container.
+If your cluster does not allow ``privileged: true`` pods, or you only need
+to build and push images, set ``enable_docker: build``. This makes
+``docker buildx build`` available inside the pod without
+requiring privileged permissions.
 
-**Limitation:** ``docker run`` / container execution is not supported. This
-approach is suitable for build-only workflows (CI, image preparation).
+**Limitation:** ``docker run`` / container execution is not supported.
 
 Configuration
 ^^^^^^^^^^^^^
