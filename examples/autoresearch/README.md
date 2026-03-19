@@ -2,9 +2,7 @@
 
 Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). A local coding agent uses the skill to spin up GPU clusters, submit experiments, and parallelize work across multiple clusters.
 
-## SkyPilot Dashboard
-
-![SkyPilot Dashboard with 4 GPU clusters](https://i.imgur.com/g05SFUR.png)
+For a deep dive into methodology and results, check out the **[blog post](https://blog.skypilot.co/scaling-autoresearch/)**.
 
 ## Architecture
 
@@ -62,3 +60,25 @@ pip install uv && uv sync && uv run prepare.py
 ```
 
 The SkyPilot skill handles installation, credential setup, and all cluster operations. If SkyPilot isn't installed yet, the skill will guide through that too.
+
+## Results
+
+<p align="center">
+  <img src="https://blog.skypilot.co/scaling-autoresearch/assets/results_wallclock.png" alt="Wall-clock time comparison: parallel vs sequential" width="600"/>
+  <br/>
+  <em>Parallel agent (16 GPUs) reaches the same best validation loss 9x faster than sequential (1 GPU).</em>
+</p>
+
+In an 8-hour run across 16 GPUs, the parallel agent:
+- Submitted **~910 experiments** (~90/hour vs ~10/hour sequential)
+- Achieved a **9x speedup** to reach the same best validation loss
+- Improved val_bpb from **1.003 → 0.974** (2.87% improvement)
+- Cost: \$9 in Claude API calls + \$300 in GPU compute
+
+Parallelism changes the agent's search strategy. Instead of greedy sequential hill-climbing, it explores a grid — testing multiple hyperparameters simultaneously and cross-referencing results. The agent also independently discovered a two-tier strategy: screening hypotheses on cheaper H100s, then promoting winners to faster H200s, without being told to do so.
+
+<p align="center">
+  <img src="https://i.imgur.com/g05SFUR.png" alt="SkyPilot Dashboard with 4 GPU clusters" width="600"/>
+  <br/>
+  <em>SkyPilot dashboard showing 4 GPU clusters running parallel experiments.</em>
+</p>
