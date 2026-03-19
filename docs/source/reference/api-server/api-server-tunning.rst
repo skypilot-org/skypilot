@@ -123,7 +123,7 @@ The API server's total memory also controls how many managed jobs can run concur
 
 .. note::
 
-    This applies when the API server manages jobs directly (the default for deploy-mode servers). If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, the API server resources only affect request handling and the table above does not apply.
+    This applies when the API server manages jobs directly (the default for remote API servers). If you are using a :ref:`remote jobs controller <jobs-controller-remote>`, the API server resources only affect request handling and the table above does not apply.
 
 Use asynchronous requests to avoid blocking
 -------------------------------------------

@@ -11,7 +11,7 @@ This page describes high availability (HA) mode for **remote controller clusters
 
 .. tip::
 
-    **Using a deploy-mode API server?** For managed jobs, :ref:`consolidation mode <jobs-consolidation-mode>` is enabled by default. In consolidation mode the jobs controller runs inside the API server pod, which already has its own resilience (Kubernetes Deployment restarts, persistent database). You do **not** need HA mode for the managed jobs controller in that case.
+    **Using a remote API server?** For managed jobs, the API server manages jobs directly by default (see :ref:`consolidation mode <jobs-consolidation-mode>`). The API server pod already has its own resilience (Kubernetes Deployment restarts, persistent database), so you do **not** need HA mode for managed jobs in that case.
 
     HA mode is relevant when:
 
@@ -87,7 +87,7 @@ To enable high availability for the controller, set the ``high_availability`` fl
         high_availability: true
 
 .. note::
-    For deploy-mode API servers, you must explicitly set ``consolidation_mode: false`` for managed jobs (as shown above) to use a remote controller cluster with HA mode. Without this, the jobs controller runs inside the API server and the ``high_availability`` setting has no effect. This is not needed for the Sky Serve controller, which always uses a remote cluster.
+    For remote API servers, you must explicitly set ``consolidation_mode: false`` for managed jobs (as shown above) to use a remote controller cluster with HA mode. Without this, the API server manages jobs directly and the ``high_availability`` setting has no effect. This is not needed for the Sky Serve controller, which always uses a remote cluster.
 
 .. note::
     Enabling or disabling ``high_availability`` only affects **new** controllers. If you have an existing controller (either running or stopped), changing this setting will not modify it. To apply the change, you must first cancel all running jobs, or terminate all services, and then tear down the existing controller using ``sky down <controller-name>``. See `Important considerations`_ below.
