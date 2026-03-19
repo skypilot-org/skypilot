@@ -352,30 +352,11 @@ class Resources:
             _maybe_add_docker_prefix_to_image_id(self._image_id)
         self._is_image_managed = _is_image_managed
 
-        if isinstance(disk_tier, str):
-            disk_tier_str = str(disk_tier).lower()
-            supported_tiers = [tier.value for tier in resources_utils.DiskTier]
-            if disk_tier_str not in supported_tiers:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid disk_tier {disk_tier_str!r}. '
-                                     f'Disk tier must be one of '
-                                     f'{", ".join(supported_tiers)}.')
-            disk_tier = resources_utils.DiskTier(disk_tier_str)
-        self._disk_tier = disk_tier
-
-        if isinstance(network_tier, str):
-            network_tier_str = str(network_tier).lower()
-            supported_tiers = [
-                tier.value for tier in resources_utils.NetworkTier
-            ]
-            if network_tier_str not in supported_tiers:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Invalid network_tier {network_tier_str!r}. '
-                        f'Network tier must be one of '
-                        f'{", ".join(supported_tiers)}.')
-            network_tier = resources_utils.NetworkTier(network_tier_str)
-        self._network_tier = network_tier
+        self._disk_tier = _validate_and_convert_tier(disk_tier,
+                                                     resources_utils.DiskTier,
+                                                     'disk_tier')
+        self._network_tier = _validate_and_convert_tier(
+            network_tier, resources_utils.NetworkTier, 'network_tier')
 
         if ports is not None:
             if isinstance(ports, tuple):
@@ -2653,6 +2634,29 @@ class LaunchableResources(Resources):
         """
         self.assert_launchable()
         return typing.cast(LaunchableResources, super().copy(**override))
+
+
+def _validate_and_convert_tier(tier_value, tier_enum, tier_name: str):
+    """Validates and converts a string tier value to its enum type.
+
+    Args:
+        tier_value: The tier value (string or enum).
+        tier_enum: The enum class (e.g., DiskTier, NetworkTier).
+        tier_name: Human-readable tier name for error messages.
+
+    Returns:
+        The validated enum value, or the original value if not a string.
+    """
+    if isinstance(tier_value, str):
+        tier_str = str(tier_value).lower()
+        supported_tiers = [tier.value for tier in tier_enum]
+        if tier_str not in supported_tiers:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid {tier_name} {tier_str!r}. '
+                                 f'{tier_name.capitalize()} must be one of '
+                                 f'{", ".join(supported_tiers)}.')
+        return tier_enum(tier_str)
+    return tier_value
 
 
 def _maybe_add_docker_prefix_to_image_id(

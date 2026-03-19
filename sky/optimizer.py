@@ -38,6 +38,31 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+
+def _format_number(x: Optional[float]) -> str:
+    """Formats a number for display: None->'-', int->no decimal, else 1dp."""
+    if x is None:
+        return '-'
+    elif x.is_integer():
+        return str(int(x))
+    else:
+        return f'{x:.1f}'
+
+
+def _estimate_execution_time(node: task_lib.Task,
+                             resources: 'resources_lib.Resources') -> float:
+    """Estimates execution time for a task on given resources.
+
+    Returns the estimated runtime in seconds, defaulting to 1 hour if
+    no time estimator is provided.
+    """
+    if node.time_estimator_func is None:
+        return 1 * 3600
+    # The execution time of dummy nodes is always 0,
+    # as they have a time estimator lambda _: 0.
+    return node.estimate_runtime(resources)
+
+
 _DUMMY_SOURCE_NAME = 'skypilot-dummy-source'
 _DUMMY_SINK_NAME = 'skypilot-dummy-sink'
 
@@ -650,12 +675,7 @@ class Optimizer:
                 return cache_finish_time[node]
 
             resources = plan[node]
-            if node.time_estimator_func is None:
-                execution_time = 1 * 3600
-            else:
-                # The execution time of dummy nodes is always 0,
-                # as they have a time estimator lambda _: 0.
-                execution_time = node.estimate_runtime(resources)
+            execution_time = _estimate_execution_time(node, resources)
 
             pred_finish_times = [0]
             for pred in graph.predecessors(node):
@@ -680,12 +700,7 @@ class Optimizer:
         total_cost = 0.
         for node in topo_order:
             resources = plan[node]
-            if node.time_estimator_func is None:
-                execution_time = 1 * 3600
-            else:
-                # The execution time of dummy nodes is always 0,
-                # as they have a time estimator lambda _: 0.
-                execution_time = node.estimate_runtime(resources)
+            execution_time = _estimate_execution_time(node, resources)
 
             cost_per_node = resources.get_cost(execution_time)
             total_cost += cost_per_node * node.num_nodes
@@ -787,8 +802,14 @@ class Optimizer:
                     instance_type = ''
             return instance_type
 
-        def _get_resources_element_list(
-                resources: 'resources_lib.Resources') -> List[str]:
+        def _get_resource_display_attrs(
+            resources: 'resources_lib.Resources'
+        ) -> Tuple[str, str, str, str, str]:
+            """Extracts common display attributes from resources.
+
+            Returns:
+                (infra, instance_with_spot, vcpus, mem, accelerators)
+            """
             accelerators = resources.get_accelerators_str()
             spot = resources.get_spot_str()
             cloud = resources.cloud
@@ -797,28 +818,15 @@ class Optimizer:
                 'Instance type must be specified'
             vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                 resources.instance_type)
-
-            def format_number(x: Optional[float]) -> str:
-                if x is None:
-                    return '-'
-                elif x.is_integer():
-                    return str(int(x))
-                else:
-                    return f'{x:.1f}'
-
-            vcpus = format_number(vcpus_)
-            mem = format_number(mem_)
-
-            # Format infra as CLOUD (REGION/ZONE)
+            vcpus = _format_number(vcpus_)
+            mem = _format_number(mem_)
             infra = resources.infra.formatted_str()
+            return (infra, _instance_type_str(resources) + spot, vcpus, mem,
+                    str(accelerators))
 
-            return [
-                infra,
-                _instance_type_str(resources) + spot,
-                vcpus,
-                mem,
-                str(accelerators),
-            ]
+        def _get_resources_element_list(
+                resources: 'resources_lib.Resources') -> List[str]:
+            return list(_get_resource_display_attrs(resources))
 
         Row = collections.namedtuple('Row', [
             'infra', 'instance', 'vcpus', 'mem', 'accelerators', 'cost_str',
@@ -827,36 +835,15 @@ class Optimizer:
 
         def _get_resources_named_tuple(resources: 'resources_lib.Resources',
                                        cost_str: str, chosen: bool) -> Row:
-
-            accelerators = resources.get_accelerators_str()
-            spot = resources.get_spot_str()
             resources = resources.assert_launchable()
-            cloud = resources.cloud
-            vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
-                resources.instance_type)
-
-            def format_number(x: Optional[float]) -> str:
-                if x is None:
-                    return '-'
-                elif x.is_integer():
-                    return str(int(x))
-                else:
-                    return f'{x:.1f}'
-
-            vcpus = format_number(vcpus_)
-            mem = format_number(mem_)
-
-            infra = resources.infra.formatted_str()
-
+            infra, instance, vcpus, mem, accelerators = (
+                _get_resource_display_attrs(resources))
             chosen_str = ''
             if chosen:
                 chosen_str = (colorama.Fore.GREEN + '   ' + '\u2714' +
                               colorama.Style.RESET_ALL)
-            row = Row(infra,
-                      _instance_type_str(resources) + spot, vcpus, mem,
-                      str(accelerators), cost_str, chosen_str)
-
-            return row
+            return Row(infra, instance, vcpus, mem, accelerators, cost_str,
+                       chosen_str)
 
         def _get_resource_group_hash(resources: 'resources_lib.Resources'):
             resource_key_dict = {
@@ -1229,11 +1216,9 @@ class Optimizer:
                 vcpus_, mem_ = cloud.get_vcpus_mem_from_instance_type(
                     instance_type)
                 if vcpus_ is not None:
-                    vcpus = (str(int(vcpus_))
-                             if vcpus_.is_integer() else f'{vcpus_:.1f}')
+                    vcpus = _format_number(vcpus_)
                 if mem_ is not None:
-                    mem = (str(int(mem_))
-                           if mem_.is_integer() else f'{mem_:.1f}')
+                    mem = _format_number(mem_)
 
             # Get accelerators
             accelerators = best_resources.get_accelerators_str()
@@ -1270,17 +1255,18 @@ class Optimizer:
         if not task_candidates:
             return []
 
-        # Collect infras per task
+        # Collect infras per task, and build a name->Cloud lookup to avoid
+        # repeated string comparisons when converting back.
         infras_per_task: List[Set[Tuple[str, Optional[str]]]] = []
+        cloud_name_to_obj: Dict[str, clouds.Cloud] = {}
 
         for _, cloud_candidates in task_candidates.items():
             task_infras: Set[Tuple[str, Optional[str]]] = set()
             for cloud, resources_list in cloud_candidates.items():
                 cloud_name = str(cloud)
+                cloud_name_to_obj.setdefault(cloud_name, cloud)
                 for resources in resources_list:
-                    # Use (cloud_name, region) as infra identifier
-                    region = resources.region
-                    task_infras.add((cloud_name, region))
+                    task_infras.add((cloud_name, resources.region))
             infras_per_task.append(task_infras)
 
         if not infras_per_task:
@@ -1291,22 +1277,10 @@ class Optimizer:
         for infra_set in infras_per_task[1:]:
             common_infras = common_infras & infra_set
 
-        # Convert back to (Cloud, region) tuples
-        result: List[Tuple[clouds.Cloud, Optional[str]]] = []
-        for cloud_name, region in common_infras:
-            # Get Cloud object from name
-            cloud_obj = None
-            for task_cloud_candidates in task_candidates.values():
-                for cloud in task_cloud_candidates.keys():
-                    if str(cloud) == cloud_name:
-                        cloud_obj = cloud
-                        break
-                if cloud_obj:
-                    break
-            if cloud_obj:
-                result.append((cloud_obj, region))
-
-        return result
+        # Convert back to (Cloud, region) tuples using the lookup dict
+        return [(cloud_name_to_obj[cloud_name], region)
+                for cloud_name, region in common_infras
+                if cloud_name in cloud_name_to_obj]
 
     @staticmethod
     def _select_best_infra(
