@@ -3013,7 +3013,7 @@ async def serve_dashboard(full_path: str):
     # e.g. /quota, /cron
     catchall_path = os.path.join(server_constants.DASHBOARD_DIR,
                                  '[...path].html')
-    if os.path.isfile(catchall_path):
+    if safe_full_path and os.path.isfile(catchall_path):
         return fastapi.responses.FileResponse(catchall_path)
 
     # Serve index.html as a last resort.
