@@ -2983,6 +2983,13 @@ async def serve_dashboard(full_path: str):
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
+    # Try serving a pre-rendered HTML page for the path.
+    # e.g. /clusters -> clusters.html, /jobs -> jobs.html
+    html_path = os.path.join(server_constants.DASHBOARD_DIR,
+                             f'{full_path}.html')
+    if os.path.isfile(html_path):
+        return fastapi.responses.FileResponse(html_path)
+
     # Serve plugin catch-all page for any /plugins/* paths so client-side
     # routing can bootstrap correctly.
     if full_path == 'plugins' or full_path.startswith('plugins/'):
@@ -2998,8 +3005,15 @@ async def serve_dashboard(full_path: str):
         if os.path.isfile(recipe_page):
             return fastapi.responses.FileResponse(recipe_page)
 
-    # Serve index.html for client-side routing
-    # e.g. /clusters, /jobs
+    # Serve the [...path] catch-all page for any remaining paths so
+    # client-side routing can bootstrap the correct plugin page.
+    # e.g. /quota, /cron
+    catchall_path = os.path.join(server_constants.DASHBOARD_DIR,
+                                 '[...path].html')
+    if os.path.isfile(catchall_path):
+        return fastapi.responses.FileResponse(catchall_path)
+
+    # Serve index.html as a last resort.
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
