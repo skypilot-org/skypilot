@@ -1138,9 +1138,9 @@ def _resolve_request_id_prefixes(
     """Resolve request ID prefixes to full request IDs.
 
     For each user-provided request ID, checks if it's an exact match or
-    a prefix. All matching requests are included (unlike ``sky api logs``
-    which errors on ambiguity, debug-dump benefits from collecting more
-    data).
+    a prefix. All matching requests are included (same as
+    ``sky api status``, rather than erroring on ambiguity like
+    ``sky api logs``).
 
     Args:
         request_ids: List of request IDs or prefixes.
