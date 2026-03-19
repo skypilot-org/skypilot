@@ -2985,8 +2985,11 @@ async def serve_dashboard(full_path: str):
 
     # Try serving a pre-rendered HTML page for the path.
     # e.g. /clusters -> clusters.html, /jobs -> jobs.html
+    safe_full_path = full_path.lstrip('/')
+    if '..' in safe_full_path.split('/'):
+        raise fastapi.HTTPException(status_code=400, detail='Invalid path')
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
-                             f'{full_path}.html')
+                             f'{safe_full_path}.html')
     if os.path.isfile(html_path):
         return fastapi.responses.FileResponse(html_path)
 
