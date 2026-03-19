@@ -43,8 +43,8 @@ Approaches
    Use BuildKit (``enable_docker: build``) if you only need image build/push.
    Use DinD (``enable_docker: true``) if you need full ``docker run`` capabilities.
 
-Option 1: Full Docker (``enable_docker: true``)
-------------------------------------------------
+Option 1: Full Docker
+---------------------
 
 Set ``enable_docker: true`` to make the full ``docker`` CLI available inside
 the pod — you can build images, push them, and run containers
@@ -102,8 +102,8 @@ Launch and verify
    docker build -t myregistry/myimage:latest .
    docker push myregistry/myimage:latest
 
-Option 2: Build-only (``enable_docker: build``)
-------------------------------------------------
+Option 2: Build-only
+--------------------
 
 If your cluster does not allow ``privileged: true`` pods, or you only need
 to build and push images, set ``enable_docker: build``. This makes
