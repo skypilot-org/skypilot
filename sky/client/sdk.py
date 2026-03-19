@@ -3060,7 +3060,7 @@ def slurm_node_info(
 
 def _build_client_info() -> Dict[str, Any]:
     """Build client-side info for debug dumps."""
-    import sky as sky_mod  # pylint: disable=import-outside-toplevel
+    import sky  # pylint: disable=import-outside-toplevel
 
     # Get configs
     user_config: Dict[str, Any] = {}
@@ -3074,7 +3074,7 @@ def _build_client_info() -> Dict[str, Any]:
         pass  # Config may not be available
 
     return {
-        'skypilot_version': sky_mod.__version__,
+        'skypilot_version': sky.__version__,
         'skypilot_commit': getattr(sky_mod, '__commit__', 'unknown'),
         'api_version': server_constants.API_VERSION,
         'python_version': platform.python_version(),
