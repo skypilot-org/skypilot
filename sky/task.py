@@ -874,36 +874,37 @@ class Task:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)
 
-        # Resolve container_tools cache volume (if configured) to include it in
+        # Resolve enable_docker cache volume (if configured) to include it in
         # the access-mode check below.  It must NOT be added to
-        # self.volume_mounts because it is managed by the container_tools
+        # self.volume_mounts because it is managed by the Docker sidecar
         # container, not by ray-node.
-        container_tools_vol_mounts: List[volume_lib.VolumeMount] = []
-        container_tools_cfg = skypilot_config.get_nested(
-            ('kubernetes', 'container_tools'), default_value=None)
+        docker_vol_mounts: List[volume_lib.VolumeMount] = []
+        raw_docker_cfg = skypilot_config.get_nested(
+            ('kubernetes', 'enable_docker'), default_value=None)
         # Task-level override wins over the global config.
         for res in self.resources:
-            task_container_tools = (res.cluster_config_overrides.get(
-                'kubernetes', {}).get('container_tools'))
-            if task_container_tools:
-                container_tools_cfg = task_container_tools
+            task_docker_cfg = (res.cluster_config_overrides.get(
+                'kubernetes', {}).get('enable_docker'))
+            if task_docker_cfg:
+                raw_docker_cfg = task_docker_cfg
                 break
-        container_tools_vol_name = (container_tools_cfg or {}).get('volume')
-        # Only resolve and check the container_tools volume if it is not already
+        # cache_volume only exists in the detailed (dict) form.
+        docker_vol_name = (raw_docker_cfg if isinstance(raw_docker_cfg, dict)
+                           else {}).get('cache_volume')
+        # Only resolve and check the enable_docker volume if it is not already
         # present in the task's own volume_mounts (same name = same PVC, the
         # access-mode check will run on it via the normal task-volume path).
-        if container_tools_vol_name and not any(
-                vm.volume_name == container_tools_vol_name
-                for vm in volume_mounts):
+        if docker_vol_name and not any(vm.volume_name == docker_vol_name
+                                       for vm in volume_mounts):
             try:
-                container_tools_vol_mounts.append(
+                docker_vol_mounts.append(
                     volume_lib.VolumeMount.resolve(
                         path='',
-                        volume_name=container_tools_vol_name,
+                        volume_name=docker_vol_name,
                     ))
             except exceptions.VolumeNotFoundError:
                 pass  # Will be surfaced later during provisioning.
-        all_vols_to_validate = volume_mounts + container_tools_vol_mounts
+        all_vols_to_validate = volume_mounts + docker_vol_mounts
 
         # Disable certain access modes
         disabled_modes = {}

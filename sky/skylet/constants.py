@@ -492,7 +492,7 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
-    ('kubernetes', 'container_tools'),
+    ('kubernetes', 'enable_docker'),
     ('azure', 'remote_identity'),
     ('azure', 'vpc_name'),
     ('gcp', 'managed_instance_group'),

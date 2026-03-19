@@ -1437,7 +1437,7 @@ def test_combine_pod_config_fields_ssh_cloud():
                                                  context=ssh_context)
 
         # Verify that get_effective_region_config was called with 'ssh' cloud
-        # and context without the "ssh-" prefix, once for container_tools and
+        # and context without the "ssh-" prefix, once for enable_docker and
         # once for pod_config.
         assert mock_get_config.call_count == 2
         mock_get_config.assert_has_calls([
@@ -1447,7 +1447,7 @@ def test_combine_pod_config_fields_ssh_cloud():
                  default_value={}),
             call(cloud='ssh',
                  region='my-cluster',
-                 keys=('container_tools',),
+                 keys=('enable_docker',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -1509,7 +1509,7 @@ def test_combine_pod_config_fields_kubernetes_cloud():
                                                  context=k8s_context)
 
         # Verify that get_effective_region_config was called with 'kubernetes'
-        # cloud and the context as-is, once for container_tools and once for
+        # cloud and the context as-is, once for enable_docker and once for
         # pod_config.
         assert mock_get_config.call_count == 2
         mock_get_config.assert_has_calls([
@@ -1519,7 +1519,7 @@ def test_combine_pod_config_fields_kubernetes_cloud():
                  default_value={}),
             call(cloud='kubernetes',
                  region=k8s_context,
-                 keys=('container_tools',),
+                 keys=('enable_docker',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -2010,7 +2010,7 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
                  default_value={}),
             call(cloud='ssh',
                  region='test-cluster',
-                 keys=('container_tools',),
+                 keys=('enable_docker',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -2047,7 +2047,7 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
                  default_value={}),
             call(cloud='kubernetes',
                  region=k8s_context,
-                 keys=('container_tools',),
+                 keys=('enable_docker',),
                  default_value=None),
         ],
                                          any_order=False)
@@ -2987,7 +2987,7 @@ class TestGetHandledTaintKeys(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Tests for kubernetes.container_tools shorthand config
+# Tests for kubernetes.enable_docker shorthand config
 # ---------------------------------------------------------------------------
 
 _BASE_CLUSTER_YAML = {
@@ -3016,46 +3016,84 @@ _BASE_CLUSTER_YAML = {
 }
 
 
-class TestContainerToolsToPodConfig(unittest.TestCase):
-    """Tests for _container_tools_to_pod_config()."""
+class TestDockerSidecarToPodConfig(unittest.TestCase):
+    """Tests for _docker_sidecar_to_pod_config()."""
 
-    def _get_result(self, container_tools_type):
-        import copy
-        cfg = {'type': container_tools_type}
-        return utils._container_tools_to_pod_config(cfg)
+    def _get_result(self, mode):
+        cfg = {'enabled': mode, 'cache_volume': None}
+        return utils._docker_sidecar_to_pod_config(cfg)
 
     # ---- DinD ----
 
     def test_dind_has_ray_node_env(self):
-        pod_cfg = self._get_result('dind')
+        pod_cfg = self._get_result('all')
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         env_names = [e['name'] for e in ray['env']]
         assert 'DOCKER_HOST' in env_names
 
-    def test_dind_container_tools_is_privileged(self):
-        pod_cfg = self._get_result('dind')
+    def test_dind_is_privileged(self):
+        pod_cfg = self._get_result('all')
         containers = pod_cfg['spec']['containers']
         dind = next(c for c in containers if c['name'] == 'dind')
         assert dind['securityContext']['privileged'] is True
 
     def test_dind_no_cache_volume_by_default(self):
         """No cache volume is injected; PVC is added later in _create_pods."""
-        pod_cfg = self._get_result('dind')
+        pod_cfg = self._get_result('all')
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'dind-storage' not in volume_names
+
+    def test_dind_has_init_container(self):
+        pod_cfg = self._get_result('all')
+        init_containers = pod_cfg['spec']['initContainers']
+        assert len(init_containers) == 1
+        assert init_containers[0]['name'] == 'install-docker-cli'
+        assert 'docker' in init_containers[0]['image']
+
+    def test_dind_has_docker_tools_volume(self):
+        pod_cfg = self._get_result('all')
+        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
+        assert 'docker-tools' in volume_names
+
+    def test_dind_ray_node_has_docker_tools_mount(self):
+        pod_cfg = self._get_result('all')
+        containers = pod_cfg['spec']['containers']
+        ray = next(c for c in containers if c['name'] == 'ray-node')
+        mount_names = [m['name'] for m in ray['volumeMounts']]
+        assert 'docker-tools' in mount_names
+
+    def test_dind_init_copies_buildx_plugin(self):
+        """DinD mode also installs buildx for multi-platform builds."""
+        pod_cfg = self._get_result('all')
+        init_containers = pod_cfg['spec']['initContainers']
+        cmd = init_containers[0]['command'][-1]
+        assert 'docker-buildx' in cmd
+        assert 'cli-plugins' in cmd
+
+    def test_dind_ray_node_has_post_start_hook(self):
+        pod_cfg = self._get_result('all')
+        containers = pod_cfg['spec']['containers']
+        ray = next(c for c in containers if c['name'] == 'ray-node')
+        assert 'lifecycle' in ray
+        assert 'postStart' in ray['lifecycle']
+        cmd = ray['lifecycle']['postStart']['exec']['command'][-1]
+        assert 'sudo ln -sf' in cmd
+        assert '/usr/local/bin/docker' in cmd
+        assert 'cli-plugins' in cmd
+        assert '|| true' in cmd
 
     # ---- BuildKit ----
 
     def test_buildkit_has_ray_node_env(self):
-        pod_cfg = self._get_result('buildkit')
+        pod_cfg = self._get_result('build')
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         env_names = [e['name'] for e in ray['env']]
         assert 'BUILDKIT_HOST' in env_names
 
-    def test_buildkit_container_tools_runs_as_user_1000(self):
-        pod_cfg = self._get_result('buildkit')
+    def test_buildkit_runs_as_user_1000(self):
+        pod_cfg = self._get_result('build')
         containers = pod_cfg['spec']['containers']
         bkd = next(c for c in containers if c['name'] == 'buildkitd')
         assert bkd['securityContext']['runAsUser'] == 1000
@@ -3063,44 +3101,161 @@ class TestContainerToolsToPodConfig(unittest.TestCase):
 
     def test_buildkit_no_cache_volume_by_default(self):
         """No cache volume is injected; PVC is added later in _create_pods."""
-        pod_cfg = self._get_result('buildkit')
+        pod_cfg = self._get_result('build')
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'buildkit-cache' not in volume_names
 
-    # ---- get_container_tools_defaults ----
+    def test_buildkit_has_init_container(self):
+        pod_cfg = self._get_result('build')
+        init_containers = pod_cfg['spec']['initContainers']
+        assert len(init_containers) == 1
+        assert init_containers[0]['name'] == 'install-docker-cli'
+
+    def test_buildkit_init_copies_buildx_plugin(self):
+        pod_cfg = self._get_result('build')
+        init_containers = pod_cfg['spec']['initContainers']
+        cmd = init_containers[0]['command'][-1]
+        assert 'docker-buildx' in cmd
+        assert 'cli-plugins' in cmd
+
+    def test_buildkit_has_docker_tools_volume(self):
+        pod_cfg = self._get_result('build')
+        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
+        assert 'docker-tools' in volume_names
+
+    def test_buildkit_ray_node_has_docker_tools_mount(self):
+        pod_cfg = self._get_result('build')
+        containers = pod_cfg['spec']['containers']
+        ray = next(c for c in containers if c['name'] == 'ray-node')
+        mount_names = [m['name'] for m in ray['volumeMounts']]
+        assert 'docker-tools' in mount_names
+
+    def test_buildkit_ray_node_post_start_configures_buildx(self):
+        pod_cfg = self._get_result('build')
+        containers = pod_cfg['spec']['containers']
+        ray = next(c for c in containers if c['name'] == 'ray-node')
+        assert 'lifecycle' in ray
+        cmd = ray['lifecycle']['postStart']['exec']['command'][-1]
+        assert 'docker buildx create' in cmd
+        assert 'skypilot-builder' in cmd
+        assert 'cli-plugins' in cmd
+        assert '|| true' in cmd
+
+    # ---- get_docker_sidecar_defaults ----
 
     def test_get_defaults_returns_valid_dind(self):
-        defaults = utils.get_container_tools_defaults('dind')
+        defaults = utils.get_docker_sidecar_defaults('all')
         assert 'image' in defaults
+        assert 'cli_image' in defaults
         assert 'cache_vol_name' in defaults
         assert 'cache_mount' in defaults
 
     def test_get_defaults_returns_valid_buildkit(self):
-        defaults = utils.get_container_tools_defaults('buildkit')
+        defaults = utils.get_docker_sidecar_defaults('build')
         assert 'image' in defaults
+        assert 'cli_image' in defaults
         assert defaults['cache_mount'] == '/home/user/.local/share/buildkit'
 
     def test_get_defaults_unknown_type_raises(self):
         with self.assertRaises(ValueError) as ctx:
-            utils.get_container_tools_defaults('unknown')
-        assert 'Unknown container_tools type' in str(ctx.exception)
+            utils.get_docker_sidecar_defaults('unknown')
+        assert 'Unknown enable_docker mode' in str(ctx.exception)
         assert "'unknown'" in str(ctx.exception)
 
 
-class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
-    """Tests for combine_pod_config_fields() with container_tools config."""
+class TestNormalizeEnableDockerConfig(unittest.TestCase):
+    """Tests for normalize_enable_docker_config()."""
+
+    # ---- disabled / None ----
+
+    def test_none_returns_none(self):
+        assert utils.normalize_enable_docker_config(None) is None
+
+    def test_false_returns_none(self):
+        assert utils.normalize_enable_docker_config(False) is None
+
+    # ---- simple bool / string ----
+
+    def test_true_returns_all(self):
+        result = utils.normalize_enable_docker_config(True)
+        assert result == {'enabled': 'all', 'cache_volume': None}
+
+    def test_string_all_returns_all(self):
+        result = utils.normalize_enable_docker_config('all')
+        assert result == {'enabled': 'all', 'cache_volume': None}
+
+    def test_string_build_returns_build(self):
+        result = utils.normalize_enable_docker_config('build')
+        assert result == {'enabled': 'build', 'cache_volume': None}
+
+    # ---- dict form ----
+
+    def test_dict_enabled_true(self):
+        result = utils.normalize_enable_docker_config({'enabled': True})
+        assert result == {'enabled': 'all', 'cache_volume': None}
+
+    def test_dict_enabled_all(self):
+        result = utils.normalize_enable_docker_config({'enabled': 'all'})
+        assert result == {'enabled': 'all', 'cache_volume': None}
+
+    def test_dict_enabled_build(self):
+        result = utils.normalize_enable_docker_config({'enabled': 'build'})
+        assert result == {'enabled': 'build', 'cache_volume': None}
+
+    def test_dict_enabled_false_returns_none(self):
+        result = utils.normalize_enable_docker_config({'enabled': False})
+        assert result is None
+
+    def test_dict_with_cache_volume(self):
+        result = utils.normalize_enable_docker_config({
+            'enabled': True,
+            'cache_volume': 'my-cache',
+        })
+        assert result == {'enabled': 'all', 'cache_volume': 'my-cache'}
+
+    def test_dict_build_with_cache_volume(self):
+        result = utils.normalize_enable_docker_config({
+            'enabled': 'build',
+            'cache_volume': 'bk-cache',
+        })
+        assert result == {'enabled': 'build', 'cache_volume': 'bk-cache'}
+
+    # ---- edge cases ----
+
+    def test_empty_dict_returns_none(self):
+        """Empty dict (e.g. from config default_value) is treated as disabled."""
+        assert utils.normalize_enable_docker_config({}) is None
+
+    def test_dict_without_enabled_key_returns_none(self):
+        """Dict missing 'enabled' key is treated as disabled."""
+        assert utils.normalize_enable_docker_config({'cache_volume': 'vol'
+                                                    }) is None
+
+    def test_invalid_value_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            utils.normalize_enable_docker_config(42)
+        assert 'Invalid enable_docker value' in str(ctx.exception)
+
+    def test_invalid_value_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            utils.normalize_enable_docker_config('abcd')
+        assert 'Invalid enable_docker value' in str(ctx.exception)
+
+
+class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
+    """Tests for combine_pod_config_fields() with enable_docker config."""
 
     def _base_yaml(self):
         import copy
         return copy.deepcopy(_BASE_CLUSTER_YAML)
 
-    def test_dind_container_tools_injected_from_global_config(self):
-        """ContainerTools containers and volumes appear when global container_tools config set."""
+    def test_dind_injected_from_global_config(self):
+        """DinD containers and volumes appear when global enable_docker is true."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('container_tools',):
-                return {'type': 'dind'}
+            if keys == ('enable_docker',):
+                return True
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3122,13 +3277,13 @@ class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
         # No cache volume by default; PVC is injected later in _create_pods.
         assert 'dind-storage' not in volume_names
 
-    def test_buildkit_container_tools_injected_from_global_config(self):
-        """BuildKit container_tools is injected correctly."""
+    def test_buildkit_injected_from_global_config(self):
+        """BuildKit sidecar is injected when enable_docker is 'build'."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('container_tools',):
-                return {'type': 'buildkit'}
+            if keys == ('enable_docker',):
+                return 'build'
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3149,18 +3304,18 @@ class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
         # No cache volume by default; PVC is injected later in _create_pods.
         assert 'buildkit-cache' not in volume_names
 
-    def test_task_container_tools_overrides_global(self):
-        """Task-level container_tools config fully replaces global container_tools config."""
+    def test_task_enable_docker_overrides_global(self):
+        """Task-level enable_docker config fully replaces global config."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('container_tools',):
+            if keys == ('enable_docker',):
                 # Global says dind
-                return {'type': 'dind'}
+                return True
             return default_value
 
         # Task overrides to buildkit
-        overrides = {'kubernetes': {'container_tools': {'type': 'buildkit'}}}
+        overrides = {'kubernetes': {'enable_docker': 'build'}}
 
         with patch('sky.skypilot_config.get_effective_region_config',
                    side_effect=mock_get_config):
@@ -3177,15 +3332,15 @@ class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
         assert 'buildkitd' in container_names
         assert 'dind' not in container_names
 
-    def test_pod_config_overrides_container_tools(self):
-        """Explicit pod_config takes precedence over auto-injected container_tools."""
+    def test_pod_config_overrides_enable_docker(self):
+        """Explicit pod_config takes precedence over auto-injected enable_docker."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('container_tools',):
-                return {'type': 'dind'}
+            if keys == ('enable_docker',):
+                return True
             if keys == ('pod_config',):
-                # User overrides the dind container_tools image
+                # User overrides the dind image
                 return {
                     'spec': {
                         'containers': [{
@@ -3211,13 +3366,13 @@ class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
             c for c in node_cfg['spec']['containers'] if c['name'] == 'dind')
         assert dind['image'] == 'docker:custom-image'
 
-    def test_container_tools_config_stored_in_provider(self):
-        """Effective container_tools config is persisted into provider for Phase 2."""
+    def test_docker_config_stored_in_provider(self):
+        """Effective docker config is persisted into provider for Phase 2."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('container_tools',):
-                return {'type': 'dind', 'volume': 'my-cache'}
+            if keys == ('enable_docker',):
+                return {'enabled': True, 'cache_volume': 'my-cache'}
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3229,17 +3384,17 @@ class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
                 cloud=sky_clouds.Kubernetes(),
                 context='test-ctx')
 
-        assert result['provider']['container_tools_config'] == {
-            'type': 'dind',
-            'volume': 'my-cache'
+        assert result['provider']['docker_config'] == {
+            'enabled': 'all',
+            'cache_volume': 'my-cache',
         }
 
-    def test_no_container_tools_config_no_injection(self):
-        """No container_tools containers when container_tools config is absent."""
+    def test_no_enable_docker_config_no_injection(self):
+        """No sidecar containers when enable_docker config is absent."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            # container_tools absent; pod_config returns empty dict
+            # enable_docker absent; pod_config returns empty dict
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3258,14 +3413,17 @@ class TestCombinePodConfigFieldsWithContainerTools(unittest.TestCase):
         assert 'buildkitd' not in container_names
 
 
-class TestInjectContainerToolsCacheVolume(unittest.TestCase):
-    """Tests for inject_container_tools_cache_volume()."""
+class TestInjectDockerCacheVolume(unittest.TestCase):
+    """Tests for inject_docker_cache_volume()."""
+
+    _DIND_CFG = {'enabled': 'all', 'cache_volume': None}
+    _BUILDKIT_CFG = {'enabled': 'build', 'cache_volume': None}
 
     def _make_pod_spec(self,
                        ctr_name='dind',
                        existing_mounts=None,
                        existing_volumes=None):
-        """Build a minimal pod spec with one image-builder container."""
+        """Build a minimal pod spec with one sidecar container."""
         ctr = {'name': ctr_name}
         if existing_mounts is not None:
             ctr['volumeMounts'] = existing_mounts
@@ -3290,10 +3448,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
 
     def test_dind_no_pvc_adds_emptydir(self):
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name=None,
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name=None,
+                                         context='ctx',
+                                         namespace='ns')
 
         vols = pod['spec']['volumes']
         assert len(vols) == 1
@@ -3310,10 +3469,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
 
     def test_buildkit_no_pvc_adds_emptydir(self):
         pod = self._make_pod_spec(ctr_name='buildkitd')
-        utils.inject_container_tools_cache_volume(pod, {'type': 'buildkit'},
-                                                  pvc_name=None,
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name=None,
+                                         context='ctx',
+                                         namespace='ns')
 
         vols = pod['spec']['volumes']
         assert len(vols) == 1
@@ -3329,10 +3489,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
 
     def test_dind_pvc_adds_volume_and_subpath(self):
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name='my-pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         vols = pod['spec']['volumes']
         assert len(vols) == 1
@@ -3348,10 +3509,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
     def test_dind_pvc_no_fsgroup(self):
         """DinD runs privileged — no fsGroup needed."""
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name='my-pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         assert 'securityContext' not in pod['spec']
 
@@ -3359,10 +3521,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
 
     def test_buildkit_pvc_adds_volume_and_fsgroup(self):
         pod = self._make_pod_spec(ctr_name='buildkitd')
-        utils.inject_container_tools_cache_volume(pod, {'type': 'buildkit'},
-                                                  pvc_name='my-pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         vols = pod['spec']['volumes']
         assert vols[0]['persistentVolumeClaim']['claimName'] == 'my-pvc'
@@ -3381,10 +3544,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         """If user already set fsGroup, don't override it."""
         pod = self._make_pod_spec(ctr_name='buildkitd')
         pod['spec']['securityContext'] = {'fsGroup': 2000}
-        utils.inject_container_tools_cache_volume(pod, {'type': 'buildkit'},
-                                                  pvc_name='my-pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._BUILDKIT_CFG,
+                                         pvc_name='my-pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         assert pod['spec']['securityContext']['fsGroup'] == 2000
 
@@ -3396,14 +3560,16 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         pod2 = self._make_pod_spec(ctr_name='dind')
         pod2['metadata']['name'] = 'pod-2'
 
-        utils.inject_container_tools_cache_volume(pod1, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
-        utils.inject_container_tools_cache_volume(pod2, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod1,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx',
+                                         namespace='ns')
+        utils.inject_docker_cache_volume(pod2,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         sp1 = pod1['spec']['containers'][1]['volumeMounts'][0]['subPath']
         sp2 = pod2['spec']['containers'][1]['volumeMounts'][0]['subPath']
@@ -3413,14 +3579,16 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         pod_a = self._make_pod_spec(ctr_name='dind')
         pod_b = self._make_pod_spec(ctr_name='dind')
 
-        utils.inject_container_tools_cache_volume(pod_a, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context='ctx-a',
-                                                  namespace='ns')
-        utils.inject_container_tools_cache_volume(pod_b, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context='ctx-b',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod_a,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx-a',
+                                         namespace='ns')
+        utils.inject_docker_cache_volume(pod_b,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx-b',
+                                         namespace='ns')
 
         sp_a = pod_a['spec']['containers'][1]['volumeMounts'][0]['subPath']
         sp_b = pod_b['spec']['containers'][1]['volumeMounts'][0]['subPath']
@@ -3432,10 +3600,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         """If user already has a volumeMount at the cache path, skip."""
         existing = [{'name': 'user-vol', 'mountPath': '/var/lib/docker'}]
         pod = self._make_pod_spec(ctr_name='dind', existing_mounts=existing)
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         # No new volumes or mounts added.
         assert 'volumes' not in pod['spec']
@@ -3456,10 +3625,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         }]
         pod = self._make_pod_spec(ctr_name='dind',
                                   existing_volumes=existing_vols)
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name='shared-pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='shared-pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         # Should NOT add a second volume entry.
         assert len(pod['spec']['volumes']) == 1
@@ -3471,7 +3641,7 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         assert dind_ctr['volumeMounts'][0]['name'] == 'task-data'
 
     def test_adds_new_volume_when_pvc_differs(self):
-        """Different PVC → new volume entry added."""
+        """Different PVC -> new volume entry added."""
         existing_vols = [{
             'name': 'other-vol',
             'persistentVolumeClaim': {
@@ -3480,10 +3650,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         }]
         pod = self._make_pod_spec(ctr_name='dind',
                                   existing_volumes=existing_vols)
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name='cache-pvc',
-                                                  context='ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='cache-pvc',
+                                         context='ctx',
+                                         namespace='ns')
 
         assert len(pod['spec']['volumes']) == 2
         pvc_names = [
@@ -3497,10 +3668,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
     def test_pvc_subpath_with_none_context(self):
         """context=None should not crash; subPath uses empty string."""
         pod = self._make_pod_spec(ctr_name='dind')
-        utils.inject_container_tools_cache_volume(pod, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context=None,
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context=None,
+                                         namespace='ns')
 
         dind_ctr = next(
             c for c in pod['spec']['containers'] if c['name'] == 'dind')
@@ -3508,10 +3680,11 @@ class TestInjectContainerToolsCacheVolume(unittest.TestCase):
         assert vm['subPath'].startswith('var_lib_docker_')
         # Verify a different context produces a different subPath.
         pod2 = self._make_pod_spec(ctr_name='dind')
-        utils.inject_container_tools_cache_volume(pod2, {'type': 'dind'},
-                                                  pvc_name='pvc',
-                                                  context='real-ctx',
-                                                  namespace='ns')
+        utils.inject_docker_cache_volume(pod2,
+                                         self._DIND_CFG,
+                                         pvc_name='pvc',
+                                         context='real-ctx',
+                                         namespace='ns')
         vm2 = next(c for c in pod2['spec']['containers']
                    if c['name'] == 'dind')['volumeMounts'][0]
         assert vm['subPath'] != vm2['subPath']

@@ -2896,39 +2896,81 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
-# Default images for each container_tools type.
-_CONTAINER_TOOLS_DEFAULTS = {
-    'dind': {
+# enable_docker mode constants.
+DOCKER_MODE_ALL = 'all'
+DOCKER_MODE_BUILD = 'build'
+# Sidecar container names.
+_DIND_CONTAINER_NAME = 'dind'
+_BUILDKITD_CONTAINER_NAME = 'buildkitd'
+# Cache subPath prefixes (used to isolate per-pod cache in a shared PVC).
+_DIND_CACHE_SUBPATH_PREFIX = 'var_lib_docker'
+_BUILDKIT_CACHE_SUBPATH_PREFIX = 'buildkit_cache'
+
+# Default images for each enable_docker mode.
+_DOCKER_SIDECAR_DEFAULTS = {
+    DOCKER_MODE_ALL: {
         'image': 'docker:29.3-dind',
+        'cli_image': 'docker:29.3-cli',
         'cache_vol_name': 'dind-storage',
         'cache_mount': '/var/lib/docker',
     },
-    'buildkit': {
+    DOCKER_MODE_BUILD: {
         'image': 'moby/buildkit:v0.28.0-rootless',
+        'cli_image': 'docker:29.3-cli',
         'cache_vol_name': 'buildkit-cache',
         'cache_mount': '/home/user/.local/share/buildkit',
     },
 }
 
 
-def get_container_tools_defaults(container_tools_type: str) -> Dict[str, str]:
-    """Return a copy of the default config for the given container tools type."""
-    defaults = _CONTAINER_TOOLS_DEFAULTS.get(container_tools_type)
+def normalize_enable_docker_config(
+    raw: Union[bool, str, Dict[str, Any], None],) -> Optional[Dict[str, Any]]:
+    """Normalize ``enable_docker`` config into a canonical dict.
+
+    Returns ``None`` when disabled, or:
+        ``{'enabled': 'all' | 'build', 'cache_volume': Optional[str]}``
+    """
+    if raw is None or raw is False:
+        return None
+    if raw is True or raw == DOCKER_MODE_ALL:
+        return {'enabled': DOCKER_MODE_ALL, 'cache_volume': None}
+    if raw == DOCKER_MODE_BUILD:
+        return {'enabled': DOCKER_MODE_BUILD, 'cache_volume': None}
+    if isinstance(raw, dict):
+        if 'enabled' not in raw:
+            # Empty dict or dict without 'enabled' key (e.g. default_value
+            # from config lookup) — treat as disabled.
+            return None
+        enabled = raw['enabled']
+        if enabled is False:
+            return None
+        mode = (DOCKER_MODE_ALL if
+                (enabled is True or
+                 enabled == DOCKER_MODE_ALL) else DOCKER_MODE_BUILD)
+        return {
+            'enabled': mode,
+            'cache_volume': raw.get('cache_volume'),
+        }
+    raise ValueError(f'Invalid enable_docker value: {raw!r}')
+
+
+def get_docker_sidecar_defaults(mode: str) -> Dict[str, str]:
+    """Return a copy of the default config for the given docker mode."""
+    defaults = _DOCKER_SIDECAR_DEFAULTS.get(mode)
     if defaults is None:
-        raise ValueError(
-            f'Unknown container_tools type: {container_tools_type!r}. '
-            f'Supported: {list(_CONTAINER_TOOLS_DEFAULTS)}')
+        raise ValueError(f'Unknown enable_docker mode: {mode!r}. '
+                         f'Supported: {list(_DOCKER_SIDECAR_DEFAULTS)}')
     return dict(defaults)
 
 
-def inject_container_tools_cache_volume(
+def inject_docker_cache_volume(
     pod_spec: Dict[str, Any],
-    container_tools_config: Dict[str, Any],
+    docker_config: Dict[str, Any],
     pvc_name: Optional[str],
     context: Optional[str],
     namespace: str,
 ) -> None:
-    """Inject a cache volume + volumeMount into the container tools container.
+    """Inject a cache volume + volumeMount into the Docker sidecar container.
 
     Mutates *pod_spec* in place.
 
@@ -2942,9 +2984,10 @@ def inject_container_tools_cache_volume(
     * If the user already mounted something at the cache path via
       ``pod_config``, this function is a no-op.
     """
-    runtime_type = container_tools_config['type']
-    defaults = _CONTAINER_TOOLS_DEFAULTS[runtime_type]
-    ctr_name = 'dind' if runtime_type == 'dind' else 'buildkitd'
+    mode = docker_config['enabled']
+    defaults = _DOCKER_SIDECAR_DEFAULTS[mode]
+    ctr_name = (_DIND_CONTAINER_NAME
+                if mode == DOCKER_MODE_ALL else _BUILDKITD_CONTAINER_NAME)
     cache_vol_name = defaults['cache_vol_name']
     cache_mount = defaults['cache_mount']
 
@@ -2961,13 +3004,13 @@ def inject_container_tools_cache_volume(
         # PVC path: per-pod subPath for isolation.
         # For rootless buildkitd (uid/gid 1000), set fsGroup so the PVC
         # mount is writable.
-        if runtime_type == 'buildkit':
+        if mode == DOCKER_MODE_BUILD:
             pod_sec = pod_spec['spec'].setdefault('securityContext', {})
             pod_sec.setdefault('fsGroup', 1000)
             pod_sec.setdefault('fsGroupChangePolicy', 'OnRootMismatch')
 
-        prefix = ('var_lib_docker'
-                  if runtime_type == 'dind' else 'buildkit_cache')
+        prefix = (_DIND_CACHE_SUBPATH_PREFIX if mode == DOCKER_MODE_ALL else
+                  _BUILDKIT_CACHE_SUBPATH_PREFIX)
         pod_name = pod_spec['metadata']['name']
         hash_key = f'{context or ""}:{namespace}:{pod_name}'
         sub_path = (f'{prefix}_'
@@ -3013,21 +3056,78 @@ def inject_container_tools_cache_volume(
                 })
 
 
-def _container_tools_to_pod_config(
-        container_tools_cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Translate a ``kubernetes.container_tools`` config into a pod_config fragment.
+def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate a normalized ``enable_docker`` config into a pod_config fragment.
+
+    The returned pod_config includes:
+    - A sidecar container (dind or buildkitd) with shared socket volume.
+    - An init container that copies the docker CLI (and buildx plugin for
+      build mode) from the ``docker:cli`` image into a shared emptyDir.
+    - A ``postStart`` lifecycle hook on the ``ray-node`` container that
+      symlinks the extracted binaries into ``/usr/local/bin`` (and configures
+      ``docker buildx`` for build mode).
 
     No cache volume is created here.  If the user specified a SkyPilot volume
-    (``container_tools_cfg['volume']``), the PVC volume and volumeMount are
+    (``docker_cfg['cache_volume']``), the PVC volume and volumeMount are
     injected later in ``_create_pods()`` once the pod name is known (so that a
     per-pod ``subPath`` can be set).
     """
-    container_tools_type = container_tools_cfg['type']
-    defaults = get_container_tools_defaults(container_tools_type)
+    mode = docker_cfg['enabled']
+    defaults = get_docker_sidecar_defaults(mode)
 
-    if container_tools_type == 'dind':
+    # -- Init container: extract docker CLI + buildx plugin ---------------
+    # Both modes install docker CLI and the buildx plugin.  In 'all' mode
+    # `docker build` works via DinD, but buildx adds multi-platform build
+    # support (`docker buildx build --platform linux/amd64,linux/arm64`).
+    init_command = ('mkdir -p /docker-tools/bin /docker-tools/cli-plugins && '
+                    'cp /usr/local/bin/docker /docker-tools/bin/ && '
+                    'cp /usr/local/libexec/docker/cli-plugins/docker-buildx '
+                    '/docker-tools/cli-plugins/')
+
+    init_containers = [{
+        'name': 'install-docker-cli',
+        'image': defaults['cli_image'],
+        'command': ['sh', '-c', init_command],
+        'volumeMounts': [{
+            'name': 'docker-tools',
+            'mountPath': '/docker-tools',
+        }],
+    }]
+
+    # -- postStart hook: symlink binaries into PATH ----------------------
+    # Common: symlink docker + buildx plugin into well-known locations.
+    post_start_cmds = [
+        'sudo ln -sf /docker-tools/bin/docker /usr/local/bin/docker'
+        ' || true',
+        'mkdir -p $HOME/.docker/cli-plugins || true',
+        'ln -sf /docker-tools/cli-plugins/docker-buildx'
+        ' $HOME/.docker/cli-plugins/docker-buildx || true',
+    ]
+    if mode == DOCKER_MODE_BUILD:
+        # Register the BuildKit sidecar as a remote buildx builder so
+        # `docker buildx build` works out of the box.
+        post_start_cmds += [
+            'docker buildx create --name skypilot-builder'
+            ' --driver remote'
+            ' unix:///run/buildkit/buildkitd.sock 2>/dev/null || true',
+            'docker buildx use skypilot-builder'
+            ' 2>/dev/null || true',
+        ]
+    post_start_cmd = ' && '.join(post_start_cmds)
+
+    lifecycle = {
+        'postStart': {
+            'exec': {
+                'command': ['sh', '-c', post_start_cmd],
+            }
+        }
+    }
+
+    # -- Build the pod_config fragment -----------------------------------
+    if mode == DOCKER_MODE_ALL:
         pod_cfg: Dict[str, Any] = {
             'spec': {
+                'initContainers': init_containers,
                 'containers': [
                     {
                         'name': 'ray-node',
@@ -3035,13 +3135,20 @@ def _container_tools_to_pod_config(
                             'name': 'DOCKER_HOST',
                             'value': 'unix:///var/run/dind/docker.sock',
                         }],
-                        'volumeMounts': [{
-                            'name': 'docker-sock-dir',
-                            'mountPath': '/var/run/dind',
-                        }],
+                        'volumeMounts': [
+                            {
+                                'name': 'docker-sock-dir',
+                                'mountPath': '/var/run/dind',
+                            },
+                            {
+                                'name': 'docker-tools',
+                                'mountPath': '/docker-tools',
+                            },
+                        ],
+                        'lifecycle': lifecycle,
                     },
                     {
-                        'name': 'dind',
+                        'name': _DIND_CONTAINER_NAME,
                         'image': defaults['image'],
                         'securityContext': {
                             'privileged': True
@@ -3060,16 +3167,23 @@ def _container_tools_to_pod_config(
                         }],
                     },
                 ],
-                'volumes': [{
-                    'name': 'docker-sock-dir',
-                    'emptyDir': {}
-                }],
+                'volumes': [
+                    {
+                        'name': 'docker-sock-dir',
+                        'emptyDir': {}
+                    },
+                    {
+                        'name': 'docker-tools',
+                        'emptyDir': {}
+                    },
+                ],
             }
         }
     else:
         # buildkit
         pod_cfg = {
             'spec': {
+                'initContainers': init_containers,
                 'containers': [
                     {
                         'name': 'ray-node',
@@ -3077,13 +3191,20 @@ def _container_tools_to_pod_config(
                             'name': 'BUILDKIT_HOST',
                             'value': 'unix:///run/buildkit/buildkitd.sock',
                         }],
-                        'volumeMounts': [{
-                            'name': 'buildkit-sock',
-                            'mountPath': '/run/buildkit',
-                        }],
+                        'volumeMounts': [
+                            {
+                                'name': 'buildkit-sock',
+                                'mountPath': '/run/buildkit',
+                            },
+                            {
+                                'name': 'docker-tools',
+                                'mountPath': '/docker-tools',
+                            },
+                        ],
+                        'lifecycle': lifecycle,
                     },
                     {
-                        'name': 'buildkitd',
+                        'name': _BUILDKITD_CONTAINER_NAME,
                         'image': defaults['image'],
                         'args': [
                             '--addr=unix:///run/buildkit/buildkitd.sock',
@@ -3105,10 +3226,16 @@ def _container_tools_to_pod_config(
                         }],
                     },
                 ],
-                'volumes': [{
-                    'name': 'buildkit-sock',
-                    'emptyDir': {}
-                }],
+                'volumes': [
+                    {
+                        'name': 'buildkit-sock',
+                        'emptyDir': {}
+                    },
+                    {
+                        'name': 'docker-tools',
+                        'emptyDir': {}
+                    },
+                ],
             }
         }
     return pod_cfg
@@ -3182,32 +3309,33 @@ def combine_pod_config_fields(
     node_config = (merged_cluster_yaml_obj['available_node_types']
                    ['ray_head_default']['node_config'])
 
-    # --- ContainerTools injection (DinD / BuildKit) ---
-    # ContainerTools is the base layer; pod_config merges on top (pod_config wins).
-    container_tools_cfg = skypilot_config.get_effective_region_config(
+    # --- Docker sidecar injection (DinD / BuildKit) ---
+    # enable_docker is the base layer; pod_config merges on top (pod_config
+    # wins).
+    raw_docker_cfg = skypilot_config.get_effective_region_config(
         cloud=cloud_str,
         region=context_str,
-        keys=('container_tools',),
+        keys=('enable_docker',),
         default_value=None)
-    task_container_tools_cfg = config_utils.get_cloud_config_value_from_dict(
+    task_raw_docker_cfg = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
         cloud=cloud_str,
         region=context_str,
-        keys=('container_tools',),
+        keys=('enable_docker',),
         default_value=None)
-    if task_container_tools_cfg:
-        container_tools_cfg = task_container_tools_cfg
-    if container_tools_cfg:
-        container_tools_pod_cfg = _container_tools_to_pod_config(
-            container_tools_cfg)
-        config_utils.merge_k8s_configs(node_config, container_tools_pod_cfg)
-        # Persist effective container_tools config in provider.
+    if task_raw_docker_cfg is not None:
+        raw_docker_cfg = task_raw_docker_cfg
+    docker_cfg = normalize_enable_docker_config(raw_docker_cfg)
+    if docker_cfg:
+        docker_pod_cfg = _docker_sidecar_to_pod_config(docker_cfg)
+        config_utils.merge_k8s_configs(node_config, docker_pod_cfg)
+        # Persist effective docker config in provider for use in instance.py.
         if 'provider' in merged_cluster_yaml_obj:
-            merged_cluster_yaml_obj['provider'][
-                'container_tools_config'] = container_tools_cfg
+            merged_cluster_yaml_obj['provider']['docker_config'] = docker_cfg
 
     # Merge the kubernetes pod_config into the YAML for both head and worker
-    # nodes. This comes after container_tools so explicit pod_config wins on conflicts.
+    # nodes. This comes after enable_docker so explicit pod_config wins on
+    # conflicts.
     config_utils.merge_k8s_configs(node_config, kubernetes_config)
     return merged_cluster_yaml_obj
 

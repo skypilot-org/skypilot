@@ -1,0 +1,13 @@
+resources:
+  cpus: 2+
+  infra: kubernetes
+
+num_nodes: 1
+
+config:
+  kubernetes:
+    enable_docker: build
+    # Or with cache volume:
+    # enable_docker:
+    #   enabled: build
+    #   cache_volume: my-builder-cache

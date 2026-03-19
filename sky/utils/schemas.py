@@ -1350,21 +1350,42 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
-    'container_tools': {
-        'type': 'object',
-        'required': ['type'],
-        'additionalProperties': False,
-        'properties': {
-            'type': {
-                'type': 'string',
-                'enum': ['dind', 'buildkit'],
+    'enable_docker': {
+        'oneOf': [
+            # Simple form: enable_docker: true / false
+            {
+                'type': 'boolean'
             },
-            # SkyPilot volume name for the container_tools cache.
-            # Omit to use an ephemeral emptyDir volume instead.
-            'volume': {
+            # Simple form: enable_docker: "all" / "build"
+            {
                 'type': 'string',
+                'enum': ['all', 'build'],
             },
-        },
+            # Detailed form with optional cache volume.
+            {
+                'type': 'object',
+                'required': ['enabled'],
+                'additionalProperties': False,
+                'properties': {
+                    'enabled': {
+                        'oneOf': [
+                            {
+                                'type': 'boolean'
+                            },
+                            {
+                                'type': 'string',
+                                'enum': ['all', 'build'],
+                            },
+                        ],
+                    },
+                    # SkyPilot volume name for the Docker/BuildKit cache.
+                    # Omit to use an ephemeral emptyDir volume instead.
+                    'cache_volume': {
+                        'type': 'string',
+                    },
+                },
+            },
+        ],
     },
 }
 
