@@ -21,7 +21,7 @@ fi
 if ! command -v sky &>/dev/null; then
     echo "[2/4] Installing SkyPilot via uv..."
     uv tool install skypilot
-    export PATH="${UV_TOOL_BIN_DIR:-$HOME/.local/bin}:$PATH"
+    export PATH="${UV_TOOL_BIN_DIR:-$HOME/.local/bin}:$HOME/.cargo/bin:$PATH"
 else
     echo "[2/4] SkyPilot already installed ($(sky --version 2>/dev/null || echo 'unknown version'))"
 fi
