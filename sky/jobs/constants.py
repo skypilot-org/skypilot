@@ -2,8 +2,6 @@
 import os
 from typing import Any, Dict, Union
 
-from sky.skylet import constants as skylet_constants
-
 # Environment variable for JobGroup name, injected into all jobs in a JobGroup
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
@@ -65,25 +63,3 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
 MANAGED_JOBS_VERSION = 17  # add collect_debug_dump_manifest for debug dump
-
-# The command for setting up the jobs dashboard on the controller. It firstly
-# checks if the systemd services are available, and if not (e.g., Kubernetes
-# containers may not have systemd), it starts the dashboard manually.
-DASHBOARD_SETUP_CMD = (
-    'if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; '
-    'then '
-    '  systemctl --user daemon-reload; '
-    '  systemctl --user enable --now skypilot-dashboard; '
-    'else '
-    '  echo "Systemd services not found. Starting SkyPilot dashboard '
-    'manually."; '
-    # Kill any old dashboard processes;
-    '  ps aux | grep -v nohup | grep -v grep | '
-    '  grep -- \'-m sky.jobs.dashboard.dashboard\' | awk \'{print $2}\' | '
-    '  xargs kill > /dev/null 2>&1 || true;'
-    # Launch the dashboard in the background if not already running
-    '  (ps aux | grep -v nohup | grep -v grep | '
-    '  grep -q -- \'-m sky.jobs.dashboard.dashboard\') || '
-    f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
-    '>> ~/.sky/job-dashboard.log 2>&1 &); '
-    'fi')
