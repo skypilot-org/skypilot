@@ -573,6 +573,9 @@ With a :ref:`remote SkyPilot API server <sky-api-server-remote>`, the API server
 .. tip::
   This is referred to as "consolidation mode" in :ref:`SkyPilot configuration <config-yaml-jobs-controller-consolidation-mode>`.
 
+.. note::
+  When using a :ref:`RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>`, local ``file_mounts`` and ``workdir`` for managed jobs are stored on the pod's ephemeral filesystem and may be lost when the old pod is replaced. To avoid this, enable :ref:`persistent storage <helm-values-storage-enabled>` with a ``ReadWriteMany`` (RWX) PVC, or use :ref:`cloud buckets <sky-storage>` / :ref:`volumes <volumes-on-kubernetes>` / :ref:`git <sync-code-and-project-files-git>` instead of local paths.
+
 .. _jobs-controller-remote:
 
 Using a remote jobs controller
@@ -584,9 +587,6 @@ Alternatively, SkyPilot can launch a dedicated **jobs controller** -- a small on
   :width: 800
   :alt: Architecture diagram of SkyPilot remote API server with and without a remote jobs controller
   :align: center
-
-.. note::
-  When using a :ref:`RollingUpdate upgrade strategy <sky-api-server-upgrade-strategy>` without a remote jobs controller, local ``file_mounts`` and ``workdir`` for managed jobs are stored on the pod's ephemeral filesystem and may be lost when the old pod is replaced. To avoid this, enable :ref:`persistent storage <helm-values-storage-enabled>` with a ``ReadWriteMany`` (RWX) PVC, or use :ref:`cloud buckets <sky-storage>` / :ref:`volumes <volumes-on-kubernetes>` / :ref:`git <sync-code-and-project-files-git>` instead of local paths.
 
 To use a remote jobs controller with a remote API server, set ``consolidation_mode: false``:
 
