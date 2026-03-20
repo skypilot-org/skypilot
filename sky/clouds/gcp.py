@@ -884,7 +884,7 @@ class GCP(clouds.Cloud):
 
             if shutil.which('gcloud') is None:
                 raise RuntimeError('Missing `gcloud` cli dependency.')
-        except (ImportError, subprocess.CalledProcessError, RuntimeError) as e:
+        except (ImportError, RuntimeError) as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
                 f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
