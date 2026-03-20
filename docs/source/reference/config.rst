@@ -150,9 +150,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
-    :ref:`subnet_ids <config-yaml-aws-subnet-ids>`:
-      - subnet-0abc123def456
-      - subnet-0xyz789ghi012
+    :ref:`subnet_names <config-yaml-aws-subnet-names>`:
+      - skypilot-subnet-1
+      - skypilot-subnet-1
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
     :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host

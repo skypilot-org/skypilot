@@ -88,7 +88,7 @@ def bootstrap_instances(
         availability_zone=config.provider_config.get('availability_zone'),
         use_internal_ips=config.provider_config.get('use_internal_ips', False),
         vpc_name=config.provider_config.get('vpc_name'),
-        subnet_ids=config.provider_config.get('subnet_ids'))
+        subnet_names=config.provider_config.get('subnet_names'))
 
     max_efa_interfaces = config.provider_config.get('max_efa_interfaces', 0)
     enable_efa = max_efa_interfaces > 0
@@ -580,14 +580,15 @@ def get_vpc_id_by_name(ec2: 'mypy_boto3_ec2.ServiceResource', vpc_name: str,
     return vpcs[0].id
 
 
-def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
-                           security_group_ids: Optional[List[str]], region: str,
-                           availability_zone: Optional[str],
-                           use_internal_ips: bool, vpc_name: Optional[str],
-                           subnet_ids: Optional[List[str]]) -> Tuple[Any, str]:
+def _get_subnet_and_vpc_id(
+        ec2: 'mypy_boto3_ec2.ServiceResource',
+        security_group_ids: Optional[List[str]], region: str,
+        availability_zone: Optional[str], use_internal_ips: bool,
+        vpc_name: Optional[str],
+        subnet_names: Optional[List[str]]) -> Tuple[Any, str]:
 
-    if isinstance(subnet_ids, str):
-        subnet_ids = [subnet_ids]
+    if isinstance(subnet_names, str):
+        subnet_names = [subnet_names]
 
     if vpc_name is not None:
         vpc_id_of_sg = get_vpc_id_by_name(ec2, vpc_name, region)
@@ -598,20 +599,18 @@ def _get_subnet_and_vpc_id(ec2: 'mypy_boto3_ec2.ServiceResource',
 
     all_subnets = list(ec2.subnets.all())
 
-    # If the user specified subnet IDs, resolve them and use as
-    # user_specified_subnets
+    # If the user specified subnet names, resolve them by tag:Name filter
     user_specified_subnets = None
-    if subnet_ids:
-        user_specified_subnets = [
-            s for s in all_subnets if s.subnet_id in subnet_ids
-        ]
-        missing = set(subnet_ids) - {
-            s.subnet_id for s in user_specified_subnets
-        }
-        if missing:
+    if subnet_names:
+        user_specified_subnets = list(
+            ec2.subnets.filter(Filters=[{
+                'Name': 'tag:Name',
+                'Values': subnet_names,
+            }]))
+        if not user_specified_subnets:
             _skypilot_log_error_and_exit_for_failover(
-                f'Subnet(s) {missing} not found in {region}. '
-                'Please check the subnet IDs in your config.')
+                f'No subnets with name(s) {subnet_names} found in '
+                f'{region}. Please check the subnet names in your config.')
         # When subnets are explicitly specified we can infer the VPC from
         # the subnets themselves, so a vpc_name is not required.
         if vpc_id_of_sg is None:

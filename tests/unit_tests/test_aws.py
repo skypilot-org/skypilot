@@ -61,7 +61,7 @@ def test_usable_subnets(monkeypatch):
                                       availability_zone=None,
                                       use_internal_ips=False,
                                       vpc_name=None,
-                                      subnet_ids=None)
+                                      subnet_names=None)
 
     error_message = str(e.value)
     assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: The default VPC in {region} either does not exist or has no subnets." == error_message
@@ -74,7 +74,7 @@ def test_usable_subnets(monkeypatch):
                                       availability_zone=None,
                                       use_internal_ips=False,
                                       vpc_name=vpc_name,
-                                      subnet_ids=None)
+                                      subnet_names=None)
 
     error_message = str(e.value)
     assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: No candidate subnets found in specified VPC {vpc_id}." == error_message
@@ -95,7 +95,7 @@ def test_usable_subnets(monkeypatch):
                                       availability_zone=None,
                                       use_internal_ips=True,
                                       vpc_name=vpc_name,
-                                      subnet_ids=None)
+                                      subnet_names=None)
 
     error_message = str(e.value)
     assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: The use_internal_ips option is set to True, but all candidate subnets are public." == error_message
@@ -116,7 +116,7 @@ def test_usable_subnets(monkeypatch):
                                       availability_zone=None,
                                       use_internal_ips=False,
                                       vpc_name=vpc_name,
-                                      subnet_ids=None)
+                                      subnet_names=None)
 
     error_message = str(e.value)
     assert f"{provision_constants.ERROR_NO_NODES_LAUNCHED}: All candidate subnets are private, did you mean to set use_internal_ips to True?" == error_message

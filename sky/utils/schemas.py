@@ -1453,7 +1453,7 @@ def get_config_schema():
                         }
                     }],
                 },
-                'subnet_ids': {
+                'subnet_names': {
                     'oneOf': [{
                         'type': 'string',
                     }, {
