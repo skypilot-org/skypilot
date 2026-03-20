@@ -1218,17 +1218,19 @@ Gets the workspaces.
 ### `sky.create_debug_dump`
 
 ```python
-sky.create_debug_dump(request_ids: Optional[List[str]] = None, cluster_names: Optional[List[str]] = None, managed_job_ids: Optional[List[int]] = None, recent_hours: Optional[float] = None) -> server_common.RequestId[str]
+sky.create_debug_dump(request_ids: Optional[List[str]] = None, cluster_names: Optional[List[str]] = None, managed_job_ids: Optional[List[int]] = None, recent_minutes: Optional[float] = None) -> server_common.RequestId[str]
 ```
 
 Create a debug dump for troubleshooting.
 
 **Args:**
-    request_ids: List of request IDs to include in the dump.
+    request_ids: List of request IDs or prefixes to include in the
+        dump. Prefixes are resolved to all matching request IDs on
+        the server.
     cluster_names: List of cluster names to include in the dump.
     managed_job_ids: List of managed job IDs to include in the dump.
-    recent_hours: If specified, include all resources active within
-        this many hours.
+    recent_minutes: If specified, include all resources active within
+        this many minutes.
 
 **Returns:**
     The request ID of the debug dump creation request.

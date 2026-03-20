@@ -753,9 +753,9 @@ Create a debug dump for troubleshooting.
 
 **Options:**
 
-- `--request-ids`, `-r` — Request IDs to include in the dump.
+- `--request-ids`, `-r` — Request IDs or prefixes to include in the dump.
 - `--cluster-names`, `-c` — Cluster names to include in the dump.
 - `--job-ids`, `-j` — Managed job IDs to include in the dump.
-- `--recent` — Include resources active within the last N hours.
+- `--recent-minutes` — Include resources active within the last N minutes.
 - `--output` — Output path for the dump file.
 - `--async` — Run the command asynchronously.
