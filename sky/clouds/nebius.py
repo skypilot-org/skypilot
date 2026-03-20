@@ -270,7 +270,8 @@ class Nebius(clouds.Cloud):
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')
 
-        if resources.image_id is None:
+        if (resources.image_id is None or
+                resources.extract_docker_image() is not None):
             image_id = default_image_family
         else:
             if None in resources.image_id:

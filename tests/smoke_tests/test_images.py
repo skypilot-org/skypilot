@@ -744,6 +744,24 @@ def test_nebius_docker_image(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.nebius
+def test_nebius_image_family(generic_cloud: str):
+    # Test that SkyPilot correctly handles image families as VM boot disks.
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'nebius_docker_image',
+        [
+            f'sky launch -y -c {name} --infra nebius '
+            f'--image-id ubuntu22.04-driverless '
+            f'"echo hello from docker && whoami"',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.gcp
 def test_helm_deploy_gke(request):
     if not request.config.getoption('--helm-package'):
