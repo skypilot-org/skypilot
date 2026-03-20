@@ -24,6 +24,12 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # the previous API server has exited.
 CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
 
+# Signal file indicating the API server has been restarted after enabling
+# consolidation mode. Created by setup_consolidation_mode_on_startup() in
+# sky/jobs/utils.py.
+JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
+
 # Resources as a dict for the jobs controller.
 # We use 50 GB disk size to reduce the cost.
 CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {

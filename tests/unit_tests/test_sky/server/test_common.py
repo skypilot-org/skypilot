@@ -1,6 +1,7 @@
 """Unit tests for the SkyPilot API server common module."""
 from http.cookiejar import Cookie
 from http.cookiejar import MozillaCookieJar
+import os
 import pathlib
 import sys
 import tempfile

@@ -426,6 +426,12 @@ def test_big_file_upload_memory_usage(generic_cloud: str):
         metrics_server_url = smoke_tests_utils.get_metrics_server_url()
         metrics_url = f'{metrics_server_url}/metrics'
 
+        print('Waiting for all processes to report metrics...',
+              file=sys.stderr,
+              flush=True)
+        metrics_utils.wait_for_stable_metrics(metrics_url,
+                                              'sky_apiserver_process_peak_rss')
+
         print("Collecting baseline RSS measurements...",
               file=sys.stderr,
               flush=True)
@@ -494,7 +500,7 @@ def test_api_server_start_stop(generic_cloud: str):
             f'sky launch -n {name} --cloud {generic_cloud} tests/test_yamls/apiserver-start-stop.yaml -y {smoke_tests_utils.LOW_RESOURCE_ARG}'
         ],
         f'sky down -y {name} || true',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        timeout=1200,
     )
     smoke_tests_utils.run_one_test(test)
 

@@ -254,3 +254,5 @@ class VolumeRecord(ResponseBaseModel):
     # Error message for volume in ERROR state (e.g., PVC pending due to
     # access mode mismatch)
     error_message: Optional[str] = None
+    # YAML configuration used to create the volume
+    creation_yaml: Optional[str] = None

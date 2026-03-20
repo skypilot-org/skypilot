@@ -387,6 +387,7 @@ Supported bucket types:
     # bucket: gs://my-bucket/
     # bucket: https://<azure_storage_account>.blob.core.windows.net/<container>
     # bucket: r2://my-bucket/
+    # bucket: vastdata://my-bucket/
     # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-force-disable-cloud-bucket:
@@ -417,7 +418,7 @@ Example:
 
 Enable :ref:`consolidation mode <jobs-consolidation-mode>`, which will run the jobs controller within the remote API server, rather than in a separate sky cluster. Don't enable unless you are using a remotely-deployed API server.
 
-Default: ``false``.
+Default: when unset, automatically enabled for deploy-mode API servers (``--deploy``). Otherwise disabled. Changes require an API server restart to take effect.
 
 Example:
 

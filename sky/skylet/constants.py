@@ -609,7 +609,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
@@ -695,3 +695,6 @@ SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
 
 # Maximum number of node name entries to keep per node in the lineage.
 MAX_NODE_NAME_LINEAGE = 10
+
+# Clouds that provide storage only (no compute).
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']

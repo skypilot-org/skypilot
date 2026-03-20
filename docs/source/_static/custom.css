@@ -193,6 +193,106 @@ active tab to be moved up. */
   border-bottom: none;
 }
 
+/* Copy page as Markdown — split button next to title */
+.copy-page-wrapper {
+  position: absolute;
+  right: 0;
+  bottom: 0.15em;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  z-index: 10;
+}
+
+.copy-page-split {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--pst-color-border);
+  border-radius: 6px;
+  background: var(--pst-color-background);
+  overflow: hidden;
+}
+
+.copy-page-main,
+.copy-page-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--pst-color-text-muted);
+  font-size: 0.8rem;
+  font-family: inherit;
+  transition: background 0.12s, color 0.12s;
+}
+
+.copy-page-main {
+  padding: 0.35rem 0.6rem;
+}
+
+.copy-page-toggle {
+  padding: 0.35rem 0.45rem;
+  border-left: 1px solid var(--pst-color-border);
+}
+
+.copy-page-main:hover,
+.copy-page-toggle:hover {
+  background: var(--pst-color-surface);
+  color: var(--pst-color-text-base);
+}
+
+.copy-page-success .copy-page-main {
+  color: var(--pst-color-success, #28a745);
+}
+
+/* Dropdown */
+.copy-page-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 210px;
+  background: var(--pst-color-background);
+  border: 1px solid var(--pst-color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 4px 0;
+  z-index: 100;
+}
+
+.copy-page-dropdown.open {
+  display: block;
+}
+
+.copy-page-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--pst-color-text-base);
+  font-size: 0.82rem;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+.copy-page-item:hover {
+  background: var(--pst-color-surface);
+}
+
+/* Hide on very small screens */
+@media (max-width: 480px) {
+  .copy-page-wrapper {
+    display: none;
+  }
+}
+
 /* Assuming your breakpoints are defined in pixels */
 @media (min-width: 959.98px) {
 

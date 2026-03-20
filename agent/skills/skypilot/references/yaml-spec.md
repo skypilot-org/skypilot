@@ -641,7 +641,7 @@ resources:
 ### ``resources.image_id``
 Custom image id (optional, advanced).
 
-The image id used to boot the instances. Only supported for AWS, GCP, OCI and IBM (for non-docker image).
+The image id used to boot the instances. Only supported for AWS, GCP, OCI, IBM and Verda. IBM and Verda only support non-docker images.
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -1022,7 +1022,7 @@ file_mounts:
   /datasets-storage:
     name: sky-dataset  # Name of storage, optional when source is bucket URI
     source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
-    store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'oci', or 'ibm'; default: None. Optional.
+    store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'vastdata', 'oci', or 'ibm'; default: None. Optional.
     persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
     mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 

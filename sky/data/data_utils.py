@@ -24,6 +24,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.adaptors import vastdata
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -627,6 +628,7 @@ class Rclone:
         AZURE = 'AZURE'
         NEBIUS = 'NEBIUS'
         COREWEAVE = 'COREWEAVE'
+        VASTDATA = 'VASTDATA'
 
         def get_profile_name(self, bucket_name: str) -> str:
             """Gets the Rclone profile name for a given bucket.
@@ -645,7 +647,8 @@ class Rclone:
                 Rclone.RcloneStores.R2: 'sky-r2',
                 Rclone.RcloneStores.AZURE: 'sky-azure',
                 Rclone.RcloneStores.NEBIUS: 'sky-nebius',
-                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave'
+                Rclone.RcloneStores.COREWEAVE: 'sky-coreweave',
+                Rclone.RcloneStores.VASTDATA: 'sky-vastdata',
             }
             return f'{profile_prefix[self]}-{bucket_name}'
 
@@ -783,6 +786,23 @@ class Rclone:
                     region = auto
                     acl = private
                     force_path_style = false
+                    """)
+            elif self is Rclone.RcloneStores.VASTDATA:
+                vastdata_session = vastdata.session()
+                vastdata_credentials = vastdata.get_vastdata_credentials(
+                    vastdata_session)
+                endpoint_url = vastdata.get_endpoint()
+                access_key_id = vastdata_credentials.access_key
+                secret_access_key = vastdata_credentials.secret_key
+                config = textwrap.dedent(f"""\
+                    [{rclone_profile_name}]
+                    type = s3
+                    provider = Other
+                    access_key_id = {access_key_id}
+                    secret_access_key = {secret_access_key}
+                    endpoint = {endpoint_url}
+                    region = auto
+                    acl = private
                     """)
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -1013,3 +1033,41 @@ def verify_coreweave_bucket(name: str, retry: int = 0) -> bool:
 
     # Should not reach here, but just in case
     return False
+
+
+def create_vastdata_client() -> Client:
+    """Create VastData S3 client."""
+    return vastdata.client('s3')
+
+
+def split_vastdata_path(vastdata_path: str) -> Tuple[str, str]:
+    """Splits VastData Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      vastdata_path: str; VastData Path, e.g. vastdata://imagenet/train/
+    """
+    path_parts = vastdata_path.replace('vastdata://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def verify_vastdata_bucket(name: str) -> bool:
+    """Verify VastData bucket exists and is accessible."""
+    vastdata_client = create_vastdata_client()
+    try:
+        vastdata_client.head_bucket(Bucket=name)
+        return True
+    except vastdata.botocore_exceptions().ClientError as e:
+        error_code = e.response['Error']['Code']
+        if error_code == '403':
+            logger.error(f'Access denied to bucket {name}')
+        elif error_code == '404':
+            logger.debug(f'Bucket {name} does not exist')
+        else:
+            logger.debug(
+                f'Unexpected error checking VastData bucket {name}: {e}')
+        return False
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Unexpected error checking VastData bucket {name}: {e}')
+        return False

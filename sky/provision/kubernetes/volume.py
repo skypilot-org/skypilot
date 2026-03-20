@@ -272,9 +272,9 @@ def get_all_volumes_usedby(
                     cluster_name = cloud_to_name_map.get(cluster_name_on_cloud)
                     if cluster_name is None:
                         continue
-                    if cluster_name not in used_by_clusters[context][namespace]:
-                        used_by_clusters[context][namespace][cluster_name] = []
-                    used_by_clusters[context][namespace][cluster_name].append(
+                    if volume_name not in used_by_clusters[context][namespace]:
+                        used_by_clusters[context][namespace][volume_name] = []
+                    used_by_clusters[context][namespace][volume_name].append(
                         cluster_name)
     return used_by_pods, used_by_clusters, failed_volume_names
 

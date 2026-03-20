@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
 from sky.adaptors import coreweave
+from sky.adaptors import vastdata
 from sky.clouds import cloud as sky_cloud
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -25,6 +26,7 @@ from sky.utils import ux_utils
 
 CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
+STORAGE_ONLY_CLOUDS = (cloudflare.NAME, coreweave.NAME, vastdata.NAME)
 
 logger = sky_logging.init_logger(__name__)
 
@@ -35,7 +37,7 @@ def _get_workspace_allowed_clouds(workspace: str) -> List[str]:
     config_allowed_cloud_names = skypilot_config.get_nested(
         ('allowed_clouds',),
         [repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-        [cloudflare.NAME, coreweave.NAME])
+        list(STORAGE_ONLY_CLOUDS))
     # filter out the clouds that are disabled in the workspace config
     workspace_disabled_clouds = []
     for cloud in config_allowed_cloud_names:
@@ -109,7 +111,7 @@ def check_capabilities(
 
     def get_all_clouds() -> Tuple[str, ...]:
         return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
-                     [cloudflare.NAME, coreweave.NAME])
+                     list(STORAGE_ONLY_CLOUDS))
 
     def _execute_check_logic_for_workspace(
         current_workspace_name: str,
@@ -149,14 +151,22 @@ def check_capabilities(
                 cloud_name: str
         ) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
             # Validates cloud_name and returns a tuple of the cloud's name and
-            # the cloud object. Includes special handling for Cloudflare and
-            # CoreWeave.
+            # the cloud object. Includes special handling for storage-only
+            # providers (Cloudflare, CoreWeave, VastData).
             if cloud_name.lower().startswith('cloudflare'):
                 return cloudflare.NAME, cloudflare
             elif cloud_name.lower().startswith('coreweave'):
                 return coreweave.NAME, coreweave
+            elif cloud_name.lower().startswith('vastdata'):
+                return vastdata.NAME, vastdata
             else:
-                cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                try:
+                    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
+                except ValueError:
+                    all_clouds = sorted(c.lower() for c in get_all_clouds())
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Cloud {cloud_name!r} is not a valid '
+                                         f'cloud among {all_clouds}') from None
                 assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
                 return repr(cloud_obj), cloud_obj
 
@@ -271,24 +281,23 @@ def check_capabilities(
         # allowed_clouds in config.yaml, it will be disabled.
         all_enabled_clouds: Set[str] = set()
         for capability in capabilities:
-            # Cloudflare and CoreWeave are not real clouds in
+            # Cloudflare, CoreWeave, and VastData are not real clouds in
             # registry.CLOUD_REGISTRY, and should not be inserted into the DB
             # (otherwise `sky launch` and other code would error out when it's
             # trying to look it up in the registry).
             enabled_clouds_set = {
                 cloud for cloud, capabilities in enabled_clouds.items()
-                if capability in capabilities and not cloud.startswith(
-                    'Cloudflare') and not cloud.startswith('CoreWeave')
+                if capability in capabilities and not any(
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             disabled_clouds_set = {
                 cloud for cloud, capabilities in disabled_clouds.items()
-                if capability in capabilities and not cloud.startswith(
-                    'Cloudflare') and not cloud.startswith('CoreWeave')
+                if capability in capabilities and not any(
+                    cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             config_allowed_clouds_set = {
                 cloud for cloud in config_allowed_cloud_names
-                if not cloud.startswith('Cloudflare') and
-                not cloud.startswith('CoreWeave')
+                if not any(cloud.startswith(s) for s in STORAGE_ONLY_CLOUDS)
             }
             previously_enabled_clouds_set = {
                 repr(cloud)
@@ -464,19 +473,24 @@ def get_cloud_credential_file_mounts(
             if os.path.exists(os.path.expanduser(local_path)):
                 file_mounts[remote_path] = os.path.realpath(
                     os.path.expanduser(local_path))
-    # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
-    # only clouds with computing instances are marked as enabled by skypilot.
-    # This will be removed when cloudflare/r2 is added as a 'cloud'.
+    # Currently, get_cached_enabled_clouds_or_refresh() does not support
+    # storage-only clouds as only clouds with computing instances are
+    # marked as enabled by skypilot.
+    # TODO (kyuds): recognize storage-only clouds as clouds.
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
 
-    # Similarly, handle CoreWeave storage credentials
     coreweave_is_enabled, _ = coreweave.check_storage_credentials()
     if coreweave_is_enabled:
         coreweave_credential_mounts = coreweave.get_credential_file_mounts()
         file_mounts.update(coreweave_credential_mounts)
+
+    vastdata_is_enabled, _ = vastdata.check_storage_credentials()
+    if vastdata_is_enabled:
+        vastdata_credential_mounts = vastdata.get_credential_file_mounts()
+        file_mounts.update(vastdata_credential_mounts)
     return file_mounts
 
 
@@ -542,7 +556,7 @@ def _print_checked_cloud(
         style_str = f'{colorama.Fore.GREEN}{colorama.Style.NORMAL}'
         status_msg = 'enabled'
         capability_string = f'[{", ".join(enabled_capabilities)}]'
-        if verbose and cloud is not cloudflare and cloud is not coreweave:
+        if verbose and isinstance(cloud, sky_cloud.Cloud):
             activated_account = cloud.get_active_user_identity_str()
         if isinstance(
                 cloud_tuple[1],
