@@ -1077,14 +1077,14 @@ def write_cluster_config(
             'runcmd': runcmd,
 
             # Preemption hook for K8s preStop lifecycle hook.
+            # hook_timeout sets both the script timeout and
+            # terminationGracePeriodSeconds in the pod spec.
             'preemption_hook': (to_provision.preemption_config.hook
                                 if to_provision.preemption_config else None),
             'preemption_hook_timeout':
                 (to_provision.preemption_config.hook_timeout
-                 if to_provision.preemption_config else 300),
-            'k8s_termination_grace_period':
-                (to_provision.preemption_config.effective_grace_period
-                 if to_provision.preemption_config else 30),
+                 if to_provision.preemption_config and
+                 to_provision.preemption_config.hook else None),
         },
     )
     if cloud_specific_failover_overrides is not None:

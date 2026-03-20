@@ -307,7 +307,6 @@ as a Kubernetes-native ``preStop`` lifecycle hook, embedded in the pod spec at l
 - The hook runs on **all nodes** (head + workers) via the Kubernetes ``preStop`` lifecycle hook
 - ``hook_timeout`` controls both the script timeout and the pod's ``terminationGracePeriodSeconds``
   (default: 300s when a hook is configured, 30s when no hook is set)
-- The ``SKYPILOT_PREEMPTION=1`` environment variable is set during hook execution
 - The hook is embedded in the pod spec at launch time; updating the hook requires
   ``sky down`` followed by ``sky launch``
 
@@ -320,12 +319,6 @@ as a Kubernetes-native ``preStop`` lifecycle hook, embedded in the pod spec at l
 **When the hook does NOT fire:**
 
 - ``sky down`` / ``sky stop`` (SkyPilot uses force delete, bypassing ``preStop``)
-
-.. note::
-
-   Cloud providers may kill the node before the grace period expires. For example,
-   GKE spot instances give ~25 seconds, and EKS spot instances give ~2 minutes.
-   Set ``hook_timeout`` accordingly.
 
 .. note::
 

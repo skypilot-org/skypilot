@@ -132,13 +132,6 @@ class PreemptionConfig:
     hook: Optional[str] = None
     hook_timeout: int = 300  # default 5 min
 
-    @property
-    def effective_grace_period(self) -> int:
-        """terminationGracePeriodSeconds = hook_timeout if hook, else 30."""
-        if self.hook:
-            return self.hook_timeout
-        return 30  # K8s default
-
     def to_yaml_config(self) -> Optional[Dict[str, Any]]:
         if self.hook is None:
             return None
