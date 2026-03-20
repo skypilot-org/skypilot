@@ -1,5 +1,7 @@
 # Parallel Autoresearch with SkyPilot
 
+> **Tip:** This page contains a quick preview. See our full findings in the [blog post](https://blog.skypilot.co/scaling-autoresearch/).
+
 Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). A local coding agent uses the skill to spin up GPU clusters, submit experiments, and parallelize work across multiple clusters.
 
 ## SkyPilot Dashboard
