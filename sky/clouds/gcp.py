@@ -3,6 +3,7 @@ import enum
 import json
 import os
 import re
+import shutil
 import subprocess
 import time
 import typing
@@ -130,15 +131,33 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-def is_api_disabled(endpoint: str, project_id: str) -> bool:
+@annotations.ttl_cache(scope='global', timer=time.time, maxsize=1, ttl=5)
+def _get_default():
+    # pylint: disable=import-outside-toplevel
+    import google.auth
+
+    return google.auth.default()
+
+
+@annotations.ttl_cache(scope='request', timer=time.time, maxsize=10, ttl=5)
+def _list_enabled_services(project_id: str) -> Set[str]:
     # requires serviceusage.services.list
-    proc = subprocess.run((f'gcloud services list --project {project_id} '
-                           f' | grep {endpoint}.googleapis.com'),
-                          check=False,
-                          shell=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-    return proc.returncode != 0
+    proc = subprocess.run(
+        f'gcloud services list --project {project_id} '
+        '--format="value(config.name)"',
+        check=True,
+        shell=True,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE)
+    return set(proc.stdout.decode().strip().splitlines())
+
+
+def is_api_disabled(endpoint: str, project_id: str) -> bool:
+    try:
+        enabled = _list_enabled_services(project_id)
+    except subprocess.CalledProcessError:
+        return True
+    return f'{endpoint}.googleapis.com' not in enabled
 
 
 class GCPIdentityType(enum.Enum):
@@ -863,9 +882,9 @@ class GCP(clouds.Cloud):
             from google import auth  # type: ignore
             import googleapiclient
 
-            # Check the installation of google-cloud-sdk.
-            _run_output('gcloud --version')
-        except (ImportError, subprocess.CalledProcessError) as e:
+            if shutil.which('gcloud') is None:
+                raise RuntimeError('Missing `gcloud` cli dependency.')
+        except (ImportError, RuntimeError) as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
                 f'{cls._INDENT_PREFIX}Credentials may also need to be set. '
@@ -920,11 +939,8 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        # pylint: disable=import-outside-toplevel,unused-import
-        import google.auth
-
         # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
-        credentials, project = google.auth.default()
+        credentials, project = _get_default()
         crm = gcp.build('cloudresourcemanager',
                         'v1',
                         credentials=credentials,
@@ -1112,13 +1128,11 @@ class GCP(clouds.Cloud):
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
-        # pylint: disable=import-outside-toplevel
-        from google import auth  # type: ignore
         config_project_id = skypilot_config.get_workspace_cloud('gcp').get(
             'project_id', None)
         if config_project_id:
             return config_project_id
-        _, project_id = auth.default()
+        _, project_id = _get_default()
         if project_id is None:
             raise exceptions.CloudUserIdentityError(
                 'Failed to get GCP project id. Please make sure you have '

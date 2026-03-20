@@ -308,6 +308,7 @@ available_node_types:
           {% if k8s_max_run_duration_seconds %}
           provreq.kueue.x-k8s.io/maxRunDurationSeconds: "{{k8s_max_run_duration_seconds|string}}"
           {% endif %}
+          skypilot-user: "{{ original_user }}"
           {% endif %}
         # https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
         # Values from google cloud guide

@@ -48,7 +48,17 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
     try {
       response = await originalFetch(input, init);
     } catch (error) {
-      // Network errors or other fetch failures - don't intercept
+      // Network errors (e.g. connection refused) on non-static requests
+      // likely indicate the server is down during an upgrade, especially
+      // with the default Recreate deployment strategy where there is a gap
+      // between the old pod dying and the new pod starting.
+      try {
+        if (!isStaticAssetRequest(input)) {
+          reportUpgrade();
+        }
+      } catch (e) {
+        console.error('Error in upgrade detection interceptor:', e);
+      }
       throw error;
     }
 
@@ -59,24 +69,14 @@ export function createUpgradeAwareFetch(reportUpgrade, clearUpgrade) {
         return response;
       }
 
-      // Check if this is a 503 response indicating server upgrade
+      // Check if this is a 503 response indicating server upgrade.
+      // This can come from the SkyPilot API server's
+      // GracefulShutdownMiddleware (JSON with detail message) or from
+      // the NGINX ingress controller when no backends are available
+      // (typically an HTML error page). Both cases indicate the server
+      // is unavailable during an upgrade.
       if (response.status === 503) {
-        // Try to read the response to check if it's an upgrade message
-        const clonedResponse = response.clone();
-        try {
-          const data = await clonedResponse.json();
-          if (
-            data.detail &&
-            (data.detail.includes('shutting down') ||
-              data.detail.includes('try again later'))
-          ) {
-            reportUpgrade();
-          }
-        } catch (e) {
-          // If we can't parse JSON, it's probably not an API response
-          // (could be a script load failure), so ignore it
-          console.debug('Non-JSON 503 response, ignoring.');
-        }
+        reportUpgrade();
       } else if (
         response.ok ||
         (response.status >= 200 && response.status < 300)

@@ -1005,7 +1005,7 @@ def test_managed_jobs_cancellation_gcp():
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
     timeout = 7 * 60  # 7 mins
-    if generic_cloud == 'azure':
+    if generic_cloud in ('azure', 'nebius'):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
@@ -1663,6 +1663,9 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
         pytest.skip(
             'Skipping HA test in non-docker remote api server environment as '
             'controller might be managed by different user/test agents')
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Skipping HA kill test in consolidation mode: no separate '
+                    'controller pod to kill')
 
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
@@ -1682,6 +1685,9 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
         pytest.skip(
             'Skipping HA test in non-docker remote api server environment as '
             'controller might be managed by different user/test agents')
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Skipping HA kill test in consolidation mode: no separate '
+                    'controller pod to kill')
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,
@@ -2897,3 +2903,37 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
             timeout=10 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.remote_server
+@pytest.mark.managed_jobs
+def test_managed_jobs_api_access(generic_cloud: str):
+    """Test managed jobs with api_access: nested job launch from a job.
+
+    This test only works with kubernetes and remote server enabled. It is the
+    only test configuration that gives us an API server that is accessible from
+    within the entity running the job since the kind cluster can access the
+    remote server container via the docker bridge network. If this assumption
+    changes then this test will not work.
+    """
+    if not smoke_tests_utils.is_remote_server_test():
+        pytest.skip('Requires a remote API server (--remote-server)')
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'managed-jobs-api-access',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} '
+            f'tests/test_yamls/test_api_access.yaml -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=600),
+        ],
+        f'sky jobs cancel -y -n {name}; sky jobs cancel -y -n nested-job',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
