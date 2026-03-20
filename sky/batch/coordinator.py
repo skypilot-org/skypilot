@@ -31,6 +31,7 @@ from typing import Any, Deque, Dict, List, Optional
 
 import sky
 from sky.batch import constants
+from sky.batch import io_formats
 from sky.batch import utils
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
@@ -151,7 +152,7 @@ class BatchCoordinator:
     # SIGTERM handler (sky jobs cancel)
     # ------------------------------------------------------------------
 
-    def _handle_sigterm(self, signum, frame):
+    def _handle_sigterm(self, signum, frame):  # pylint: disable=unused-argument
         """Graceful shutdown on ``sky jobs cancel``."""
         logger.info('Received SIGTERM — shutting down workers...')
         self.cancel()
@@ -180,26 +181,21 @@ class BatchCoordinator:
         Uses typed format dicts if provided; falls back to path-based
         detection for backward compatibility.
         """
-        from sky.batch.io_formats import (
-            InputFormat)  # pylint: disable=import-outside-toplevel
-        from sky.batch.io_formats import (
-            OutputFormat)  # pylint: disable=import-outside-toplevel
-
         if self._input_format_dict is not None:
-            self._input_format = InputFormat.from_dict(self._input_format_dict)
+            self._input_format = io_formats.InputFormat.from_dict(
+                self._input_format_dict)
         else:
             # Backward compat: infer from path.
-            from sky.batch.io_formats import (
-                JsonInput)  # pylint: disable=import-outside-toplevel
             if self.dataset_path.endswith('.jsonl'):
-                self._input_format = JsonInput(self.dataset_path)
+                self._input_format = io_formats.JsonInput(self.dataset_path)
             else:
                 raise ValueError(f'Unsupported dataset format: '
                                  f'{self.dataset_path}. Supported: .jsonl')
 
         if self._output_formats_dict is not None:
             self._output_formats = [
-                OutputFormat.from_dict(d) for d in self._output_formats_dict
+                io_formats.OutputFormat.from_dict(d)
+                for d in self._output_formats_dict
             ]
         else:
             # Backward compat: infer from path.
@@ -559,8 +555,8 @@ class BatchCoordinator:
                     # (e.g. rolling update) we'll get repeated None
                     # statuses — treat that as a failure after a grace
                     # period so the batch can be retried.
-                    _none_count = 0
-                    _MAX_NONE = 12  # ~60s at 5s poll interval
+                    none_count = 0
+                    max_none = 12  # ~60s at 5s poll interval
                     while True:
                         time.sleep(constants.BATCH_POLL_INTERVAL)
                         req_id = sdk.job_status(cluster_name,
@@ -568,15 +564,15 @@ class BatchCoordinator:
                         statuses = sdk.get(req_id)
                         status = statuses.get(job_id_on_cluster)
                         if status is None:
-                            _none_count += 1
-                            if _none_count >= _MAX_NONE:
+                            none_count += 1
+                            if none_count >= max_none:
                                 raise RuntimeError(
                                     f'Batch {batch_idx}: lost contact '
                                     f'with {cluster_name} (job status '
-                                    f'unavailable for {_none_count} '
+                                    f'unavailable for {none_count} '
                                     f'consecutive polls)')
                             continue
-                        _none_count = 0
+                        none_count = 0
                         if status.is_terminal():
                             if status != sky.JobStatus.SUCCEEDED:
                                 raise RuntimeError(

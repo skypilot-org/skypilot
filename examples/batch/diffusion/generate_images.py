@@ -15,7 +15,8 @@ Usage (from project root):
        $ python examples/batch/diffusion/generate_images.py
 
     3. Check output:
-       $ aws s3 cp s3://$SKY_BATCH_BUCKET/generated_images/ ./generated_images/ --recursive
+       $ aws s3 cp s3://$SKY_BATCH_BUCKET/generated_images/ \
+         ./generated_images/ --recursive
 """
 import os
 
@@ -30,9 +31,11 @@ def generate_images():
     The model is loaded once per worker and reused across all batches.
     Each prompt produces one PNG image.
     """
+    # pylint: disable=import-outside-toplevel
     from diffusers import StableDiffusionPipeline
     import torch
 
+    # pylint: enable=import-outside-toplevel
     # Load model once (amortized across all batches on this worker).
     # Using SD v1.5 (public, no HuggingFace auth required).
     pipe = StableDiffusionPipeline.from_pretrained(
@@ -116,7 +119,7 @@ def main():
 
     print(f'\nDone! Images saved to {output_path}')
     print(f'Manifest written to {manifest_path}')
-    print(f'You can download them with:')
+    print('You can download them with:')
     print(f'  aws s3 cp {output_path} ./generated_images/ --recursive')
 
 

@@ -11,24 +11,11 @@ The worker service (``worker.py``) must be running before these APIs are
 called.  ``start_worker()`` handles that automatically.
 """
 import logging
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List
+
+from sky.batch import worker
 
 logger = logging.getLogger(__name__)
-
-# Worker state set by worker.start_worker() before the mapper runs.
-_output_path: Optional[str] = None
-_job_id: Optional[str] = None
-
-
-def set_worker_state(output_path: str, job_id: str) -> None:
-    """Install worker state used by ``save_results()``.
-
-    Called once by ``worker.start_worker()`` before the mapper function
-    is invoked.
-    """
-    global _output_path, _job_id
-    _output_path = output_path
-    _job_id = job_id
 
 
 def load() -> Iterator[List[Dict[str, Any]]]:
@@ -53,8 +40,6 @@ def load() -> Iterator[List[Dict[str, Any]]]:
                 results = [model.predict(item) for item in batch]
                 sky.batch.save_results(results)
     """
-    from sky.batch import worker
-
     while True:
         batch_item = worker.get_next_batch()
         if batch_item is None:
@@ -96,10 +81,8 @@ def save_results(results: List[Dict[str, Any]]) -> None:
         RuntimeError: If no batch is currently in progress.
         ValueError: If results length doesn't match batch length.
     """
-    from sky.batch import worker
-
-    with worker._current_batch_lock:
-        batch_item = worker._current_batch
+    with worker._current_batch_lock:  # pylint: disable=protected-access
+        batch_item = worker._current_batch  # pylint: disable=protected-access
     if batch_item is None:
         raise RuntimeError(
             'save_results() called without a current batch. '
@@ -112,11 +95,11 @@ def save_results(results: List[Dict[str, Any]]) -> None:
             'input item.')
 
     # Upload results using all output formats.
-    assert worker._output_formats, 'Worker not initialized'
-    for fmt in worker._output_formats:
+    assert worker._output_formats, 'Worker not initialized'  # pylint: disable=protected-access
+    for fmt in worker._output_formats:  # pylint: disable=protected-access
         chunk_path = fmt.upload_chunk(results, fmt.path, batch_item.batch_idx,
                                       batch_item.start_idx, batch_item.end_idx,
-                                      _job_id)
+                                      worker._job_id)  # pylint: disable=protected-access
         logger.info('Saved results to %s', chunk_path)
 
     # Signal completion — unblocks the HTTP handler in worker.py.

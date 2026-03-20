@@ -14,11 +14,14 @@ from http.server import BaseHTTPRequestHandler
 from http.server import HTTPServer
 import json
 import logging
+import os
 import queue
 import threading
 from typing import Any, Dict, List, Optional
 
 from sky.batch import constants
+from sky.batch import io_formats
+from sky.batch import utils
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +68,7 @@ _output_formats: List[Any] = []  # List of OutputFormat instances
 class _WorkerHandler(BaseHTTPRequestHandler):
     """Handles ``/feed_batch``, ``/shutdown``, and ``/health``."""
 
-    def do_POST(self):
+    def do_POST(self):  # pylint: disable=invalid-name
         if self.path == '/feed_batch':
             self._handle_feed_batch()
         elif self.path == '/shutdown':
@@ -73,7 +76,7 @@ class _WorkerHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    def do_GET(self):
+    def do_GET(self):  # pylint: disable=invalid-name
         if self.path == '/health':
             self._send_json(200, {'status': 'healthy'})
         else:
@@ -184,19 +187,13 @@ def _resolve_input_format(dataset_path: str):
 
     Returns an InputFormat instance.
     """
-    import os as _os  # pylint: disable=import-outside-toplevel
-
-    env_val = _os.environ.get('SKY_BATCH_INPUT_FORMAT')
+    env_val = os.environ.get('SKY_BATCH_INPUT_FORMAT')
     if env_val:
-        from sky.batch.io_formats import (
-            InputFormat)  # pylint: disable=import-outside-toplevel
-        return InputFormat.from_dict(json.loads(env_val))
+        return io_formats.InputFormat.from_dict(json.loads(env_val))
 
     # Backward compat fallback.
-    from sky.batch.io_formats import (
-        JsonInput)  # pylint: disable=import-outside-toplevel
     if dataset_path.endswith('.jsonl'):
-        return JsonInput(dataset_path)
+        return io_formats.JsonInput(dataset_path)
     raise ValueError(f'Unsupported dataset format: {dataset_path}')
 
 
@@ -205,28 +202,22 @@ def _resolve_output_formats(output_path: str):
 
     Returns a list of OutputFormat instances.
     """
-    import os as _os  # pylint: disable=import-outside-toplevel
-
-    from sky.batch.io_formats import (
-        OutputFormat)  # pylint: disable=import-outside-toplevel
-
     # New plural env var: JSON array of format dicts.
-    env_val = _os.environ.get('SKY_BATCH_OUTPUT_FORMATS')
+    env_val = os.environ.get('SKY_BATCH_OUTPUT_FORMATS')
     if env_val:
         dicts = json.loads(env_val)
         if dicts:
-            return [OutputFormat.from_dict(d) for d in dicts]
+            return [io_formats.OutputFormat.from_dict(d) for d in dicts]
 
     # Backward compat: singular env var wraps to list.
-    env_val_singular = _os.environ.get('SKY_BATCH_OUTPUT_FORMAT')
+    env_val_singular = os.environ.get('SKY_BATCH_OUTPUT_FORMAT')
     if env_val_singular:
         d = json.loads(env_val_singular)
         if d:
-            return [OutputFormat.from_dict(d)]
+            return [io_formats.OutputFormat.from_dict(d)]
 
     # Backward compat fallback: infer from path.
-    from sky.batch import utils as _utils
-    return [_utils.get_output_format(output_path)]
+    return [utils.get_output_format(output_path)]
 
 
 # ---------------------------------------------------------------------------
@@ -243,9 +234,6 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
        ``for batch in sky.batch.load(): …`` which blocks on the internal
        queue until batches arrive or shutdown is signaled.
     """
-    from sky.batch import api
-    from sky.batch import utils
-
     global _output_path, _job_id, _dataset_format, _output_formats
     _output_path = output_path
     _job_id = job_id
@@ -259,9 +247,6 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
     server_thread.start()
     logger.info('Worker service listening on 127.0.0.1:%d',
                 constants.WORKER_SERVICE_PORT)
-
-    # Install worker state for api.py.
-    api.set_worker_state(output_path, job_id)
 
     # Deserialize and run the mapper.
     mapper_fn = utils.deserialize_function(serialized_fn)

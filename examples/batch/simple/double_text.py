@@ -107,7 +107,7 @@ def main():
             print(f'{i}. {result}')
         print('=' * 60)
         print(f'Total results: {len(results)}')
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         print(f'Error loading results: {e}')
         print(f'You can manually download the results from: {output_path}')
 

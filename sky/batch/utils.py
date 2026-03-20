@@ -10,6 +10,8 @@ import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from sky.adaptors import aws
+from sky.adaptors import gcp
 from sky.batch import constants
 from sky.data import data_utils
 
@@ -138,16 +140,14 @@ def cloud_path_exists(path: str) -> bool:
         provider, bucket, key = parse_cloud_path(path)
 
         if provider == 's3':
-            import boto3
-            s3_client = boto3.client('s3')
+            s3_client = aws.client('s3')
             try:
                 s3_client.head_object(Bucket=bucket, Key=key)
                 return True
             except s3_client.exceptions.NoSuchKey:  # type: ignore[attr-defined]
                 return False
         elif provider == 'gs':
-            from google.cloud import storage
-            client = storage.Client()
+            client = gcp.storage_client()
             bucket_obj = client.bucket(bucket)
             blob = bucket_obj.blob(key)
             return blob.exists()
@@ -225,14 +225,12 @@ def _download_file(provider: str, bucket: str, key: str,
 
 def _download_from_s3(bucket: str, key: str, local_path: str) -> None:
     """Download a file from S3."""
-    from sky.adaptors import aws
     s3 = aws.resource('s3')
     s3.Bucket(bucket).download_file(key, local_path)
 
 
 def _download_from_gcs(bucket: str, key: str, local_path: str) -> None:
     """Download a file from GCS."""
-    from sky.adaptors import gcp
     client = gcp.storage_client()
     bucket_obj = client.bucket(bucket)
     blob = bucket_obj.blob(key)
@@ -249,11 +247,9 @@ def download_file_from_cloud(cloud_path: str, local_path: str) -> None:
     provider, bucket, key = parse_cloud_path(cloud_path)
 
     if provider == 's3':
-        from sky.adaptors import aws
         s3 = aws.client('s3')
         s3.download_file(bucket, key, local_path)
     elif provider == 'gs':
-        from sky.adaptors import gcp
         client = gcp.storage_client()
         bucket_obj = client.bucket(bucket)
         blob = bucket_obj.blob(key)
@@ -281,14 +277,12 @@ def upload_file_to_cloud(local_path: str, cloud_path: str) -> None:
 
 def _upload_to_s3(local_path: str, bucket: str, key: str) -> None:
     """Upload a file to S3."""
-    from sky.adaptors import aws
     s3 = aws.resource('s3')
     s3.Bucket(bucket).upload_file(local_path, key)
 
 
 def _upload_to_gcs(local_path: str, bucket: str, key: str) -> None:
     """Upload a file to GCS."""
-    from sky.adaptors import gcp
     client = gcp.storage_client()
     bucket_obj = client.bucket(bucket)
     blob = bucket_obj.blob(key)
@@ -305,11 +299,9 @@ def upload_bytes_to_cloud(data: bytes, cloud_path: str) -> None:
     provider, bucket, key = parse_cloud_path(cloud_path)
 
     if provider == 's3':
-        from sky.adaptors import aws
         s3 = aws.client('s3')
         s3.put_object(Bucket=bucket, Key=key, Body=data)
     elif provider == 'gs':
-        from sky.adaptors import gcp
         client = gcp.storage_client()
         bucket_obj = client.bucket(bucket)
         blob = bucket_obj.blob(key)
@@ -328,18 +320,17 @@ def get_output_format(output_path: str):
         - Path ending with ``.jsonl`` → JSONL format (default).
         - Path ending with ``/`` → Image directory format.
     """
-    from sky.batch.io_formats import (
-        ImageOutput)  # pylint: disable=import-outside-toplevel
-    from sky.batch.io_formats import (
-        JsonOutput)  # pylint: disable=import-outside-toplevel
+    # Lazy import: io_formats imports utils at top level, so importing
+    # io_formats here avoids a circular dependency.
+    from sky.batch import io_formats  # pylint: disable=import-outside-toplevel
 
     if output_path.rstrip('/').endswith('.jsonl'):
-        return JsonOutput(output_path)
+        return io_formats.JsonOutput(output_path)
     elif output_path.endswith('/'):
-        return ImageOutput(output_path)
+        return io_formats.ImageOutput(output_path)
     else:
         # Default to JSONL for backward compatibility.
-        return JsonOutput(output_path)
+        return io_formats.JsonOutput(output_path)
 
 
 def _load_jsonl_file(path: str) -> List[Dict[str, Any]]:
@@ -519,7 +510,6 @@ def _extract_chunk_start_index(chunk_path: str) -> int:
 
 def _list_s3_objects(bucket: str, prefix: str) -> List[str]:
     """List objects in an S3 bucket with a prefix."""
-    from sky.adaptors import aws
     s3 = aws.client('s3')
     response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
     if 'Contents' not in response:
@@ -529,7 +519,6 @@ def _list_s3_objects(bucket: str, prefix: str) -> List[str]:
 
 def _list_gcs_objects(bucket: str, prefix: str) -> List[str]:
     """List objects in a GCS bucket with a prefix."""
-    from sky.adaptors import gcp
     client = gcp.storage_client()
     bucket_obj = client.bucket(bucket)
     blobs = bucket_obj.list_blobs(prefix=prefix)
@@ -612,14 +601,12 @@ def delete_input_chunk_files(output_path: str,
 
 def _delete_s3_object(bucket: str, key: str) -> None:
     """Delete an object from S3."""
-    from sky.adaptors import aws
     s3 = aws.client('s3')
     s3.delete_object(Bucket=bucket, Key=key)
 
 
 def _delete_gcs_object(bucket: str, key: str) -> None:
     """Delete an object from GCS."""
-    from sky.adaptors import gcp
     client = gcp.storage_client()
     bucket_obj = client.bucket(bucket)
     blob = bucket_obj.blob(key)

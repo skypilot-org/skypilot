@@ -25,6 +25,7 @@ from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.batch import coordinator as batch_coordinator
 from sky.data import data_utils
 from sky.jobs import constants as jobs_constants
 from sky.jobs import file_content_utils
@@ -583,10 +584,6 @@ class JobController:
         When ``is_resume=True``, the coordinator reloads persisted batch
         state from the DB and resumes dispatch from where it left off.
         """
-        # Import lazily to avoid circular imports and keep startup fast.
-        from sky.batch.coordinator import (
-            BatchCoordinator)  # pylint: disable=import-outside-toplevel
-
         if is_resume:
             # Check if the previous run already reached a terminal status.
             _, prev_status = (await
@@ -603,7 +600,7 @@ class JobController:
 
         metadata = task.metadata
 
-        coordinator = BatchCoordinator(
+        coordinator = batch_coordinator.BatchCoordinator(
             dataset_path=metadata['batch_dataset_path'],
             output_path=metadata['batch_output_path'],
             batch_size=metadata['batch_size'],
