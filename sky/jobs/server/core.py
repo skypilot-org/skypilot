@@ -649,6 +649,13 @@ def launch(
                             'same priority. Found priority '
                             f'{resource.priority} but expected {task_priority}.'
                         )
+                if resource.priority_class != task_priority_class:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Task {task_.name!r}: All resources must have the '
+                            'same priority class. Found priority class '
+                            f'{resource.priority_class} but expected '
+                            f'{task_priority_class!r}.')
 
         if task_priority is not None:
             if (priority is not None and priority != task_priority):
