@@ -2555,3 +2555,91 @@ def test_node_names_multi_node(generic_cloud: str):
         print(f'node_names: {node_names} ({len(nodes)} nodes)')
     finally:
         sky.get(sky.down(name))
+
+
+# ---------- K8s Preemption Hook ----------
+@pytest.mark.kubernetes
+def test_k8s_preemption_hook_pod_spec():
+    """Test that preemption hook is correctly embedded in K8s pod spec."""
+    name = smoke_tests_utils.get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    test = smoke_tests_utils.Test(
+        'k8s_preemption_hook_pod_spec',
+        [
+            # Launch with preemption hook
+            f'sky launch -y -c {name} tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Verify terminationGracePeriodSeconds = 60 (matches hook_timeout)
+            f'POD={name}-{user_hash}-head && '
+            'kubectl get pod $POD -o jsonpath='
+            "'{.spec.terminationGracePeriodSeconds}'"
+            " | grep '^60$'",
+            # Verify preStop lifecycle hook exists with base64 content
+            f'POD={name}-{user_hash}-head && '
+            'kubectl get pod $POD -o jsonpath='
+            "'{.spec.containers[0].lifecycle.preStop.exec.command}'"
+            " | grep 'base64'",
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_k8s_no_preemption_hook_pod_spec():
+    """Test that pods without preemption hook have default spec."""
+    name = smoke_tests_utils.get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    test = smoke_tests_utils.Test(
+        'k8s_no_preemption_hook_pod_spec',
+        [
+            # Launch without preemption hook
+            f'sky launch -y -c {name} tests/test_yamls/test_k8s_no_preemption_hook.yaml',
+            # Verify terminationGracePeriodSeconds = 30 (default)
+            f'POD={name}-{user_hash}-head && '
+            'kubectl get pod $POD -o jsonpath='
+            "'{.spec.terminationGracePeriodSeconds}'"
+            " | grep '^30$'",
+            # Verify no lifecycle block (empty output)
+            f'POD={name}-{user_hash}-head && '
+            'LIFECYCLE=$(kubectl get pod $POD -o '
+            "jsonpath='{.spec.containers[0].lifecycle}') && "
+            '[ -z "$LIFECYCLE" ]',
+        ],
+        f'sky down -y {name}',
+        timeout=10 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+def test_k8s_preemption_hook_fires_on_delete():
+    """Test that preemption hook fires on graceful pod delete.
+
+    Verifies by starting a background delete with --grace-period=120,
+    then immediately checking the proof file while the pod is still
+    in Terminating state (preStop is running).
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    user_hash = common_utils.get_user_hash()
+    test = smoke_tests_utils.Test(
+        'k8s_preemption_hook_fires',
+        [
+            # Launch with preemption hook that writes to a local file
+            f'sky launch -y -c {name} tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Graceful delete in background (triggers preStop), then
+            # wait for proof file to appear while pod is terminating
+            f'POD={name}-{user_hash}-head && '
+            'kubectl delete pod $POD --grace-period=120 & '
+            # Poll for the proof file (preStop writes it)
+            'for i in $(seq 1 30); do '
+            '  kubectl exec $POD -- cat /tmp/preemption_proof.txt 2>/dev/null '
+            '  && exit 0; '
+            '  sleep 2; '
+            'done; '
+            'echo "Hook proof file not found" && exit 1',
+        ],
+        f'sky down -y {name}',
+        timeout=15 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)

@@ -1,0 +1,11 @@
+resources:
+  cloud: kubernetes
+  cpus: 2
+  preemption:
+    hook: |
+      echo "hook fired at $(date) on $(hostname)" > /tmp/preemption_proof.txt
+    hook_timeout: 60
+
+run: |
+  echo "Running on $(hostname)..."
+  sleep infinity

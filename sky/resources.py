@@ -2401,6 +2401,7 @@ class Resources:
         resources_fields['ports'] = config.pop('ports', None)
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['autostop'] = config.pop('autostop', None)
+        resources_fields['preemption'] = config.pop('preemption', None)
         resources_fields['priority'] = config.pop('priority', None)
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(

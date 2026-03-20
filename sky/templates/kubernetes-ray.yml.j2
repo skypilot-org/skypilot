@@ -383,7 +383,7 @@ available_node_types:
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
         restartPolicy: {{ "Always" if high_availability else "Never" }}
-        terminationGracePeriodSeconds: {{preemption_hook_timeout | default(30)}}
+        terminationGracePeriodSeconds: {{preemption_hook_timeout | default(30, true)}}
         {% if volume_mounts %}
         securityContext:
           fsGroup: 1000
@@ -1159,14 +1159,16 @@ available_node_types:
               while true; do sleep infinity & wait $!; done
 
           {% if preemption_hook %}
+          # preemption_hook is base64-encoded in backend_utils.py to avoid
+          # Jinja2 tojson HTML-escaping (> becomes \u003e, breaking shell).
           lifecycle:
             preStop:
               exec:
                 command:
-                - sh
+                - bash
                 - -c
                 - |
-                  timeout {{preemption_hook_timeout | default(300)}} bash -c {{preemption_hook | tojson}}
+                  timeout {{preemption_hook_timeout | default(300)}} bash <(echo "{{preemption_hook}}" | base64 --decode)
           {% endif %}
           ports:
           - containerPort: 22  # Used for SSH

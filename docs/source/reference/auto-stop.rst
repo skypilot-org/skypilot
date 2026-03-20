@@ -316,9 +316,21 @@ as a Kubernetes-native ``preStop`` lifecycle hook, embedded in the pod spec at l
 - Node drain (e.g., during cluster maintenance)
 - Pod eviction (e.g., resource pressure)
 
-**When the hook does NOT fire:**
+**Behavior on** ``sky down``:
 
-- ``sky down`` / ``sky stop`` (SkyPilot uses force delete, bypassing ``preStop``)
+SkyPilot uses ``grace_period_seconds=0`` (force delete) when tearing down clusters,
+which is intended to skip the ``preStop`` hook. However, due to a `known kubelet
+regression <https://github.com/kubernetes/kubernetes/issues/123408>`_, the
+``preStop`` hook may still execute briefly (~1-2 seconds) before the container is
+killed. Fast hooks (e.g., uploading a small file) may complete; longer hooks (e.g.,
+saving a large checkpoint) will be interrupted.
+
+Design your hook to be **best-effort** — it is guaranteed to run on genuine
+preemption events, but may or may not complete on user-initiated teardown.
+
+.. note::
+
+   ``sky stop`` is not supported on Kubernetes clusters.
 
 .. note::
 
