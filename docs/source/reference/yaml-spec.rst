@@ -1119,7 +1119,7 @@ OR
 
 The ``type`` field specifies a pre-tuned workload type for ``MOUNT_CACHED`` mode.
 Available types: ``MODEL_CHECKPOINT_RO``, ``MODEL_CHECKPOINT_RW``, ``DATASET_RO``, ``DATASET_RW``.
-See :ref:`sky-storage` for details on workload types and ``config.mount_cached`` parameters.
+See :ref:`mount_cached_workload_types` for details on workload types and ``config.mount_cached`` parameters.
 
 .. _yaml-spec-setup:
 
