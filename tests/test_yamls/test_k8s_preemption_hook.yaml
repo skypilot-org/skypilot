@@ -4,7 +4,14 @@ resources:
   preemption:
     hook: |
       echo "hook fired at $(date) on $(hostname)" > /tmp/preemption_proof.txt
+      aws s3 cp /tmp/preemption_proof.txt ${PREEMPTION_HOOK_S3_PATH}/$(hostname).txt
     hook_timeout: 60
+
+envs:
+  PREEMPTION_HOOK_S3_PATH:
+
+setup: |
+  pip install awscli 2>/dev/null || true
 
 run: |
   echo "Running on $(hostname)..."
