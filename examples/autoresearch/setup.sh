@@ -46,7 +46,7 @@ echo "=== Credential check ==="
 # then inspect the text. (sky check exits non-zero when some clouds are absent,
 # which would otherwise trip set -e / pipefail on the pipe.)
 SKY_CHECK=$(sky check 2>&1 || true)
-if echo "$SKY_CHECK" | grep -q "enabled"; then
+if echo "$SKY_CHECK" | grep -q ": enabled"; then
     echo "Cloud credentials OK."
 else
     echo ""
