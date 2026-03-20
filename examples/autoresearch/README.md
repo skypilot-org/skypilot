@@ -1,5 +1,9 @@
 # Parallel Autoresearch with SkyPilot
 
+<p align="center">
+  <img src="https://blog.skypilot.co/scaling-autoresearch/assets/banner.png" alt="Parallel Autoresearch with SkyPilot" width="600"/>
+</p>
+
 Run [karpathy/autoresearch](https://github.com/karpathy/autoresearch) experiments in parallel on cloud GPUs using the [SkyPilot skill](https://docs.skypilot.co/en/latest/getting-started/skill.html). A local coding agent uses the skill to spin up GPU clusters, submit experiments, and parallelize work across multiple clusters.
 
 For a deep dive into methodology and results, check out the **[blog post](https://blog.skypilot.co/scaling-autoresearch/)**.
@@ -76,9 +80,3 @@ In an 8-hour run across 16 GPUs, the parallel agent:
 - Cost: \$9 in Claude API calls + \$300 in GPU compute
 
 Parallelism changes the agent's search strategy. Instead of greedy sequential hill-climbing, it explores a grid — testing multiple hyperparameters simultaneously and cross-referencing results. The agent also independently discovered a two-tier strategy: screening hypotheses on cheaper H100s, then promoting winners to faster H200s, without being told to do so.
-
-<p align="center">
-  <img src="https://i.imgur.com/g05SFUR.png" alt="SkyPilot Dashboard with 4 GPU clusters" width="800"/>
-  <br/>
-  <em>SkyPilot dashboard showing Claude running parallel experiments.</em>
-</p>
