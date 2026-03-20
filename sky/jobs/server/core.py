@@ -1031,7 +1031,7 @@ def _maybe_restart_controller(
 
 
 # For backwards compatibility
-# TODO(hailong): Remove before 0.12.0.
+# TODO(lloyd): Remove before 0.13.0.
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,

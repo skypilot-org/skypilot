@@ -300,9 +300,6 @@ def _get_cloud_dependencies_installation_commands(
     # installed, so we don't check that.
     python_packages: Set[str] = set()
 
-    # add flask to the controller dependencies for dashboard
-    python_packages.add('flask')
-
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     # Wrap in braces to isolate the || in SKY_UV_INSTALL_CMD from
     # the outer && chain, preventing operator precedence issues.
@@ -1470,6 +1467,38 @@ def can_provision(pool: bool) -> bool:
 
 def can_start_new_process(pool: bool) -> bool:
     return serve_state.get_num_services() < _get_number_of_services(pool)
+
+
+def get_max_services_error_message(pool: bool) -> str:
+    """Returns a detailed error message when max services is reached."""
+    current = serve_state.get_num_services()
+    maximum = _get_number_of_services(pool)
+    consolidation = _is_consolidation_mode(pool)
+    controller_type = 'jobs' if pool else 'serve'
+
+    msg = (f'{serve_constants.MAX_NUMBER_OF_SERVICES_REACHED_ERROR}: '
+           f'{current}/{maximum} services are running.')
+    msg += ' To spin up more services, please tear down some existing ones.'
+
+    docs_link = ('https://skypilot.readthedocs.io/en/latest/serving/'
+                 'sky-serve.html#sky-serve-max-services-calculation')
+    if consolidation:
+        msg += (f'\n\nThe {controller_type} controller is running in '
+                'consolidation mode, sharing memory with the API server. '
+                'The max number of concurrent services is calculated based '
+                'on the available memory after reserving resources for the '
+                'API server workers. To increase the limit, allocate more '
+                f'memory to the API server pod. For more information, see: '
+                f'{docs_link}')
+    else:
+        msg += (f'\n\nThe max number of concurrent services is calculated '
+                f'based on the controller VM memory. To increase the limit, '
+                f'use a controller with more memory by configuring '
+                f'`{controller_type}.controller.resources` in '
+                f'~/.sky/config.yaml. For more information, see: '
+                f'{docs_link}')
+
+    return msg
 
 
 def can_terminate(pool: bool) -> bool:

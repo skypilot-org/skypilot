@@ -833,6 +833,75 @@ def test_add_volumes_policy_with_existing_volumes_server_side(
     assert len(mutated_request.task.volumes) == 1
 
 
+def test_slurm_filesystem_routing_policy(add_example_policy_paths, task):
+    """Verify SlurmFilesystemRoutingPolicy request filtering and caching.
+
+    - Non-OPTIMIZE and client-side requests are no-ops (no SSH).
+    - OPTIMIZE sets slurm.allowed_clusters; SSH results are cached so a
+      second apply() call does not re-invoke SSH.
+    """
+    import example_policy.skypilot_policy as slurm_policy
+
+    config_path = os.path.join(POLICY_PATH, 'slurm_filesystem_routing.yaml')
+
+    slurm_policy._filesystem_cache.clear()
+
+    task = sky.Task()
+    task.update_envs({'SKYPILOT_REQUIRED_FILESYSTEMS': '/data/mnist,/scratch'})
+
+    os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
+    importlib.reload(skypilot_config)
+
+    # --- Part 1: non-OPTIMIZE and client-side requests are no-ops ---
+    with mock.patch('example_policy.skypilot_policy._check_paths_via_ssh',
+                    return_value=True) as m:
+        for request_name in [
+                request_names.AdminPolicyRequestName.CLUSTER_LAUNCH,
+                request_names.AdminPolicyRequestName.CLUSTER_EXEC,
+                request_names.AdminPolicyRequestName.VALIDATE,
+        ]:
+            admin_policy_utils.apply(task, request_name=request_name)
+
+        # Client-side OPTIMIZE should also be a no-op.
+        admin_policy_utils.apply(
+            task,
+            request_name=request_names.AdminPolicyRequestName.OPTIMIZE,
+            at_client_side=True)
+
+        assert m.call_count == 0, (
+            'SSH must not be called for non-OPTIMIZE or client-side requests')
+
+    # --- Part 2: OPTIMIZE sets slurm.allowed_clusters; SSH results cached ---
+    slurm_policy._filesystem_cache.clear()
+
+    with mock.patch.object(sky.clouds.Slurm,
+                           'existing_allowed_clusters',
+                           return_value=['cluster-a', 'cluster-b']):
+        with mock.patch('example_policy.skypilot_policy._check_paths_via_ssh',
+                        side_effect=lambda cluster, paths: cluster ==
+                        'cluster-a') as mock_ssh:
+            # First OPTIMIZE: cache miss -> SSH called once per cluster.
+            _, config1 = admin_policy_utils.apply(
+                task,
+                request_name=request_names.AdminPolicyRequestName.OPTIMIZE)
+            assert mock_ssh.call_count == 2, (
+                'SSH must be called once per cluster on first OPTIMIZE')
+            assert config1.get_nested(('slurm', 'allowed_clusters'), None) == [
+                'cluster-a'
+            ], ('Only cluster-a has all paths; cluster-b must be filtered out')
+
+            # Second OPTIMIZE: cache hit -> no additional SSH calls.
+            admin_policy_utils.apply(
+                task,
+                request_name=request_names.AdminPolicyRequestName.OPTIMIZE)
+            assert mock_ssh.call_count == 2, (
+                'SSH must NOT be called again (cache hit)')
+
+    required = frozenset(['/data/mnist', '/scratch'])
+    assert ('cluster-a', required) in slurm_policy._filesystem_cache
+    assert ('cluster-b', required) in slurm_policy._filesystem_cache
+
+
 def test_add_volumes_policy_server_side_vs_client_side(add_volumes_policy_cls,
                                                        task):
     """Test consistency between server-side and client-side execution.
