@@ -2963,6 +2963,94 @@ async def complete_api_request(incomplete: str,) -> List[str]:
     return await requests_lib.get_api_request_ids_start_with(incomplete)
 
 
+def _find_bracket_html(directory: str) -> Optional[str]:
+    """Find a [param].html file (not a catch-all) in *directory*."""
+    try:
+        for entry in os.scandir(directory):
+            if (entry.is_file() and entry.name.startswith('[') and
+                    entry.name.endswith('].html') and
+                    not entry.name.startswith('[...')):
+                return entry.path
+    except OSError:
+        pass
+    return None
+
+
+def _find_bracket_dir(directory: str) -> Optional[str]:
+    """Find a [param] directory (not a catch-all) in *directory*."""
+    try:
+        for entry in os.scandir(directory):
+            if (entry.is_dir() and entry.name.startswith('[') and
+                    entry.name.endswith(']') and
+                    not entry.name.startswith('[...')):
+                return entry.path
+    except OSError:
+        pass
+    return None
+
+
+def _find_catchall_html(directory: str) -> Optional[str]:
+    """Find a [...name].html catch-all file in *directory*."""
+    try:
+        for entry in os.scandir(directory):
+            if (entry.is_file() and entry.name.startswith('[...') and
+                    entry.name.endswith('].html')):
+                return entry.path
+    except OSError:
+        pass
+    return None
+
+
+def _resolve_dynamic_route(dashboard_dir: str,
+                           segments: List[str]) -> Optional[str]:
+    """Resolve a URL path to a Next.js dynamic-route HTML file.
+
+    Walks *segments* against the dashboard build output directory, matching
+    Next.js file-system routing conventions in priority order:
+      1. Literal segments (exact name match)
+      2. Single-segment dynamic routes (``[param]``)
+      3. Catch-all routes (``[...slug]``)
+
+    Args:
+        dashboard_dir: Absolute path to the dashboard ``out/`` directory.
+        segments: URL path split by ``/`` with no empty strings,
+            e.g. ``['clusters', 'my-cluster']`` for ``/clusters/my-cluster``.
+
+    Returns:
+        Absolute path to the matching HTML file, or ``None``.
+    """
+
+    def _resolve(current_dir: str, index: int) -> Optional[str]:
+        is_last = index == len(segments) - 1
+        segment = segments[index]
+
+        if is_last:
+            # Final segment – look for .html files.
+            literal = os.path.join(current_dir, f'{segment}.html')
+            if os.path.isfile(literal):
+                return literal
+            bracket = _find_bracket_html(current_dir)
+            if bracket is not None:
+                return bracket
+        else:
+            # Intermediate segment – descend into directories.
+            literal_dir = os.path.join(current_dir, segment)
+            if os.path.isdir(literal_dir):
+                result = _resolve(literal_dir, index + 1)
+                if result is not None:
+                    return result
+            bracket_dir = _find_bracket_dir(current_dir)
+            if bracket_dir is not None:
+                result = _resolve(bracket_dir, index + 1)
+                if result is not None:
+                    return result
+
+        # Catch-all at this level consumes all remaining segments.
+        return _find_catchall_html(current_dir)
+
+    return _resolve(dashboard_dir, 0)
+
+
 @app.get('/dashboard/{full_path:path}')
 async def serve_dashboard(full_path: str):
     """Serves the Next.js dashboard application.
@@ -2993,28 +3081,17 @@ async def serve_dashboard(full_path: str):
     if os.path.isfile(html_path):
         return fastapi.responses.FileResponse(html_path)
 
-    # Serve plugin catch-all page for any /plugins/* paths so client-side
-    # routing can bootstrap correctly.
-    if full_path == 'plugins' or full_path.startswith('plugins/'):
-        plugin_catchall = os.path.join(server_constants.DASHBOARD_DIR,
-                                       'plugins', '[...slug].html')
-        if os.path.isfile(plugin_catchall):
-            return fastapi.responses.FileResponse(plugin_catchall)
-
-    # Serve recipe detail page for any /recipes/* paths (dynamic route)
-    if full_path.startswith('recipes/') and full_path != 'recipes/':
-        recipe_page = os.path.join(server_constants.DASHBOARD_DIR, 'recipes',
-                                   '[recipe].html')
-        if os.path.isfile(recipe_page):
-            return fastapi.responses.FileResponse(recipe_page)
-
-    # Serve the [...path] catch-all page for any remaining paths so
-    # client-side routing can bootstrap the correct plugin page.
-    # e.g. /quota, /cron
-    catchall_path = os.path.join(server_constants.DASHBOARD_DIR,
-                                 '[...path].html')
-    if safe_full_path and os.path.isfile(catchall_path):
-        return fastapi.responses.FileResponse(catchall_path)
+    # Resolve Next.js dynamic routes by walking the filesystem.
+    # Handles patterns like:
+    #   /clusters/my-cluster  -> clusters/[cluster].html
+    #   /jobs/123/456         -> jobs/[job]/[task].html
+    #   /plugins/foo/bar      -> plugins/[...slug].html
+    if safe_full_path:
+        segments = safe_full_path.split('/')
+        resolved = _resolve_dynamic_route(server_constants.DASHBOARD_DIR,
+                                          segments)
+        if resolved is not None:
+            return fastapi.responses.FileResponse(resolved)
 
     # Serve index.html as a last resort.
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
