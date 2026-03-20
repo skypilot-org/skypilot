@@ -651,29 +651,25 @@ class TestResolveDynamicRoute:
 
     def test_volumes_dynamic(self, tmp_path):
         d = _build_dashboard_tree(tmp_path)
-        result = server._resolve_dynamic_route(str(d),
-                                               ['volumes', 'my-vol'])
+        result = server._resolve_dynamic_route(str(d), ['volumes', 'my-vol'])
         assert result is not None
         assert result.endswith('[volume].html')
 
     def test_workspaces_dynamic(self, tmp_path):
         d = _build_dashboard_tree(tmp_path)
-        result = server._resolve_dynamic_route(str(d),
-                                               ['workspaces', 'my-ws'])
+        result = server._resolve_dynamic_route(str(d), ['workspaces', 'my-ws'])
         assert result is not None
         assert result.endswith('[name].html')
 
     def test_recipes_dynamic(self, tmp_path):
         d = _build_dashboard_tree(tmp_path)
-        result = server._resolve_dynamic_route(str(d),
-                                               ['recipes', 'my-recipe'])
+        result = server._resolve_dynamic_route(str(d), ['recipes', 'my-recipe'])
         assert result is not None
         assert result.endswith('[recipe].html')
 
     def test_literal_html_takes_priority(self, tmp_path):
         d = _build_dashboard_tree(tmp_path)
-        result = server._resolve_dynamic_route(str(d),
-                                               ['settings', 'config'])
+        result = server._resolve_dynamic_route(str(d), ['settings', 'config'])
         assert result is not None
         assert result.endswith('config.html')
         assert '[' not in os.path.basename(result)
