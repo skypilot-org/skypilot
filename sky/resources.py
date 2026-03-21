@@ -200,6 +200,7 @@ class Resources:
         autostop: Union[bool, int, str, Dict[str, Any], None] = None,
         preemption: Optional[Dict[str, Any]] = None,
         priority: Optional[int] = None,
+        priority_class: Optional[str] = None,
         volumes: Optional[List[Dict[str, Any]]] = None,
         # Internal use only.
         # pylint: disable=invalid-name
@@ -300,6 +301,10 @@ class Resources:
           priority: the priority for this resource configuration. Must be an
             integer from -1000 to 1000, where higher values indicate higher priority.
             If None, no priority is set.
+          priority_class: optional logical priority class name (e.g. for Kueue).
+            When set, numeric priority may be filled in by the API server; do not
+            set both priority and priority_class in the same request (enforced
+            server-side for requests that go through admin policy).
           volumes: the volumes to mount on the instance.
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
@@ -440,6 +445,7 @@ class Resources:
 
         # Initialize _priority before calling the setter
         self._priority: Optional[int] = None
+        self._priority_class: Optional[str] = None
 
         self._set_cpus(cpus)
         self._set_memory(memory)
@@ -447,6 +453,7 @@ class Resources:
         self._set_autostop_config(autostop)
         self._set_preemption_config(preemption)
         self._set_priority(priority)
+        self._set_priority_class(priority_class)
         self._set_volumes(volumes)
         self._set_local_disk(local_disk)
 
@@ -736,6 +743,11 @@ class Resources:
         return self._priority
 
     @property
+    def priority_class(self) -> Optional[str]:
+        """Logical priority class name, if set."""
+        return self._priority_class
+
+    @property
     def is_image_managed(self) -> Optional[bool]:
         return self._is_image_managed
 
@@ -955,6 +967,13 @@ class Resources:
                         f'Priority must be between {constants.MIN_PRIORITY} and'
                         f' {constants.MAX_PRIORITY}. Found: {priority}')
         self._priority = priority
+
+    def _set_priority_class(self, priority_class: Optional[str]) -> None:
+        if priority_class is not None:
+            priority_class = str(priority_class).strip()
+            if not priority_class:
+                priority_class = None
+        self._priority_class = priority_class
 
     def _set_volumes(
         self,
@@ -2076,6 +2095,7 @@ class Resources:
             autostop=override.pop('autostop', current_autostop_config),
             preemption=override.pop('preemption', current_preemption_config),
             priority=override.pop('priority', self.priority),
+            priority_class=override.pop('priority_class', self.priority_class),
             volumes=override.pop('volumes', self.volumes),
             infra=override.pop('infra', None),
             _docker_login_config=override.pop('_docker_login_config',
@@ -2403,6 +2423,7 @@ class Resources:
         resources_fields['autostop'] = config.pop('autostop', None)
         resources_fields['preemption'] = config.pop('preemption', None)
         resources_fields['priority'] = config.pop('priority', None)
+        resources_fields['priority_class'] = config.pop('priority_class', None)
         resources_fields['volumes'] = config.pop('volumes', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
@@ -2491,6 +2512,7 @@ class Resources:
         add_if_not_none('_no_missing_accel_warnings',
                         self._no_missing_accel_warnings)
         add_if_not_none('priority', self.priority)
+        add_if_not_none('priority_class', self.priority_class)
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
@@ -2663,6 +2685,9 @@ class Resources:
 
         if version < 27:
             self._priority = None
+
+        if version < 30:
+            self._priority_class = None
 
         if version < 28:
             self._no_missing_accel_warnings = state.get(

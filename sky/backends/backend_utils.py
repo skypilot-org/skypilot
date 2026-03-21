@@ -1091,6 +1091,9 @@ def write_cluster_config(
                 (to_provision.preemption_config.hook_timeout
                  if to_provision.preemption_config and
                  to_provision.preemption_config.hook else None),
+
+            # Priority class
+            'priority_class': to_provision.priority_class,
         },
     )
     if cloud_specific_failover_overrides is not None:

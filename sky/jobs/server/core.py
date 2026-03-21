@@ -619,6 +619,7 @@ def launch(
 
     task_names = set()
     priority = None
+    priority_class = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -631,11 +632,13 @@ def launch(
 
         # Check for priority in resources
         task_priority = None
+        task_priority_class = None
         if task_.resources:
             # Convert set to list to access elements by index
             resources_list = list(task_.resources)
             # Take first resource's priority as reference
             task_priority = resources_list[0].priority
+            task_priority_class = resources_list[0].priority_class
 
             # Check all other resources have same priority
             for resource in resources_list[1:]:
@@ -646,6 +649,13 @@ def launch(
                             'same priority. Found priority '
                             f'{resource.priority} but expected {task_priority}.'
                         )
+                if resource.priority_class != task_priority_class:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Task {task_.name!r}: All resources must have the '
+                            'same priority class. Found priority class '
+                            f'{resource.priority_class} but expected '
+                            f'{task_priority_class!r}.')
 
         if task_priority is not None:
             if (priority is not None and priority != task_priority):
@@ -655,6 +665,8 @@ def launch(
                         'Either specify a priority in only one task, or set '
                         'the same priority for each task.')
             priority = task_priority
+        if task_priority_class is not None:
+            priority_class = task_priority_class
 
     if priority is None:
         priority = skylet_constants.DEFAULT_PRIORITY
@@ -801,6 +813,7 @@ def launch(
             'remote_env_file_path': remote_env_file_path,
             'modified_catalogs': modified_catalogs,
             'priority': priority,
+            'priority_class': priority_class,
             'is_consolidation_mode': is_consolidation_mode,
             'pool': pool,
             'job_controller_indicator_file':
