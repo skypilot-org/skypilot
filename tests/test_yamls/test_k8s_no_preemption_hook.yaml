@@ -1,6 +1,6 @@
 resources:
   cloud: kubernetes
-  cpus: 2
+  cpus: 1
 
 run: |
   echo "Running on $(hostname)..."

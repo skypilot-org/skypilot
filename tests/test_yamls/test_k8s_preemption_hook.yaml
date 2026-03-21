@@ -1,6 +1,6 @@
 resources:
   cloud: kubernetes
-  cpus: 2
+  cpus: 1
   preemption:
     hook: |
       # Write proof to a Kubernetes ConfigMap that persists after pod deletion.
