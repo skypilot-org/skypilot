@@ -995,6 +995,12 @@ def write_cluster_config(
                 keys=('vpc_name',),
                 default_value=None,
                 override_configs=to_provision.cluster_config_overrides),
+            'subnet_names': skypilot_config.get_effective_region_config(
+                cloud=str(cloud).lower(),
+                region=region.name,
+                keys=('subnet_names',),
+                default_value=None,
+                override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.
             'labels': labels,
             # User-supplied remote_identity
