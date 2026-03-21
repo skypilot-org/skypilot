@@ -2577,9 +2577,16 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
         'k8s_preemption_hook_spec_and_delete',
         [
             # --- Test 1: Pod spec WITH hook ---
-            f'sky launch -y -c {name} '
+            # Use -d (detach) because the task runs 'sleep infinity'
+            f'sky launch -y -d -c {name} '
             f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Wait for task setup to complete (awscli install + S3 path file)
+            f'POD={name}-{user_hash}-head && '
+            'kubectl exec $POD -- bash -c '
+            "'for i in $(seq 1 90); do "
+            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
+            "sleep 2; done; exit 1'",
             # Verify terminationGracePeriodSeconds = 60
             f'POD={name}-{user_hash}-head && '
             'kubectl get pod $POD -o jsonpath='
@@ -2592,7 +2599,7 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
             " | grep 'base64'",
 
             # --- Test 2: Pod spec WITHOUT hook ---
-            f'sky launch -y -c {nohook_name} '
+            f'sky launch -y -d -c {nohook_name} '
             'tests/test_yamls/test_k8s_no_preemption_hook.yaml',
             # Verify terminationGracePeriodSeconds = 30 (default)
             f'POD={nohook_name}-{user_hash}-head && '
@@ -2620,9 +2627,15 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
 
             # --- Test 4: sky down does NOT trigger hook ---
             # Re-launch the cluster
-            f'sky launch -y -c {name} '
+            f'sky launch -y -d -c {name} '
             f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Wait for task setup to complete
+            f'POD={name}-{user_hash}-head && '
+            'kubectl exec $POD -- bash -c '
+            "'for i in $(seq 1 90); do "
+            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
+            "sleep 2; done; exit 1'",
             # Clean S3 marker
             f'aws s3 rm {s3_path}/ --recursive || true',
             # sky down uses grace_period_seconds=0 (force delete)
@@ -2660,9 +2673,16 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
         'k8s_preemption_hook_drain_and_priority',
         [
             # --- Test 1: Node drain triggers hook ---
-            f'sky launch -y -c {name} '
+            # Use -d (detach) because the task runs 'sleep infinity'
+            f'sky launch -y -d -c {name} '
             f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Wait for task setup to complete (awscli install + S3 path file)
+            f'POD={name}-{user_hash}-head && '
+            'kubectl exec $POD -- bash -c '
+            "'for i in $(seq 1 90); do "
+            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
+            "sleep 2; done; exit 1'",
             f'aws s3 rm {s3_path}/ --recursive || true',
             # Get node name and drain it
             f'POD={name}-{user_hash}-head && '
@@ -2681,9 +2701,15 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             # --- Test 2: K8s priority preemption triggers hook ---
             f'aws s3 rm {s3_path}/ --recursive || true',
             # Re-launch (previous pod was evicted by drain)
-            f'sky launch -y -c {name} '
+            f'sky launch -y -d -c {name} '
             f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
+            # Wait for task setup to complete
+            f'POD={name}-{user_hash}-head && '
+            'kubectl exec $POD -- bash -c '
+            "'for i in $(seq 1 90); do "
+            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
+            "sleep 2; done; exit 1'",
             # Create high-priority class
             'kubectl apply -f - <<EOF\n'
             'apiVersion: scheduling.k8s.io/v1\n'

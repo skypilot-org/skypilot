@@ -3,8 +3,13 @@ resources:
   cpus: 2
   preemption:
     hook: |
-      echo "hook fired at $(date) on $(hostname)" > /tmp/preemption_proof.txt
-      aws s3 cp /tmp/preemption_proof.txt ${PREEMPTION_HOOK_S3_PATH}/$(hostname).txt
+      # Read the S3 path from a file written during setup, since task env
+      # vars are not available in the K8s preStop lifecycle hook context.
+      S3_PATH=$(cat /tmp/preemption_s3_path.txt 2>/dev/null || echo "")
+      if [ -n "$S3_PATH" ]; then
+        echo "hook fired at $(date) on $(hostname)" > /tmp/preemption_proof.txt
+        aws s3 cp /tmp/preemption_proof.txt ${S3_PATH}/$(hostname).txt
+      fi
     hook_timeout: 60
 
 envs:
@@ -12,6 +17,9 @@ envs:
 
 setup: |
   pip install awscli 2>/dev/null || true
+  # Persist the S3 path to a file so the preStop hook can read it.
+  # The preStop hook runs in a separate process context without task env vars.
+  echo "${PREEMPTION_HOOK_S3_PATH}" > /tmp/preemption_s3_path.txt
 
 run: |
   echo "Running on $(hostname)..."
