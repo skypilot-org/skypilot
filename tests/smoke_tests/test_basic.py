@@ -1589,15 +1589,26 @@ def test_kubernetes_allowed_nodes():
         pytest.skip('Skipping test because the Kubernetes configs and '
                     'credentials are located on the remote API server '
                     'and not the machine where the test is running')
-    from sky.provision.kubernetes import utils as kubernetes_utils
 
-    nodes = kubernetes_utils.get_kubernetes_nodes(context=None)
-    if len(nodes) < 2:
+    # Get node names directly from kubectl (independent of SkyPilot config,
+    # which the test framework may override via SKYPILOT_GLOBAL_CONFIG).
+    result = subprocess.run(
+        ['kubectl', 'get', 'nodes', '-o', 'jsonpath={.items[*].metadata.name}'],
+        capture_output=True,
+        text=True,
+        check=False)
+    if result.returncode != 0:
+        pytest.skip(f'kubectl failed: {result.stderr}')
+    node_names = result.stdout.strip().split()
+    if len(node_names) < 2:
         pytest.skip('Need at least 2 nodes for allowed_nodes test')
 
-    allowed_node = nodes[0].metadata.name
+    allowed_node = node_names[0]
     name = smoke_tests_utils.get_cluster_name()
 
+    # Write the allowed_nodes config. The API server reads config at
+    # request time, so writing to ~/.sky/config.yaml and reloading is
+    # sufficient. We back up and restore the original config.
     config_content = textwrap.dedent(f"""\
         kubernetes:
           allowed_nodes:
@@ -1613,9 +1624,15 @@ def test_kubernetes_allowed_nodes():
     test = smoke_tests_utils.Test(
         'kubernetes_allowed_nodes',
         [
+            # Back up existing config, install allowed_nodes config,
+            # and restart the API server to pick it up.
+            'cp ~/.sky/config.yaml ~/.sky/config.yaml.bak.allowed_nodes'
+            ' 2>/dev/null; true',
+            f'cp {config_path} ~/.sky/config.yaml'
+            ' && sky api stop && sky api start',
             # Launch with the allowed_nodes config
-            f'SKYPILOT_CONFIG={config_path} sky launch -y -c {name}'
-            f' --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            f'sky launch -y -c {name}'
+            f' --infra kubernetes --cpus 0.5 --memory 1'
             f' -- echo "hello from allowed node"',
             f'sky logs {name} 1 --status',
             # Verify the pod landed on the allowed node
@@ -1624,7 +1641,12 @@ def test_kubernetes_allowed_nodes():
             f' echo "Pod landed on: $POD_NODE" &&'
             f' [ "$POD_NODE" = "{allowed_node}" ]',
         ],
-        teardown=f'sky down -y {name}; rm -f {config_path}',
+        # Restore original config and restart API server
+        teardown=(f'sky down -y {name};'
+                  ' mv ~/.sky/config.yaml.bak.allowed_nodes'
+                  ' ~/.sky/config.yaml 2>/dev/null; true;'
+                  ' sky api stop; sky api start;'
+                  f' rm -f {config_path}'),
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
     )
     smoke_tests_utils.run_one_test(test)
