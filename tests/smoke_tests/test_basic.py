@@ -2578,7 +2578,7 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
         [
             # --- Test 1: Pod spec WITH hook ---
             # Use -d (detach) because the task runs 'sleep infinity'
-            f'sky launch -y -d -c {name} '
+            f'sky launch -y -d --retry-until-up -c {name} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
             # Verify terminationGracePeriodSeconds = 60
             f'POD={name}-{user_hash}-head && '
@@ -2592,7 +2592,7 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
             " | grep 'base64'",
 
             # --- Test 2: Pod spec WITHOUT hook ---
-            f'sky launch -y -d -c {nohook_name} '
+            f'sky launch -y -d --retry-until-up -c {nohook_name} '
             'tests/test_yamls/test_k8s_no_preemption_hook.yaml',
             # Verify terminationGracePeriodSeconds = 30 (default)
             f'POD={nohook_name}-{user_hash}-head && '
@@ -2617,7 +2617,7 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
 
             # --- Test 4: sky down does NOT trigger hook ---
             # Re-launch the cluster
-            f'sky launch -y -d -c {name} '
+            f'sky launch -y -d --retry-until-up -c {name} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
             # Clean ConfigMap marker
             f'kubectl delete configmap {proof_cm} --ignore-not-found',
@@ -2656,7 +2656,7 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
         [
             # --- Test 1: Node drain triggers hook ---
             # Use -d (detach) because the task runs 'sleep infinity'
-            f'sky launch -y -d -c {name} '
+            f'sky launch -y -d --retry-until-up -c {name} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
             f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # Get node name and drain it
@@ -2674,7 +2674,7 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             # --- Test 2: K8s priority preemption triggers hook ---
             f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # Re-launch (previous pod was evicted by drain)
-            f'sky launch -y -d -c {name} '
+            f'sky launch -y -d --retry-until-up -c {name} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
             # Create high-priority class
             'kubectl apply -f - <<EOF\n'
