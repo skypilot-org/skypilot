@@ -150,6 +150,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`vpc_names <config-yaml-aws-vpc-names>`:
       - skypilot-vpc-1
       - skypilot-vpc-2
+    :ref:`subnet_names <config-yaml-aws-subnet-names>`:
+      - skypilot-subnet-1
+      - skypilot-subnet-2
     :ref:`use_internal_ips <config-yaml-aws-use-internal-ips>`: true
     :ref:`use_ssm <config-yaml-aws-use-ssm>`: true
     :ref:`ssh_proxy_command <config-yaml-aws-ssh-proxy-command>`: ssh -W %h:%p user@host
@@ -748,6 +751,36 @@ It is possible to set either a ``string`` (one VPC), or a ``list`` (multiple
 target VPCs).
 
 Default: ``null`` (use the default VPC in each region).
+
+.. _config-yaml-aws-subnet-names:
+
+``aws.subnet_names``
+~~~~~~~~~~~~~~~~~~~~
+
+Subnet(s) to use in each region (optional).
+
+If set, SkyPilot will only use the specified subnets when launching instances.
+Subnets are matched by their ``Name`` tag. Multiple subnets can be specified
+for failover across availability zones. The subnets must all belong to the
+same VPC.
+
+If ``vpc_names`` is also set, the specified subnets must belong to the
+specified VPC. If ``vpc_names`` is not set, the VPC is automatically inferred
+from the specified subnets.
+
+It is possible to set either a ``string`` (one subnet name) or a ``list``
+(multiple subnet names).
+
+Default: ``null`` (automatically select subnets from the VPC).
+
+Example:
+
+.. code-block:: yaml
+
+  aws:
+    subnet_names:
+      - skypilot-subnet-1
+      - skypilot-subnet-2
 
 .. _config-yaml-aws-use-internal-ips:
 
