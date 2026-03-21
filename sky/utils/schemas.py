@@ -1356,27 +1356,20 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
             {
                 'type': 'boolean'
             },
-            # Simple form: enable_docker: "all" / "build"
+            # Simple form: enable_docker: "ALL" / "BUILD"
             {
                 'type': 'string',
-                'enum': ['all', 'build'],
+                'enum': ['ALL', 'BUILD'],
             },
             # Detailed form with optional cache volume.
             {
                 'type': 'object',
-                'required': ['enabled'],
+                'required': ['mode'],
                 'additionalProperties': False,
                 'properties': {
-                    'enabled': {
-                        'oneOf': [
-                            {
-                                'type': 'boolean'
-                            },
-                            {
-                                'type': 'string',
-                                'enum': ['all', 'build'],
-                            },
-                        ],
+                    'mode': {
+                        'type': 'string',
+                        'enum': ['ALL', 'BUILD'],
                     },
                     # SkyPilot volume name for the Docker/BuildKit cache.
                     # Omit to use an ephemeral emptyDir volume instead.

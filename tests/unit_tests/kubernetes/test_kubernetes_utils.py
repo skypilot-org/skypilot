@@ -3019,45 +3019,45 @@ _BASE_CLUSTER_YAML = {
 class TestDockerSidecarToPodConfig(unittest.TestCase):
     """Tests for _docker_sidecar_to_pod_config()."""
 
-    def _get_result(self, mode):
-        cfg = {'enabled': mode, 'cache_volume': None}
+    def _get_result(self, mode: utils.DockerMode):
+        cfg = utils.DockerConfig(mode=mode)
         return utils._docker_sidecar_to_pod_config(cfg)
 
     # ---- DinD ----
 
     def test_dind_has_ray_node_env(self):
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         env_names = [e['name'] for e in ray['env']]
         assert 'DOCKER_HOST' in env_names
 
     def test_dind_is_privileged(self):
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         containers = pod_cfg['spec']['containers']
         dind = next(c for c in containers if c['name'] == 'dind')
         assert dind['securityContext']['privileged'] is True
 
     def test_dind_no_cache_volume_by_default(self):
         """No cache volume is injected; PVC is added later in _create_pods."""
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'dind-storage' not in volume_names
 
     def test_dind_has_init_container(self):
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         init_containers = pod_cfg['spec']['initContainers']
         assert len(init_containers) == 1
         assert init_containers[0]['name'] == 'install-docker-cli'
         assert 'docker' in init_containers[0]['image']
 
     def test_dind_has_docker_tools_volume(self):
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'docker-tools' in volume_names
 
     def test_dind_ray_node_has_docker_tools_mount(self):
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         mount_names = [m['name'] for m in ray['volumeMounts']]
@@ -3065,14 +3065,14 @@ class TestDockerSidecarToPodConfig(unittest.TestCase):
 
     def test_dind_init_copies_buildx_plugin(self):
         """DinD mode also installs buildx for multi-platform builds."""
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         init_containers = pod_cfg['spec']['initContainers']
         cmd = init_containers[0]['command'][-1]
         assert 'docker-buildx' in cmd
         assert 'cli-plugins' in cmd
 
     def test_dind_ray_node_has_post_start_hook(self):
-        pod_cfg = self._get_result('all')
+        pod_cfg = self._get_result(utils.DockerMode.ALL)
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         assert 'lifecycle' in ray
@@ -3086,14 +3086,14 @@ class TestDockerSidecarToPodConfig(unittest.TestCase):
     # ---- BuildKit ----
 
     def test_buildkit_has_ray_node_env(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         env_names = [e['name'] for e in ray['env']]
         assert 'BUILDKIT_HOST' in env_names
 
     def test_buildkit_runs_as_user_1000(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         containers = pod_cfg['spec']['containers']
         bkd = next(c for c in containers if c['name'] == 'buildkitd')
         assert bkd['securityContext']['runAsUser'] == 1000
@@ -3101,37 +3101,37 @@ class TestDockerSidecarToPodConfig(unittest.TestCase):
 
     def test_buildkit_no_cache_volume_by_default(self):
         """No cache volume is injected; PVC is added later in _create_pods."""
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'buildkit-cache' not in volume_names
 
     def test_buildkit_has_init_container(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         init_containers = pod_cfg['spec']['initContainers']
         assert len(init_containers) == 1
         assert init_containers[0]['name'] == 'install-docker-cli'
 
     def test_buildkit_init_copies_buildx_plugin(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         init_containers = pod_cfg['spec']['initContainers']
         cmd = init_containers[0]['command'][-1]
         assert 'docker-buildx' in cmd
         assert 'cli-plugins' in cmd
 
     def test_buildkit_has_docker_tools_volume(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
         assert 'docker-tools' in volume_names
 
     def test_buildkit_ray_node_has_docker_tools_mount(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         mount_names = [m['name'] for m in ray['volumeMounts']]
         assert 'docker-tools' in mount_names
 
     def test_buildkit_ray_node_post_start_configures_buildx(self):
-        pod_cfg = self._get_result('build')
+        pod_cfg = self._get_result(utils.DockerMode.BUILD)
         containers = pod_cfg['spec']['containers']
         ray = next(c for c in containers if c['name'] == 'ray-node')
         assert 'lifecycle' in ray
@@ -3141,26 +3141,25 @@ class TestDockerSidecarToPodConfig(unittest.TestCase):
         assert 'cli-plugins' in cmd
         assert '|| true' in cmd
 
-    # ---- get_docker_sidecar_defaults ----
+    # ---- _DOCKER_SIDECAR_DEFAULTS ----
 
-    def test_get_defaults_returns_valid_dind(self):
-        defaults = utils.get_docker_sidecar_defaults('all')
-        assert 'image' in defaults
-        assert 'cli_image' in defaults
-        assert 'cache_vol_name' in defaults
-        assert 'cache_mount' in defaults
+    def test_defaults_returns_valid_dind(self):
+        defaults = utils._DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.ALL]
+        assert isinstance(defaults, utils.DockerSidecarDefaults)
+        assert defaults.image
+        assert defaults.cli_image
+        assert defaults.cache_vol_name
+        assert defaults.cache_mount
 
-    def test_get_defaults_returns_valid_buildkit(self):
-        defaults = utils.get_docker_sidecar_defaults('build')
-        assert 'image' in defaults
-        assert 'cli_image' in defaults
-        assert defaults['cache_mount'] == '/home/user/.local/share/buildkit'
+    def test_defaults_returns_valid_buildkit(self):
+        defaults = utils._DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.BUILD]
+        assert isinstance(defaults, utils.DockerSidecarDefaults)
+        assert defaults.cli_image
+        assert defaults.cache_mount == '/home/user/.local/share/buildkit'
 
-    def test_get_defaults_unknown_type_raises(self):
-        with self.assertRaises(ValueError) as ctx:
-            utils.get_docker_sidecar_defaults('unknown')
-        assert 'Unknown enable_docker mode' in str(ctx.exception)
-        assert "'unknown'" in str(ctx.exception)
+    def test_defaults_unknown_mode_raises(self):
+        with self.assertRaises(ValueError):
+            utils.DockerMode('unknown')
 
 
 class TestNormalizeEnableDockerConfig(unittest.TestCase):
@@ -3178,47 +3177,41 @@ class TestNormalizeEnableDockerConfig(unittest.TestCase):
 
     def test_true_returns_all(self):
         result = utils.normalize_enable_docker_config(True)
-        assert result == {'enabled': 'all', 'cache_volume': None}
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL)
 
     def test_string_all_returns_all(self):
-        result = utils.normalize_enable_docker_config('all')
-        assert result == {'enabled': 'all', 'cache_volume': None}
+        result = utils.normalize_enable_docker_config('ALL')
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL)
 
     def test_string_build_returns_build(self):
-        result = utils.normalize_enable_docker_config('build')
-        assert result == {'enabled': 'build', 'cache_volume': None}
+        result = utils.normalize_enable_docker_config('BUILD')
+        assert result == utils.DockerConfig(mode=utils.DockerMode.BUILD)
 
     # ---- dict form ----
 
-    def test_dict_enabled_true(self):
-        result = utils.normalize_enable_docker_config({'enabled': True})
-        assert result == {'enabled': 'all', 'cache_volume': None}
+    def test_dict_mode_all(self):
+        result = utils.normalize_enable_docker_config({'mode': 'ALL'})
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL)
 
-    def test_dict_enabled_all(self):
-        result = utils.normalize_enable_docker_config({'enabled': 'all'})
-        assert result == {'enabled': 'all', 'cache_volume': None}
-
-    def test_dict_enabled_build(self):
-        result = utils.normalize_enable_docker_config({'enabled': 'build'})
-        assert result == {'enabled': 'build', 'cache_volume': None}
-
-    def test_dict_enabled_false_returns_none(self):
-        result = utils.normalize_enable_docker_config({'enabled': False})
-        assert result is None
+    def test_dict_mode_build(self):
+        result = utils.normalize_enable_docker_config({'mode': 'BUILD'})
+        assert result == utils.DockerConfig(mode=utils.DockerMode.BUILD)
 
     def test_dict_with_cache_volume(self):
         result = utils.normalize_enable_docker_config({
-            'enabled': True,
+            'mode': 'ALL',
             'cache_volume': 'my-cache',
         })
-        assert result == {'enabled': 'all', 'cache_volume': 'my-cache'}
+        assert result == utils.DockerConfig(mode=utils.DockerMode.ALL,
+                                            cache_volume='my-cache')
 
     def test_dict_build_with_cache_volume(self):
         result = utils.normalize_enable_docker_config({
-            'enabled': 'build',
+            'mode': 'BUILD',
             'cache_volume': 'bk-cache',
         })
-        assert result == {'enabled': 'build', 'cache_volume': 'bk-cache'}
+        assert result == utils.DockerConfig(mode=utils.DockerMode.BUILD,
+                                            cache_volume='bk-cache')
 
     # ---- edge cases ----
 
@@ -3226,17 +3219,17 @@ class TestNormalizeEnableDockerConfig(unittest.TestCase):
         """Empty dict (e.g. from config default_value) is treated as disabled."""
         assert utils.normalize_enable_docker_config({}) is None
 
-    def test_dict_without_enabled_key_returns_none(self):
-        """Dict missing 'enabled' key is treated as disabled."""
+    def test_dict_without_mode_key_returns_none(self):
+        """Dict missing 'mode' key is treated as disabled."""
         assert utils.normalize_enable_docker_config({'cache_volume': 'vol'
                                                     }) is None
 
-    def test_invalid_value_raises(self):
+    def test_invalid_type_raises(self):
         with self.assertRaises(ValueError) as ctx:
             utils.normalize_enable_docker_config(42)
         assert 'Invalid enable_docker value' in str(ctx.exception)
 
-    def test_invalid_value_raises(self):
+    def test_invalid_string_raises(self):
         with self.assertRaises(ValueError) as ctx:
             utils.normalize_enable_docker_config('abcd')
         assert 'Invalid enable_docker value' in str(ctx.exception)
@@ -3278,12 +3271,12 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
         assert 'dind-storage' not in volume_names
 
     def test_buildkit_injected_from_global_config(self):
-        """BuildKit sidecar is injected when enable_docker is 'build'."""
+        """BuildKit sidecar is injected when enable_docker is 'BUILD'."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
             if keys == ('enable_docker',):
-                return 'build'
+                return 'BUILD'
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3315,7 +3308,7 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
             return default_value
 
         # Task overrides to buildkit
-        overrides = {'kubernetes': {'enable_docker': 'build'}}
+        overrides = {'kubernetes': {'enable_docker': 'BUILD'}}
 
         with patch('sky.skypilot_config.get_effective_region_config',
                    side_effect=mock_get_config):
@@ -3367,12 +3360,12 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
         assert dind['image'] == 'docker:custom-image'
 
     def test_docker_config_stored_in_provider(self):
-        """Effective docker config is persisted into provider for Phase 2."""
+        """Effective docker config is persisted into provider."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
             if keys == ('enable_docker',):
-                return {'enabled': True, 'cache_volume': 'my-cache'}
+                return {'mode': 'ALL', 'cache_volume': 'my-cache'}
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3385,7 +3378,7 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
                 context='test-ctx')
 
         assert result['provider']['docker_config'] == {
-            'enabled': 'all',
+            'mode': 'ALL',
             'cache_volume': 'my-cache',
         }
 
@@ -3416,8 +3409,8 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
 class TestInjectDockerCacheVolume(unittest.TestCase):
     """Tests for inject_docker_cache_volume()."""
 
-    _DIND_CFG = {'enabled': 'all', 'cache_volume': None}
-    _BUILDKIT_CFG = {'enabled': 'build', 'cache_volume': None}
+    _DIND_CFG = utils.DockerConfig(mode=utils.DockerMode.ALL)
+    _BUILDKIT_CFG = utils.DockerConfig(mode=utils.DockerMode.BUILD)
 
     def _make_pod_spec(self,
                        ctr_name='dind',

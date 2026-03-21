@@ -14,7 +14,6 @@ from sky import dag as dag_lib
 from sky import exceptions
 from sky import resources as resources_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.provision import docker_utils
@@ -873,36 +872,6 @@ class Task:
             else:
                 raise ValueError(f'Invalid volume config: {dst_path}: {vol}')
             volume_mounts.append(volume_mount)
-
-        # Resolve enable_docker cache volume (if configured) to include it in
-        # the access-mode check below.  It must NOT be added to
-        # self.volume_mounts because it is managed by the Docker sidecar
-        # container, not by ray-node.
-        docker_vol_mounts: List[volume_lib.VolumeMount] = []
-        raw_docker_cfg = skypilot_config.get_nested(
-            ('kubernetes', 'enable_docker'), default_value=None)
-        # Task-level override wins over the global config.
-        for res in self.resources:
-            task_docker_cfg = (res.cluster_config_overrides.get(
-                'kubernetes', {}).get('enable_docker'))
-            if task_docker_cfg:
-                raw_docker_cfg = task_docker_cfg
-                break
-        # cache_volume only exists in the detailed (dict) form.
-        docker_vol_name = (raw_docker_cfg if isinstance(raw_docker_cfg, dict)
-                           else {}).get('cache_volume')
-        # Only resolve and check the enable_docker volume if it is not already
-        # present in the task's own volume_mounts (same name = same PVC, the
-        # access-mode check will run on it via the normal task-volume path).
-        if docker_vol_name and not any(vm.volume_name == docker_vol_name
-                                       for vm in volume_mounts):
-            docker_vol_mounts.append(
-                volume_lib.VolumeMount.resolve(
-                    path='',
-                    volume_name=docker_vol_name,
-                ))
-        all_vols_to_validate = volume_mounts + docker_vol_mounts
-
         # Disable certain access modes
         disabled_modes = {}
         if self.num_nodes > 1:
@@ -922,7 +891,7 @@ class Task:
             'region': ('', None),
             'zone': ('', None),
         }
-        for vol in all_vols_to_validate:
+        for vol in volume_mounts:
             # Check access mode
             access_mode = vol.volume_config.config.get('access_mode', '')
             if access_mode in disabled_modes:

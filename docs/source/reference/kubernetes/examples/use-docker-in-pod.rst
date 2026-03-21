@@ -40,17 +40,23 @@ Approaches
 
 .. tip::
 
-   Use BuildKit (``enable_docker: build``) if you only need image build/push.
-   Use DinD (``enable_docker: true``) if you need full ``docker run`` capabilities.
+   - Use ``enable_docker: BUILD`` if you only need image build/push.
+   - Use ``enable_docker: true`` if you need full ``docker run`` capabilities.
 
-Option 1: Full Docker
----------------------
+Option 1: Full Docker access (privileged permission required)
+-------------------------------------------------------------
 
 Set ``enable_docker: true`` to make the full ``docker`` CLI available inside
 the pod — you can build images, push them, and run containers
 (``docker run``).
 
 **Cluster prerequisite:** The cluster must allow pods with ``privileged: true``.
+
+.. note::
+
+   GPU passthrough to nested containers (``docker run --gpus``) is not
+   currently supported. To test a GPU image, build and push it first,
+   then launch it directly with ``sky launch``.
 
 Configuration
 ^^^^^^^^^^^^^
@@ -70,23 +76,7 @@ Or apply it globally to all SkyPilot clusters in SkyPilot config:
    kubernetes:
      enable_docker: true
 
-To persist the Docker cache across cluster restarts, specify a SkyPilot volume:
-
-.. code-block:: yaml
-
-   config:
-     kubernetes:
-       enable_docker:
-         enabled: true
-         cache_volume: my-builder-cache  # SkyPilot volume name
-
-.. note::
-
-   For multi-node clusters, use a ``ReadWriteMany`` volume so all
-   nodes can mount it simultaneously. Each pod gets its own ``subPath`` within
-   the PVC, so a single volume can be safely shared across clusters.
-
-See `dind_cluster.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/enable_docker/dind_cluster.yaml>`_ for a complete example.
+To persist the Docker cache across cluster restarts, see :ref:`persist-docker-cache`.
 
 Launch and verify
 ^^^^^^^^^^^^^^^^^
@@ -102,11 +92,13 @@ Launch and verify
    docker build -t myregistry/myimage:latest .
    docker push myregistry/myimage:latest
 
+See `dind_cluster.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/enable_docker/dind_cluster.yaml>`_ for a complete example.
+
 Option 2: Build-only
 --------------------
 
 If your cluster does not allow ``privileged: true`` pods, or you only need
-to build and push images, set ``enable_docker: build``. This makes
+to build and push images, set ``enable_docker: BUILD``. This makes
 ``docker buildx build`` available inside the pod without
 requiring privileged permissions.
 
@@ -121,32 +113,16 @@ Add the following to the task YAML's ``config`` field:
 
    config:
      kubernetes:
-       enable_docker: build
+       enable_docker: BUILD
 
 Or apply it globally in SkyPilot config:
 
 .. code-block:: yaml
 
    kubernetes:
-     enable_docker: build
+     enable_docker: BUILD
 
-To persist the BuildKit cache across cluster restarts:
-
-.. code-block:: yaml
-
-   config:
-     kubernetes:
-       enable_docker:
-         enabled: build
-         cache_volume: my-builder-cache  # SkyPilot volume name
-
-.. note::
-
-   For multi-node clusters, use a ``ReadWriteMany`` volume so all
-   nodes can mount it simultaneously. Each pod gets its own ``subPath`` within
-   the PVC, so a single volume can be safely shared across clusters.
-
-See `buildkit_cluster.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/enable_docker/buildkit_cluster.yaml>`_ for a complete example.
+To persist the BuildKit cache across cluster restarts, see :ref:`persist-docker-cache`.
 
 Launch and verify
 ^^^^^^^^^^^^^^^^^
@@ -160,3 +136,49 @@ Launch and verify
    docker buildx ls
    # Build and push an image using buildx
    docker buildx build -t myregistry/myimage:latest --push .
+
+See `buildkit_cluster.yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/enable_docker/buildkit_cluster.yaml>`_ for a complete example.
+
+.. _persist-docker-cache:
+
+Persist the cache
+-----------------
+
+By default the Docker / BuildKit cache is lost when the cluster is stopped or
+restarted. To persist it, create a SkyPilot volume and reference it in the
+``enable_docker`` config.
+
+1. Define a volume YAML:
+
+   .. code-block:: yaml
+
+      # docker-cache-vol.yaml
+      name: my-builder-cache
+      type: k8s-pvc
+      infra: k8s
+      size: 50Gi
+      config:
+        storage_class_name: standard-rwx
+        access_mode: ReadWriteMany  # Required for multi-node clusters
+
+2. Create the volume:
+
+   .. code-block:: console
+
+      $ sky volumes apply docker-cache-vol.yaml
+
+3. Reference the volume in ``enable_docker``:
+
+   .. code-block:: yaml
+
+      config:
+        kubernetes:
+          enable_docker:
+            mode: ALL   # or BUILD
+            cache_volume: my-builder-cache
+
+.. note::
+
+   For multi-node clusters, use a ``ReadWriteMany`` volume so all
+   nodes can mount it simultaneously. Each pod gets its own ``subPath`` within
+   the PVC, so a single volume can be safely shared across clusters.

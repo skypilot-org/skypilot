@@ -2896,9 +2896,6 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
-# enable_docker mode constants.
-DOCKER_MODE_ALL = 'all'
-DOCKER_MODE_BUILD = 'build'
 # Sidecar container names.
 _DIND_CONTAINER_NAME = 'dind'
 _BUILDKITD_CONTAINER_NAME = 'buildkitd'
@@ -2906,66 +2903,85 @@ _BUILDKITD_CONTAINER_NAME = 'buildkitd'
 _DIND_CACHE_SUBPATH_PREFIX = 'var_lib_docker'
 _BUILDKIT_CACHE_SUBPATH_PREFIX = 'buildkit_cache'
 
+
+class DockerMode(str, enum.Enum):
+    """Modes for the ``enable_docker`` config."""
+    ALL = 'ALL'
+    BUILD = 'BUILD'
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerSidecarDefaults:
+    """Default image and volume names for a Docker sidecar mode."""
+    image: str
+    cli_image: str
+    cache_vol_name: str
+    cache_mount: str
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerConfig:
+    """Normalized ``enable_docker`` config produced by
+    :func:`normalize_enable_docker_config`."""
+    mode: DockerMode
+    cache_volume: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a plain dict (for YAML round-trip via provider)."""
+        return {'mode': self.mode.value, 'cache_volume': self.cache_volume}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'DockerConfig':
+        """Reconstruct from a dict (e.g. read back from provider config)."""
+        return cls(mode=DockerMode(d['mode']),
+                   cache_volume=d.get('cache_volume'))
+
+
 # Default images for each enable_docker mode.
-_DOCKER_SIDECAR_DEFAULTS = {
-    DOCKER_MODE_ALL: {
-        'image': 'docker:29.3-dind',
-        'cli_image': 'docker:29.3-cli',
-        'cache_vol_name': 'dind-storage',
-        'cache_mount': '/var/lib/docker',
-    },
-    DOCKER_MODE_BUILD: {
-        'image': 'moby/buildkit:v0.28.0-rootless',
-        'cli_image': 'docker:29.3-cli',
-        'cache_vol_name': 'buildkit-cache',
-        'cache_mount': '/home/user/.local/share/buildkit',
-    },
+_DOCKER_SIDECAR_DEFAULTS: Dict[DockerMode, DockerSidecarDefaults] = {
+    DockerMode.ALL: DockerSidecarDefaults(
+        image='docker:29.3-dind',
+        cli_image='docker:29.3-cli',
+        cache_vol_name='dind-storage',
+        cache_mount='/var/lib/docker',
+    ),
+    DockerMode.BUILD: DockerSidecarDefaults(
+        image='moby/buildkit:v0.28.0-rootless',
+        cli_image='docker:29.3-cli',
+        cache_vol_name='buildkit-cache',
+        cache_mount='/home/user/.local/share/buildkit',
+    ),
 }
 
 
 def normalize_enable_docker_config(
-    raw: Union[bool, str, Dict[str, Any], None],) -> Optional[Dict[str, Any]]:
-    """Normalize ``enable_docker`` config into a canonical dict.
+    raw: Union[bool, str, Dict[str, Any], None],) -> Optional[DockerConfig]:
+    """Normalize ``enable_docker`` config into a :class:`DockerConfig`.
 
-    Returns ``None`` when disabled, or:
-        ``{'enabled': 'all' | 'build', 'cache_volume': Optional[str]}``
+    Returns ``None`` when disabled.
     """
     if raw is None or raw is False:
         return None
-    if raw is True or raw == DOCKER_MODE_ALL:
-        return {'enabled': DOCKER_MODE_ALL, 'cache_volume': None}
-    if raw == DOCKER_MODE_BUILD:
-        return {'enabled': DOCKER_MODE_BUILD, 'cache_volume': None}
+    if raw is True or raw == DockerMode.ALL:
+        return DockerConfig(mode=DockerMode.ALL)
+    if raw == DockerMode.BUILD:
+        return DockerConfig(mode=DockerMode.BUILD)
     if isinstance(raw, dict):
-        if 'enabled' not in raw:
-            # Empty dict or dict without 'enabled' key (e.g. default_value
+        if 'mode' not in raw:
+            # Empty dict or dict without 'mode' key (e.g. default_value
             # from config lookup) — treat as disabled.
             return None
-        enabled = raw['enabled']
-        if enabled is False:
+        mode_val = raw['mode']
+        if mode_val is False:
             return None
-        mode = (DOCKER_MODE_ALL if
-                (enabled is True or
-                 enabled == DOCKER_MODE_ALL) else DOCKER_MODE_BUILD)
-        return {
-            'enabled': mode,
-            'cache_volume': raw.get('cache_volume'),
-        }
+        mode = DockerMode(mode_val)
+        return DockerConfig(mode=mode, cache_volume=raw.get('cache_volume'))
     raise ValueError(f'Invalid enable_docker value: {raw!r}')
-
-
-def get_docker_sidecar_defaults(mode: str) -> Dict[str, str]:
-    """Return a copy of the default config for the given docker mode."""
-    defaults = _DOCKER_SIDECAR_DEFAULTS.get(mode)
-    if defaults is None:
-        raise ValueError(f'Unknown enable_docker mode: {mode!r}. '
-                         f'Supported: {list(_DOCKER_SIDECAR_DEFAULTS)}')
-    return dict(defaults)
 
 
 def inject_docker_cache_volume(
     pod_spec: Dict[str, Any],
-    docker_config: Dict[str, Any],
+    docker_config: DockerConfig,
     pvc_name: Optional[str],
     context: Optional[str],
     namespace: str,
@@ -2984,12 +3000,12 @@ def inject_docker_cache_volume(
     * If the user already mounted something at the cache path via
       ``pod_config``, this function is a no-op.
     """
-    mode = docker_config['enabled']
+    mode = docker_config.mode
     defaults = _DOCKER_SIDECAR_DEFAULTS[mode]
     ctr_name = (_DIND_CONTAINER_NAME
-                if mode == DOCKER_MODE_ALL else _BUILDKITD_CONTAINER_NAME)
-    cache_vol_name = defaults['cache_vol_name']
-    cache_mount = defaults['cache_mount']
+                if mode == DockerMode.ALL else _BUILDKITD_CONTAINER_NAME)
+    cache_vol_name = defaults.cache_vol_name
+    cache_mount = defaults.cache_mount
 
     # Check if the user already mounted a volume at the cache path
     # via pod_config (e.g. manual emptyDir or hostPath).
@@ -3004,13 +3020,13 @@ def inject_docker_cache_volume(
         # PVC path: per-pod subPath for isolation.
         # For rootless buildkitd (uid/gid 1000), set fsGroup so the PVC
         # mount is writable.
-        if mode == DOCKER_MODE_BUILD:
+        if mode == DockerMode.BUILD:
             pod_sec = pod_spec['spec'].setdefault('securityContext', {})
             pod_sec.setdefault('fsGroup', 1000)
             pod_sec.setdefault('fsGroupChangePolicy', 'OnRootMismatch')
 
-        prefix = (_DIND_CACHE_SUBPATH_PREFIX if mode == DOCKER_MODE_ALL else
-                  _BUILDKIT_CACHE_SUBPATH_PREFIX)
+        prefix = (_DIND_CACHE_SUBPATH_PREFIX
+                  if mode == DockerMode.ALL else _BUILDKIT_CACHE_SUBPATH_PREFIX)
         pod_name = pod_spec['metadata']['name']
         hash_key = f'{context or ""}:{namespace}:{pod_name}'
         sub_path = (f'{prefix}_'
@@ -3056,23 +3072,24 @@ def inject_docker_cache_volume(
                 })
 
 
-def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def _docker_sidecar_to_pod_config(docker_cfg: DockerConfig) -> Dict[str, Any]:
     """Translate a normalized ``enable_docker`` config into a pod_config fragment.
 
     The returned pod_config includes:
     - A sidecar container (dind or buildkitd) with shared socket volume.
-    - An init container that copies the docker CLI and buildx plugin from the ``docker:cli`` image into a shared emptyDir.
+    - An init container that copies the docker CLI and buildx plugin from the
+      ``docker:cli`` image into a shared emptyDir.
     - A ``postStart`` lifecycle hook on the ``ray-node`` container that
       symlinks the extracted binaries into ``/usr/local/bin`` (and configures
       ``docker buildx`` for build mode).
 
     No cache volume is created here.  If the user specified a SkyPilot volume
-    (``docker_cfg['cache_volume']``), the PVC volume and volumeMount are
+    (``docker_cfg.cache_volume``), the PVC volume and volumeMount are
     injected later in ``_create_pods()`` once the pod name is known (so that a
     per-pod ``subPath`` can be set).
     """
-    mode = docker_cfg['enabled']
-    defaults = get_docker_sidecar_defaults(mode)
+    mode = docker_cfg.mode
+    defaults = _DOCKER_SIDECAR_DEFAULTS[mode]
 
     # -- Init container: extract docker CLI + buildx plugin ---------------
     # Both modes install docker CLI and the buildx plugin.  In 'all' mode
@@ -3085,7 +3102,7 @@ def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
 
     init_containers = [{
         'name': 'install-docker-cli',
-        'image': defaults['cli_image'],
+        'image': defaults.cli_image,
         'command': ['sh', '-c', init_command],
         'volumeMounts': [{
             'name': 'docker-tools',
@@ -3102,7 +3119,7 @@ def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
         'ln -sf /docker-tools/cli-plugins/docker-buildx'
         ' $HOME/.docker/cli-plugins/docker-buildx || true',
     ]
-    if mode == DOCKER_MODE_BUILD:
+    if mode == DockerMode.BUILD:
         # Register the BuildKit sidecar as a remote buildx builder so
         # `docker buildx build` works out of the box.
         post_start_cmds += [
@@ -3123,7 +3140,7 @@ def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
     # -- Build the pod_config fragment -----------------------------------
-    if mode == DOCKER_MODE_ALL:
+    if mode == DockerMode.ALL:
         pod_cfg: Dict[str, Any] = {
             'spec': {
                 'initContainers': init_containers,
@@ -3148,7 +3165,7 @@ def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     },
                     {
                         'name': _DIND_CONTAINER_NAME,
-                        'image': defaults['image'],
+                        'image': defaults.image,
                         'securityContext': {
                             'privileged': True
                         },
@@ -3204,7 +3221,7 @@ def _docker_sidecar_to_pod_config(docker_cfg: Dict[str, Any]) -> Dict[str, Any]:
                     },
                     {
                         'name': _BUILDKITD_CONTAINER_NAME,
-                        'image': defaults['image'],
+                        'image': defaults.image,
                         'args': [
                             '--addr=unix:///run/buildkit/buildkitd.sock',
                             '--oci-worker-no-process-sandbox',
@@ -3309,28 +3326,27 @@ def combine_pod_config_fields(
                    ['ray_head_default']['node_config'])
 
     # --- Docker sidecar injection (DinD / BuildKit) ---
-    # enable_docker is the base layer; pod_config merges on top (pod_config
-    # wins).
-    raw_docker_cfg = skypilot_config.get_effective_region_config(
-        cloud=cloud_str,
-        region=context_str,
-        keys=('enable_docker',),
-        default_value=None)
-    task_raw_docker_cfg = config_utils.get_cloud_config_value_from_dict(
+    # Task-level config takes precedence; fall back to global config.
+    raw_docker_cfg = config_utils.get_cloud_config_value_from_dict(
         dict_config=cluster_config_overrides,
         cloud=cloud_str,
         region=context_str,
         keys=('enable_docker',),
         default_value=None)
-    if task_raw_docker_cfg is not None:
-        raw_docker_cfg = task_raw_docker_cfg
+    if raw_docker_cfg is None:
+        raw_docker_cfg = skypilot_config.get_effective_region_config(
+            cloud=cloud_str,
+            region=context_str,
+            keys=('enable_docker',),
+            default_value=None)
     docker_cfg = normalize_enable_docker_config(raw_docker_cfg)
     if docker_cfg:
         docker_pod_cfg = _docker_sidecar_to_pod_config(docker_cfg)
         config_utils.merge_k8s_configs(node_config, docker_pod_cfg)
         # Persist effective docker config in provider for use in instance.py.
         if 'provider' in merged_cluster_yaml_obj:
-            merged_cluster_yaml_obj['provider']['docker_config'] = docker_cfg
+            merged_cluster_yaml_obj['provider'][
+                'docker_config'] = docker_cfg.to_dict()
 
     # Merge the kubernetes pod_config into the YAML for both head and worker
     # nodes. This comes after enable_docker so explicit pod_config wins on

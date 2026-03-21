@@ -1139,10 +1139,14 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     # specified for the enable_docker cache, look up the PVC name. The actual
     # volume + volumeMount are added per-pod inside _create_resource_thread (so
     # that each pod can have its own subPath).
-    docker_config = provider_config.get('docker_config')
+    raw_docker_config = provider_config.get('docker_config')
+    docker_config: Optional[kubernetes_utils.DockerConfig] = None
+    if raw_docker_config:
+        docker_config = kubernetes_utils.DockerConfig.from_dict(
+            raw_docker_config)
     docker_pvc_name: Optional[str] = None
-    if docker_config and docker_config.get('cache_volume'):
-        cache_vol_name = docker_config['cache_volume']
+    if docker_config and docker_config.cache_volume:
+        cache_vol_name = docker_config.cache_volume
         vol_record = global_user_state.get_volume_by_name(cache_vol_name)
         if vol_record is None:
             raise exceptions.VolumeNotFoundError(

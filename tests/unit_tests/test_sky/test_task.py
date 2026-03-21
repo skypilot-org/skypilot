@@ -744,7 +744,6 @@ def make_mock_resource(cloud=None, region=None, zone=None):
             self.region = region
             self.zone = zone
             self.priority = 0
-            self.cluster_config_overrides = {}
 
         def copy(self, **override):
             # Return a new instance with overridden attributes
@@ -1298,121 +1297,6 @@ secrets:
         os.unlink(yaml_path)
 
 
-# ---------- enable_docker volume in resolve_and_validate_volumes ----------
-
-
-def test_enable_docker_volume_resolved_from_global_config():
-    """enable_docker cache_volume is resolved and included in validation."""
-    t = task.Task()
-    t._volumes = {'/mnt': 'task-vol'}
-    t.resources = [make_mock_resource()]
-
-    def get_vol_by_name(name):
-        if name == 'task-vol':
-            return {
-                'handle': make_mock_volume_config(name='task-vol', cloud='aws')
-            }
-        if name == 'builder-cache':
-            return {
-                'handle': make_mock_volume_config(name='builder-cache',
-                                                  cloud='aws')
-            }
-        return None
-
-    with mock.patch('sky.global_user_state.get_volume_by_name',
-                    side_effect=get_vol_by_name), \
-         mock.patch('sky.skypilot_config.get_nested',
-                    return_value={'enabled': True,
-                                  'cache_volume': 'builder-cache'}):
-        t.resolve_and_validate_volumes()
-        # task volumes only — enable_docker vol must not appear
-        assert len(t.volume_mounts) == 1
-        assert t.volume_mounts[0].volume_name == 'task-vol'
-
-
-def test_enable_docker_volume_task_override():
-    """Task-level enable_docker config overrides global."""
-    t = task.Task()
-    t._volumes = {'/mnt': 'task-vol'}
-    res = make_mock_resource()
-    res.cluster_config_overrides = {
-        'kubernetes': {
-            'enable_docker': {
-                'enabled': 'build',
-                'cache_volume': 'task-builder-vol',
-            }
-        }
-    }
-    t.resources = [res]
-
-    def get_vol_by_name(name):
-        if name == 'task-vol':
-            return {
-                'handle': make_mock_volume_config(name='task-vol', cloud='aws')
-            }
-        if name == 'task-builder-vol':
-            return {
-                'handle': make_mock_volume_config(name='task-builder-vol',
-                                                  cloud='aws')
-            }
-        return None
-
-    # Global config says 'global-cache', but task override says
-    # 'task-builder-vol'.  The task override should win.
-    with mock.patch('sky.global_user_state.get_volume_by_name',
-                    side_effect=get_vol_by_name), \
-         mock.patch('sky.skypilot_config.get_nested',
-                    return_value={'enabled': True,
-                                  'cache_volume': 'global-cache'}):
-        t.resolve_and_validate_volumes()
-        # Should not raise — 'task-builder-vol' exists.
-        assert len(t.volume_mounts) == 1
-
-
-def test_enable_docker_volume_not_found_raises():
-    """VolumeNotFoundError for enable_docker cache_volume is raised."""
-    t = task.Task()
-    t._volumes = {'/mnt': 'task-vol'}
-    t.resources = [make_mock_resource()]
-
-    def get_vol_by_name(name):
-        if name == 'task-vol':
-            return {
-                'handle': make_mock_volume_config(name='task-vol', cloud='aws')
-            }
-        # 'missing-vol' not found
-        return None
-
-    with mock.patch('sky.global_user_state.get_volume_by_name',
-                    side_effect=get_vol_by_name), \
-         mock.patch('sky.skypilot_config.get_nested',
-                    return_value={'enabled': True,
-                                  'cache_volume': 'missing-vol'}):
-        with pytest.raises(exceptions.VolumeNotFoundError):
-            t.resolve_and_validate_volumes()
-
-
-def test_enable_docker_volume_skip_if_already_in_task_volumes():
-    """enable_docker cache_volume that is already in task
-    volume_mounts is not resolved twice."""
-    t = task.Task()
-    # Task mounts the same volume as enable_docker uses.
-    t._volumes = {'/mnt': 'shared-vol'}
-    t.resources = [make_mock_resource()]
-
-    with mock.patch('sky.global_user_state.get_volume_by_name') as get_vol, \
-         mock.patch('sky.skypilot_config.get_nested',
-                    return_value={'enabled': True,
-                                  'cache_volume': 'shared-vol'}):
-        get_vol.return_value = {
-            'handle': make_mock_volume_config(name='shared-vol', cloud='aws')
-        }
-        t.resolve_and_validate_volumes()
-        # get_volume_by_name should be called only once (for the task volume),
-        # not a second time for enable_docker since names match.
-        assert get_vol.call_count == 1
-
-
 def test_multinode_rwo_volume_raises():
     """multi-node task with ReadWriteOnce volume raises."""
     t = task.Task()
@@ -1428,39 +1312,6 @@ def test_multinode_rwo_volume_raises():
                 cloud='aws',
                 config={'access_mode': 'ReadWriteOnce'})
         }
-        with pytest.raises(ValueError, match='ReadWriteOnce.*multi-node'):
-            t.resolve_and_validate_volumes()
-
-
-def test_multinode_rwo_enable_docker_volume_raises():
-    """multi-node + enable_docker cache_volume with RWO raises."""
-    t = task.Task()
-    t._volumes = {'/mnt': 'task-vol'}
-    t.resources = [make_mock_resource()]
-    t.num_nodes = 2
-
-    def get_vol_by_name(name):
-        if name == 'task-vol':
-            return {
-                'handle': make_mock_volume_config(
-                    name='task-vol',
-                    cloud='aws',
-                    config={'access_mode': 'ReadWriteMany'})
-            }
-        if name == 'builder-cache':
-            return {
-                'handle': make_mock_volume_config(
-                    name='builder-cache',
-                    cloud='aws',
-                    config={'access_mode': 'ReadWriteOnce'})
-            }
-        return None
-
-    with mock.patch('sky.global_user_state.get_volume_by_name',
-                    side_effect=get_vol_by_name), \
-         mock.patch('sky.skypilot_config.get_nested',
-                    return_value={'enabled': True,
-                                  'cache_volume': 'builder-cache'}):
         with pytest.raises(ValueError, match='ReadWriteOnce.*multi-node'):
             t.resolve_and_validate_volumes()
 
