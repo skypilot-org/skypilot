@@ -1472,7 +1472,7 @@ def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
     # kubectl exec into the sidecar to verify cache mount exists.
     # For _dv cases the mount is a PVC; for default cases it is an emptyDir.
     verify_mount_cmd = (
-        f'kubectl exec {name_on_cloud}-head -c {sidecar} -- df -h {cache_mount} '
+        f'kubectl exec {name_on_cloud}-head -c {sidecar} -- df -a '
         f'| grep {cache_mount}')
 
     test_cmds: List[str] = [
