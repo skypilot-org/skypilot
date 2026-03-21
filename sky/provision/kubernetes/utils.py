@@ -3113,7 +3113,8 @@ def _docker_sidecar_to_pod_config(docker_cfg: DockerConfig) -> Dict[str, Any]:
     # -- postStart hook: symlink binaries into PATH ----------------------
     # Common: symlink docker + buildx plugin into well-known locations.
     post_start_cmds = [
-        'sudo ln -sf /docker-tools/bin/docker /usr/local/bin/docker'
+        'ln -sf /docker-tools/bin/docker /usr/local/bin/docker'
+        ' || sudo ln -sf /docker-tools/bin/docker /usr/local/bin/docker'
         ' || true',
         'mkdir -p $HOME/.docker/cli-plugins || true',
         'ln -sf /docker-tools/cli-plugins/docker-buildx'
@@ -3125,19 +3126,14 @@ def _docker_sidecar_to_pod_config(docker_cfg: DockerConfig) -> Dict[str, Any]:
         post_start_cmds += [
             'docker buildx create --name skypilot-builder'
             ' --driver remote'
-            ' unix:///run/buildkit/buildkitd.sock 2>/dev/null || true',
-            'docker buildx use skypilot-builder'
-            ' 2>/dev/null || true',
+            ' unix:///run/buildkit/buildkitd.sock || true',
+            'docker buildx use skypilot-builder || true',
         ]
+    post_start_log = '/tmp/skypilot_docker_setup.log'
     post_start_cmd = ' && '.join(post_start_cmds)
+    logged_cmd = f'{{ {post_start_cmd} ; }} >> {post_start_log} 2>&1'
 
-    lifecycle = {
-        'postStart': {
-            'exec': {
-                'command': ['sh', '-c', post_start_cmd],
-            }
-        }
-    }
+    lifecycle = {'postStart': {'exec': {'command': ['sh', '-c', logged_cmd],}}}
 
     # -- Build the pod_config fragment -----------------------------------
     if mode == DockerMode.ALL:

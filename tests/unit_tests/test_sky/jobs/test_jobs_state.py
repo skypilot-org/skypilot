@@ -153,7 +153,11 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
             'job_id5': job_id5,
         }
 
-    return asyncio.get_event_loop().run_until_complete(create_job_states())
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
 
 
 class TestMapResponseFieldToDbColumn:
