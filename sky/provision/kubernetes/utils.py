@@ -3512,6 +3512,24 @@ def get_kubernetes_node_info(
             if result is not None:
                 logger.debug(f'Got node info from external provider for '
                              f'{resolved_context}')
+                # Apply allowed_nodes filtering to plugin results. The
+                # plugin returns info for all nodes, but we need to
+                # respect the user's allowed_nodes config. Use
+                # get_kubernetes_nodes() (which is already filtered) to
+                # determine the set of allowed node names.
+                allowed_config = get_allowed_nodes_config(resolved_context)
+                if allowed_config is not None:
+                    allowed_nodes = get_kubernetes_nodes(
+                        context=resolved_context)
+                    allowed_names = {n.metadata.name for n in allowed_nodes}
+                    result = models.KubernetesNodesInfo(
+                        node_info_dict={
+                            name: info
+                            for name, info in result.node_info_dict.items()
+                            if name in allowed_names
+                        },
+                        hint=result.hint,
+                    )
                 return result
         # Fall through to direct Kubernetes API query if provider returns None
 
