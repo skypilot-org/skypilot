@@ -3,6 +3,7 @@
 """
 
 import collections
+import copy
 import os
 import re
 import tempfile
@@ -2925,3 +2926,401 @@ class TestGetHandledTaintKeys(unittest.TestCase):
             assert 'custom.io/gpu' in keys
             assert utils.TPU_RESOURCE_KEY in keys
             assert 'nvidia.com/gpu' in keys
+
+
+class TestAllowedNodesFiltering:
+    """Tests for _filter_allowed_nodes() discovery filtering."""
+
+    def _create_node(self,
+                     name: str,
+                     labels: Optional[dict] = None,
+                     internal_ip: Optional[str] = None,
+                     external_ip: Optional[str] = None) -> utils.V1Node:
+        """Helper to create a V1Node with addresses for filtering tests."""
+        addresses = []
+        if internal_ip:
+            addresses.append(
+                utils.V1NodeAddress(type='InternalIP', address=internal_ip))
+        if external_ip:
+            addresses.append(
+                utils.V1NodeAddress(type='ExternalIP', address=external_ip))
+        return utils.V1Node(
+            metadata=utils.V1ObjectMeta(name=name, labels=labels or {}),
+            status=utils.V1NodeStatus(
+                allocatable={
+                    'cpu': '4',
+                    'memory': '16Gi'
+                },
+                capacity={
+                    'cpu': '4',
+                    'memory': '16Gi'
+                },
+                addresses=addresses,
+                conditions=[utils.V1NodeCondition(type='Ready',
+                                                  status='True')]),
+            spec=utils.V1NodeSpec(unschedulable=False, taints=[]))
+
+    def _make_nodes(self):
+        """Create a standard set of test nodes."""
+        return [
+            self._create_node('gpu-node-1',
+                              labels={
+                                  'pool': 'gpu',
+                                  'team': 'research'
+                              },
+                              internal_ip='10.0.1.1'),
+            self._create_node('gpu-node-2',
+                              labels={
+                                  'pool': 'gpu',
+                                  'team': 'platform'
+                              },
+                              internal_ip='10.0.1.2'),
+            self._create_node('cpu-node-1',
+                              labels={
+                                  'pool': 'cpu',
+                                  'team': 'research'
+                              },
+                              internal_ip='10.0.2.1'),
+            self._create_node('cpu-node-2',
+                              labels={
+                                  'pool': 'cpu',
+                                  'team': 'platform'
+                              },
+                              internal_ip='10.0.2.2',
+                              external_ip='203.0.113.5'),
+        ]
+
+    def test_filter_no_config(self):
+        """No allowed_nodes config returns all nodes."""
+        nodes = self._make_nodes()
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=None):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert len(result) == 4
+
+    def test_filter_empty_config(self):
+        """allowed_nodes: {} returns all nodes."""
+        nodes = self._make_nodes()
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value={}):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert len(result) == 4
+
+    def test_filter_label_selector_single(self):
+        """Single label matches nodes with that label."""
+        nodes = self._make_nodes()
+        config = {'label_selector': {'pool': 'gpu'}}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(
+            n.metadata.name for n in result) == ['gpu-node-1', 'gpu-node-2']
+
+    def test_filter_label_selector_multiple_or(self):
+        """Multiple labels are OR'd: pool=gpu OR team=research."""
+        nodes = self._make_nodes()
+        config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        # gpu-node-1 (pool=gpu), gpu-node-2 (pool=gpu), cpu-node-1 (team=research)
+        assert sorted(n.metadata.name for n in result) == [
+            'cpu-node-1', 'gpu-node-1', 'gpu-node-2'
+        ]
+
+    def test_filter_names(self):
+        """Names list matches by node name."""
+        nodes = self._make_nodes()
+        config = {'names': ['gpu-node-1', 'cpu-node-2']}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(
+            n.metadata.name for n in result) == ['cpu-node-2', 'gpu-node-1']
+
+    def test_filter_ips_internal(self):
+        """IPs match against InternalIP addresses."""
+        nodes = self._make_nodes()
+        config = {'ips': ['10.0.1.1', '10.0.2.2']}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(
+            n.metadata.name for n in result) == ['cpu-node-2', 'gpu-node-1']
+
+    def test_filter_ips_external(self):
+        """IPs match against ExternalIP addresses."""
+        nodes = self._make_nodes()
+        config = {'ips': ['203.0.113.5']}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert [n.metadata.name for n in result] == ['cpu-node-2']
+
+    def test_filter_combined_or(self):
+        """Labels + names + IPs all OR'd together."""
+        nodes = self._make_nodes()
+        # pool=gpu -> gpu-node-1, gpu-node-2
+        # names=[cpu-node-1]
+        # ips=[10.0.2.2] -> cpu-node-2
+        config = {
+            'label_selector': {
+                'pool': 'gpu'
+            },
+            'names': ['cpu-node-1'],
+            'ips': ['10.0.2.2'],
+        }
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert sorted(n.metadata.name for n in result) == [
+            'cpu-node-1', 'cpu-node-2', 'gpu-node-1', 'gpu-node-2'
+        ]
+
+    def test_filter_no_matches(self):
+        """Config set but nothing matches returns empty list."""
+        nodes = self._make_nodes()
+        config = {'label_selector': {'pool': 'nonexistent'}}
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        assert not result
+
+    def test_filter_no_duplicates(self):
+        """Node matching multiple criteria is only included once."""
+        nodes = self._make_nodes()
+        # gpu-node-1 matches both label and name
+        config = {
+            'label_selector': {
+                'pool': 'gpu'
+            },
+            'names': ['gpu-node-1'],
+        }
+        with mock.patch('sky.skypilot_config.get_effective_region_config',
+                        return_value=config):
+            result = utils._filter_allowed_nodes(nodes, context='test')
+        names = [n.metadata.name for n in result]
+        assert names.count('gpu-node-1') == 1
+        assert sorted(names) == ['gpu-node-1', 'gpu-node-2']
+
+
+class TestAllowedNodesScheduling:
+    """Tests for allowed_nodes scheduling enforcement (nodeAffinity injection).
+
+    These test the logic that injects nodeAffinity constraints into pod specs
+    to ensure pods only land on allowed nodes.
+    """
+
+    def _make_pod_spec_with_gpu_affinity(self):
+        """Create a pod spec with existing GPU nodeAffinity (typical GPU workload)."""
+        return {
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'nvidia.com/gpu': 1
+                        }
+                    }
+                }],
+                'affinity': {
+                    'nodeAffinity': {
+                        'requiredDuringSchedulingIgnoredDuringExecution': {
+                            'nodeSelectorTerms': [{
+                                'matchExpressions': [{
+                                    'key': 'cloud.google.com/gke-accelerator',
+                                    'operator': 'In',
+                                    'values': ['nvidia-a100'],
+                                }]
+                            }]
+                        }
+                    }
+                },
+            },
+        }
+
+    def _make_pod_spec_cpu_only(self):
+        """Create a pod spec with no required nodeAffinity (typical CPU workload)."""
+        return {
+            'metadata': {
+                'labels': {}
+            },
+            'spec': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'cpu': '4'
+                        }
+                    }
+                }],
+                'affinity': {
+                    'nodeAffinity': {
+                        'preferredDuringSchedulingIgnoredDuringExecution': [{
+                            'weight': 1,
+                            'preference': {
+                                'matchExpressions': [{
+                                    'key': 'cloud.google.com/gke-accelerator',
+                                    'operator': 'DoesNotExist',
+                                }]
+                            },
+                        }]
+                    }
+                },
+            },
+        }
+
+    def _make_filtered_nodes(self):
+        """Create mock filtered nodes with kubernetes.io/hostname labels."""
+        nodes = []
+        for name, hostname, ip in [
+            ('node-a', 'node-a', '10.0.1.1'),
+            ('node-b', 'node-b', '10.0.1.2'),
+        ]:
+            nodes.append(
+                utils.V1Node(metadata=utils.V1ObjectMeta(
+                    name=name,
+                    labels={
+                        'kubernetes.io/hostname': hostname,
+                        'pool': 'gpu'
+                    }),
+                             status=utils.V1NodeStatus(
+                                 allocatable={
+                                     'cpu': '4',
+                                     'memory': '16Gi'
+                                 },
+                                 capacity={
+                                     'cpu': '4',
+                                     'memory': '16Gi'
+                                 },
+                                 addresses=[
+                                     utils.V1NodeAddress(type='InternalIP',
+                                                         address=ip)
+                                 ],
+                                 conditions=[
+                                     utils.V1NodeCondition(type='Ready',
+                                                           status='True')
+                                 ]),
+                             spec=utils.V1NodeSpec(unschedulable=False,
+                                                   taints=[])))
+        return nodes
+
+    def test_scheduling_labels_only_gpu_workload(self):
+        """Label-only config with GPU workload: cross-product with existing GPU term."""
+        pod_spec = self._make_pod_spec_with_gpu_affinity()
+        config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     config,
+                                                     context='test')
+
+        # Should create 2 terms (one per label), each with existing GPU expr + label
+        terms = result['affinity']['nodeAffinity'][
+            'requiredDuringSchedulingIgnoredDuringExecution'][
+                'nodeSelectorTerms']
+        assert len(terms) == 2
+
+        # Each term should have the original GPU expression AND one label
+        for term in terms:
+            exprs = term['matchExpressions']
+            keys = [e['key'] for e in exprs]
+            assert 'cloud.google.com/gke-accelerator' in keys
+            assert len(exprs) == 2  # GPU + one label
+
+        # One term has pool=gpu, other has team=research
+        added_keys = set()
+        for term in terms:
+            for expr in term['matchExpressions']:
+                if expr['key'] != 'cloud.google.com/gke-accelerator':
+                    added_keys.add(expr['key'])
+        assert added_keys == {'pool', 'team'}
+
+    def test_scheduling_labels_only_cpu_workload(self):
+        """Label-only config with CPU workload: creates new terms (no existing required terms)."""
+        pod_spec = self._make_pod_spec_cpu_only()
+        config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     config,
+                                                     context='test')
+
+        terms = result['affinity']['nodeAffinity'][
+            'requiredDuringSchedulingIgnoredDuringExecution'][
+                'nodeSelectorTerms']
+        # 2 terms, one per label
+        assert len(terms) == 2
+        term_keys = [
+            terms[0]['matchExpressions'][0]['key'],
+            terms[1]['matchExpressions'][0]['key']
+        ]
+        assert set(term_keys) == {'pool', 'team'}
+
+        # preferredDuringScheduling should be preserved
+        assert 'preferredDuringSchedulingIgnoredDuringExecution' in \
+            result['affinity']['nodeAffinity']
+
+    def test_scheduling_with_names_gpu_workload(self):
+        """Names/IPs config with GPU workload: hostname expr added to existing GPU term."""
+        pod_spec = self._make_pod_spec_with_gpu_affinity()
+        config = {'names': ['node-a', 'node-b']}
+        filtered_nodes = self._make_filtered_nodes()
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=filtered_nodes):
+            result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+                pod_spec['spec']),
+                                                         config,
+                                                         context='test')
+
+        terms = result['affinity']['nodeAffinity'][
+            'requiredDuringSchedulingIgnoredDuringExecution'][
+                'nodeSelectorTerms']
+        # Still 1 term, with GPU expr + hostname expr
+        assert len(terms) == 1
+        exprs = terms[0]['matchExpressions']
+        keys = [e['key'] for e in exprs]
+        assert 'cloud.google.com/gke-accelerator' in keys
+        assert 'kubernetes.io/hostname' in keys
+
+        # Hostname values should be the allowed nodes
+        hostname_expr = [
+            e for e in exprs if e['key'] == 'kubernetes.io/hostname'
+        ][0]
+        assert sorted(hostname_expr['values']) == ['node-a', 'node-b']
+
+    def test_scheduling_with_names_cpu_workload(self):
+        """Names/IPs config with CPU workload: creates new hostname term."""
+        pod_spec = self._make_pod_spec_cpu_only()
+        config = {'ips': ['10.0.1.1', '10.0.1.2']}
+        filtered_nodes = self._make_filtered_nodes()
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=filtered_nodes):
+            result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+                pod_spec['spec']),
+                                                         config,
+                                                         context='test')
+
+        terms = result['affinity']['nodeAffinity'][
+            'requiredDuringSchedulingIgnoredDuringExecution'][
+                'nodeSelectorTerms']
+        assert len(terms) == 1
+        assert terms[0]['matchExpressions'][0]['key'] == \
+            'kubernetes.io/hostname'
+        assert sorted(
+            terms[0]['matchExpressions'][0]['values']) == ['node-a', 'node-b']
+
+    def test_scheduling_no_config(self):
+        """No allowed_nodes config leaves affinity unchanged."""
+        pod_spec = self._make_pod_spec_with_gpu_affinity()
+        original = copy.deepcopy(pod_spec['spec'])
+
+        result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+            pod_spec['spec']),
+                                                     None,
+                                                     context='test')
+
+        assert result == original

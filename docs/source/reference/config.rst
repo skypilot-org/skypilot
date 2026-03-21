@@ -72,6 +72,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
       - context1
       - context2
+    :ref:`allowed_nodes <config-yaml-kubernetes-allowed-nodes>`:
+      names:
+        - gpu-node-01
     :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
       labels:
         mylabel: myvalue
@@ -1523,6 +1526,56 @@ If you want all available contexts to be allowed, set it to 'all' like this:
 
 You can also set ``SKYPILOT_ALLOW_ALL_KUBERNETES_CONTEXTS`` environment variable to ``"true"``
 for the same effect. Configuration option overrides the environment variable if set.
+
+.. _config-yaml-kubernetes-allowed-nodes:
+
+``kubernetes.allowed_nodes``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Restrict which Kubernetes nodes SkyPilot can use within a cluster (optional).
+
+This filters nodes from both resource discovery (e.g., ``sky gpus list``) and pod
+scheduling. It is the node-level equivalent of ``allowed_contexts``.
+
+All criteria are OR'd: a node is allowed if it matches **any** label key-value pair,
+**any** name, or **any** IP address. If ``allowed_nodes`` is not set, all nodes in
+the cluster are available.
+
+.. code-block:: yaml
+
+  kubernetes:
+    allowed_nodes:
+      # Label selectors: each key-value pair is OR'd.
+      # A node matching pool=gpu OR team=research is allowed.
+      label_selector:
+        pool: gpu
+        team: research
+      # Explicit node names:
+      names:
+        - gpu-node-01
+        - gpu-node-02
+      # Explicit IPs (internal or external):
+      ips:
+        - 10.0.1.5
+        - 10.0.1.6
+
+You can also set this per-context using ``context_configs``:
+
+.. code-block:: yaml
+
+  kubernetes:
+    context_configs:
+      prod-cluster:
+        allowed_nodes:
+          label_selector:
+            pool: production-gpu
+
+.. note::
+
+  When using only ``label_selector`` (no ``names`` or ``ips``), new nodes that
+  match the labels are automatically eligible (autoscaler-friendly). When
+  ``names`` or ``ips`` are configured, the allowed node set is resolved at
+  pod creation time.
 
 .. _config-yaml-kubernetes-custom-metadata:
 

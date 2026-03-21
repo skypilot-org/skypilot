@@ -1450,12 +1450,203 @@ class V1Node:
         return taints
 
 
+def get_allowed_nodes_config(
+        context: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Returns the allowed_nodes config for the given K8s context, or None.
+
+    Reads from ~/.sky/config.yaml, respecting context_configs overrides.
+    """
+    return skypilot_config.get_effective_region_config(cloud='kubernetes',
+                                                       region=context,
+                                                       keys=('allowed_nodes',),
+                                                       default_value=None)
+
+
+def _filter_allowed_nodes(nodes: List[V1Node],
+                          context: Optional[str] = None) -> List[V1Node]:
+    """Filter nodes based on the allowed_nodes config.
+
+    All criteria across all sub-fields are OR'd: a node is included if it
+    matches ANY label key-value pair, ANY name, or ANY IP address.
+
+    Args:
+        nodes: List of V1Node objects to filter.
+        context: K8s context name (for reading per-context config).
+
+    Returns:
+        Filtered list of nodes. Returns all nodes if no allowed_nodes
+        config is set or if the config is empty.
+    """
+    config = get_allowed_nodes_config(context)
+    if config is None:
+        return nodes
+
+    label_selector = config.get('label_selector', {})
+    allowed_names = set(config.get('names', []))
+    allowed_ips = set(config.get('ips', []))
+
+    # If all sub-fields are empty, return all nodes (empty config = no filter).
+    if not label_selector and not allowed_names and not allowed_ips:
+        return nodes
+
+    # Use a set to track already-added nodes and avoid duplicates when a
+    # node matches multiple criteria.
+    seen = set()
+    filtered = []
+    for node in nodes:
+        if node.metadata.name in seen:
+            continue
+
+        matched = False
+
+        # Check each label key-value pair (OR'd: match if ANY pair matches).
+        if label_selector:
+            for key, value in label_selector.items():
+                if node.metadata.labels.get(key) == value:
+                    matched = True
+                    break
+
+        # Check node name.
+        if not matched and allowed_names:
+            if node.metadata.name in allowed_names:
+                matched = True
+
+        # Check IPs (matches against any address type: InternalIP,
+        # ExternalIP, etc.).
+        if not matched and allowed_ips:
+            node_ips = {addr.address for addr in node.status.addresses}
+            if node_ips & allowed_ips:
+                matched = True
+
+        if matched:
+            seen.add(node.metadata.name)
+            filtered.append(node)
+
+    return filtered
+
+
+def inject_allowed_nodes_affinity(
+    pod_spec: Dict[str, Any],
+    allowed_nodes_config: Optional[Dict[str, Any]],
+    context: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Inject nodeAffinity constraints for allowed_nodes into a pod spec.
+
+    Ensures pods are only scheduled on nodes permitted by the allowed_nodes
+    config. Uses one of two strategies:
+
+    **Label-only** (no names/ips configured): Forward label constraints
+    directly as K8s nodeAffinity expressions. This is autoscaler-friendly
+    because new nodes matching the labels are automatically eligible.
+
+    Since allowed_nodes labels are OR'd but K8s matchExpressions within a
+    single nodeSelectorTerm are AND'd, we use a cross-product approach:
+    for each existing nodeSelectorTerm, create N copies (one per label),
+    each with one label expression added. K8s OR's across terms, so:
+
+        existing_terms x labels = (existing AND label1) OR (existing AND label2)
+
+    This correctly expresses: existing_constraints AND (label1 OR label2).
+
+    **Names/IPs involved**: Resolve all allowed nodes to their
+    kubernetes.io/hostname label values, then inject a single hostname
+    In expression into each existing term. Names and IPs are inherently
+    static, so this snapshot-at-scheduling-time approach is appropriate.
+
+    Args:
+        pod_spec: The pod spec dict (pod_spec['spec'] level, containing
+            'affinity', 'containers', etc.).
+        allowed_nodes_config: The allowed_nodes config dict, or None.
+        context: K8s context for resolving nodes when names/IPs are used.
+
+    Returns:
+        The modified pod_spec (also modified in-place).
+    """
+    if allowed_nodes_config is None:
+        return pod_spec
+
+    label_selector = allowed_nodes_config.get('label_selector', {})
+    has_names_or_ips = bool(
+        allowed_nodes_config.get('names') or allowed_nodes_config.get('ips'))
+
+    # Nothing to do if the config is completely empty.
+    if not label_selector and not has_names_or_ips:
+        return pod_spec
+
+    # Navigate into the nodeAffinity structure, creating as needed.
+    affinity = pod_spec.setdefault('affinity', {})
+    node_affinity = affinity.setdefault('nodeAffinity', {})
+    required = node_affinity.setdefault(
+        'requiredDuringSchedulingIgnoredDuringExecution', {})
+    existing_terms = required.get('nodeSelectorTerms', [])
+
+    if not has_names_or_ips and label_selector:
+        # --- Label-only strategy ---
+        # Cross-product: for each (existing_term, label), produce a new term
+        # with the label expression appended. If no existing terms, use an
+        # empty base so we get one term per label.
+        base_terms = existing_terms if existing_terms else [{}]
+        new_terms = []
+        for key, value in label_selector.items():
+            for term in base_terms:
+                new_term = copy.deepcopy(term)
+                new_term.setdefault('matchExpressions', []).append({
+                    'key': key,
+                    'operator': 'In',
+                    'values': [value],
+                })
+                new_terms.append(new_term)
+        required['nodeSelectorTerms'] = new_terms
+    else:
+        # --- Hostname strategy ---
+        # Resolve all allowed nodes (already filtered by discovery) to their
+        # kubernetes.io/hostname label. This label is set by the kubelet on
+        # every node and may differ from node.metadata.name in some setups,
+        # so we read the actual label value with a fallback to the name.
+        filtered_nodes = get_kubernetes_nodes(context=context)
+        if not filtered_nodes:
+            raise exceptions.ResourcesUnavailableError(
+                'No Kubernetes nodes match the allowed_nodes filter '
+                'in ~/.sky/config.yaml. Check your allowed_nodes '
+                'configuration.')
+
+        allowed_hostnames = sorted(
+            set(
+                n.metadata.labels.get('kubernetes.io/hostname', n.metadata.name)
+                for n in filtered_nodes))
+
+        hostname_expr = {
+            'key': 'kubernetes.io/hostname',
+            'operator': 'In',
+            'values': allowed_hostnames,
+        }
+
+        if not existing_terms:
+            # No existing required terms (e.g., CPU-only workload).
+            # Create one term with just the hostname constraint.
+            required['nodeSelectorTerms'] = [{
+                'matchExpressions': [hostname_expr]
+            }]
+        else:
+            # Add hostname constraint to each existing term (AND semantics).
+            # This preserves existing constraints (e.g., GPU label matching)
+            # while restricting to allowed nodes.
+            for term in existing_terms:
+                term.setdefault('matchExpressions', []).append(hostname_expr)
+
+    return pod_spec
+
+
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
+
+    If allowed_nodes is configured in ~/.sky/config.yaml, the returned list
+    is filtered to only include nodes matching the config. All criteria
+    (labels, names, IPs) are OR'd.
     """
     if context is None:
         context = get_current_kube_config_context_name()
@@ -1471,6 +1662,9 @@ def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[V1Node]:
         ]
     finally:
         response.release_conn()
+
+    # Apply allowed_nodes filtering if configured.
+    nodes = _filter_allowed_nodes(nodes, context)
 
     return nodes
 
