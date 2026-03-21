@@ -354,8 +354,7 @@ class TestWorkspaceSchema(unittest.TestCase):
             {
                 'my-workspace': {
                     'aws': {
-                        'disabled':
-                            'should-be-boolean'  # disabled should be bool
+                        'disabled': 'should-be-boolean'  # disabled should be bool
                     }
                 }
             }

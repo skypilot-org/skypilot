@@ -67,8 +67,7 @@ _AUTOSTOP_SCHEMA = {
                     'type': 'boolean',
                 },
                 'wait_for': {
-                    'type':
-                        'string',
+                    'type': 'string',
                     'case_insensitive_enum':
                         autostop_lib.AutostopWaitFor.supported_modes(),
                 },
@@ -479,8 +478,7 @@ def get_volume_schema():
                 'type': 'string',
             },
             'type': {
-                'type':
-                    'string',
+                'type': 'string',
                 'case_sensitive_enum': [
                     type.value for type in volume.VolumeType
                 ],
@@ -512,8 +510,7 @@ def get_volume_schema():
                         'type': 'string',
                     },
                     'access_mode': {
-                        'type':
-                            'string',
+                        'type': 'string',
                         'case_sensitive_enum': [
                             type.value for type in volume.VolumeAccessMode
                         ],
@@ -564,8 +561,7 @@ def get_storage_schema():
                 }]
             },
             'store': {
-                'type':
-                    'string',
+                'type': 'string',
                 'case_insensitive_enum': [
                     type.value for type in storage.StoreType
                 ]
@@ -574,15 +570,13 @@ def get_storage_schema():
                 'type': 'boolean',
             },
             'mode': {
-                'type':
-                    'string',
+                'type': 'string',
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
             },
             'type': {
-                'type':
-                    'string',
+                'type': 'string',
                 'case_insensitive_enum': [
                     t.value for t in storage.FileMountType
                 ]
@@ -833,10 +827,9 @@ def get_service_schema():
                         'minimum': 0,
                     },
                     'spot_placer': {
-                        'type':
-                            'string',
-                        'case_insensitive_enum':
-                            list(spot_placer.SPOT_PLACERS.keys())
+                        'type': 'string',
+                        'case_insensitive_enum': list(
+                            spot_placer.SPOT_PLACERS.keys())
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',
@@ -856,10 +849,9 @@ def get_service_schema():
                 'type': 'integer',
             },
             'load_balancing_policy': {
-                'type':
-                    'string',
-                'case_insensitive_enum':
-                    list(load_balancing_policies.LB_POLICIES.keys())
+                'type': 'string',
+                'case_insensitive_enum': list(
+                    load_balancing_policies.LB_POLICIES.keys())
             },
             'tls': {
                 'type': 'object',
@@ -1027,9 +1019,9 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
-            'config':
-                _filter_schema(get_config_schema(),
-                               constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
+            'config': _filter_schema(
+                get_config_schema(),
+                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
             # volumes config is validated separately using get_volume_schema
             'volumes': {
                 'type': 'object',
@@ -1185,8 +1177,7 @@ _CAPABILITIES_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA = {
     'remote_identity': {
-        'type':
-            'string',
+        'type': 'string',
         'case_insensitive_enum': [
             option.value for option in RemoteIdentityOptions
         ]
@@ -1283,23 +1274,20 @@ _CONTEXT_CONFIG_SCHEMA_MINIMAL = {
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
     # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
-        'type':
-            'string',
+        'type': 'string',
         'case_insensitive_enum': [
             type.value for type in kubernetes_enums.KubernetesNetworkingMode
         ],
     },
     'ports': {
-        'type':
-            'string',
+        'type': 'string',
         'case_insensitive_enum': [
             type.value for type in kubernetes_enums.KubernetesPortMode
         ],
     },
     **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
     'autoscaler': {
-        'type':
-            'string',
+        'type': 'string',
         'case_insensitive_enum': [
             type.value for type in kubernetes_enums.KubernetesAutoscalerType
         ],
@@ -1690,10 +1678,8 @@ def get_config_schema():
                                     'required': [],
                                     'additionalProperties': False,
                                     'properties': {
-                                        'pricing':
-                                            _PRICING_SCHEMA,
-                                        'sbatch_options':
-                                            _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
+                                        'pricing': _PRICING_SCHEMA,
+                                        'sbatch_options': _SBATCH_OPTIONS_SCHEMA,  # pylint: disable=line-too-long
                                     },
                                 },
                             },
@@ -1791,8 +1777,7 @@ def get_config_schema():
                                             'type': 'string',
                                         },
                                         'attach_mode': {
-                                            'type':
-                                                'string',
+                                            'type': 'string',
                                             'case_sensitive_enum': [
                                                 'READ_WRITE', 'READ_ONLY'
                                             ]
@@ -1811,8 +1796,7 @@ def get_config_schema():
     }
 
     admin_policy_schema = {
-        'type':
-            'string',
+        'type': 'string',
         'anyOf': [
             {
                 # Check regex to be a valid python module path
@@ -1830,8 +1814,7 @@ def get_config_schema():
         # A list of cloud names that are allowed to be used
         'type': 'array',
         'items': {
-            'type':
-                'string',
+            'type': 'string',
             'case_insensitive_enum':
                 (list(constants.ALL_CLOUDS) + constants.STORAGE_ONLY_CLOUDS)
         }
