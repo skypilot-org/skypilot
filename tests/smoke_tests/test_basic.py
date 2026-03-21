@@ -1573,6 +1573,63 @@ def test_kubernetes_get_nodes():
         assert node_addresses == preloaded_addresses
 
 
+@pytest.mark.kubernetes
+@pytest.mark.resource_heavy
+@pytest.mark.no_dependency
+def test_kubernetes_allowed_nodes():
+    """Test that allowed_nodes config filters discovery and scheduling.
+
+    This test requires a multi-node Kubernetes cluster (runs on EKS/GKE
+    resource_heavy queue). It:
+    1. Picks one node from the cluster as the "allowed" node
+    2. Launches with allowed_nodes.names restricting to that node
+    3. Verifies the pod landed on the allowed node
+    """
+    if smoke_tests_utils.is_non_docker_remote_api_server():
+        pytest.skip('Skipping test because the Kubernetes configs and '
+                    'credentials are located on the remote API server '
+                    'and not the machine where the test is running')
+    from sky.provision.kubernetes import utils as kubernetes_utils
+
+    nodes = kubernetes_utils.get_kubernetes_nodes(context=None)
+    if len(nodes) < 2:
+        pytest.skip('Need at least 2 nodes for allowed_nodes test')
+
+    allowed_node = nodes[0].metadata.name
+    name = smoke_tests_utils.get_cluster_name()
+
+    config_content = textwrap.dedent(f"""\
+        kubernetes:
+          allowed_nodes:
+            names:
+              - {allowed_node}
+    """)
+
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as f:
+        f.write(config_content)
+        config_path = f.name
+
+    test = smoke_tests_utils.Test(
+        'kubernetes_allowed_nodes',
+        [
+            # Launch with the allowed_nodes config
+            f'SKYPILOT_CONFIG={config_path} sky launch -y -c {name}'
+            f' --infra kubernetes {smoke_tests_utils.LOW_RESOURCE_ARG}'
+            f' -- echo "hello from allowed node"',
+            f'sky logs {name} 1 --status',
+            # Verify the pod landed on the allowed node
+            f'POD_NODE=$(kubectl get pod -l skypilot-cluster-name={name}'
+            f' -o jsonpath="{{.items[0].spec.nodeName}}") &&'
+            f' echo "Pod landed on: $POD_NODE" &&'
+            f' [ "$POD_NODE" = "{allowed_node}" ]',
+        ],
+        teardown=f'sky down -y {name}; rm -f {config_path}',
+        timeout=smoke_tests_utils.get_timeout('kubernetes'),
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_aws
 @pytest.mark.no_gcp
 @pytest.mark.no_nebius
