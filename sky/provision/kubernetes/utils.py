@@ -3517,6 +3517,9 @@ def get_kubernetes_node_info(
                 # respect the user's allowed_nodes config. Use
                 # get_kubernetes_nodes() (which is already filtered) to
                 # determine the set of allowed node names.
+                # TODO(cooperc): Move this filtering into the plugin's
+                # NodeInfoSource so it can filter server-side and avoid
+                # the extra list_node API call here.
                 allowed_config = get_allowed_nodes_config(resolved_context)
                 if allowed_config is not None:
                     allowed_nodes = get_kubernetes_nodes(
