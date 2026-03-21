@@ -2566,27 +2566,20 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
     Verifies:
     1. Pod with hook: terminationGracePeriodSeconds=60, preStop lifecycle
     2. Pod without hook: terminationGracePeriodSeconds=30, no lifecycle
-    3. Graceful delete (simulates preemption): S3 proof file created
-    4. sky down (force delete): S3 proof file NOT created (or best-effort)
+    3. Graceful delete (simulates preemption): ConfigMap proof created
+    4. sky down (force delete): ConfigMap proof NOT created (best-effort)
     """
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
-    s3_path = f's3://sky-smoke-tests-preemption-hook/{name}'
     nohook_name = f'{name}-nohook'
+    proof_cm = f'preemption-proof-{name}-{user_hash}-head'
     test = smoke_tests_utils.Test(
         'k8s_preemption_hook_spec_and_delete',
         [
             # --- Test 1: Pod spec WITH hook ---
             # Use -d (detach) because the task runs 'sleep infinity'
             f'sky launch -y -d -c {name} '
-            f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
-            # Wait for task setup to complete (awscli install + S3 path file)
-            f'POD={name}-{user_hash}-head && '
-            'kubectl exec $POD -- bash -c '
-            "'for i in $(seq 1 90); do "
-            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
-            "sleep 2; done; exit 1'",
             # Verify terminationGracePeriodSeconds = 60
             f'POD={name}-{user_hash}-head && '
             'kubectl get pod $POD -o jsonpath='
@@ -2614,44 +2607,33 @@ def test_k8s_preemption_hook_pod_spec_and_graceful_delete():
             # Clean up no-hook cluster
             f'sky down -y {nohook_name}',
 
-            # --- Test 3: Graceful delete triggers hook -> S3 proof ---
-            f'aws s3 rm {s3_path}/ --recursive || true',
+            # --- Test 3: Graceful delete triggers hook -> ConfigMap proof ---
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
             f'POD={name}-{user_hash}-head && '
             'kubectl delete pod $POD --grace-period=120',
-            # Wait for hook to upload to S3
-            'sleep 15',
-            f'aws s3 ls {s3_path}/ | grep ".txt"',
-            # Read and verify content
-            f'aws s3 cp {s3_path}/ /tmp/hook-proof/ --recursive && '
-            'cat /tmp/hook-proof/*.txt | grep "hook fired"',
+            # Verify ConfigMap proof was created by the hook
+            f'kubectl get configmap {proof_cm} -o '
+            "jsonpath='{.data.status}' | grep 'hook fired'",
 
             # --- Test 4: sky down does NOT trigger hook ---
             # Re-launch the cluster
             f'sky launch -y -d -c {name} '
-            f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
-            # Wait for task setup to complete
-            f'POD={name}-{user_hash}-head && '
-            'kubectl exec $POD -- bash -c '
-            "'for i in $(seq 1 90); do "
-            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
-            "sleep 2; done; exit 1'",
-            # Clean S3 marker
-            f'aws s3 rm {s3_path}/ --recursive || true',
+            # Clean ConfigMap marker
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # sky down uses grace_period_seconds=0 (force delete)
             f'sky down -y {name}',
-            'sleep 10',
-            # S3 should ideally be empty. On K8s >= 1.28 the hook may still
-            # fire briefly (kubelet regression kubernetes#123408), so we
-            # just log the result rather than failing.
-            f'echo "--- sky down S3 check (informational) ---" && '
-            f'aws s3 ls {s3_path}/ 2>&1 || '
-            'echo "No S3 files (hook correctly skipped)"',
+            'sleep 5',
+            # ConfigMap should ideally not exist. On K8s >= 1.28 the hook
+            # may still fire briefly (kubelet regression kubernetes#123408),
+            # so we just log the result rather than failing.
+            f'echo "--- sky down ConfigMap check (informational) ---" && '
+            f'kubectl get configmap {proof_cm} 2>&1 || '
+            'echo "No ConfigMap (hook correctly skipped)"',
         ],
         # Teardown: clean up everything
         f'sky down -y {name} {nohook_name}; '
-        f'aws s3 rm {s3_path}/ --recursive 2>/dev/null || true; '
-        'rm -rf /tmp/hook-proof/',
+        f'kubectl delete configmap {proof_cm} --ignore-not-found',
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -2663,27 +2645,20 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
     """Test preemption hook fires on node drain and priority preemption.
 
     Verifies:
-    1. Node drain: S3 proof file created
-    2. K8s priority-based preemption: S3 proof file created
+    1. Node drain: ConfigMap proof created
+    2. K8s priority-based preemption: ConfigMap proof created
     """
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
-    s3_path = f's3://sky-smoke-tests-preemption-hook/{name}'
+    proof_cm = f'preemption-proof-{name}-{user_hash}-head'
     test = smoke_tests_utils.Test(
         'k8s_preemption_hook_drain_and_priority',
         [
             # --- Test 1: Node drain triggers hook ---
             # Use -d (detach) because the task runs 'sleep infinity'
             f'sky launch -y -d -c {name} '
-            f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
-            # Wait for task setup to complete (awscli install + S3 path file)
-            f'POD={name}-{user_hash}-head && '
-            'kubectl exec $POD -- bash -c '
-            "'for i in $(seq 1 90); do "
-            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
-            "sleep 2; done; exit 1'",
-            f'aws s3 rm {s3_path}/ --recursive || true',
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # Get node name and drain it
             f'POD={name}-{user_hash}-head && '
             'NODE=$(kubectl get pod $POD -o '
@@ -2692,24 +2667,15 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             '--delete-emptydir-data --grace-period=120 --force && '
             # Always uncordon so future tests work
             'kubectl uncordon $NODE',
-            'sleep 15',
-            # Verify S3 proof file exists
-            f'aws s3 ls {s3_path}/ | grep ".txt"',
-            f'aws s3 cp {s3_path}/ /tmp/hook-proof-drain/ --recursive && '
-            'cat /tmp/hook-proof-drain/*.txt | grep "hook fired"',
+            # Verify ConfigMap proof was created by the hook
+            f'kubectl get configmap {proof_cm} -o '
+            "jsonpath='{.data.status}' | grep 'hook fired'",
 
             # --- Test 2: K8s priority preemption triggers hook ---
-            f'aws s3 rm {s3_path}/ --recursive || true',
+            f'kubectl delete configmap {proof_cm} --ignore-not-found',
             # Re-launch (previous pod was evicted by drain)
             f'sky launch -y -d -c {name} '
-            f'--env PREEMPTION_HOOK_S3_PATH={s3_path} '
             'tests/test_yamls/test_k8s_preemption_hook.yaml',
-            # Wait for task setup to complete
-            f'POD={name}-{user_hash}-head && '
-            'kubectl exec $POD -- bash -c '
-            "'for i in $(seq 1 90); do "
-            "[ -f /tmp/preemption_s3_path.txt ] && exit 0; "
-            "sleep 2; done; exit 1'",
             # Create high-priority class
             'kubectl apply -f - <<EOF\n'
             'apiVersion: scheduling.k8s.io/v1\n'
@@ -2720,8 +2686,13 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             'globalDefault: false\n'
             'preemptionPolicy: PreemptLowerPriority\n'
             'EOF',
-            # Deploy evictor pod that requests enough CPU to preempt
-            'kubectl apply -f - <<EOF\n'
+            # Deploy evictor pod that requests enough CPU to force preemption.
+            # Request (allocatable - 2) so it can fit after preempting the
+            # SkyPilot pod (2 CPUs) but not without it.
+            'NODE_CPU=$(kubectl get node -o '
+            "jsonpath='{.items[0].status.allocatable.cpu}') && "
+            'EVICTOR_CPU=$((NODE_CPU - 2)) && '
+            'cat <<EOF | kubectl apply -f -\n'
             'apiVersion: v1\n'
             'kind: Pod\n'
             'metadata:\n'
@@ -2734,9 +2705,7 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             '    command: ["sleep", "120"]\n'
             '    resources:\n'
             '      requests:\n'
-            '        cpu: "15"\n'
-            '      limits:\n'
-            '        cpu: "15"\n'
+            '        cpu: "${EVICTOR_CPU}"\n'
             'EOF',
             # Wait for preemption to happen
             'sleep 60',
@@ -2745,10 +2714,9 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
             'grep -E "Terminating|NotFound" || '
             f'[ -z "$(kubectl get pod {name}-{user_hash}-head '
             '--no-headers 2>/dev/null)" ]',
-            # Verify S3 proof file
-            f'aws s3 ls {s3_path}/ | grep ".txt"',
-            f'aws s3 cp {s3_path}/ /tmp/hook-proof-preempt/ --recursive && '
-            'cat /tmp/hook-proof-preempt/*.txt | grep "hook fired"',
+            # Verify ConfigMap proof was created by the hook
+            f'kubectl get configmap {proof_cm} -o '
+            "jsonpath='{.data.status}' | grep 'hook fired'",
         ],
         # Teardown: clean up everything
         f'sky down -y {name}; '
@@ -2756,8 +2724,7 @@ def test_k8s_preemption_hook_drain_and_priority_preemption():
         '--ignore-not-found --grace-period=0 --force; '
         'kubectl delete priorityclass skypilot-test-high-priority '
         '--ignore-not-found; '
-        f'aws s3 rm {s3_path}/ --recursive 2>/dev/null || true; '
-        'rm -rf /tmp/hook-proof-drain/ /tmp/hook-proof-preempt/',
+        f'kubectl delete configmap {proof_cm} --ignore-not-found',
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
