@@ -148,6 +148,10 @@ export function getAggregatedStatus(tasks) {
 // Define filter options for the filter dropdown
 const PROPERTY_OPTIONS = [
   {
+    label: 'ID',
+    value: 'id',
+  },
+  {
     label: 'Name',
     value: 'name',
   },
@@ -330,6 +334,7 @@ export function ManagedJobs() {
   const updateFiltersByURLParams = React.useCallback(() => {
     const propertyMap = new Map();
     propertyMap.set('', '');
+    propertyMap.set('id', 'ID');
     propertyMap.set('status', 'Status');
     propertyMap.set('name', 'Name');
     propertyMap.set('user', 'User');
@@ -542,8 +547,10 @@ export function ManagedJobsTable({
         };
 
         // Build params for jobsCacheManager
+        const jobIdFilter = getFilterValue('id');
         const params = {
           allUsers: true,
+          jobIdMatch: jobIdFilter,
           nameMatch: getFilterValue('name'),
           userMatch: getFilterValue('user'),
           workspaceMatch: getFilterValue('workspace'),

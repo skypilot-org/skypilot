@@ -113,6 +113,7 @@ export async function getManagedJobs(options = {}) {
       allUsers = true,
       skipFinished = false,
       allFields = false,
+      jobIdMatch,
       nameMatch,
       userMatch,
       workspaceMatch,
@@ -136,7 +137,10 @@ export async function getManagedJobs(options = {}) {
     if (page !== undefined) body.page = page;
     if (limit !== undefined) body.limit = limit;
     if (statuses !== undefined && statuses.length > 0) body.statuses = statuses;
-    if (jobIDs !== undefined && jobIDs.length > 0) body.job_ids = jobIDs;
+    // Support both jobIdMatch (from filter UI) and jobIDs (direct usage)
+    const resolvedJobIDs = jobIdMatch ? [jobIdMatch] : jobIDs;
+    if (resolvedJobIDs !== undefined && resolvedJobIDs.length > 0)
+      body.job_ids = resolvedJobIDs;
     if (!allFields) {
       if (fields && fields.length > 0) {
         body.fields = fields;
