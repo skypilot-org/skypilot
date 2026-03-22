@@ -5596,17 +5596,17 @@ def jobs_launch(
             # Sort job ids to ensure consistent ordering.
             job_ids_str = ','.join(map(str, sorted(job_ids)))
             dashboard_hint = ''
-            if not server_common.is_api_server_local():
+            if not server_common.is_api_server_local() and pool is not None:
                 query = urllib.parse.urlencode({
-                    'property': 'name',
+                    'property': 'pool',
                     'operator': ':',
-                    'value': dag.name,
+                    'value': pool,
                 })
                 dashboard_url = server_common.get_dashboard_url(
                     server_common.get_server_url(),
                     starting_page=f'jobs?{query}')
                 dashboard_hint = (
-                    f'\n{ux_utils.INDENT_SYMBOL}To view on dashboard:'
+                    f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
                     f'\t\t{ux_utils.BOLD}{dashboard_url}'
                     f'{ux_utils.RESET_BOLD}')
             click.secho(
