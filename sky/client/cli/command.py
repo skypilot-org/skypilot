@@ -1308,9 +1308,20 @@ def launch(
             returncode = sdk.tail_logs(handle.get_cluster_name(),
                                        job_id,
                                        follow=True)
+        cluster_dashboard_url = None
+        if not server_common.is_api_server_local():
+            query = urllib.parse.urlencode({
+                'property': 'cluster',
+                'operator': ':',
+                'value': handle.get_cluster_name(),
+            })
+            cluster_dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(),
+                starting_page=f'clusters?{query}')
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
-                                           job_id, handle.get_cluster_name()))
+                                           job_id, handle.get_cluster_name(),
+                                           cluster_dashboard_url))
         sys.exit(returncode)
 
 
@@ -5582,47 +5593,61 @@ def jobs_launch(
     job_ids = [job_id_handle[0]] if isinstance(job_id_handle[0],
                                                int) else job_id_handle[0]
 
-    if not detach_run:
-        if len(job_ids) == 1:
-            job_id = job_ids[0]
+    if len(job_ids) == 1:
+        job_id = job_ids[0]
+        if not detach_run:
             returncode = managed_jobs.tail_logs(name=None,
                                                 job_id=job_id,
                                                 follow=True,
                                                 controller=False)
             sys.exit(returncode)
         else:
-            # TODO(tian): This can be very long. Considering have a "group id"
-            # and query all job ids with the same group id.
-            # Sort job ids to ensure consistent ordering.
-            job_ids_str = ','.join(map(str, sorted(job_ids)))
-            dashboard_hint = ''
-            if not server_common.is_api_server_local() and pool is not None:
+            job_dashboard_url = None
+            if not server_common.is_api_server_local():
                 query = urllib.parse.urlencode({
-                    'property': 'pool',
-                    'operator': ':',
-                    'value': pool,
+                    'property': 'id',
+                    'operator': '=',
+                    'value': job_id,
                 })
-                dashboard_url = server_common.get_dashboard_url(
+                job_dashboard_url = server_common.get_dashboard_url(
                     server_common.get_server_url(),
                     starting_page=f'jobs?{query}')
-                dashboard_hint = (
-                    f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
-                    f'\t\t{ux_utils.BOLD}{dashboard_url}'
-                    f'{ux_utils.RESET_BOLD}')
             click.secho(
-                f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
-                f'{job_ids_str}{colorama.Style.RESET_ALL}.'
-                f'\n📋 Useful Commands'
-                f'{dashboard_hint}'
-                f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
-                f'{ux_utils.BOLD}sky jobs logs <job-id>'
-                f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
-                f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
-                f'{ux_utils.RESET_BOLD}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
-                f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                ux_utils.command_hint_messages(
+                    ux_utils.CommandHintType.MANAGED_JOB,
+                    job_id=str(job_id),
+                    dashboard_url=job_dashboard_url))
+    else:
+        # TODO(tian): This can be very long. Considering have a "group id"
+        # and query all job ids with the same group id.
+        # Sort job ids to ensure consistent ordering.
+        job_ids_str = ','.join(map(str, sorted(job_ids)))
+        dashboard_hint = ''
+        if not server_common.is_api_server_local():
+            query = urllib.parse.urlencode({
+                'property': 'pool',
+                'operator': ':',
+                'value': pool,
+            })
+            dashboard_url = server_common.get_dashboard_url(
+                server_common.get_server_url(), starting_page=f'jobs?{query}')
+            dashboard_hint = (
+                f'\n{ux_utils.INDENT_SYMBOL}Show all jobs in the pool:'
+                f'\t\t{ux_utils.BOLD}{dashboard_url}'
                 f'{ux_utils.RESET_BOLD}')
+        click.secho(f'Jobs submitted with IDs: {colorama.Fore.CYAN}'
+                    f'{job_ids_str}{colorama.Style.RESET_ALL}.'
+                    f'\n📋 Useful Commands'
+                    f'{dashboard_hint}'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream job logs:\t\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs <job-id>'
+                    f'{ux_utils.RESET_BOLD}'
+                    f'\n{ux_utils.INDENT_SYMBOL}To stream controller logs:\t\t'
+                    f'{ux_utils.BOLD}sky jobs logs --controller <job-id>'
+                    f'{ux_utils.RESET_BOLD}'
+                    f'\n{ux_utils.INDENT_LAST_SYMBOL}To cancel all jobs on the '
+                    f'pool:\t{ux_utils.BOLD}sky jobs cancel --pool {pool}'
+                    f'{ux_utils.RESET_BOLD}')
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
