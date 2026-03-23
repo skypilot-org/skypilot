@@ -507,6 +507,60 @@ class TestRedactSecretsValues:
         assert result == expected
 
 
+class TestCheckWorkspaceNameIsValid:
+
+    @pytest.mark.parametrize('name', [
+        'a',
+        'dev',
+        'my-workspace',
+        'my_workspace',
+        'team-alpha-2',
+        'a1',
+        'default',
+        'a' * 63,
+        'abc-def_ghi-123',
+    ])
+    def test_valid_names(self, name):
+        """Valid workspace names should pass validation."""
+        common_utils.check_workspace_name_is_valid(name)
+
+    @pytest.mark.parametrize('name', [
+        '',
+        '1workspace',
+        '-workspace',
+        '_workspace',
+        'MyWorkspace',
+        'my.workspace',
+        'workspace-',
+        'workspace_',
+        'a' * 64,
+        'ALLCAPS',
+        'has space',
+        'has@symbol',
+        '123',
+    ])
+    def test_invalid_names(self, name):
+        """Invalid workspace names should raise InvalidWorkspaceNameError."""
+        with pytest.raises(exceptions.InvalidWorkspaceNameError):
+            common_utils.check_workspace_name_is_valid(name)
+
+    def test_none_name(self):
+        """None workspace name should pass (no-op)."""
+        common_utils.check_workspace_name_is_valid(None)
+
+    def test_too_long_error_message(self):
+        """Error message for too-long names should mention the length limit."""
+        with pytest.raises(exceptions.InvalidWorkspaceNameError,
+                           match='too long'):
+            common_utils.check_workspace_name_is_valid('a' * 64)
+
+    def test_invalid_chars_error_message(self):
+        """Error message for invalid chars should mention allowed characters."""
+        with pytest.raises(exceptions.InvalidWorkspaceNameError,
+                           match='lowercase'):
+            common_utils.check_workspace_name_is_valid('MyWorkspace')
+
+
 @pytest.mark.asyncio
 async def test_set_request_context_coroutine_is_context_safe():
     original_user = common_utils.get_current_user()
