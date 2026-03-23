@@ -263,14 +263,17 @@ def queue_v2(
 # server supports it, which breaks the backward compatibility.
 # In https://github.com/skypilot-org/skypilot/pull/8015, we revert the change
 # and add a new function `queue_v2` to return the new typed data.
+# TODO(lloyd): Remove version=1 support before 0.13.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
-    job_ids: Optional[List[int]] = None
-) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
+    job_ids: Optional[List[int]] = None,
+    version: int = 1,
+) -> server_common.RequestId[Union[List[responses.ManagedJobRecord], Tuple[
+        List[responses.ManagedJobRecord], int, Dict[str, int], int]]]:
     """Gets statuses of managed jobs.
 
     Deprecated. Please use queue_v2 instead for better performance.
@@ -282,6 +285,7 @@ def queue(
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
+        version: Queue API version to use. Must be 1 or 2.
 
     Returns:
         The request ID of the queue request.
@@ -316,6 +320,19 @@ def queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    if version not in (1, 2):
+        raise ValueError(f'Invalid queue version: {version}. Must be 1 or 2.')
+
+    if version == 2:
+        return queue_v2(refresh=refresh,
+                        skip_finished=skip_finished,
+                        all_users=all_users,
+                        job_ids=job_ids)
+
+    logger.warning('sky.jobs.queue(version=1) is deprecated and will be '
+                   'removed in v0.13. Use sky.jobs.queue(version=2) or '
+                   'sky.jobs.queue_v2() instead.')
+
     body = payloads.JobsQueueBody(
         refresh=refresh,
         skip_finished=skip_finished,

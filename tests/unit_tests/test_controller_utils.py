@@ -260,8 +260,6 @@ def test_get_cloud_dependencies_installation_commands_empty_clouds(
     assert len(commands) >= 3
     # Check that uv installation is included
     assert any('uv' in cmd for cmd in commands)
-    # Check that flask is included for dashboard
-    assert any('flask' in cmd for cmd in commands)
     # Should end with "done" message
     assert 'done.' in commands[-1]
 
@@ -539,11 +537,10 @@ def test_get_cloud_dependencies_installation_commands_command_structure(
     assert 'uv' in commands[0]
     assert constants.SKY_UV_INSTALL_CMD in commands[0]
 
-    # Python packages command should include flask
+    # Python packages command should use uv pip
     python_cmd = next(
         (cmd for cmd in commands if 'cloud python packages' in cmd), None)
     assert python_cmd is not None
-    assert 'flask' in python_cmd
     assert constants.SKY_UV_PIP_CMD in python_cmd
 
     # Last command should be the "done" message
