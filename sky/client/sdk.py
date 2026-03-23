@@ -473,7 +473,8 @@ def validate(
     omit_local_disk = _omit(35)
     omit_mount_cached_config = _omit(37)
     omit_file_mount_type = _omit(40)
-    omit_max_hourly_cost = _omit(43)
+    omit_priority_class = _omit(43)
+    omit_max_hourly_cost = _omit(44)
 
     for task in dag.tasks:
         if omit_user_specified_yaml:
@@ -498,6 +499,13 @@ def validate(
                 storage.file_mount_type = None
             logger.debug('`type` is ignored because the server does not '
                          'support it yet.')
+        if omit_priority_class:
+            for resource in task.resources:
+                if resource.priority_class:
+                    # pylint: disable=protected-access
+                    resource._set_priority_class(None)
+            logger.debug('`priority_class` is ignored because the server '
+                         'does not support it yet.')
         if omit_max_hourly_cost:
             for resource in task.resources:
                 # pylint: disable=protected-access

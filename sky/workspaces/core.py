@@ -432,6 +432,7 @@ def create_workspace(workspace_name: str, config: Dict[str,
     # Validate the workspace name
     if not workspace_name or not isinstance(workspace_name, str):
         raise ValueError('Workspace name must be a non-empty string.')
+    common_utils.check_workspace_name_is_valid(workspace_name)
 
     _validate_workspace_config(workspace_name, config)
 
@@ -567,6 +568,9 @@ def update_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # Check each workspace that is being modified
     for workspace_name, new_workspace_config in new_workspaces.items():
         if workspace_name not in current_workspaces:
+            # Validate names for newly added workspaces only (not existing
+            # ones, for backward compatibility with pre-validation names).
+            common_utils.check_workspace_name_is_valid(workspace_name)
             users = workspaces_utils.get_workspace_users(new_workspace_config)
             workspaces_to_check_policy['add'][workspace_name] = users
             continue
