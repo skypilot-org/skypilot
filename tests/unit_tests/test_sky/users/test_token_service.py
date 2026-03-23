@@ -226,7 +226,7 @@ class TestTokenService:
     def test_token_preserves_user_identity_for_nested_jobs(self):
         """Test that a token created for a managed job preserves user identity.
 
-        When api_access: true is set, _create_job_api_token creates a token
+        When api_server_access is set, _create_job_api_token creates a token
         where both creator_user_id and service_account_user_id are the same
         user. This ensures nested jobs launched via the token authenticate as
         the original user.
