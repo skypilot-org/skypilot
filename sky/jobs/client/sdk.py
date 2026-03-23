@@ -478,7 +478,7 @@ def tail_logs(name: Optional[str] = None,
 @context.contextual
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-@versions.minimal_api_version(43)
+@versions.minimal_api_version(45)
 def wait(
     name: Optional[str] = None,
     job_id: Optional[int] = None,
