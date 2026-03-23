@@ -181,8 +181,8 @@ def _delete_hostpath_volume(config: models.VolumeConfig) -> models.VolumeConfig:
                         'name': 'cleanup',
                         'image': 'busybox:1.36',
                         'command': [
-                            'sh', '-c', 'rm -rf /cleanup-target/* '
-                            '/cleanup-target/.[!.]* '
+                            'sh', '-c',
+                            'find /cleanup-target -mindepth 1 -delete '
                             '&& sleep infinity'
                         ],
                         'volumeMounts': [{
