@@ -1034,7 +1034,7 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
-            'api_access': {
+            'api_server_access': {
                 'type': 'boolean',
             },
             '_metadata': {

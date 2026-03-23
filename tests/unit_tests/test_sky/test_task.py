@@ -1236,27 +1236,30 @@ secrets:
         assert value.get_secret_value() == expected_secrets[key]
 
 
-def test_api_access_from_yaml_config():
-    """Test that api_access is parsed from YAML and serialized correctly."""
-    # Test default (False)
+def test_api_server_access_from_yaml_config():
+    """Test that api_server_access is parsed from YAML and serialized."""
+    # Test default (True)
     config = {'run': 'echo hello'}
     task_obj = task.Task.from_yaml_config(config)
-    assert task_obj.api_access is False
+    assert task_obj.api_server_access is True
 
-    # Test explicit True
-    config_with_access = {'run': 'echo hello', 'api_access': True}
-    task_obj = task.Task.from_yaml_config(config_with_access)
-    assert task_obj.api_access is True
-
-    # Test serialization round-trip
-    yaml_config = task_obj.to_yaml_config()
-    assert yaml_config.get('api_access') is True
-
-    # Test that False is not serialized (to keep YAML clean)
-    config_no_access = {'run': 'echo hello', 'api_access': False}
+    # Test explicit False
+    config_no_access = {
+        'run': 'echo hello',
+        'api_server_access': False,
+    }
     task_obj = task.Task.from_yaml_config(config_no_access)
+    assert task_obj.api_server_access is False
+
+    # Test serialization round-trip (False should be serialized)
     yaml_config = task_obj.to_yaml_config()
-    assert 'api_access' not in yaml_config
+    assert yaml_config.get('api_server_access') is False
+
+    # Test that True (default) is not serialized (to keep YAML clean)
+    config_with_access = {'run': 'echo hello', 'api_server_access': True}
+    task_obj = task.Task.from_yaml_config(config_with_access)
+    yaml_config = task_obj.to_yaml_config()
+    assert 'api_server_access' not in yaml_config
 
 
 def test_secrets_not_plaintext_from_yaml():
