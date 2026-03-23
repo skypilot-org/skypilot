@@ -143,7 +143,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 30
+    _VERSION = 31  # add max hourly cost.
 
     def __init__(
         self,
@@ -2677,7 +2677,7 @@ class Resources:
         if version < 29:
             self._local_disk = None
 
-        if version < 30:
+        if version < 31:
             self._max_hourly_cost = None
 
         self.__dict__.update(state)
