@@ -40,6 +40,7 @@ Below is the configuration syntax and some example values.  See details under ea
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`network_tier <yaml-spec-resources-network-tier>`: best
+    :ref:`max_hourly_cost <yaml-spec-resources-max-hourly-cost>`: 10.0
 
     # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
@@ -619,6 +620,32 @@ If ``'best'`` is specified, use the best network tier available on the specified
 
   resources:
     network_tier: best
+
+
+.. _yaml-spec-resources-max-hourly-cost:
+
+``resources.max_hourly_cost``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When ``use_spot`` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100
+    max_hourly_cost: 10.0
+
+.. code-block:: yaml
+
+  # Combined with spot instances: filters by spot price
+  resources:
+    use_spot: true
+    max_hourly_cost: 5.0
 
 
 .. _yaml-spec-resources-ports:
