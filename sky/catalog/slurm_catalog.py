@@ -23,15 +23,17 @@ def instance_type_exists(instance_type: str) -> bool:
     return slurm_utils.SlurmInstanceType.is_valid_instance_type(instance_type)
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              local_disk: Optional[str] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     # Delete unused parameters.
-    del disk_tier, region, zone, local_disk
+    del disk_tier, region, zone, local_disk, use_spot, max_hourly_cost
 
     # Slurm provisions resources via --cpus-per-task and --mem.
     instance_cpus = float(
