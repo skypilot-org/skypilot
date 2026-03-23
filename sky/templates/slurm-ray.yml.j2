@@ -11,8 +11,8 @@ provider:
   type: external
   module: sky.provision.slurm
 
-  cluster: {{slurm_cluster}}
-  partition: {{slurm_partition}}
+  cluster: "{{slurm_cluster}}"
+  partition: "{{slurm_partition}}"
   provision_timeout: {{provision_timeout}}
 
   ssh:
