@@ -2957,6 +2957,14 @@ def resolve_shared_caches(
 
         # Add volumeMount entries for each cache path
         for cache_path in cache_paths:
+            # Reject absolute paths — subPath must be relative
+            if cache_path.startswith('/'):
+                logger.warning(
+                    f'Absolute path {cache_path!r} in shared_caches is not '
+                    'supported as a subPath. Skipping. Please use a path '
+                    'starting with "~/".')
+                continue
+
             # Resolve ~ to the container home directory for mount path
             if cache_path.startswith('~/'):
                 mount_path = (
@@ -2965,7 +2973,10 @@ def resolve_shared_caches(
             elif cache_path == '~':
                 mount_path = HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
             else:
-                mount_path = cache_path
+                # Relative paths are relative to home directory
+                mount_path = (
+                    f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
+                    f'/{cache_path}')
 
             # Use the cache_path as-is for subPath (~ kept literally)
             sub_path = cache_path

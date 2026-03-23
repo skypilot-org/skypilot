@@ -684,6 +684,7 @@ class TestSubPath:
                 region=None,
                 zone=None,
                 name_on_cloud='test-pvc',
+                size=None,
             ),
         }
         with patch('sky.global_user_state.get_volume_by_name',
@@ -724,6 +725,7 @@ class TestSubPath:
             region=None,
             zone=None,
             name_on_cloud='test-pvc',
+            size=None,
         )
         mount = volume_utils.VolumeMount('/mnt/data',
                                          'test',
