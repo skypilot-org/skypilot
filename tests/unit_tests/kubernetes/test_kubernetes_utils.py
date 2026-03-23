@@ -3258,11 +3258,48 @@ class TestAllowedNodesScheduling:
                                                    taints=[])))
         return nodes
 
-    def test_scheduling_labels_only_gpu_workload(self):
-        """Label-only config + GPU pod: cross-product with existing GPU term.
+    # Shared sub-expressions used in expected outputs.
+    _GPU_EXPR = {
+        'key': 'cloud.google.com/gke-accelerator',
+        'operator': 'In',
+        'values': ['nvidia-a100'],
+    }
+    _HOSTNAME_EXPR = {
+        'key': 'kubernetes.io/hostname',
+        'operator': 'In',
+        'values': ['node-a', 'node-b'],
+    }
+    _POD_AFFINITY = {
+        'podAffinity': {
+            'preferredDuringSchedulingIgnoredDuringExecution': [{
+                'weight': 1,
+                'podAffinityTerm': {
+                    'labelSelector': {
+                        'matchExpressions': [{
+                            'key': 'skypilot-binpack',
+                            'operator': 'In',
+                            'values': ['gpu'],
+                        }]
+                    },
+                    'topologyKey': 'kubernetes.io/hostname',
+                },
+            }]
+        }
+    }
+    _PREFERRED_AVOID_GPU = {
+        'preferredDuringSchedulingIgnoredDuringExecution': [{
+            'weight': 1,
+            'preference': {
+                'matchExpressions': [{
+                    'key': 'cloud.google.com/gke-accelerator',
+                    'operator': 'DoesNotExist',
+                }]
+            },
+        }]
+    }
 
-        Verifies podAffinity (binpacking) is preserved.
-        """
+    def test_scheduling_labels_only_gpu_workload(self):
+        """Label-only config + GPU pod: cross-product with existing GPU term."""
         pod_spec = self._make_pod_spec_gpu()
         config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
 
@@ -3271,35 +3308,47 @@ class TestAllowedNodesScheduling:
                                                      config,
                                                      context='test')
 
-        # Should create 2 terms (one per label), each with existing GPU + label
-        terms = result['affinity']['nodeAffinity'][
-            'requiredDuringSchedulingIgnoredDuringExecution'][
-                'nodeSelectorTerms']
-        assert len(terms) == 2
-        for term in terms:
-            exprs = term['matchExpressions']
-            keys = [e['key'] for e in exprs]
-            assert 'cloud.google.com/gke-accelerator' in keys
-            assert len(exprs) == 2  # GPU + one label
-
-        added_keys = set()
-        for term in terms:
-            for expr in term['matchExpressions']:
-                if expr['key'] != 'cloud.google.com/gke-accelerator':
-                    added_keys.add(expr['key'])
-        assert added_keys == {'pool', 'team'}
-
-        # podAffinity for GPU binpacking must be preserved
-        assert 'podAffinity' in result['affinity']
-        pod_aff = result['affinity']['podAffinity']
-        assert 'preferredDuringSchedulingIgnoredDuringExecution' in pod_aff
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'nvidia.com/gpu': '1'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'pool',
+                                        'operator': 'In',
+                                        'values': ['gpu']
+                                    },
+                                ]
+                            },
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'team',
+                                        'operator': 'In',
+                                        'values': ['research']
+                                    },
+                                ]
+                            },
+                        ]
+                    }
+                },
+                **self._POD_AFFINITY,
+            },
+        }
 
     def test_scheduling_labels_only_cpu_on_gpu_cluster(self):
-        """Label-only config + CPU pod on GPU cluster.
-
-        No existing required terms, so creates one term per label.
-        Verifies preferred (avoid GPU nodes) is preserved.
-        """
+        """Label-only config + CPU pod on GPU cluster."""
         pod_spec = self._make_pod_spec_cpu_on_gpu_cluster()
         config = {'label_selector': {'pool': 'gpu', 'team': 'research'}}
 
@@ -3308,25 +3357,42 @@ class TestAllowedNodesScheduling:
                                                      config,
                                                      context='test')
 
-        terms = result['affinity']['nodeAffinity'][
-            'requiredDuringSchedulingIgnoredDuringExecution'][
-                'nodeSelectorTerms']
-        assert len(terms) == 2
-        term_keys = [
-            terms[0]['matchExpressions'][0]['key'],
-            terms[1]['matchExpressions'][0]['key']
-        ]
-        assert set(term_keys) == {'pool', 'team'}
-
-        # preferredDuringScheduling (avoid GPU nodes) must be preserved
-        assert 'preferredDuringSchedulingIgnoredDuringExecution' in \
-            result['affinity']['nodeAffinity']
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'cpu': '4',
+                        'memory': '8Gi'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    **self._PREFERRED_AVOID_GPU,
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [
+                            {
+                                'matchExpressions': [{
+                                    'key': 'pool',
+                                    'operator': 'In',
+                                    'values': ['gpu']
+                                },]
+                            },
+                            {
+                                'matchExpressions': [{
+                                    'key': 'team',
+                                    'operator': 'In',
+                                    'values': ['research']
+                                },]
+                            },
+                        ]
+                    },
+                },
+            },
+        }
 
     def test_scheduling_labels_only_cpu_no_gpus(self):
-        """Label-only config + CPU pod on cluster with no GPUs.
-
-        No existing affinity block at all. Creates one from scratch.
-        """
+        """Label-only config + CPU pod on cluster with no GPUs."""
         pod_spec = self._make_pod_spec_cpu_no_gpus_in_cluster()
         config = {'label_selector': {'pool': 'cpu'}}
 
@@ -3335,18 +3401,32 @@ class TestAllowedNodesScheduling:
                                                      config,
                                                      context='test')
 
-        terms = result['affinity']['nodeAffinity'][
-            'requiredDuringSchedulingIgnoredDuringExecution'][
-                'nodeSelectorTerms']
-        assert len(terms) == 1
-        assert terms[0]['matchExpressions'][0]['key'] == 'pool'
-        assert terms[0]['matchExpressions'][0]['values'] == ['cpu']
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'cpu': '4',
+                        'memory': '8Gi'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [{
+                                'key': 'pool',
+                                'operator': 'In',
+                                'values': ['cpu']
+                            },]
+                        },]
+                    },
+                },
+            },
+        }
 
     def test_scheduling_with_names_gpu_workload(self):
-        """Names config + GPU pod: hostname added to existing GPU term.
-
-        Verifies podAffinity (binpacking) is preserved.
-        """
+        """Names config + GPU pod: hostname added to existing GPU term."""
         pod_spec = self._make_pod_spec_gpu()
         config = {'names': ['node-a', 'node-b']}
         filtered_nodes = self._make_filtered_nodes()
@@ -3358,28 +3438,31 @@ class TestAllowedNodesScheduling:
                                                          config,
                                                          context='test')
 
-        terms = result['affinity']['nodeAffinity'][
-            'requiredDuringSchedulingIgnoredDuringExecution'][
-                'nodeSelectorTerms']
-        assert len(terms) == 1
-        exprs = terms[0]['matchExpressions']
-        keys = [e['key'] for e in exprs]
-        assert 'cloud.google.com/gke-accelerator' in keys
-        assert 'kubernetes.io/hostname' in keys
-
-        hostname_expr = [
-            e for e in exprs if e['key'] == 'kubernetes.io/hostname'
-        ][0]
-        assert sorted(hostname_expr['values']) == ['node-a', 'node-b']
-
-        # podAffinity for binpacking must be preserved
-        assert 'podAffinity' in result['affinity']
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'nvidia.com/gpu': '1'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [
+                                self._GPU_EXPR,
+                                self._HOSTNAME_EXPR,
+                            ]
+                        }]
+                    }
+                },
+                **self._POD_AFFINITY,
+            },
+        }
 
     def test_scheduling_with_ips_cpu_on_gpu_cluster(self):
-        """IPs config + CPU pod on GPU cluster: hostname term created.
-
-        Verifies preferred (avoid GPU nodes) is preserved.
-        """
+        """IPs config + CPU pod on GPU cluster: hostname term created."""
         pod_spec = self._make_pod_spec_cpu_on_gpu_cluster()
         config = {'ips': ['10.0.1.1', '10.0.1.2']}
         filtered_nodes = self._make_filtered_nodes()
@@ -3391,18 +3474,26 @@ class TestAllowedNodesScheduling:
                                                          config,
                                                          context='test')
 
-        terms = result['affinity']['nodeAffinity'][
-            'requiredDuringSchedulingIgnoredDuringExecution'][
-                'nodeSelectorTerms']
-        assert len(terms) == 1
-        assert terms[0]['matchExpressions'][0]['key'] == \
-            'kubernetes.io/hostname'
-        assert sorted(
-            terms[0]['matchExpressions'][0]['values']) == ['node-a', 'node-b']
-
-        # preferredDuringScheduling (avoid GPU nodes) must be preserved
-        assert 'preferredDuringSchedulingIgnoredDuringExecution' in \
-            result['affinity']['nodeAffinity']
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'cpu': '4',
+                        'memory': '8Gi'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    **self._PREFERRED_AVOID_GPU,
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [{
+                            'matchExpressions': [self._HOSTNAME_EXPR]
+                        }]
+                    },
+                },
+            },
+        }
 
     def test_scheduling_no_config(self):
         """No allowed_nodes config leaves affinity unchanged."""
