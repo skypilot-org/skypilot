@@ -1606,38 +1606,20 @@ def test_kubernetes_allowed_nodes():
     allowed_node = node_names[0]
     name = smoke_tests_utils.get_cluster_name()
 
-    # Write the allowed_nodes config. The API server reads config at
-    # request time, so writing to ~/.sky/config.yaml and reloading is
-    # sufficient. We back up and restore the original config.
-    config_content = textwrap.dedent(f"""\
-        kubernetes:
-          allowed_nodes:
-            names:
-              - {allowed_node}
-    """)
-
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
-                                     delete=False) as f:
-        f.write(config_content)
-        config_path = f.name
-
     test = smoke_tests_utils.Test(
         'kubernetes_allowed_nodes',
         [
-            # Back up existing config, install allowed_nodes config,
-            # and restart the API server to pick it up.
-            'cp ~/.sky/config.yaml ~/.sky/config.yaml.bak.allowed_nodes'
-            ' 2>/dev/null; true',
-            f'cp {config_path} ~/.sky/config.yaml'
-            ' && sky api stop && sky api start',
-            # Launch with the allowed_nodes config
+            # Launch with the allowed_nodes config (config_dict is
+            # automatically overlaid via override_sky_config and sent
+            # to the API server with each request).
             f'sky launch -y -c {name}'
             f' --infra kubernetes --cpus 0.5 --memory 1'
             f' -- echo "hello from allowed node"',
             f'sky logs {name} 1 --status',
             # Verify the pod landed on the allowed node. We query by
-            # the annotation (which has the exact cluster name, unlike the
-            # label which includes a hash suffix) across all namespaces.
+            # the annotation (which has the exact cluster name, unlike
+            # the label which includes a hash suffix) across all
+            # namespaces.
             f'POD_NODE=$(kubectl get pods --all-namespaces -o'
             f' jsonpath=\'{{range .items[*]}}'
             f'{{.metadata.annotations.skypilot-cluster-name}}'
@@ -1646,13 +1628,17 @@ def test_kubernetes_allowed_nodes():
             f' echo "Pod landed on: $POD_NODE" &&'
             f' [ "$POD_NODE" = "{allowed_node}" ]',
         ],
-        # Restore original config and restart API server
-        teardown=(f'sky down -y {name};'
-                  ' mv ~/.sky/config.yaml.bak.allowed_nodes'
-                  ' ~/.sky/config.yaml 2>/dev/null; true;'
-                  ' sky api stop; sky api start;'
-                  f' rm -f {config_path}'),
+        teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout('kubernetes'),
+        # Use config_dict to overlay allowed_nodes into the active
+        # config via the standard override_sky_config mechanism.
+        config_dict={
+            'kubernetes': {
+                'allowed_nodes': {
+                    'names': [allowed_node]
+                }
+            }
+        },
     )
     smoke_tests_utils.run_one_test(test)
 
