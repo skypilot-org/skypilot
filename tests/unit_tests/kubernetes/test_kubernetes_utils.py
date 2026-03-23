@@ -3495,6 +3495,65 @@ class TestAllowedNodesScheduling:
             },
         }
 
+    def test_scheduling_labels_and_names_gpu_workload(self):
+        """Labels + names combined with GPU pod.
+
+        Labels produce dynamic terms, names produce a hostname term.
+        All are cross-producted with the existing GPU term.
+        """
+        pod_spec = self._make_pod_spec_gpu()
+        config = {
+            'label_selector': {
+                'pool': 'gpu'
+            },
+            'names': ['node-a'],
+        }
+        filtered_nodes = self._make_filtered_nodes()
+
+        with mock.patch('sky.provision.kubernetes.utils.get_kubernetes_nodes',
+                        return_value=filtered_nodes):
+            result = utils.inject_allowed_nodes_affinity(copy.deepcopy(
+                pod_spec['spec']),
+                                                         config,
+                                                         context='test')
+
+        assert result == {
+            'containers': [{
+                'resources': {
+                    'limits': {
+                        'nvidia.com/gpu': '1'
+                    }
+                }
+            }],
+            'affinity': {
+                'nodeAffinity': {
+                    'requiredDuringSchedulingIgnoredDuringExecution': {
+                        'nodeSelectorTerms': [
+                            # Label term: GPU AND pool=gpu
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    {
+                                        'key': 'pool',
+                                        'operator': 'In',
+                                        'values': ['gpu']
+                                    },
+                                ]
+                            },
+                            # Hostname term: GPU AND hostname in [...]
+                            {
+                                'matchExpressions': [
+                                    self._GPU_EXPR,
+                                    self._HOSTNAME_EXPR,
+                                ]
+                            },
+                        ]
+                    }
+                },
+                **self._POD_AFFINITY,
+            },
+        }
+
     def test_scheduling_no_config(self):
         """No allowed_nodes config leaves affinity unchanged."""
         pod_spec = self._make_pod_spec_gpu()

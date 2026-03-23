@@ -1533,25 +1533,23 @@ def inject_allowed_nodes_affinity(
     """Inject nodeAffinity constraints for allowed_nodes into a pod spec.
 
     Ensures pods are only scheduled on nodes permitted by the allowed_nodes
-    config. Uses one of two strategies:
+    config. Builds one matchExpression per criterion:
 
-    **Label-only** (no names/ips configured): Forward label constraints
-    directly as K8s nodeAffinity expressions. This is autoscaler-friendly
-    because new nodes matching the labels are automatically eligible.
+    - Each label key-value pair becomes a label expression (autoscaler-
+      friendly: new nodes matching the label are automatically eligible).
+    - Names/IPs are resolved to a single kubernetes.io/hostname In
+      expression (static snapshot at scheduling time).
 
-    Since allowed_nodes labels are OR'd but K8s matchExpressions within a
-    single nodeSelectorTerm are AND'd, we use a cross-product approach:
-    for each existing nodeSelectorTerm, create N copies (one per label),
-    each with one label expression added. K8s OR's across terms, so:
+    These expressions are then cross-producted with the existing
+    nodeSelectorTerms. Since K8s OR's across terms but AND's within a
+    term, this correctly expresses:
 
-        existing_terms x labels = (existing AND label1) OR (existing AND label2)
+        existing_constraints AND (label1 OR label2 OR hostname_set)
 
-    This correctly expresses: existing_constraints AND (label1 OR label2).
+    For example, with GPU affinity + label_selector {pool: gpu} +
+    names [node-01]:
 
-    **Names/IPs involved**: Resolve all allowed nodes to their
-    kubernetes.io/hostname label values, then inject a single hostname
-    In expression into each existing term. Names and IPs are inherently
-    static, so this snapshot-at-scheduling-time approach is appropriate.
+        (GPU AND pool=gpu) OR (GPU AND hostname in [node-01])
 
     Args:
         pod_spec: The pod spec dict (pod_spec['spec'] level, containing
@@ -1573,66 +1571,70 @@ def inject_allowed_nodes_affinity(
     if not label_selector and not has_names_or_ips:
         return pod_spec
 
-    # Navigate into the nodeAffinity structure, creating as needed.
+    # Build a list of matchExpression entries — one per allowed_nodes
+    # criterion. Each entry represents one OR'd alternative. Labels are
+    # forwarded directly (autoscaler-friendly: new nodes matching the
+    # label are automatically eligible). Names/IPs are resolved to a
+    # kubernetes.io/hostname In expression (static snapshot).
+    allowed_exprs: List[Dict[str, Any]] = []
+
+    for key, value in label_selector.items():
+        allowed_exprs.append({
+            'key': key,
+            'operator': 'In',
+            'values': [value],
+        })
+
+    if has_names_or_ips:
+        # Resolve names/IPs to hostnames. get_kubernetes_nodes() returns
+        # already-filtered nodes. The kubernetes.io/hostname label is set
+        # by the kubelet and may differ from node.metadata.name, so we
+        # read the actual label with a fallback.
+        filtered_nodes = get_kubernetes_nodes(context=context)
+        if not filtered_nodes and not label_selector:
+            raise exceptions.ResourcesUnavailableError(
+                'No Kubernetes nodes match the allowed_nodes filter '
+                'in ~/.sky/config.yaml. Check your allowed_nodes '
+                'configuration.')
+        # Only include nodes that matched via name/IP (not labels) to
+        # avoid duplicating label-matched nodes as static hostnames.
+        # Since _filter_allowed_nodes OR's all criteria, we resolve
+        # all filtered nodes here — the hostname term captures names
+        # and IPs, while label terms remain dynamic above.
+        if filtered_nodes:
+            allowed_hostnames = sorted(
+                set(
+                    n.metadata.labels.get('kubernetes.io/hostname',
+                                          n.metadata.name)
+                    for n in filtered_nodes))
+            allowed_exprs.append({
+                'key': 'kubernetes.io/hostname',
+                'operator': 'In',
+                'values': allowed_hostnames,
+            })
+
+    if not allowed_exprs:
+        return pod_spec
+
+    # Cross-product the allowed expressions with existing nodeSelectorTerms.
+    # Each allowed expression becomes a separate term (OR'd by K8s), and
+    # within each term the expression is AND'd with existing constraints
+    # (e.g., GPU label). This correctly expresses:
+    #   existing_constraints AND (criterion1 OR criterion2 OR ...)
     affinity = pod_spec.setdefault('affinity', {})
     node_affinity = affinity.setdefault('nodeAffinity', {})
     required = node_affinity.setdefault(
         'requiredDuringSchedulingIgnoredDuringExecution', {})
     existing_terms = required.get('nodeSelectorTerms', [])
 
-    if not has_names_or_ips and label_selector:
-        # --- Label-only strategy ---
-        # Cross-product: for each (existing_term, label), produce a new term
-        # with the label expression appended. If no existing terms, use an
-        # empty base so we get one term per label.
-        base_terms = existing_terms if existing_terms else [{}]
-        new_terms = []
-        for key, value in label_selector.items():
-            for term in base_terms:
-                new_term = copy.deepcopy(term)
-                new_term.setdefault('matchExpressions', []).append({
-                    'key': key,
-                    'operator': 'In',
-                    'values': [value],
-                })
-                new_terms.append(new_term)
-        required['nodeSelectorTerms'] = new_terms
-    else:
-        # --- Hostname strategy ---
-        # Resolve all allowed nodes (already filtered by discovery) to their
-        # kubernetes.io/hostname label. This label is set by the kubelet on
-        # every node and may differ from node.metadata.name in some setups,
-        # so we read the actual label value with a fallback to the name.
-        filtered_nodes = get_kubernetes_nodes(context=context)
-        if not filtered_nodes:
-            raise exceptions.ResourcesUnavailableError(
-                'No Kubernetes nodes match the allowed_nodes filter '
-                'in ~/.sky/config.yaml. Check your allowed_nodes '
-                'configuration.')
-
-        allowed_hostnames = sorted(
-            set(
-                n.metadata.labels.get('kubernetes.io/hostname', n.metadata.name)
-                for n in filtered_nodes))
-
-        hostname_expr = {
-            'key': 'kubernetes.io/hostname',
-            'operator': 'In',
-            'values': allowed_hostnames,
-        }
-
-        if not existing_terms:
-            # No existing required terms (e.g., CPU-only workload).
-            # Create one term with just the hostname constraint.
-            required['nodeSelectorTerms'] = [{
-                'matchExpressions': [hostname_expr]
-            }]
-        else:
-            # Add hostname constraint to each existing term (AND semantics).
-            # This preserves existing constraints (e.g., GPU label matching)
-            # while restricting to allowed nodes.
-            for term in existing_terms:
-                term.setdefault('matchExpressions', []).append(hostname_expr)
+    base_terms = existing_terms if existing_terms else [{}]
+    new_terms = []
+    for expr in allowed_exprs:
+        for term in base_terms:
+            new_term = copy.deepcopy(term)
+            new_term.setdefault('matchExpressions', []).append(expr)
+            new_terms.append(new_term)
+    required['nodeSelectorTerms'] = new_terms
 
     return pod_spec
 
