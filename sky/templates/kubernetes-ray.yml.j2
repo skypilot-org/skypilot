@@ -470,9 +470,16 @@ available_node_types:
             claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
         {% for volume_mount in volume_mounts %}
+        {% if volume_mount.volume_type == 'k8s-hostpath' %}
+        - name: {{volume_mount.name}}
+          hostPath:
+            path: {{volume_mount.host_path}}
+            type: DirectoryOrCreate
+        {% else %}
         - name: {{volume_mount.name}}
           persistentVolumeClaim:
             claimName: {{volume_mount.volume_name_on_cloud}}
+        {% endif %}
         {% endfor %}
         {% if k8s_enable_gpudirect_tcpx %}
         - name: libraries
