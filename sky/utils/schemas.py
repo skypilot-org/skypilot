@@ -372,6 +372,9 @@ def _get_single_resources_schema():
                 'minimum': constants.MIN_PRIORITY,
                 'maximum': constants.MAX_PRIORITY,
             },
+            'priority_class': {
+                'type': 'string',
+            },
             # The following fields are for internal use only. Should not be
             # specified in the task config.
             '_docker_login_config': {
@@ -1439,6 +1442,18 @@ def get_config_schema():
                     }]
                 },
                 'vpc_names': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
+                    }],
+                },
+                'subnet_names': {
                     'oneOf': [{
                         'type': 'string',
                     }, {

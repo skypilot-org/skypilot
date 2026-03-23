@@ -409,6 +409,11 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 RECIPE_NAME_VALID_REGEX = r'[a-zA-Z]([-a-zA-Z0-9]*[a-zA-Z0-9])?'
 RECIPE_NAME_MAX_LENGTH = 40
 
+# Workspace names: lowercase letters, numbers, dashes, and underscores.
+# Must start with a lowercase letter, end with a lowercase letter or digit.
+WORKSPACE_NAME_VALID_REGEX = r'[a-z]([-_a-z0-9]*[a-z0-9])?'
+WORKSPACE_NAME_MAX_LENGTH = 63
+
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.

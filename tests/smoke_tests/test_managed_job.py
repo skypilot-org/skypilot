@@ -1005,7 +1005,7 @@ def test_managed_jobs_cancellation_gcp():
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
     timeout = 7 * 60  # 7 mins
-    if generic_cloud == 'azure':
+    if generic_cloud in ('azure', 'nebius'):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
@@ -1663,6 +1663,9 @@ def test_managed_jobs_ha_kill_running(generic_cloud: str):
         pytest.skip(
             'Skipping HA test in non-docker remote api server environment as '
             'controller might be managed by different user/test agents')
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Skipping HA kill test in consolidation mode: no separate '
+                    'controller pod to kill')
 
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
@@ -1682,6 +1685,9 @@ def test_managed_jobs_ha_kill_starting(generic_cloud: str):
         pytest.skip(
             'Skipping HA test in non-docker remote api server environment as '
             'controller might be managed by different user/test agents')
+    if smoke_tests_utils.server_side_is_consolidation_mode():
+        pytest.skip('Skipping HA kill test in consolidation mode: no separate '
+                    'controller pod to kill')
     name = smoke_tests_utils.get_cluster_name()
     test = _get_ha_kill_test(
         name,

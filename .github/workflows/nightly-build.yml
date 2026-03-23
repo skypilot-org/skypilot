@@ -23,7 +23,7 @@ jobs:
       should_run: ${{ steps.compute_should_run.outputs.should_run }}
       is_preflight: ${{ steps.compute_should_run.outputs.is_preflight }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
       - name: print latest_commit
         run: echo ${{ github.sha }}
       - id: compute_should_run
@@ -90,9 +90,9 @@ jobs:
       version: ${{ steps.set-release-version.outputs.version }}
     steps:
       - name: Clone repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '23'
           cache: 'npm'
@@ -106,7 +106,7 @@ jobs:
           cd sky/dashboard
           npm run build
       - name: Set up Python 3.10
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c # v4.9.1
         with:
           python-version: '3.10'
           cache: 'pip' # caching pip dependencies
@@ -134,7 +134,7 @@ jobs:
           --outdir dist/
           .
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: skypilot-artifacts-skypilot-nightly
           path: dist/
@@ -162,7 +162,7 @@ jobs:
       branch: ${{ github.ref_name }}
       message: "nightly-build-pypi backward compatibility test --base-branch pypi/skypilot-nightly"
       pipeline: "quicktest-core"
-      build_env_vars: '{"ARGS": "--base-branch pypi/skypilot-nightly"}'
+      build_env_vars: '{"ARGS": "--kubernetes --base-branch pypi/skypilot-nightly"}'
       timeout_minutes: 60
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
@@ -478,7 +478,7 @@ jobs:
           echo "message_block=${MARKDOWN_TEXT}" >> $GITHUB_OUTPUT
 
       - name: Notify Slack channel on failure
-        uses: slackapi/slack-github-action@v2.0.0
+        uses: slackapi/slack-github-action@485a9d42d3a73031f12ec201c457e2162c45d02d # v2.0.0
         with:
           method: chat.postMessage
           token: ${{ secrets.SLACK_BOT_TOKEN }}
