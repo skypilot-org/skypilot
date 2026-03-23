@@ -81,8 +81,7 @@ async def queue_v2(request: fastapi.Request,
 
 
 @router.post('/wait')
-async def wait(request: fastapi.Request,
-               jobs_wait_body: payloads.JobsWaitBody,
+async def wait(request: fastapi.Request, jobs_wait_body: payloads.JobsWaitBody,
                background_tasks: fastapi.BackgroundTasks) -> None:
     executor.check_request_thread_executor_available()
     request_task = await executor.prepare_request_async(
