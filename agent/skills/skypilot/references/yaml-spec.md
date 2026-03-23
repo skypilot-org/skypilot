@@ -39,6 +39,7 @@ resources:
   disk_size: 256
   disk_tier: medium
   network_tier: best
+  max_hourly_cost: 10.0
 
   # Config.
   image_id: ami-0868a20f5a3bf9702
@@ -587,6 +588,30 @@ If `'best'` is specified, use the best network tier available on the specified i
 ```yaml
 resources:
   network_tier: best
+
+```
+
+
+### ``resources.max_hourly_cost``
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When `use_spot` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+```yaml
+resources:
+  accelerators: A100
+  max_hourly_cost: 10.0
+```
+
+```yaml
+# Combined with spot instances: filters by spot price
+resources:
+  use_spot: true
+  max_hourly_cost: 5.0
 
 ```
 
