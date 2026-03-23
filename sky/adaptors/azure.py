@@ -48,22 +48,26 @@ def get_credential():
     """Returns an Azure credential object.
 
     Uses a hybrid approach:
-    - If ~/.azure/msal_token_cache.json exists, use AzureCliCredential with
-      process_timeout=30 (fast path, preserves workaround for Azure CLI
-      bug https://github.com/Azure/azure-cli/issues/20404).
-    - Otherwise, use DefaultAzureCredential (handles SP secret/cert,
-      workload identity, managed identity).
+    - If AZURE_CLIENT_ID is set, use DefaultAzureCredential (handles SP
+      secret/cert, workload identity, managed identity). This takes priority
+      to be consistent with AWS/GCP, where service account credentials
+      (via env vars) take priority over personal CLI credentials.
+    - Otherwise, use AzureCliCredential with process_timeout=30 (fast path,
+      preserves workaround for Azure CLI bug
+      https://github.com/Azure/azure-cli/issues/20404).
     """
     from azure import identity
 
+    # Service principal / managed identity via env vars takes priority,
+    # consistent with AWS (env vars > ~/.aws/credentials) and
+    # GCP (GOOGLE_APPLICATION_CREDENTIALS > gcloud auth login).
+    if is_non_cli_credential():
+        return identity.DefaultAzureCredential(
+            exclude_cli_credential=True,
+            exclude_powershell_credential=True,
+        )
     # Fast path: preserve existing CLI behavior with timeout workaround
-    if os.path.isfile(os.path.expanduser('~/.azure/msal_token_cache.json')):
-        return identity.AzureCliCredential(process_timeout=30)
-    # All other methods: SP (secret/cert), workload identity, managed identity
-    return identity.DefaultAzureCredential(
-        exclude_cli_credential=True,
-        exclude_powershell_credential=True,
-    )
+    return identity.AzureCliCredential(process_timeout=30)
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
@@ -389,11 +393,18 @@ def assign_storage_account_iam_role(
     # Reference: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-owner # pylint: disable=line-too-long
     storage_blob_data_owner_role_id = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 
+    # Create a new event loop if none exists
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    graph_client = get_client('graph')
+
     if is_non_cli_credential():
         # For service principals, look up the SP's object ID via Graph API
         # using the application (client) ID.
-        graph_client = get_client('graph')
-
         async def get_sp_object_id() -> str:
             from msgraph.generated.service_principals.service_principals_request_builder import (
                 ServicePrincipalsRequestBuilder)  # pylint: disable=line-too-long
@@ -416,11 +427,6 @@ def assign_storage_account_iam_role(
             return str(result.value[0].id)
 
         try:
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
             object_id = loop.run_until_complete(get_sp_object_id())
         except sky_exceptions.StorageBucketCreateError:
             raise
@@ -435,8 +441,6 @@ def assign_storage_account_iam_role(
                     f'{common_utils.format_exception(e, use_bracket=True)}')
         principal_type = 'ServicePrincipal'
     else:
-        graph_client = get_client('graph')
-
         # Obtaining user's object ID to assign role.
         # Reference: https://github.com/Azure/azure-sdk-for-python/issues/35573 # pylint: disable=line-too-long
         async def get_object_id_async() -> str:
@@ -448,13 +452,6 @@ def assign_storage_account_iam_role(
                 'https://graph.microsoft.com/v1.0/me').get()
             httpx_logger.setLevel(original_level)
             return str(user.additional_data['id'])
-
-        # Create a new event loop if none exists
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
 
         object_id = loop.run_until_complete(get_object_id_async())
         principal_type = 'User'

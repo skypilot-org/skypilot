@@ -205,24 +205,21 @@ class TestGetCurrentAccountUser:
 class TestGetCredential:
     """Tests for azure.get_credential hybrid approach."""
 
-    @mock.patch('os.path.isfile', return_value=True)
-    def test_cli_fast_path(self, mock_isfile):
-        """When token cache exists, returns AzureCliCredential."""
+    @mock.patch.dict(os.environ, {}, clear=True)
+    def test_cli_fast_path(self):
+        """When no SP env vars, returns AzureCliCredential."""
         mock_identity = mock.MagicMock()
         with mock.patch.dict('sys.modules', {'azure.identity': mock_identity}):
-            from azure import identity
-            identity.AzureCliCredential(process_timeout=30)
+            azure.get_credential()
             mock_identity.AzureCliCredential.assert_called_with(
                 process_timeout=30)
 
-    @mock.patch('os.path.isfile', return_value=False)
-    def test_non_cli_default_credential(self, mock_isfile):
-        """When no token cache, returns DefaultAzureCredential."""
+    @mock.patch.dict(os.environ, {'AZURE_CLIENT_ID': 'test-client-id'})
+    def test_non_cli_default_credential(self):
+        """When SP env vars set, returns DefaultAzureCredential."""
         mock_identity = mock.MagicMock()
         with mock.patch.dict('sys.modules', {'azure.identity': mock_identity}):
-            from azure import identity
-            identity.DefaultAzureCredential(exclude_cli_credential=True,
-                                            exclude_powershell_credential=True)
+            azure.get_credential()
             mock_identity.DefaultAzureCredential.assert_called_with(
                 exclude_cli_credential=True, exclude_powershell_credential=True)
 
