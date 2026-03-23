@@ -1635,9 +1635,14 @@ def test_kubernetes_allowed_nodes():
             f' --infra kubernetes --cpus 0.5 --memory 1'
             f' -- echo "hello from allowed node"',
             f'sky logs {name} 1 --status',
-            # Verify the pod landed on the allowed node
-            f'POD_NODE=$(kubectl get pod -l skypilot-cluster-name={name}'
-            f' -o jsonpath="{{.items[0].spec.nodeName}}") &&'
+            # Verify the pod landed on the allowed node. We query by
+            # the annotation (which has the exact cluster name, unlike the
+            # label which includes a hash suffix) across all namespaces.
+            f'POD_NODE=$(kubectl get pods --all-namespaces -o'
+            f' jsonpath=\'{{range .items[*]}}'
+            f'{{.metadata.annotations.skypilot-cluster-name}}'
+            f' {{.spec.nodeName}}{{\"\\n\"}}{{end}}\''
+            f' | grep "^{name} " | awk \'{{print $2}}\') &&'
             f' echo "Pod landed on: $POD_NODE" &&'
             f' [ "$POD_NODE" = "{allowed_node}" ]',
         ],
