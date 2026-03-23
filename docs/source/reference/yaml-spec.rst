@@ -78,6 +78,8 @@ Below is the configuration syntax and some example values.  See details under ea
     MY_HF_TOKEN: my-secret-value
     WANDB_API_KEY: my-secret-value-2
 
+  :ref:`api_server_access <yaml-spec-api-server-access>`: true
+
   :ref:`volumes <yaml-spec-new-volumes>`:
     /mnt/data: volume-name
     /mnt/cache:
@@ -1057,6 +1059,22 @@ Example:
   secrets:
     HF_TOKEN: my-huggingface-token
     WANDB_API_KEY: my-wandb-api-key
+
+.. _yaml-spec-api-server-access:
+
+``api_server_access``
+~~~~~~~~~~~~~~~~~~~~~
+
+Whether to inject API server credentials into the task's environment so that it can call ``sky`` CLI/SDK to launch nested SkyPilot operations. Defaults to ``true``. Set to ``false`` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+.. code-block:: yaml
+
+  # Opt out of API server access injection
+  api_server_access: false
+
+See :ref:`Nested SkyPilot from managed jobs <nested-skypilot-managed-jobs>` for details.
 
 .. _yaml-spec-new-volumes:
 
