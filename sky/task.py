@@ -1,5 +1,6 @@
 """Task: a coarse-grained stage in an application."""
 import collections
+import dataclasses
 import json
 import os
 import re
@@ -238,6 +239,13 @@ def get_plaintext_secrets(secrets: Dict[str, SecretStr]) -> Dict[str, str]:
     return {k: v.get_secret_value() for k, v in secrets.items()}
 
 
+@dataclasses.dataclass
+class ManagedSecretRef:
+    """A reference to a managed secret in task YAML."""
+    name: str
+    mount_path: Optional[str] = None
+
+
 class Task:
     """Task: a computation to be run on the cloud."""
 
@@ -366,6 +374,7 @@ class Task:
         if secrets is not None:
             self._secrets = {k: SecretStr(v) for k, v in secrets.items()}
         self._volumes = volumes or {}
+        self._managed_secret_refs: List[ManagedSecretRef] = []
         self._api_access = api_access
 
         # concatenate commands if given as list
@@ -655,6 +664,22 @@ class Task:
             _metadata=config.pop('_metadata', None),
             _user_specified_yaml=user_specified_yaml,
         )
+
+        # Parse managed_secrets references
+        managed_secrets_raw = config.pop('managed_secrets', None)
+        if managed_secrets_raw:
+            # pylint: disable=protected-access
+            for entry in managed_secrets_raw:
+                if isinstance(entry, str):
+                    task._managed_secret_refs.append(
+                        ManagedSecretRef(name=entry))
+                elif isinstance(entry, dict):
+                    for name, opts in entry.items():
+                        task._managed_secret_refs.append(
+                            ManagedSecretRef(
+                                name=name,
+                                mount_path=opts.get('mount_path'),
+                            ))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to
@@ -970,6 +995,10 @@ class Task:
     @property
     def secrets(self) -> Dict[str, SecretStr]:
         return self._secrets
+
+    @property
+    def managed_secret_refs(self) -> List['ManagedSecretRef']:
+        return self._managed_secret_refs
 
     @property
     def api_access(self) -> bool:
