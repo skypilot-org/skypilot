@@ -9,6 +9,7 @@ run: |
   mkdir -p sky_workdir/dev
   cat >> sky_workdir/dev/Dockerfile <<'EOF'
   FROM alpine
+  RUN echo "test"
   CMD ["echo", "hello from DinD"]
   EOF
   docker buildx ls

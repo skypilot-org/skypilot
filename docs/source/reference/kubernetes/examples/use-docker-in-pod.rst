@@ -158,8 +158,22 @@ restarted. To persist it, create a SkyPilot volume and reference it in the
       infra: k8s
       size: 50Gi
       config:
-        storage_class_name: standard-rwx
-        access_mode: ReadWriteMany  # Required for multi-node clusters
+        storage_class_name: standard-rwo
+        access_mode: ReadWriteOnce
+
+   .. note::
+
+      The cache volume **must** be backed by a block-storage filesystem (e.g.,
+      ext4/xfs on EBS, Persistent Disk, etc.).  NFS-based storage such as AWS
+      EFS, Google Cloud Filestore, or CephFS **cannot** be used because:
+
+      - **ALL mode (DinD):** The overlay storage driver is not supported on NFS.
+      - **BUILD mode (rootless BuildKit):** NFS prevents unpacking image layers
+        with correct file ownership.
+
+      See the `Docker known limitations
+      <https://docs.docker.com/engine/security/rootless/troubleshoot/#known-limitations>`_
+      for details.
 
 2. Create the volume:
 
@@ -176,9 +190,3 @@ restarted. To persist it, create a SkyPilot volume and reference it in the
           enable_docker:
             mode: ALL   # or BUILD
             cache_volume: my-builder-cache
-
-.. note::
-
-   For multi-node clusters, use a ``ReadWriteMany`` volume so all
-   nodes can mount it simultaneously. Each pod gets its own ``subPath`` within
-   the PVC, so a single volume can be safely shared across clusters.
