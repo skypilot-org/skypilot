@@ -996,6 +996,30 @@ def get_task_schema():
                 },
                 'additionalProperties': False,
             },
+            'managed_secrets': {
+                'type': 'array',
+                'items': {
+                    'oneOf': [
+                        {
+                            'type': 'string'
+                        },
+                        {
+                            'type': 'object',
+                            'maxProperties': 1,
+                            'additionalProperties': {
+                                'type': 'object',
+                                'properties': {
+                                    'mount_path': {
+                                        'type': 'string'
+                                    },
+                                },
+                                'required': ['mount_path'],
+                                'additionalProperties': False,
+                            },
+                        },
+                    ],
+                },
+            },
             # inputs and outputs are experimental
             'inputs': {
                 'type': 'object',

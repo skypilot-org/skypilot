@@ -2,8 +2,11 @@
 
 See `Stage` for a Task's life cycle.
 """
+import asyncio
 import enum
 import logging
+import os
+import tempfile
 import time
 import typing
 from typing import Callable, List, Optional, Tuple, Union
@@ -102,6 +105,51 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     task.best_resources = None
     logger.debug(f'Overridden task resources: {task.resources}')
     return task
+
+
+def _resolve_managed_secrets(dag: 'sky.Dag') -> None:
+    """Resolve managed secret references for all tasks in the DAG."""
+    # pylint: disable=import-outside-toplevel
+    from sky.server import plugins
+
+    for task in dag.tasks:
+        if not task.managed_secret_refs:
+            continue
+
+        ext_ctx = plugins.get_extension_context()
+        if ext_ctx is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no plugin system '
+                'is available.')
+        provider = ext_ctx.managed_secrets_provider
+        if provider is None:
+            raise RuntimeError(
+                'Task references managed_secrets but no managed secrets '
+                'provider is configured. Install a secrets management '
+                'plugin.')
+
+        # The provider.resolve() is async; run it from this sync context.
+        resolved = asyncio.run(
+            provider.resolve(
+                task.managed_secret_refs,
+                user_hash='',
+                workspace='default',
+            ))
+
+        # Merge resolved env vars into the task.
+        if resolved.env_vars:
+            task.update_envs(resolved.env_vars)
+
+        # Write resolved file mounts to temp files and add to task.
+        if resolved.file_mounts:
+            tmp_dir = os.path.expanduser('~/.sky/plugins/secrets_manager/tmp')
+            os.makedirs(tmp_dir, exist_ok=True)
+            for fm in resolved.file_mounts:
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=tmp_dir)
+                with os.fdopen(tmp_fd, 'wb') as f:
+                    f.write(fm.content)
+                os.chmod(tmp_path, 0o600)
+                task.update_file_mounts({fm.mount_path: tmp_path})
 
 
 def _execute(
@@ -217,6 +265,7 @@ def _execute(
                 for storage in task.storage_mounts.values():
                     # Ensure the storage is constructed.
                     storage.construct()
+        _resolve_managed_secrets(dag)
         return _execute_dag(
             dag,
             dryrun=dryrun,
