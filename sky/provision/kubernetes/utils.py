@@ -2896,6 +2896,87 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
+def resolve_shared_caches(
+    context: Optional[str],
+    pod_spec: Dict[str, Any],
+) -> None:
+    """Resolves shared_caches config and injects volumes/volumeMounts.
+
+    Reads the shared_caches config from skypilot_config, resolves SkyPilot
+    volume names to PVC claimNames via DB lookup, and injects the corresponding
+    volume and volumeMount entries into the pod spec.
+
+    Args:
+        context: The Kubernetes context name.
+        pod_spec: The pod spec dict to inject volumes into (modified in-place).
+    """
+    shared_caches = skypilot_config.get_effective_region_config(
+        cloud='kubernetes',
+        region=context,
+        keys=('shared_caches',),
+        default_value=None)
+    if not shared_caches:
+        return
+
+    if 'volumes' not in pod_spec['spec']:
+        pod_spec['spec']['volumes'] = []
+    if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
+        pod_spec['spec']['containers'][0]['volumeMounts'] = []
+
+    # Track which volume names have already been added to avoid duplicates
+    # when multiple cache_paths reference the same volume.
+    added_volumes: Set[str] = set()
+
+    for cache_entry in shared_caches:
+        spec = cache_entry['spec']
+        volume_name = spec['name']
+        cache_paths = cache_entry['cache_paths']
+
+        # Resolve SkyPilot volume name to PVC claimName
+        record = global_user_state.get_volume_by_name(volume_name)
+        if record is None:
+            logger.warning(
+                f'Shared cache volume {volume_name!r} not found in SkyPilot '
+                f'volume DB. Skipping. Create it with: sky volumes apply')
+            continue
+        volume_config: models.VolumeConfig = record['handle']
+        pvc_claim_name = volume_config.name_on_cloud
+
+        # Use a prefixed name to avoid conflicts with user volumes
+        k8s_volume_name = f'shared-cache-{volume_name}'
+
+        # Add volume entry (once per unique volume)
+        if volume_name not in added_volumes:
+            pod_spec['spec']['volumes'].append({
+                'name': k8s_volume_name,
+                'persistentVolumeClaim': {
+                    'claimName': pvc_claim_name,
+                },
+            })
+            added_volumes.add(volume_name)
+
+        # Add volumeMount entries for each cache path
+        for cache_path in cache_paths:
+            # Resolve ~ to the container home directory for mount path
+            if cache_path.startswith('~/'):
+                mount_path = (
+                    f'{HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH}'
+                    f'/{cache_path[2:]}')
+            elif cache_path == '~':
+                mount_path = HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+            else:
+                mount_path = cache_path
+
+            # Use the cache_path as-is for subPath (~ kept literally)
+            sub_path = cache_path
+
+            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+                'name': k8s_volume_name,
+                'mountPath': mount_path,
+                'subPath': sub_path,
+            })
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],

@@ -1130,10 +1130,17 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             })
             if 'volumeMounts' not in pod_spec['spec']['containers'][0]:
                 pod_spec['spec']['containers'][0]['volumeMounts'] = []
-            pod_spec['spec']['containers'][0]['volumeMounts'].append({
+            volume_mount_entry = {
                 'name': ephemeral_volume.name,
                 'mountPath': ephemeral_volume.path,
-            })
+            }
+            if ephemeral_volume.sub_path:
+                volume_mount_entry['subPath'] = ephemeral_volume.sub_path
+            pod_spec['spec']['containers'][0]['volumeMounts'].append(
+                volume_mount_entry)
+
+    # Inject shared cache volumes from skypilot config
+    kubernetes_utils.resolve_shared_caches(context, pod_spec)
 
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])

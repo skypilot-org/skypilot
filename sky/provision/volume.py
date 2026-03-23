@@ -117,6 +117,7 @@ def _create_ephemeral_volume(
         path=path,
         volume_name_on_cloud=volume_config.name_on_cloud,
         volume_id_on_cloud=volume_config.id_on_cloud,
+        sub_path=volume_mount.sub_path,
     )
     return volume_info
 

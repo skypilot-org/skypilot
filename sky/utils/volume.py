@@ -173,7 +173,11 @@ class VolumeMount:
             labels=config.get('labels'),
         )
 
-        return cls(path, '', volume_config, is_ephemeral=True)
+        return cls(path,
+                   '',
+                   volume_config,
+                   is_ephemeral=True,
+                   sub_path=config.get('sub_path'))
 
     def to_yaml_config(self) -> Dict[str, Any]:
         config = {
