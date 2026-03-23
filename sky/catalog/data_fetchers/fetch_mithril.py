@@ -68,10 +68,9 @@ def fetch_instance_types(api_key: str, api_url: str) -> List[Dict[str, Any]]:
             f'Failed to fetch instance types: {e}') from e
 
 
-def fetch_instance_pricing(
-        api_key: str, api_url: str,
-        instance_fid: str) -> Dict[str, float]:
-    """Fetch on-demand and spot prices for an instance type.
+def fetch_instance_pricing(api_key: str, api_url: str,
+                           instance_fid: str) -> float:
+    """Fetch on-demand price for an instance type from Mithril Pricing API.
 
     Args:
         api_key: API key for authentication
@@ -79,8 +78,7 @@ def fetch_instance_pricing(
         instance_fid: Instance type FID (e.g., 'it_XqgKWbhZ5gznAYsG')
 
     Returns:
-        Dict with 'price' (on-demand, from reserved_price_cents) and
-        'spot_price' (from spot_price_cents), both in dollars.
+        On-demand price in dollars (from reserved_price_cents).
     """
     endpoint = f'{api_url}/v2/pricing/current'
 
@@ -93,13 +91,14 @@ def fetch_instance_pricing(
         )
         response.raise_for_status()
         data = response.json()
-        return {
-            'price': data['reserved_price_cents'] / 100.0,
-            'spot_price': data['spot_price_cents'] / 100.0,
-        }
+        return data['reserved_price_cents'] / 100.0
     except requests.exceptions.RequestException as e:
         raise mithril_utils.MithrilError(
             f'Failed to fetch pricing for {instance_fid}: {e}') from e
+    except KeyError as e:
+        raise mithril_utils.MithrilError(
+            f'Failed to parse pricing for {instance_fid}. '
+            f'Missing key in API response: {e}') from e
 
 
 def fetch_spot_availability(api_key: str,
@@ -150,7 +149,7 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
     logger.info('Found %d instance types.', len(instance_types))
 
     logger.info('Fetching pricing for each instance type...')
-    instance_pricing: Dict[str, Dict[str, float]] = {}
+    instance_pricing: Dict[str, float] = {}
     for inst in instance_types:
         instance_pricing[inst['fid']] = fetch_instance_pricing(
             api_key, api_url, inst['fid'])
@@ -192,7 +191,7 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
             gpu_info = (make_gpu_info_json(gpu_name, gpu_count, gpu_memory_gb)
                         if gpu_count else '')
 
-            pricing = instance_pricing[inst['fid']]
+            price = instance_pricing[inst['fid']]
 
             for item in regions_with_prices:
                 writer.writerow([
@@ -201,7 +200,7 @@ def create_catalog(output_path: str = 'mithril/vms.csv') -> None:
                     gpu_count or '',
                     vcpus,
                     memory_gb,
-                    pricing['price'],
+                    price,
                     item['spot_price'],
                     item['region'],
                     gpu_info,
