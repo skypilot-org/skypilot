@@ -265,7 +265,7 @@ class Nebius(clouds.Cloud):
         if platform.startswith('cpu'):
             default_image_family = 'ubuntu24.04-driverless'
         elif platform.startswith('gpu'):
-            default_image_family = 'ubuntu24.04-cuda13'
+            default_image_family = 'ubuntu24.04-cuda13.0'
         else:
             raise RuntimeError('Unsupported instance type for Nebius cloud:'
                                f' {resources.instance_type}')

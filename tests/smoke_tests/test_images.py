@@ -749,11 +749,11 @@ def test_nebius_image_family(generic_cloud: str):
     # Test that SkyPilot correctly handles image families as VM boot disks.
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
-        'nebius_docker_image',
+        'nebius_image_family',
         [
             f'sky launch -y -c {name} --infra nebius '
             f'--image-id ubuntu22.04-driverless '
-            f'"echo hello from docker && whoami"',
+            f'"echo hello from nebius && whoami"',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
