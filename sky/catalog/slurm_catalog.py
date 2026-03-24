@@ -69,7 +69,8 @@ def get_default_instance_type(
                 logger.debug(f'Failed to check memory scheduling for cluster '
                              f'{cluster!r}: {e}')
 
-        all_no_mem = len(no_mem_clusters) == len(clusters_to_check)
+        all_no_mem = (clusters_to_check and
+                      len(no_mem_clusters) == len(clusters_to_check))
         if all_no_mem:
             details = ', '.join(
                 f'{c} ({p})' for c, p in no_mem_clusters.items())
