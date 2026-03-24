@@ -748,11 +748,13 @@ class RetryingVmProvisioner(object):
             prev_handle: Optional['CloudVmRayResourceHandle'],
             prev_cluster_ever_up: bool,
             prev_config_hash: Optional[str],
+            warm_nodes: int = 0,
         ) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
             self.cluster_name = cluster_name
             self.resources = resources
             self.num_nodes = num_nodes
+            self.warm_nodes = warm_nodes
             self.prev_cluster_status = prev_cluster_status
             self.prev_handle = prev_handle
             self.prev_cluster_ever_up = prev_cluster_ever_up
@@ -953,6 +955,7 @@ class RetryingVmProvisioner(object):
         prev_cluster_ever_up: bool,
         skip_if_config_hash_matches: Optional[str],
         volume_mounts: Optional[List[volume_lib.VolumeMount]],
+        warm_nodes: int = 0,
     ) -> Dict[str, Any]:
         """The provision retry loop.
 
@@ -1068,6 +1071,7 @@ class RetryingVmProvisioner(object):
                         keep_launch_fields_in_existing_config=cluster_exists,
                         volume_mounts=volume_mounts,
                         cloud_specific_failover_overrides=failover_overrides,
+                        warm_nodes=warm_nodes,
                     )
                 except exceptions.ResourcesUnavailableError as e:
                     # Failed due to catalog issue, e.g. image not found, or
@@ -1743,6 +1747,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up,
                     skip_if_config_hash_matches=skip_if_config_hash_matches,
                     volume_mounts=task.volume_mounts,
+                    warm_nodes=to_provision_config.warm_nodes,
                 )
                 if dryrun:
                     return config_dict
@@ -5821,7 +5826,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             prev_cluster_status=None,
             prev_handle=None,
             prev_cluster_ever_up=False,
-            prev_config_hash=prev_config_hash)
+            prev_config_hash=prev_config_hash,
+            warm_nodes=task.warm_nodes)
 
     def _execute_file_mounts(self, handle: CloudVmRayResourceHandle,
                              file_mounts: Optional[Dict[Path, Path]]):

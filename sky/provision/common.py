@@ -65,6 +65,10 @@ class ProvisionConfig:
     resume_stopped_nodes: bool
     # Optional ports to open on launch of the cluster.
     ports_to_open_on_launch: Optional[List[int]]
+    # Number of warm (spare) instances to create alongside active instances.
+    # Warm instances run setup but do not start Ray workers. They are used
+    # for fast recovery when an active node fails. K8s-only for now.
+    warm_nodes: int = 0
 
     def get_redacted_config(self) -> Dict[str, Any]:
         """Get the redacted config."""

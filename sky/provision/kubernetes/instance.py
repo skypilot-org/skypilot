@@ -1189,15 +1189,27 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{running_pod_statuses}')
 
-    to_start_count = config.count - len(running_pods)
+    # Separate running pods into active and warm categories.
+    active_running_pods = {
+        name: pod
+        for name, pod in running_pods.items()
+        if pod.metadata.labels.get('skypilot.co/role') != 'warm'
+    }
+    warm_running_pods = {
+        name: pod
+        for name, pod in running_pods.items()
+        if pod.metadata.labels.get('skypilot.co/role') == 'warm'
+    }
+    to_start_count = config.count - len(active_running_pods)
     if to_start_count < 0:
         raise RuntimeError(
-            'The number of running+pending pods '
+            'The number of running+pending active pods '
             f'({config.count - to_start_count}) in cluster '
             f'"{cluster_name_on_cloud}" is greater than the number '
             f'requested by the user ({config.count}). '
             'This is likely a resource leak. '
             'Use "sky down" to terminate the cluster.')
+    warm_to_start_count = config.warm_nodes - len(warm_running_pods)
 
     # Add nvidia runtime class if it exists
     nvidia_runtime_exists = False
@@ -1229,9 +1241,15 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
 
     logger.debug(f'run_instances: calling create_namespaced_pod '
-                 f'(count={to_start_count}).')
+                 f'(count={to_start_count}, warm={warm_to_start_count}).')
 
     def _create_resource_thread(i: int):
+        """Create a single pod. Index mapping:
+        - i == 0: head pod
+        - 1 <= i < config.count: active worker pods
+        - config.count <= i < config.count + config.warm_nodes: warm pods
+        """
+        is_warm = i >= config.count
         pod_spec_copy = copy.deepcopy(pod_spec)
         # 0 is for head pod, while 1+ is for worker pods.
         if i == 0:
@@ -1246,8 +1264,26 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             else:
                 # If head pod already exists, we skip creating it.
                 return
+        elif is_warm:
+            # Warm spare pods — same spec as workers but with warm role label.
+            warm_index = i - config.count
+            pod_spec_copy['metadata']['labels'].update(
+                constants.WORKER_NODE_TAGS)
+            pod_name = f'{cluster_name_on_cloud}-warm{warm_index}'
+            if pod_name in running_pods:
+                return
+            pod_spec_copy['metadata']['name'] = pod_name
+            pod_spec_copy['metadata']['labels']['component'] = pod_name
+            pod_spec_copy['metadata']['labels']['skypilot.co/role'] = 'warm'
+            # Add env var so setup scripts can detect warm node.
+            for container in pod_spec_copy['spec']['containers']:
+                env_list = container.setdefault('env', [])
+                env_list.append({
+                    'name': 'SKYPILOT_WARM_NODE',
+                    'value': '1',
+                })
         else:
-            # Worker pods
+            # Active worker pods
             pod_spec_copy['metadata']['labels'].update(
                 constants.WORKER_NODE_TAGS)
             pod_name = f'{cluster_name_on_cloud}-worker{i}'
@@ -1424,15 +1460,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
             raise exceptions.InconsistentHighAvailabilityError(message)
 
     created_resources = []
-    if to_start_count > 0:
+    total_pod_count = config.count + config.warm_nodes
+    if to_start_count > 0 or warm_to_start_count > 0:
         # Create pods in parallel.
-        # Use `config.count` instead of `to_start_count` to keep the index of
-        # the Pods consistent especially for the case where some Pods are down
-        # due to node failure or manual termination, etc. and then launch
-        # again to create the Pods back.
+        # Use `config.count` (+ warm_nodes) instead of `to_start_count` to
+        # keep the index of the Pods consistent especially for the case where
+        # some Pods are down due to node failure or manual termination, etc.
+        # and then launch again to create the Pods back.
         # The existing Pods will be skipped in _create_resource_thread.
         created_resources = subprocess_utils.run_in_parallel(
-            _create_resource_thread, list(range(config.count)), _NUM_THREADS)
+            _create_resource_thread, list(range(total_pod_count)), _NUM_THREADS)
 
     if to_create_deployment:
         deployments = copy.deepcopy(created_resources)
@@ -1458,35 +1495,46 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
 
     # The running_pods may include Pending Pods, so we add them to the pods
     # list to wait for scheduling and running
-    if running_pods:
-        pods = pods + list(running_pods.values())
+    if active_running_pods:
+        pods = pods + list(active_running_pods.values())
+
+    # Only wait for active pods — warm pods may still be provisioning and
+    # should NOT block job start. Filter out warm pods from the wait list.
+    active_pods = [
+        p for p in pods
+        if p is not None and p.metadata.labels.get('skypilot.co/role') != 'warm'
+    ]
 
     provision_timeout = provider_config['timeout']
 
     wait_str = ('indefinitely'
                 if provision_timeout < 0 else f'for {provision_timeout}s')
-    logger.debug(f'run_instances: waiting {wait_str} for pods to schedule and '
-                 f'run: {[pod.metadata.name for pod in pods]}')
+    logger.debug(f'run_instances: waiting {wait_str} for active pods to '
+                 f'schedule and run: '
+                 f'{[pod.metadata.name for pod in active_pods]}' +
+                 (f' (warm pods provisioning async: '
+                  f'{config.warm_nodes})' if config.warm_nodes else ''))
 
-    # Wait until the pods are scheduled and surface cause for error
-    # if there is one
-    _wait_for_pods_to_schedule(namespace, context, pods, provision_timeout,
-                               cluster_name, create_pods_start)
+    # Wait until the active pods are scheduled and surface cause for error
+    # if there is one. Warm pods are NOT waited on — they provision async.
+    _wait_for_pods_to_schedule(namespace, context, active_pods,
+                               provision_timeout, cluster_name,
+                               create_pods_start)
     # Reset spinner message here because it might have hinted autoscaling
     # while waiting for pods to schedule.
     rich_utils.force_update_status(
         ux_utils.spinner_message('Launching', cluster_name=cluster_name))
-    # Wait until the pods and their containers are up and running, and
-    # fail early if there is an error
-    logger.debug(f'run_instances: waiting for pods to be running: '
-                 f'{[pod.metadata.name for pod in pods]}')
-    _wait_for_pods_to_run(namespace, context, cluster_name, pods)
+    # Wait until the active pods and their containers are up and running,
+    # and fail early if there is an error
+    logger.debug(f'run_instances: waiting for active pods to be running: '
+                 f'{[pod.metadata.name for pod in active_pods]}')
+    _wait_for_pods_to_run(namespace, context, cluster_name, active_pods)
     # Reset spinner message here because it might have hinted the reason
     # pods were pending.
     rich_utils.force_update_status(
         ux_utils.spinner_message('Launching', cluster_name=cluster_name))
-    logger.debug(f'run_instances: all pods are scheduled and running: '
-                 f'{[pod.metadata.name for pod in pods]}')
+    logger.debug(f'run_instances: all active pods are scheduled and running: '
+                 f'{[pod.metadata.name for pod in active_pods]}')
 
     assert head_pod_name is not None, 'head_instance_id should not be None'
     return common.ProvisionRecord(
