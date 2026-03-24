@@ -37,9 +37,10 @@ from sky.utils import ux_utils
 from sky.utils import validator
 
 if typing.TYPE_CHECKING:
+    import webbrowser
+
     import jinja2
     import psutil
-    import webbrowser
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
@@ -820,7 +821,7 @@ def open_browser(url: str) -> bool:
                 logger.debug(f'{cmd[0]} failed', exc_info=True)
                 continue
             except Exception:  # pylint: disable=broad-except
-                logger.debug(f'failed', exc_info=True)
+                logger.debug('failed', exc_info=True)
                 continue
         return False
 
