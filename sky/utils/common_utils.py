@@ -39,9 +39,11 @@ from sky.utils import validator
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
+    import webbrowser
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
+    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -822,7 +824,6 @@ def open_browser(url: str) -> bool:
                 continue
         return False
 
-    import webbrowser  # pylint: disable=import-outside-toplevel
     return webbrowser.open(url)
 
 
