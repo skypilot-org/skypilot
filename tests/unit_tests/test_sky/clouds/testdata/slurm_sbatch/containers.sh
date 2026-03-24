@@ -8,9 +8,6 @@
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task=4
-# Memory is in MB to support fractional GB values (e.g. 0.5GB -> 512M),
-# since Slurm's --mem requires integer values per unit. Slurm's M suffix
-# means MiB (1G = 1024M in Slurm), matching SkyPilot's GB convention.
 #SBATCH --mem=16384M
 #SBATCH --gres=gpu:A100:2
 

@@ -181,6 +181,10 @@ apiService:
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
+  # Whether to save server logs to a file (/root/.sky/api_server/server.log)
+  # in addition to stdout. When false, logs are only written to stdout (container logs).
+  serveServerLog: true
+
   # Configure how to manage API server logs
   logs:
     retention:
