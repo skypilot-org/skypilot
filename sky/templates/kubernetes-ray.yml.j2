@@ -889,7 +889,7 @@ available_node_types:
                   https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
                   $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
                   | $(prefix_cmd) tee /etc/apt/sources.list.d/docker.list > /dev/null
-                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin
+                apt_update_install_with_retries docker-ce-cli docker-buildx-plugin >> /tmp/apt-update.log 2>&1
                 {% endif %}
 
                 {% if k8s_fuse_device_required %}

@@ -3137,12 +3137,10 @@ def combine_pod_config_fields(
         default_value={})
     config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
-    node_config = (merged_cluster_yaml_obj['available_node_types']
-                   ['ray_head_default']['node_config'])
-
-    # Merge the kubernetes pod_config into the YAML for both head and worker
-    # nodes.
-    config_utils.merge_k8s_configs(node_config, kubernetes_config)
+    # Merge the kubernetes config into the YAML for both head and worker nodes.
+    config_utils.merge_k8s_configs(
+        merged_cluster_yaml_obj['available_node_types']['ray_head_default']
+        ['node_config'], kubernetes_config)
     return merged_cluster_yaml_obj
 
 
