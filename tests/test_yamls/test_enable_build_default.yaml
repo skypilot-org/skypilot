@@ -1,0 +1,21 @@
+resources:
+  cpus: 0.1+
+  infra: kubernetes
+
+num_nodes: 1
+
+run: |
+  set -ex
+  mkdir -p sky_workdir/dev
+  cat >> sky_workdir/dev/Dockerfile <<'EOF'
+  FROM alpine
+  RUN echo "test"
+  CMD ["echo", "hello from DinD"]
+  EOF
+  docker buildx ls
+  docker buildx build -t hello:test sky_workdir/dev
+  docker buildx du
+
+config:
+  kubernetes:
+    enable_docker: BUILD

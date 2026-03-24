@@ -10,7 +10,7 @@ from sky.skylet import constants
 # based on version info is needed.
 # For more details and code guidelines, refer to:
 # https://docs.skypilot.co/en/latest/developers/CONTRIBUTING.html#backward-compatibility-guidelines
-API_VERSION = 44  # SSH redirect via WebSocket first-frame protocol
+API_VERSION = 45  # SSH redirect via WebSocket first-frame protocol
 
 # The minimum peer API version that the code should still work with.
 # Notes (dev):
@@ -36,11 +36,11 @@ MIN_RECIPE_LAUNCH_API_VERSION = 33
 # Minimum API version that supports upload API v2.
 UPLOAD_API_V2_VERSION = 41
 
-# Minimum server API version required for api_access in managed jobs.
+# Minimum server API version required for api_server_access in managed jobs.
 MIN_API_ACCESS_API_VERSION = 42
 
 # Minimum API version that supports the SSH redirect first-frame protocol.
-MIN_SSH_REDIRECT_PROTOCOL_VERSION = 44
+MIN_SSH_REDIRECT_PROTOCOL_VERSION = 45
 
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'

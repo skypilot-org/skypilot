@@ -85,6 +85,7 @@ Below is the configuration syntax and some example values. See detailed explanat
           my-label: my-value
       spec:
         runtimeClassName: nvidia
+    :ref:`enable_docker <config-yaml-kubernetes-enable-docker>`: true  # or ALL / BUILD
     :ref:`kueue <config-yaml-kubernetes-kueue>`:
       :ref:`local_queue_name <config-yaml-kubernetes-kueue-local-queue-name>`: skypilot-local-queue
     :ref:`dws <config-yaml-kubernetes-dws>`:
@@ -1660,6 +1661,51 @@ By default, SkyPilot automatically creates a single container named ``ray-node``
         containers:
           - name: ray-node
             ...
+
+.. _config-yaml-kubernetes-enable-docker:
+
+``kubernetes.enable_docker``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable Docker inside SkyPilot pods (optional, default: disabled).
+
+Set this to make the ``docker`` CLI available inside the pod. SkyPilot
+automatically injects a sidecar container with the appropriate runtime and
+installs the ``docker`` CLI and ``docker buildx`` plugin.
+
+Accepted values:
+
+- ``true`` or ``ALL`` — Full Docker access (build, push, and ``docker run``).
+  Requires ``privileged: true`` permission on the cluster.
+- ``BUILD`` — Build and push images only (via ``docker buildx build``). Does
+  not require privileged permissions.
+- ``false`` (default) — Docker is not injected.
+
+Simple form:
+
+.. code-block:: yaml
+
+   kubernetes:
+     enable_docker: true   # or ALL / BUILD
+
+Detailed form with a persistent cache volume:
+
+.. code-block:: yaml
+
+   kubernetes:
+     enable_docker:
+       mode: ALL            # or BUILD
+       cache_volume: my-builder-cache  # SkyPilot volume name
+
+This can also be set per-task in the task YAML's ``config`` field:
+
+.. code-block:: yaml
+
+   config:
+     kubernetes:
+       enable_docker: true
+
+See :ref:`use-docker-in-pod` for a full guide.
 
 .. _config-yaml-kubernetes-kueue:
 

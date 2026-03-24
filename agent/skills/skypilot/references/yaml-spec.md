@@ -39,6 +39,7 @@ resources:
   disk_size: 256
   disk_tier: medium
   network_tier: best
+  max_hourly_cost: 10.0
 
   # Config.
   image_id: ami-0868a20f5a3bf9702
@@ -75,6 +76,8 @@ envs:
 secrets:
   MY_HF_TOKEN: my-secret-value
   WANDB_API_KEY: my-secret-value-2
+
+api_server_access: true
 
 volumes:
   /mnt/data: volume-name
@@ -591,6 +594,30 @@ resources:
 ```
 
 
+### ``resources.max_hourly_cost``
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When `use_spot` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+```yaml
+resources:
+  accelerators: A100
+  max_hourly_cost: 10.0
+```
+
+```yaml
+# Combined with spot instances: filters by spot price
+resources:
+  use_spot: true
+  max_hourly_cost: 5.0
+
+```
+
+
 ### ``resources.ports``
 
 Ports to expose (optional).
@@ -981,6 +1008,20 @@ secrets:
   HF_TOKEN: my-huggingface-token
   WANDB_API_KEY: my-wandb-api-key
 ```
+
+
+### ``api_server_access``
+
+Whether to inject API server credentials into the task's environment so that it can call `sky` CLI/SDK to launch nested SkyPilot operations. Defaults to `true`. Set to `false` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+```yaml
+# Opt out of API server access injection
+api_server_access: false
+```
+
+See Nested SkyPilot from managed jobs for details.
 
 
 ### ``volumes``

@@ -2896,6 +2896,182 @@ def get_endpoint_debug_message(context: Optional[str] = None) -> str:
                                           debug_cmd=debug_cmd)
 
 
+# Sidecar container names.
+_DIND_CONTAINER_NAME = 'dind'
+_BUILDKITD_CONTAINER_NAME = 'buildkitd'
+# Cache subPath prefixes (used to isolate per-pod cache in a shared PVC).
+_DIND_CACHE_SUBPATH_PREFIX = 'var_lib_docker'
+_BUILDKIT_CACHE_SUBPATH_PREFIX = 'buildkit_cache'
+
+
+class DockerMode(str, enum.Enum):
+    """Modes for the ``enable_docker`` config."""
+    ALL = 'ALL'
+    BUILD = 'BUILD'
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerSidecarDefaults:
+    """Default image and volume names for a Docker sidecar mode."""
+    image: str
+    cli_image: str
+    cache_vol_name: str
+    cache_mount: str
+
+
+@dataclasses.dataclass(frozen=True)
+class DockerConfig:
+    """Normalized ``enable_docker`` config produced by
+    :func:`normalize_enable_docker_config`."""
+    mode: DockerMode
+    cache_volume: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a plain dict (for YAML round-trip via provider)."""
+        return {'mode': self.mode.value, 'cache_volume': self.cache_volume}
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'DockerConfig':
+        """Reconstruct from a dict (e.g. read back from provider config)."""
+        return cls(mode=DockerMode(d['mode']),
+                   cache_volume=d.get('cache_volume'))
+
+
+# Default images for each enable_docker mode.
+DOCKER_SIDECAR_DEFAULTS: Dict[DockerMode, DockerSidecarDefaults] = {
+    DockerMode.ALL: DockerSidecarDefaults(
+        image='docker:29.3-dind',
+        cli_image='docker:29.3-cli',
+        cache_vol_name='dind-storage',
+        cache_mount='/var/lib/docker',
+    ),
+    DockerMode.BUILD: DockerSidecarDefaults(
+        image='moby/buildkit:v0.28.0-rootless',
+        cli_image='docker:29.3-cli',
+        cache_vol_name='buildkit-cache',
+        cache_mount='/home/user/.local/share/buildkit',
+    ),
+}
+
+
+def normalize_enable_docker_config(
+    raw: Union[bool, str, Dict[str, Any], None],) -> Optional[DockerConfig]:
+    """Normalize ``enable_docker`` config into a :class:`DockerConfig`.
+
+    Returns ``None`` when disabled.
+    """
+    if raw is None or raw is False:
+        return None
+    if raw is True or raw == DockerMode.ALL:
+        return DockerConfig(mode=DockerMode.ALL)
+    if raw == DockerMode.BUILD:
+        return DockerConfig(mode=DockerMode.BUILD)
+    if isinstance(raw, dict):
+        if 'mode' not in raw:
+            # Empty dict or dict without 'mode' key (e.g. default_value
+            # from config lookup) — treat as disabled.
+            return None
+        mode_val = raw['mode']
+        if mode_val is False:
+            return None
+        mode = DockerMode(mode_val)
+        return DockerConfig(mode=mode, cache_volume=raw.get('cache_volume'))
+    raise ValueError(f'Invalid enable_docker value: {raw!r}')
+
+
+def inject_docker_cache_volume(
+    pod_spec: Dict[str, Any],
+    docker_config: DockerConfig,
+    pvc_name: Optional[str],
+    context: Optional[str],
+    namespace: str,
+) -> None:
+    """Inject a cache volume + volumeMount into the Docker sidecar container.
+
+    Mutates *pod_spec* in place.
+
+    * If *pvc_name* is set, a PVC-backed volume with a per-pod ``subPath``
+      is added (for persistent cache).  For BuildKit the pod-level
+      ``securityContext.fsGroup`` is set so the rootless daemon (uid 1000)
+      can write to the PVC.
+    * Otherwise an ``emptyDir`` is added so the builder avoids writing to
+      the container overlay (nested overlayfs causes perf/stability issues
+      for DinD).
+    * If the user already mounted something at the cache path via
+      ``pod_config``, this function is a no-op.
+    """
+    mode = docker_config.mode
+    defaults = DOCKER_SIDECAR_DEFAULTS[mode]
+    ctr_name = (_DIND_CONTAINER_NAME
+                if mode == DockerMode.ALL else _BUILDKITD_CONTAINER_NAME)
+    cache_vol_name = defaults.cache_vol_name
+    cache_mount = defaults.cache_mount
+
+    # Check if the user already mounted a volume at the cache path
+    # via pod_config (e.g. manual emptyDir or hostPath).
+    for ctr in pod_spec['spec'].get('containers', []):
+        if ctr['name'] == ctr_name:
+            for vm in ctr.get('volumeMounts', []):
+                if vm.get('mountPath') == cache_mount:
+                    return  # User-provided mount takes precedence.
+            break
+
+    if pvc_name:
+        # PVC path: per-pod subPath for isolation.
+        # For rootless buildkitd (uid/gid 1000), set fsGroup so the PVC
+        # mount is writable.
+        if mode == DockerMode.BUILD:
+            pod_sec = pod_spec['spec'].setdefault('securityContext', {})
+            pod_sec.setdefault('fsGroup', 1000)
+            pod_sec.setdefault('fsGroupChangePolicy', 'OnRootMismatch')
+
+        prefix = (_DIND_CACHE_SUBPATH_PREFIX
+                  if mode == DockerMode.ALL else _BUILDKIT_CACHE_SUBPATH_PREFIX)
+        pod_name = pod_spec['metadata']['name']
+        hash_key = f'{context or ""}:{namespace}:{pod_name}'
+        sub_path = (f'{prefix}_'
+                    f'{hashlib.sha256(hash_key.encode()).hexdigest()[:12]}')
+
+        # Reuse an existing volume entry for this PVC if one already exists
+        # (avoids duplicate spec.volumes entries).
+        existing_vol = next((
+            v['name']
+            for v in pod_spec['spec'].get('volumes', [])
+            if v.get('persistentVolumeClaim', {}).get('claimName') == pvc_name),
+                            None)
+        if existing_vol:
+            vol_name = existing_vol
+        else:
+            vol_name = cache_vol_name
+            pod_spec['spec'].setdefault('volumes', []).append({
+                'name': vol_name,
+                'persistentVolumeClaim': {
+                    'claimName': pvc_name
+                },
+            })
+
+        for ctr in pod_spec['spec'].get('containers', []):
+            if ctr['name'] == ctr_name:
+                ctr.setdefault('volumeMounts', []).append({
+                    'name': vol_name,
+                    'mountPath': cache_mount,
+                    'subPath': sub_path,
+                })
+    else:
+        # No PVC: add an emptyDir so the builder doesn't write to the
+        # container overlay layer.
+        pod_spec['spec'].setdefault('volumes', []).append({
+            'name': cache_vol_name,
+            'emptyDir': {},
+        })
+        for ctr in pod_spec['spec'].get('containers', []):
+            if ctr['name'] == ctr_name:
+                ctr.setdefault('volumeMounts', []).append({
+                    'name': cache_vol_name,
+                    'mountPath': cache_mount,
+                })
+
+
 def combine_pod_config_fields(
     cluster_yaml_obj: Dict[str, Any],
     cluster_config_overrides: Dict[str, Any],
