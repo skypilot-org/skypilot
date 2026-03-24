@@ -1351,6 +1351,17 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 gpu_toleration
             ]
 
+        # Apply allowed_nodes scheduling constraints to restrict pods to
+        # nodes permitted by the user's config. This is required in addition
+        # to discovery filtering because the K8s scheduler doesn't know
+        # about our filter - it would schedule on any node matching the GPU
+        # label, including non-allowed nodes with the same GPU type.
+        allowed_nodes_config = kubernetes_utils.get_allowed_nodes_config(
+            context)
+        kubernetes_utils.inject_allowed_nodes_affinity(pod_spec_copy['spec'],
+                                                       allowed_nodes_config,
+                                                       context=context)
+
         if to_create_deployment:
             volume.create_persistent_volume_claim(namespace, context, pvc_spec)
 
