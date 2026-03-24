@@ -3498,8 +3498,9 @@ class TestAllowedNodesScheduling:
     def test_scheduling_labels_and_names_gpu_workload(self):
         """Labels + names combined with GPU pod.
 
-        Labels produce dynamic terms, names produce a hostname term.
-        All are cross-producted with the existing GPU term.
+        Labels produce dynamic terms, names produce a hostname term
+        (only for the named node). All are cross-producted with the
+        existing GPU term.
         """
         pod_spec = self._make_pod_spec_gpu()
         config = {
@@ -3529,7 +3530,7 @@ class TestAllowedNodesScheduling:
                 'nodeAffinity': {
                     'requiredDuringSchedulingIgnoredDuringExecution': {
                         'nodeSelectorTerms': [
-                            # Label term: GPU AND pool=gpu
+                            # Label term: GPU AND pool=gpu (dynamic)
                             {
                                 'matchExpressions': [
                                     self._GPU_EXPR,
@@ -3540,11 +3541,17 @@ class TestAllowedNodesScheduling:
                                     },
                                 ]
                             },
-                            # Hostname term: GPU AND hostname in [...]
+                            # Hostname term: GPU AND hostname=node-a
+                            # (only node-a, not node-b, because names
+                            # only listed node-a)
                             {
                                 'matchExpressions': [
                                     self._GPU_EXPR,
-                                    self._HOSTNAME_EXPR,
+                                    {
+                                        'key': 'kubernetes.io/hostname',
+                                        'operator': 'In',
+                                        'values': ['node-a'],
+                                    },
                                 ]
                             },
                         ]

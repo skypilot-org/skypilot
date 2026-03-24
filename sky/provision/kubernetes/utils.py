@@ -1586,31 +1586,36 @@ def inject_allowed_nodes_affinity(
         })
 
     if has_names_or_ips:
-        # Resolve names/IPs to hostnames. get_kubernetes_nodes() returns
-        # already-filtered nodes. The kubernetes.io/hostname label is set
-        # by the kubelet and may differ from node.metadata.name, so we
-        # read the actual label with a fallback.
-        filtered_nodes = get_kubernetes_nodes(context=context)
-        if not filtered_nodes and not label_selector:
+        # Resolve node names and IPs to kubernetes.io/hostname values.
+        # This label is set by the kubelet and may differ from
+        # node.metadata.name in some setups, so we look it up from
+        # the actual node objects rather than assuming equality.
+        allowed_names = set(allowed_nodes_config.get('names', []))
+        allowed_ips = set(allowed_nodes_config.get('ips', []))
+        all_nodes = get_kubernetes_nodes(context=context)
+        hostnames = set()
+        for node in all_nodes:
+            matched = False
+            if node.metadata.name in allowed_names:
+                matched = True
+            if not matched and allowed_ips:
+                node_ips = {a.address for a in node.status.addresses}
+                if node_ips & allowed_ips:
+                    matched = True
+            if matched:
+                hostnames.add(
+                    node.metadata.labels.get('kubernetes.io/hostname',
+                                             node.metadata.name))
+        if not hostnames and not label_selector:
             raise exceptions.ResourcesUnavailableError(
                 'No Kubernetes nodes match the allowed_nodes filter '
                 'in ~/.sky/config.yaml. Check your allowed_nodes '
                 'configuration.')
-        # Only include nodes that matched via name/IP (not labels) to
-        # avoid duplicating label-matched nodes as static hostnames.
-        # Since _filter_allowed_nodes OR's all criteria, we resolve
-        # all filtered nodes here — the hostname term captures names
-        # and IPs, while label terms remain dynamic above.
-        if filtered_nodes:
-            allowed_hostnames = sorted(
-                set(
-                    n.metadata.labels.get('kubernetes.io/hostname',
-                                          n.metadata.name)
-                    for n in filtered_nodes))
+        if hostnames:
             allowed_exprs.append({
                 'key': 'kubernetes.io/hostname',
                 'operator': 'In',
-                'values': allowed_hostnames,
+                'values': sorted(hostnames),
             })
 
     if not allowed_exprs:
