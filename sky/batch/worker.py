@@ -17,7 +17,7 @@ import logging
 import os
 import queue
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from sky.batch import constants
 from sky.batch import io_formats
@@ -48,7 +48,7 @@ class _Shutdown:
 
 
 # ---------------------------------------------------------------------------
-# Module-level state (shared between HTTP handler and api.py)
+# Module-level state (shared between HTTP handler and public APIs)
 # ---------------------------------------------------------------------------
 
 _batch_queue: queue.Queue = queue.Queue()
@@ -143,7 +143,7 @@ class _WorkerHandler(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
-# Public helpers called by api.py
+# Internal helpers for batch lifecycle
 # ---------------------------------------------------------------------------
 
 
@@ -175,6 +175,99 @@ def signal_batch_done(error: Optional[str] = None) -> None:
             _current_batch.error = error
             _current_batch.done_event.set()
             _current_batch = None
+
+
+# ---------------------------------------------------------------------------
+# Public APIs for mapper functions (load / save_results)
+# ---------------------------------------------------------------------------
+
+
+def load() -> Iterator[List[Dict[str, Any]]]:
+    """Blocking generator that yields batches as they arrive.
+
+    Each iteration blocks until the controller pushes a new batch via
+    the worker service's ``/feed_batch`` endpoint.  The generator stops
+    when a shutdown signal is received.
+
+    After each ``yield``, the caller **must** call ``save_results()``
+    before the next iteration.  Failing to do so raises ``RuntimeError``.
+
+    Yields:
+        List of dictionaries representing the current batch.
+
+    Example::
+
+        @sky.batch.remote_function
+        def process():
+            model = load_expensive_model()   # runs once
+            for batch in sky.batch.load():
+                results = [model.predict(item) for item in batch]
+                sky.batch.save_results(results)
+    """
+    while True:
+        batch_item = get_next_batch()
+        if batch_item is None:
+            # Shutdown signal received — stop iterating.
+            return
+
+        try:
+            yield batch_item.data
+        except GeneratorExit:
+            # Mapper broke out of the loop or was garbage-collected.
+            signal_batch_done(error='Mapper stopped iterating')
+            return
+
+        # After yield: the user's loop body has executed.  Verify that
+        # save_results() was called (which sets done_event).
+        if not batch_item.done_event.is_set():
+            error_msg = ('save_results() must be called after processing '
+                         'each batch. Did you forget to call '
+                         'sky.batch.save_results()?')
+            signal_batch_done(error=error_msg)
+            raise RuntimeError(error_msg)
+
+
+def save_results(results: List[Dict[str, Any]]) -> None:
+    """Save results for the current batch.
+
+    Uploads the result chunk to cloud storage and signals the worker
+    service that this batch is complete.  This causes the ``sky.exec()``
+    notify job on the worker to exit with SUCCEEDED, which the controller
+    detects via ``sdk.job_status()`` polling.
+
+    Must be called exactly once per batch yielded by ``load()``.
+
+    Args:
+        results: List of result dictionaries, one per input item.
+                 Order must match the input batch order.
+
+    Raises:
+        RuntimeError: If no batch is currently in progress.
+        ValueError: If results length doesn't match batch length.
+    """
+    with _current_batch_lock:
+        batch_item = _current_batch
+    if batch_item is None:
+        raise RuntimeError(
+            'save_results() called without a current batch. '
+            'Make sure to call it inside the loop over sky.batch.load().')
+
+    if len(results) != len(batch_item.data):
+        raise ValueError(
+            f'Results length ({len(results)}) does not match batch length '
+            f'({len(batch_item.data)}). Results must have one entry per '
+            'input item.')
+
+    # Upload results using all output formats.
+    assert _output_formats, 'Worker not initialized'
+    for fmt in _output_formats:
+        chunk_path = fmt.upload_chunk(results, fmt.path, batch_item.batch_idx,
+                                      batch_item.start_idx, batch_item.end_idx,
+                                      _job_id)
+        logger.info('Saved results to %s', chunk_path)
+
+    # Signal completion — unblocks the HTTP handler in worker.py.
+    signal_batch_done()
 
 
 # ---------------------------------------------------------------------------

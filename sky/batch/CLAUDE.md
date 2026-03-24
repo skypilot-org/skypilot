@@ -28,7 +28,6 @@ Client (`dataset.py`) polls `ManagedJobRecord.batch_total_batches` / `batch_comp
 | `sky/batch/coordinator.py` | Runs inline on jobs controller; splits dataset, discovers workers, dispatches batches, merges results |
 | `sky/batch/dataset.py` | Client-side: `Dataset.map()`, launches managed job, polls progress with tqdm |
 | `sky/batch/worker.py` | Long-running HTTP service on each pool worker; hosts `/feed_batch`, `/shutdown`, `/health` endpoints |
-| `sky/batch/api.py` | Worker-side APIs: `load()` generator that yields batches, `save_results()` that uploads results |
 | `sky/batch/utils.py` | Cloud storage helpers (S3/GCS), chunk file management, function serialization (source-code-based) |
 | `sky/batch/constants.py` | Ports, timeouts, chunk naming patterns, retry settings |
 | `sky/batch/io_formats.py` | Typed format classes: `JsonInput`, `JsonOutput`, `ImageOutput` (with `InputFormat`/`OutputFormat` base) |

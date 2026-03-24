@@ -242,5 +242,4 @@ __all__ = [
     'JOBS_RECOVERY_STRATEGY_REGISTRY',
     # Batch processing
     'batch',
-    'dataset',
 ]

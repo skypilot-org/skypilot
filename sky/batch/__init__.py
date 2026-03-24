@@ -29,8 +29,6 @@ Example usage:
     ds.map(process, pool_name=pool_name, batch_size=32,
            output=sky.batch.JsonOutput("s3://bucket/output.jsonl"))
 """
-from sky.batch.api import load
-from sky.batch.api import save_results
 from sky.batch.dataset import Dataset
 from sky.batch.io_formats import ImageOutput
 from sky.batch.io_formats import InputFormat
@@ -38,6 +36,8 @@ from sky.batch.io_formats import JsonInput
 from sky.batch.io_formats import JsonOutput
 from sky.batch.io_formats import OutputFormat
 from sky.batch.remote import remote_function
+from sky.batch.worker import load
+from sky.batch.worker import save_results
 
 __all__ = [
     'Dataset',
