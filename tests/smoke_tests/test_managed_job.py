@@ -2905,6 +2905,77 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_wait_timeout(generic_cloud: str):
+    """Test that jobs.wait raises TimeoutError when timeout is exceeded."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    def sdk_wait_timeout():
+        # Wait with a short timeout; the job should still be running.
+        request_id = jobs_sdk.wait(name=name, timeout=5, poll_interval=5)
+        try:
+            sky.stream_and_get(request_id)
+        except Exception as e:  # pylint: disable=broad-except
+            assert 'TimeoutError' in type(e).__name__ or 'Timed out' in str(
+                e), f'Expected TimeoutError, got {type(e).__name__}: {e}'
+            print('Got Timeout Error (Expected)')
+        else:
+            raise AssertionError('Expected TimeoutError but wait succeeded')
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_wait_timeout',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 300" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=360),
+            sdk_wait_timeout,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+@pytest.mark.no_hyperbolic  # Hyperbolic doesn't support host controllers and auto-stop
+@pytest.mark.no_shadeform  # Shadeform does not support host controllers
+def test_managed_jobs_wait_success(generic_cloud: str):
+    """Test that jobs.wait returns successfully for a completed job."""
+    name = smoke_tests_utils.get_cluster_name()
+
+    def sdk_wait_success():
+        request_id = jobs_sdk.wait(name=name, poll_interval=5)
+        exit_code = sky.stream_and_get(request_id)
+        assert exit_code == sky.exceptions.JobExitCode.SUCCEEDED, (
+            f'Expected SUCCEEDED (0), got {exit_code}')
+        print('Successfully waited for job to succeed.')
+
+    test = smoke_tests_utils.Test(
+        'managed_jobs_wait_success',
+        [
+            f'sky jobs launch -n {name} --infra {generic_cloud} '
+            f'{smoke_tests_utils.LOW_RESOURCE_ARG} "sleep 300" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=360),
+            sdk_wait_success,
+        ],
+        f'sky jobs cancel -y -n {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 @pytest.mark.remote_server
 @pytest.mark.managed_jobs
