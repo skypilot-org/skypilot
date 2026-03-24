@@ -118,7 +118,20 @@ def get_git_commit(path: Optional[str] = None) -> Optional[str]:
                                 cwd=path,
                                 check=True)
         return result.stdout.strip()
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
+def get_git_dirty(path: Optional[str] = None) -> Optional[bool]:
+    """Returns True if working tree is dirty, False if clean, None on error."""
+    try:
+        result = subprocess.run(['git', 'status', '--porcelain=v1'],
+                                capture_output=True,
+                                text=True,
+                                cwd=path,
+                                check=True)
+        return len(result.stdout.strip()) > 0
+    except (subprocess.CalledProcessError, OSError):
         return None
 
 
