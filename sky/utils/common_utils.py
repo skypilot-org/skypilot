@@ -221,6 +221,36 @@ def check_recipe_name_is_valid(recipe_name: Optional[str]) -> None:
                 'only contains letters, numbers, and dashes).')
 
 
+def check_workspace_name_is_valid(workspace_name: Optional[str]) -> None:
+    """Errors out on invalid workspace names.
+
+    Workspace names must:
+    - Start with a lowercase letter
+    - Contain only lowercase letters, numbers, dashes, and underscores
+    - End with a lowercase letter or number
+    - Be at most constants.WORKSPACE_NAME_MAX_LENGTH characters
+
+    Raises:
+        exceptions.InvalidWorkspaceNameError: If the workspace name is invalid.
+    """
+    if workspace_name is None:
+        return
+    if len(workspace_name) > constants.WORKSPACE_NAME_MAX_LENGTH:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidWorkspaceNameError(
+                f'Workspace name "{workspace_name}" is too long; '
+                f'maximum length is {constants.WORKSPACE_NAME_MAX_LENGTH} '
+                f'characters, got {len(workspace_name)}')
+    valid_regex = constants.WORKSPACE_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, workspace_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidWorkspaceNameError(
+                f'Workspace name "{workspace_name}" is invalid; '
+                'ensure it starts with a lowercase letter, ends with '
+                'a lowercase letter or number, and contains only '
+                'lowercase letters, numbers, dashes, and underscores.')
+
+
 def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:

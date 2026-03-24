@@ -1135,6 +1135,24 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 'mountPath': ephemeral_volume.path,
             })
 
+    # Docker sidecar cache volume injection: if a SkyPilot volume was
+    # specified for the enable_docker cache, look up the PVC name. The actual
+    # volume + volumeMount are added per-pod inside _create_resource_thread (so
+    # that each pod can have its own subPath).
+    raw_docker_config = provider_config.get('docker_config')
+    docker_config: Optional[kubernetes_utils.DockerConfig] = None
+    if raw_docker_config:
+        docker_config = kubernetes_utils.DockerConfig.from_dict(
+            raw_docker_config)
+    docker_pvc_name: Optional[str] = None
+    if docker_config and docker_config.cache_volume:
+        cache_vol_name = docker_config.cache_volume
+        vol_record = global_user_state.get_volume_by_name(cache_vol_name)
+        if vol_record is None:
+            raise exceptions.VolumeNotFoundError(
+                f'Docker cache volume {cache_vol_name!r} not found.')
+        docker_pvc_name = vol_record['handle'].name_on_cloud
+
     terminating_pods = kubernetes_utils.filter_pods(namespace, context, tags,
                                                     ['Terminating'])
     start_time = time.time()
@@ -1238,6 +1256,16 @@ def _create_pods(region: str, cluster_name: str, cluster_name_on_cloud: str,
                 return
             pod_spec_copy['metadata']['name'] = pod_name
             pod_spec_copy['metadata']['labels']['component'] = pod_name
+
+        # Inject cache volume + volumeMount for the Docker sidecar container.
+        if docker_config:
+            kubernetes_utils.inject_docker_cache_volume(
+                pod_spec=pod_spec_copy,
+                docker_config=docker_config,
+                pvc_name=docker_pvc_name,
+                context=context,
+                namespace=namespace,
+            )
 
         # We need to keep the following fields in the pod spec to be same for
         # head and worker pods.

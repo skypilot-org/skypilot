@@ -310,6 +310,10 @@ def _get_single_resources_schema():
             'local_disk': {
                 'type': 'string',
             },
+            'max_hourly_cost': {
+                'type': 'number',
+                'exclusiveMinimum': 0,
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -1030,7 +1034,7 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
-            'api_access': {
+            'api_server_access': {
                 'type': 'boolean',
             },
             '_metadata': {
@@ -1381,6 +1385,36 @@ _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
         }],
     },
     'pricing': _PRICING_SCHEMA,
+    'enable_docker': {
+        'oneOf': [
+            # Simple form: enable_docker: true / false
+            {
+                'type': 'boolean'
+            },
+            # Simple form: enable_docker: "ALL" / "BUILD"
+            {
+                'type': 'string',
+                'enum': ['ALL', 'BUILD'],
+            },
+            # Detailed form with optional cache volume.
+            {
+                'type': 'object',
+                'required': ['mode'],
+                'additionalProperties': False,
+                'properties': {
+                    'mode': {
+                        'type': 'string',
+                        'enum': ['ALL', 'BUILD'],
+                    },
+                    # SkyPilot volume name for the Docker/BuildKit cache.
+                    # Omit to use an ephemeral emptyDir volume instead.
+                    'cache_volume': {
+                        'type': 'string',
+                    },
+                },
+            },
+        ],
+    },
 }
 
 
@@ -1470,6 +1504,18 @@ def get_config_schema():
                     }]
                 },
                 'vpc_names': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }, {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string'
+                        }
+                    }],
+                },
+                'subnet_names': {
                     'oneOf': [{
                         'type': 'string',
                     }, {
