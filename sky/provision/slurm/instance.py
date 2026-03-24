@@ -555,7 +555,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
 # Let the job be terminated rather than requeued implicitly.
 #SBATCH --no-requeue
 #SBATCH --cpus-per-task={int(resources["cpus"])}
-#SBATCH --mem={int(resources["memory"])}G
+#SBATCH --mem={int(float(resources["memory"]) * 1024)}M
 {gpu_directive}{custom_sbatch_directives}
 
 # Cleanup function to remove cluster dirs on job termination.
