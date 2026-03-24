@@ -1,4 +1,0 @@
-pool:
-  workers: 1
-resources:
-  infra: k8s
