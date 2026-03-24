@@ -642,10 +642,11 @@ class Slurm(clouds.Cloud):
                 # (RealMemory not set in slurm.conf).
                 try:
                     nodes = slurm_utils.get_slurm_nodes_info(cluster)
-                    # RealMemory defaults to 1 MB in Slurm when unset,
-                    # and 0 when explicitly set to 0. Check both.
+                    # RealMemory defaults to 1 MB when unset in slurm.conf,
+                    # and 0 MB when explicitly set to 0. Both convert to
+                    # near-zero GB (0.0 or ~0.001), so < 0.01 catches both.
                     zero_nodes = sorted(
-                        set(n.node for n in nodes if n.memory_gb <= 1))
+                        set(n.node for n in nodes if n.memory_gb < 0.01))
                     if zero_nodes:
                         sample = zero_nodes[:5]
                         node_str = ', '.join(sample)
