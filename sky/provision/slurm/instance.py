@@ -544,7 +544,12 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
     # the home directory.
     mem_directive = ''
     if float(resources['memory']) > 0:
-        mem_directive = f'#SBATCH --mem={int(resources["memory"])}G\n'
+        # Memory is in MB to support fractional GB values (e.g. 0.5GB ->
+        # 512M), since Slurm's --mem requires integer values per unit.
+        # Slurm's M suffix means MiB (1G = 1024M), matching SkyPilot's
+        # GB convention.
+        mem_in_mb = int(float(resources['memory']) * 1024)
+        mem_directive = f'#SBATCH --mem={mem_in_mb}M\n'
     # pylint: disable=line-too-long
     # fmt: off
     provision_script = f"""\
