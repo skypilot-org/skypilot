@@ -1672,8 +1672,8 @@ def adjust_resources_to_allocatable(
             # system components. This is stable across scheduling
             # cycles since it is set by kubelet configuration
             # (--system-reserved, --kube-reserved, eviction thresholds).
-            cpu_overhead = node_cap_cpu - alloc_cpu - 0.05
-            mem_overhead = node_cap_mem - alloc_mem - 0.05
+            cpu_overhead = node_cap_cpu - alloc_cpu + 0.05
+            mem_overhead = node_cap_mem - alloc_mem + 0.05
             adjusted_cpus = cpus - cpu_overhead
             adjusted_mem = mem - mem_overhead
             if cpu_overhead > 0 or mem_overhead > 0:
