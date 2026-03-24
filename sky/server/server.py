@@ -24,8 +24,7 @@ import threading
 import time
 import traceback
 import typing
-from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
-                    Set, Tuple, Type)
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Type
 import uuid
 import zipfile
 
@@ -2447,9 +2446,6 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 
 SSHMessageType = websocket_utils.SSHMessageType
 
-# Re-export for backward compatibility.
-register_ssh_redirect_hook = websocket_utils.register_ssh_redirect_hook
-
 
 async def _get_cluster_and_validate(
     cluster_name: str,
@@ -2510,11 +2506,12 @@ async def kubernetes_pod_ssh_proxy(
         client_version = {client_version}')
 
     # Check if there is a hook wants to redirect this connection.
-    if (websocket_utils._ssh_redirect_hook is not None and client_version is not None and
-            client_version >=
+    if (websocket_utils.ssh_redirect_hook is not None and
+            client_version is not None and client_version >=
             server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION):
         try:
-            redirect_info = await websocket_utils._ssh_redirect_hook(websocket, cluster_name)
+            redirect_info = await websocket_utils.ssh_redirect_hook(
+                websocket, cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'SSH redirect hook failed for {cluster_name}: {e}')
             redirect_info = None

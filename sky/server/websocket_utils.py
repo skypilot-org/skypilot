@@ -16,8 +16,8 @@ logger = sky_logging.init_logger(__name__)
 # Hook for plugins to inject SSH redirect logic. When set, it is called after
 # WebSocket accept for clients that support the redirect protocol.
 # TODO(aylei): support in slurm ssh handler
-_ssh_redirect_hook: Optional[Callable[[fastapi.WebSocket, str],
-                                      Awaitable[Optional[dict]]]] = None
+ssh_redirect_hook: Optional[Callable[[fastapi.WebSocket, str],
+                                     Awaitable[Optional[dict]]]] = None
 
 
 def register_ssh_redirect_hook(
@@ -28,8 +28,8 @@ def register_ssh_redirect_hook(
     The hook is called with (websocket, cluster_name) after the WebSocket is
     accepted but before the backend connection is established.
     """
-    global _ssh_redirect_hook
-    _ssh_redirect_hook = hook
+    global ssh_redirect_hook
+    ssh_redirect_hook = hook
 
 
 class SSHMessageType(IntEnum):
