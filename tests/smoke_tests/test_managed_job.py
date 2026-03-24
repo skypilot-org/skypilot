@@ -2920,6 +2920,7 @@ def test_managed_jobs_wait_timeout(generic_cloud: str):
         except Exception as e:  # pylint: disable=broad-except
             assert 'TimeoutError' in type(e).__name__ or 'Timed out' in str(
                 e), f'Expected TimeoutError, got {type(e).__name__}: {e}'
+            print('Got Timeout Error (Expected)')
         else:
             raise AssertionError('Expected TimeoutError but wait succeeded')
 
@@ -2954,6 +2955,7 @@ def test_managed_jobs_wait_success(generic_cloud: str):
         exit_code = sky.stream_and_get(request_id)
         assert exit_code == sky.exceptions.JobExitCode.SUCCEEDED, (
             f'Expected SUCCEEDED (0), got {exit_code}')
+        print('Successfully waited for job to succeed.')
 
     test = smoke_tests_utils.Test(
         'managed_jobs_wait_success',
