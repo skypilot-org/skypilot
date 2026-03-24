@@ -222,31 +222,3 @@ class Dataset:
         return f'Dataset(input_format={self.input_format!r})'
 
 
-def dataset(input_format: InputFormat) -> Dataset:
-    """Create a Dataset from a typed input format.
-
-    This is the main entry point for creating datasets in Sky Batch.
-
-    Args:
-        input_format: An ``InputFormat`` descriptor, e.g.:
-            - ``sky.JsonInput('s3://bucket/data.jsonl')``
-
-    Returns:
-        A Dataset instance.
-
-    Example:
-        import sky
-
-        ds = sky.dataset(sky.batch.JsonInput("s3://my-bucket/prompts.jsonl"))
-
-        @sky.batch.remote_function
-        def process():
-            for batch in sky.batch.load():
-                results = [{"output": item["text"] * 2} for item in batch]
-                sky.batch.save_results(results)
-
-        pool_name = sky.jobs.pool_apply("pool.yaml")
-        ds.map(process, pool_name=pool_name, batch_size=32,
-               output=sky.batch.JsonOutput("s3://my-bucket/output.jsonl"))
-    """
-    return Dataset(input_format)

@@ -79,7 +79,7 @@ def main():
     pool_yaml = os.path.join(os.path.dirname(__file__), 'pool.yaml')
 
     # Create dataset from cloud storage
-    ds = sky.dataset(sky.batch.JsonInput(input_path))
+    ds = sky.batch.Dataset(sky.batch.JsonInput(input_path))
 
     # Ensure the pool exists (creates it if needed)
     ensure_pool(pool_name, pool_yaml)

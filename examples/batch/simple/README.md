@@ -124,12 +124,12 @@ Key points:
 ### The main function
 
 ```python
-ds = sky.dataset(input_path)
+ds = sky.batch.Dataset(sky.batch.JsonInput(input_path))
 ds.map(double_text, pool_name=pool_name, batch_size=5, output_path=output_path)
 ```
 
 Key points:
-- `sky.dataset()` creates a dataset from cloud storage
+- `sky.batch.Dataset()` creates a dataset from cloud storage
 - `ds.map()` submits the job to the pool's batch controller and polls for completion
 - The pool must be created beforehand with `sky jobs pool apply`
 

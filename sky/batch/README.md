@@ -32,7 +32,7 @@ Reference the dataset in Python:
 ```python
 import sky
 
-ds = sky.dataset("s3://my-bucket/prompts.jsonl")
+ds = sky.batch.Dataset(sky.batch.JsonInput("s3://my-bucket/prompts.jsonl"))
 ```
 
 Supported storage backends:

@@ -33,7 +33,7 @@ Client (`dataset.py`) polls `ManagedJobRecord.batch_total_batches` / `batch_comp
 | `sky/batch/constants.py` | Ports, timeouts, chunk naming patterns, retry settings |
 | `sky/batch/io_formats.py` | Typed format classes: `JsonInput`, `JsonOutput`, `ImageOutput` (with `InputFormat`/`OutputFormat` base) |
 | `sky/batch/remote.py` | `@remote_function` decorator with closure/global validation via AST |
-| `sky/batch/__init__.py` | Public API exports: `dataset`, `load`, `save_results`, format classes |
+| `sky/batch/__init__.py` | Public API exports: `Dataset`, `load`, `save_results`, format classes |
 | `sky/jobs/controller.py` | `_run_batch_coordinator_task()` — detects `batch_coordinator` metadata, runs coordinator |
 
 ## Worker Architecture

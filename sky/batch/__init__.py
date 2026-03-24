@@ -5,7 +5,7 @@ clusters. It enables scalable batch inference by distributing workloads
 across a pool of workers.
 
 Main components:
-- dataset(): Create a Dataset from a typed InputFormat
+- Dataset(): Create a Dataset from a typed InputFormat
 - JsonInput / JsonOutput / ImageOutput: Typed format descriptors
 - remote_function: Decorator for functions that run on workers
 - load(): Generator that yields batches on workers
@@ -15,7 +15,7 @@ Example usage:
     import sky
 
     # Create dataset from cloud storage
-    ds = sky.dataset(sky.batch.JsonInput("s3://bucket/data.jsonl"))
+    ds = sky.batch.Dataset(sky.batch.JsonInput("s3://bucket/data.jsonl"))
 
     # Define mapper function
     @sky.batch.remote_function
@@ -32,7 +32,6 @@ Example usage:
 from sky.batch.api import load
 from sky.batch.api import save_results
 from sky.batch.dataset import Dataset
-from sky.batch.dataset import dataset
 from sky.batch.io_formats import ImageOutput
 from sky.batch.io_formats import InputFormat
 from sky.batch.io_formats import JsonInput
@@ -42,7 +41,6 @@ from sky.batch.remote import remote_function
 
 __all__ = [
     'Dataset',
-    'dataset',
     'remote_function',
     'load',
     'save_results',

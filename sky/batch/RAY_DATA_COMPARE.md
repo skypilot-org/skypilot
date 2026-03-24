@@ -41,7 +41,7 @@ ds = ray.data.from_pandas(df)
 import sky
 
 # JSONL input
-ds = sky.dataset(sky.batch.JsonInput("s3://bucket/data.jsonl"))
+ds = sky.batch.Dataset(sky.batch.JsonInput("s3://bucket/data.jsonl"))
 ```
 
 **API naming convention:** Sky Batch format classes map directly to Ray Data function names:
@@ -204,7 +204,7 @@ ds.write_json("s3://bucket/output/")
 ```python
 import sky
 
-ds = sky.dataset(sky.batch.JsonInput("s3://bucket/prompts.jsonl"))
+ds = sky.batch.Dataset(sky.batch.JsonInput("s3://bucket/prompts.jsonl"))
 
 @sky.batch.remote_function
 def predict():
@@ -270,7 +270,7 @@ ds.write_images("s3://bucket/images/", column="image")
 ```python
 import sky
 
-ds = sky.dataset(sky.batch.JsonInput("s3://bucket/prompts.jsonl"))
+ds = sky.batch.Dataset(sky.batch.JsonInput("s3://bucket/prompts.jsonl"))
 
 @sky.batch.remote_function
 def generate_images():
