@@ -57,7 +57,6 @@ class RequestName(str, enum.Enum):
     JOBS_POOL_LOGS = 'jobs.pool_logs'
     JOBS_POOL_SYNC_DOWN_LOGS = 'jobs.pool_sync_down_logs'
     JOBS_EVENTS = 'jobs.events'
-    JOBS_BATCH_PROGRESS = 'jobs.batch_progress'
     # Serve requests
     SERVE_UP = 'serve.up'
     SERVE_UPDATE = 'serve.update'

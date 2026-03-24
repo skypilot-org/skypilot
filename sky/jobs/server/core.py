@@ -1591,12 +1591,3 @@ def get_job_events(
     return managed_job_state.get_job_events(job_id=job_id,
                                             task_id=task_id,
                                             limit=limit)
-
-
-def set_batch_progress(job_id: int, total: int, completed: int) -> None:
-    """Update batch progress for dashboard display.
-
-    No-op: batch progress is now derived from the batch_state table.
-    This endpoint is kept for backward compatibility.
-    """
-    del job_id, total, completed  # unused

@@ -1957,7 +1957,6 @@ def reset_dispatched_batches(job_id: int) -> None:
         session.commit()
 
 
-
 def update_job_full_resources(job_id: int,
                               full_resources_json: Dict[str, Any]) -> None:
     """Update the full_resources column for a job.
@@ -2616,7 +2615,6 @@ def set_winding_down(job_id: int, task_id: int) -> None:
             logger.warning(f'set_winding_down: expected 1 row updated, '
                            f'got {result.rowcount} for job_id={job_id}, '
                            f'task_id={task_id}')
-
 
 
 async def set_succeeded_async(job_id: int, task_id: int, end_time: float,

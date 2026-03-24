@@ -946,13 +946,6 @@ class GetJobEventsBody(RequestBody):
     limit: Optional[int] = 10  # Default to 10 most recent task events
 
 
-class SetBatchProgressBody(RequestBody):
-    """The request body for setting batch progress."""
-    job_id: int
-    total: int
-    completed: int
-
-
 # =============================================================================
 # YAML Hub payloads
 # =============================================================================
