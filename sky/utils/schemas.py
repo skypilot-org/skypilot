@@ -985,7 +985,21 @@ def get_task_schema():
                 'type': 'string',
             },
             'num_nodes': {
-                'type': 'integer',
+                'oneOf': [{
+                    'type': 'integer',
+                }, {
+                    'type': 'object',
+                    'required': ['active'],
+                    'properties': {
+                        'active': {
+                            'type': 'integer',
+                        },
+                        'warm': {
+                            'type': 'integer',
+                        },
+                    },
+                    'additionalProperties': False,
+                }],
             },
             # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {

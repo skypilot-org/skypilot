@@ -418,6 +418,19 @@ def start_ray_on_worker_nodes(cluster_name: str, no_restart: bool,
                                             cluster_info, **ssh_credentials)
     worker_runners = runners[1:]
     worker_instances = cluster_info.get_worker_instances()
+
+    # Filter out warm pods — they should NOT start Ray workers.
+    # Warm pods are identified by having 'warm' in the instance_id (pod name).
+    # They are pre-provisioned spares that idle until activated during recovery.
+    active_indices = [
+        i for i, inst in enumerate(worker_instances)
+        if '-warm' not in inst.instance_id
+    ]
+    if len(active_indices) < len(worker_instances):
+        warm_count = len(worker_instances) - len(active_indices)
+        logger.info(f'Skipping Ray start on {warm_count} warm spare pod(s).')
+        worker_instances = [worker_instances[i] for i in active_indices]
+        worker_runners = [worker_runners[i] for i in active_indices]
     cache_ids = []
     prev_instance_id = None
     cnt = 0

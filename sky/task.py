@@ -389,6 +389,7 @@ class Task:
         # Ignore type error due to a mypy bug.
         # https://github.com/python/mypy/issues/3004
         self._num_nodes = 1
+        self._warm_nodes = 0
         self.num_nodes = num_nodes  # type: ignore
 
         self.inputs: Optional[str] = None
@@ -945,15 +946,40 @@ class Task:
     def num_nodes(self) -> int:
         return self._num_nodes
 
+    @property
+    def warm_nodes(self) -> int:
+        """Number of warm spare nodes (0 if not specified)."""
+        return self._warm_nodes
+
     @num_nodes.setter
-    def num_nodes(self, num_nodes: Optional[int]) -> None:
+    def num_nodes(self, num_nodes) -> None:
         if num_nodes is None:
             num_nodes = 1
+        if isinstance(num_nodes, dict):
+            # num_nodes:
+            #   active: 1024
+            #   warm: 10
+            active = num_nodes.get('active')
+            warm = num_nodes.get('warm', 0)
+            if not isinstance(active, int) or active <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'num_nodes.active should be a positive int. '
+                        f'Got: {active}')
+            if not isinstance(warm, int) or warm < 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'num_nodes.warm should be a non-negative int. '
+                        f'Got: {warm}')
+            self._num_nodes = active
+            self._warm_nodes = warm
+            return
         if not isinstance(num_nodes, int) or num_nodes <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
+        self._warm_nodes = 0
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -1757,7 +1783,13 @@ class Task:
         if self.service is not None:
             add_if_not_none('service', self.service.to_yaml_config())
 
-        add_if_not_none('num_nodes', self.num_nodes)
+        if self._warm_nodes > 0:
+            add_if_not_none('num_nodes', {
+                'active': self.num_nodes,
+                'warm': self._warm_nodes,
+            })
+        else:
+            add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
             add_if_not_none('inputs',

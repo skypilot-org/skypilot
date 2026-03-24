@@ -654,6 +654,7 @@ def write_cluster_config(
     keep_launch_fields_in_existing_config: bool = True,
     volume_mounts: Optional[List['volume_utils.VolumeMount']] = None,
     cloud_specific_failover_overrides: Optional[Dict[str, Any]] = None,
+    warm_nodes: int = 0,
 ) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -965,6 +966,7 @@ def write_cluster_config(
         **{
             'cluster_name_on_cloud': cluster_name_on_cloud,
             'num_nodes': num_nodes,
+            'warm_nodes': warm_nodes,
             'disk_size': to_provision.disk_size,
             # If the current code is run by controller, propagate the real
             # calling user which should've been passed in as the

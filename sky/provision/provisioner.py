@@ -129,6 +129,7 @@ def bulk_provision(
     prev_cluster_ever_up: bool,
     log_dir: str,
     ports_to_open_on_launch: Optional[List[int]] = None,
+    warm_nodes: int = 0,
 ) -> provision_common.ProvisionRecord:
     """Provisions a cluster and wait until fully provisioned.
 
@@ -149,6 +150,8 @@ def bulk_provision(
         node_config=original_config['available_node_types'][head_node_type]
         ['node_config'],
         count=num_nodes,
+        warm_nodes=(warm_nodes or
+                    original_config['provider'].get('warm_nodes', 0)),
         tags={},
         resume_stopped_nodes=True,
         ports_to_open_on_launch=ports_to_open_on_launch)
