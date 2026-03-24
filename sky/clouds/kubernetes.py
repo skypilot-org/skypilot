@@ -537,6 +537,12 @@ class Kubernetes(clouds.Cloud):
             resources.instance_type)
         cpus = k.cpus
         mem = k.memory
+        # If the requested CPUs/memory match the max node capacity and
+        # no larger node exists, adjust down to the allocatable amount.
+        # This allows users to specify e.g. --cpus 4 on a 4-CPU node
+        # without hitting scheduling errors from kube-system overhead.
+        cpus, mem = kubernetes_utils.adjust_resources_to_allocatable(
+            cpus, mem, context)
         # Optionally populate accelerator information.
         acc_type = k.accelerator_type
         acc_count = k.accelerator_count

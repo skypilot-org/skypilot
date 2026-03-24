@@ -1615,6 +1615,78 @@ def get_allocated_gpu_qty_by_node(
     return allocated_qty_by_node
 
 
+def adjust_resources_to_allocatable(
+    cpus: float,
+    mem: float,
+    context: Optional[str],
+) -> Tuple[float, float]:
+    """Adjusts resource requests by subtracting system overhead when the
+    request matches the maximum node capacity.
+
+    Each K8s node reserves a portion of its resources for system services
+    (kubelet, kube-system pods, eviction thresholds). This overhead is
+    computed as (capacity - allocatable) and is stable — it is determined
+    by kubelet configuration, not runtime state. We avoid using
+    allocatable directly as a target because it can vary over time; instead
+    we compute the overhead delta and subtract it from the request.
+
+    If a larger node exists, no adjustment is made — the K8s scheduler
+    can place the pod on the larger node where the full request fits.
+
+    Args:
+        cpus: Requested CPU count.
+        mem: Requested memory in GB.
+        context: Kubernetes context.
+
+    Returns:
+        Tuple of (adjusted_cpus, adjusted_mem).
+    """
+    nodes = get_kubernetes_nodes(context=context)
+    ready_nodes = [n for n in nodes if n.is_ready()]
+
+    # Check if any node has strictly more CPU capacity than requested.
+    # If so, no adjustment is needed — the pod can be scheduled on the
+    # larger node where the full request fits.
+    has_larger_node = any(
+        parse_cpu_or_gpu_resource_to_float(n.status.capacity.get('cpu', '0')) >
+        cpus + 0.01 for n in ready_nodes)
+    if has_larger_node:
+        return cpus, mem
+
+    # No larger node exists. If the request matches a node's capacity,
+    # subtract the system overhead (capacity - allocatable) from the
+    # request so the pod fits within what the node can actually schedule.
+    for node in ready_nodes:
+        node_cap_cpu = parse_cpu_or_gpu_resource_to_float(
+            node.status.capacity.get('cpu', '0'))
+        if abs(node_cap_cpu - cpus) < 0.01:
+            node_cap_mem = parse_memory_resource(node.status.capacity.get(
+                'memory', '0'),
+                                                 unit='G')
+            alloc_cpu = parse_cpu_or_gpu_resource_to_float(
+                node.status.allocatable.get('cpu', '0'))
+            alloc_mem = parse_memory_resource(node.status.allocatable.get(
+                'memory', '0'),
+                                              unit='G')
+            # System overhead: resources reserved by kubelet and
+            # system components. This is stable across scheduling
+            # cycles since it is set by kubelet configuration
+            # (--system-reserved, --kube-reserved, eviction thresholds).
+            cpu_overhead = node_cap_cpu - alloc_cpu - 0.05
+            mem_overhead = node_cap_mem - alloc_mem - 0.05
+            adjusted_cpus = cpus - cpu_overhead
+            adjusted_mem = mem - mem_overhead
+            if cpu_overhead > 0 or mem_overhead > 0:
+                logger.info(
+                    f'Node system overhead: {cpu_overhead} CPUs, '
+                    f'{mem_overhead}G memory. Adjusted resource '
+                    f'request from {cpus} CPUs, {mem}G memory '
+                    f'to {adjusted_cpus} CPUs, {adjusted_mem}G memory.')
+            return adjusted_cpus, adjusted_mem
+
+    return cpus, mem
+
+
 def check_instance_fits(context: Optional[str],
                         instance: str) -> Tuple[bool, Optional[str]]:
     """Checks if the instance fits on the Kubernetes cluster.
@@ -1650,12 +1722,13 @@ def check_instance_fits(context: Optional[str],
             if node_cpus > max_cpu:
                 max_cpu = node_cpus
                 max_mem = node_memory_gb
-            # We don't consider nodes that have exactly the same amount of
-            # CPU or memory as the candidate instance type.
-            # This is to account for the fact that each node always has some
-            # amount kube-system pods running on it and consuming resources.
-            if (node_cpus > candidate_instance_type.cpus and
-                    node_memory_gb > candidate_instance_type.memory):
+            # We allow nodes with equal or greater CPU/memory than
+            # requested. When the request equals node capacity, the
+            # actual pod CPU/memory request is adjusted down to the
+            # allocatable amount in _make_deploy_variables() to account
+            # for kube-system resource consumption.
+            if (node_cpus >= candidate_instance_type.cpus and
+                    node_memory_gb >= candidate_instance_type.memory):
                 return True, None
         return False, (
             'Maximum resources found on a single node: '
@@ -1739,16 +1812,16 @@ def check_instance_fits(context: Optional[str],
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (
             f'GPU nodes with {acc_type} do not have '
-            f'enough CPU (> {k8s_instance_type.cpus} CPUs) and/or '
-            f'memory (> {k8s_instance_type.memory} G). ')
+            f'enough CPU (>= {k8s_instance_type.cpus} CPUs) and/or '
+            f'memory (>= {k8s_instance_type.memory} G). ')
     else:
         candidate_nodes = [node for node in nodes if node.is_ready()]
         if not candidate_nodes:
             return False, 'No ready nodes found in the cluster.'
         not_fit_reason_prefix = (f'No nodes found with enough '
-                                 f'CPU (> {k8s_instance_type.cpus} CPUs) '
+                                 f'CPU (>= {k8s_instance_type.cpus} CPUs) '
                                  'and/or memory '
-                                 f'(> {k8s_instance_type.memory} G). ')
+                                 f'(>= {k8s_instance_type.memory} G). ')
     # Check if CPU and memory requirements are met on at least one
     # candidate node.
     fits, reason = check_cpu_mem_fits(k8s_instance_type, candidate_nodes)
