@@ -83,7 +83,8 @@ async def queue_v2(request: fastapi.Request,
 @router.post('/wait')
 async def wait(request: fastapi.Request,
                jobs_wait_body: payloads.JobsWaitBody) -> None:
-    await executor.schedule_request_async(
+    executor.check_request_thread_executor_available()
+    request_task = await executor.prepare_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.JOBS_WAIT,
         request_body=jobs_wait_body,
@@ -92,6 +93,7 @@ async def wait(request: fastapi.Request,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
         auth_user=request.state.auth_user,
     )
+    executor.execute_request_in_coroutine(request_task)
 
 
 @router.post('/cancel')
