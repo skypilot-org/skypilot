@@ -274,42 +274,23 @@ def save_results(results: List[Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_input_format(dataset_path: str) -> io_formats.InputFormat:
-    """Resolve input format from env var or fall back to path-based detection.
-
-    Returns an InputFormat instance.
-    """
+def _resolve_input_format() -> io_formats.InputFormat:
+    """Resolve input format from the ``SKY_BATCH_INPUT_FORMAT`` env var."""
     env_val = os.environ.get('SKY_BATCH_INPUT_FORMAT')
-    if env_val:
-        return io_formats.InputFormat.from_dict(json.loads(env_val))
-
-    # Backward compat fallback.
-    if dataset_path.endswith('.jsonl'):
-        return io_formats.JsonInput(dataset_path)
-    raise ValueError(f'Unsupported dataset format: {dataset_path}')
+    if not env_val:
+        raise ValueError('SKY_BATCH_INPUT_FORMAT env var is required')
+    return io_formats.InputFormat.from_dict(json.loads(env_val))
 
 
-def _resolve_output_formats(output_path: str) -> List[io_formats.OutputFormat]:
-    """Resolve output formats from env var or fall back to path-based detection.
-
-    Returns a list of OutputFormat instances.
-    """
-    # New plural env var: JSON array of format dicts.
+def _resolve_output_formats() -> List[io_formats.OutputFormat]:
+    """Resolve output formats from the ``SKY_BATCH_OUTPUT_FORMATS`` env var."""
     env_val = os.environ.get('SKY_BATCH_OUTPUT_FORMATS')
-    if env_val:
-        dicts = json.loads(env_val)
-        if dicts:
-            return [io_formats.OutputFormat.from_dict(d) for d in dicts]
-
-    # Backward compat: singular env var wraps to list.
-    env_val_singular = os.environ.get('SKY_BATCH_OUTPUT_FORMAT')
-    if env_val_singular:
-        d = json.loads(env_val_singular)
-        if d:
-            return [io_formats.OutputFormat.from_dict(d)]
-
-    # Backward compat fallback: infer from path.
-    return [utils.get_output_format(output_path)]
+    if not env_val:
+        raise ValueError('SKY_BATCH_OUTPUT_FORMATS env var is required')
+    dicts = json.loads(env_val)
+    if not dicts:
+        raise ValueError('SKY_BATCH_OUTPUT_FORMATS env var is empty')
+    return [io_formats.OutputFormat.from_dict(d) for d in dicts]
 
 
 # ---------------------------------------------------------------------------
@@ -317,8 +298,7 @@ def _resolve_output_formats(output_path: str) -> List[io_formats.OutputFormat]:
 # ---------------------------------------------------------------------------
 
 
-def start_worker(serialized_fn: str, output_path: str, job_id: str,
-                 dataset_path: str) -> None:
+def start_worker(serialized_fn: str, output_path: str, job_id: str) -> None:
     """Start the long-running worker service.
 
     1. Launch a localhost HTTP server in a daemon thread.
@@ -329,8 +309,8 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
     global _output_path, _job_id, _dataset_format, _output_formats
     _output_path = output_path
     _job_id = job_id
-    _dataset_format = _resolve_input_format(dataset_path)
-    _output_formats = _resolve_output_formats(output_path)
+    _dataset_format = _resolve_input_format()
+    _output_formats = _resolve_output_formats()
 
     # Start HTTP server.
     server = http_server.HTTPServer(

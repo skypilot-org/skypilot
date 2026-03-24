@@ -314,29 +314,6 @@ def upload_bytes_to_cloud(data: bytes, cloud_path: str) -> None:
         raise ValueError(f'Unsupported provider: {provider}')
 
 
-def get_output_format(output_path: str) -> 'io_formats.OutputFormat':
-    """Detect the output format from the output path.
-
-    Returns:
-        An OutputFormat instance suitable for writing results.
-
-    Rules:
-        - Path ending with ``.jsonl`` → JSONL format (default).
-        - Path ending with ``/`` → Image directory format.
-    """
-    # Lazy import: io_formats imports utils at top level, so importing
-    # io_formats here avoids a circular dependency.
-    from sky.batch import io_formats  # pylint: disable=import-outside-toplevel
-
-    if output_path.rstrip('/').endswith('.jsonl'):
-        return io_formats.JsonOutput(output_path)
-    elif output_path.endswith('/'):
-        return io_formats.ImageOutput(output_path)
-    else:
-        # Default to JSONL for backward compatibility.
-        return io_formats.JsonOutput(output_path)
-
-
 def _load_jsonl_file(path: str) -> List[Dict[str, Any]]:
     """Load a local JSONL file.
 

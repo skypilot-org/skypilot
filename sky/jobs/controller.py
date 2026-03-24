@@ -609,9 +609,8 @@ class JobController:
             activate_env=metadata.get('batch_activate_env', ''),
             job_id=self._job_id,
             is_resume=is_resume,
-            input_format_dict=metadata.get('batch_input_format'),
-            output_format_dict=metadata.get('batch_output_format'),
-            output_formats_dict=metadata.get('batch_output_formats'),
+            input_format_dict=metadata['batch_input_format'],
+            output_formats_dict=metadata['batch_output_formats'],
         )
 
         if not is_resume:

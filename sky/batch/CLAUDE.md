@@ -130,7 +130,7 @@ aws s3 ls s3://<bucket>/.sky_batch_tmp/
 ## Gotchas
 
 - The coordinator runs inline on the controller — no separate cluster is provisioned
-- `BatchCoordinator.__init__` still supports env var fallback for backward compat
-- Worker format resolution also has env var fallback chains for backward compat (`SKY_BATCH_OUTPUT_FORMATS` -> `SKY_BATCH_OUTPUT_FORMAT` -> path-based detection)
+- Typed format dicts are required — both `input_format_dict` and `output_formats_dict` must be provided (no path-based inference)
+- Workers require `SKY_BATCH_INPUT_FORMAT` and `SKY_BATCH_OUTPUT_FORMATS` env vars (no fallback)
 - Worker downloads the full dataset once and caches locally per job_id to avoid stale data from previous jobs
 - Cloud storage support: S3 (`s3://`) and GCS (`gs://`) for both inputs and outputs

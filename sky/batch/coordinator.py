@@ -22,6 +22,7 @@ Lifecycle::
 import collections
 import contextvars
 import logging
+import os
 import signal
 import sys
 import textwrap
@@ -54,12 +55,11 @@ class BatchCoordinator:
                  batch_size: int,
                  pool_name: str,
                  serialized_fn: str,
+                 input_format_dict: Dict[str, Any],
+                 output_formats_dict: List[Dict[str, Any]],
                  activate_env: str = '',
                  job_id: Optional[int] = None,
-                 is_resume: bool = False,
-                 input_format_dict: Optional[Dict[str, Any]] = None,
-                 output_format_dict: Optional[Dict[str, Any]] = None,
-                 output_formats_dict: Optional[List[Dict[str, Any]]] = None):
+                 is_resume: bool = False):
         self.dataset_path = dataset_path
         self.output_path = output_path
         self.batch_size = batch_size
@@ -68,30 +68,19 @@ class BatchCoordinator:
         self.activate_env = activate_env
         self._is_resume = is_resume
 
-        # Reconstruct typed formats from dicts; fall back to path-based
-        # detection if not provided (backward compat).
         self._input_format_dict = input_format_dict
-        # Normalize to list. Backward compat: singular dict wraps to list.
-        if output_formats_dict is not None:
-            self._output_formats_dict: Optional[List[Dict[str, Any]]] = (
-                output_formats_dict)
-        elif output_format_dict is not None:
-            self._output_formats_dict = [output_format_dict]
-        else:
-            self._output_formats_dict = None
+        self._output_formats_dict = output_formats_dict
 
         # Use explicit job_id if provided (inline on controller),
         # otherwise fall back to env var (backward compat).
         if job_id is not None:
             self._managed_job_id: int = job_id
         else:
-            import os  # pylint: disable=import-outside-toplevel
             env_var = skylet_constants.MANAGED_JOB_ID_ENV_VAR
             raw = os.environ.get(env_var)
             if raw is None:
-                raise RuntimeError(
-                    f'{env_var} not set. The coordinator must run '
-                    f'as a managed job.')
+                raise RuntimeError(f'{env_var} not set. The coordinator must '
+                                   'run as a managed job.')
             self._managed_job_id = int(raw)
 
         # Batch metadata: list of [start_idx, end_idx] tuples.
@@ -176,30 +165,13 @@ class BatchCoordinator:
     # ------------------------------------------------------------------
 
     def _resolve_formats(self) -> None:
-        """Resolve typed input/output format handlers.
-
-        Uses typed format dicts if provided; falls back to path-based
-        detection for backward compatibility.
-        """
-        if self._input_format_dict is not None:
-            self._input_format = io_formats.InputFormat.from_dict(
-                self._input_format_dict)
-        else:
-            # Backward compat: infer from path.
-            if self.dataset_path.endswith('.jsonl'):
-                self._input_format = io_formats.JsonInput(self.dataset_path)
-            else:
-                raise ValueError(f'Unsupported dataset format: '
-                                 f'{self.dataset_path}. Supported: .jsonl')
-
-        if self._output_formats_dict is not None:
-            self._output_formats = [
-                io_formats.OutputFormat.from_dict(d)
-                for d in self._output_formats_dict
-            ]
-        else:
-            # Backward compat: infer from path.
-            self._output_formats = [utils.get_output_format(self.output_path)]
+        """Resolve typed input/output format handlers from dicts."""
+        self._input_format = io_formats.InputFormat.from_dict(
+            self._input_format_dict)
+        self._output_formats = [
+            io_formats.OutputFormat.from_dict(d)
+            for d in self._output_formats_dict
+        ]
 
     def _count_and_split(self) -> None:
         """Count dataset items and create batch index ranges."""
@@ -380,7 +352,6 @@ class BatchCoordinator:
             export SKY_BATCH_SERIALIZED_FN='{self.serialized_fn}'
             export SKY_BATCH_OUTPUT_PATH='{self.output_path}'
             export SKY_BATCH_JOB_ID='{job_id}'
-            export SKY_BATCH_DATASET_PATH='{self.dataset_path}'
             export SKY_BATCH_INPUT_FORMAT='{input_format_json}'
             export SKY_BATCH_OUTPUT_FORMATS='{output_formats_json}'
 
@@ -400,7 +371,6 @@ class BatchCoordinator:
                 serialized_fn=os.environ["SKY_BATCH_SERIALIZED_FN"],
                 output_path=os.environ["SKY_BATCH_OUTPUT_PATH"],
                 job_id=os.environ["SKY_BATCH_JOB_ID"],
-                dataset_path=os.environ["SKY_BATCH_DATASET_PATH"],
             )
             ' 2>&1 | tee /tmp/sky_batch_worker.log
             """)
