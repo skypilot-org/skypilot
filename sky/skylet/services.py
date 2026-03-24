@@ -538,6 +538,7 @@ class ManagedJobsServiceImpl(managed_jobsv1_pb2_grpc.ManagedJobsServiceServicer
                         for ip_pair in (job.get('internal_external_ips') or [])
                     ],
                     internal_services=job.get('internal_services') or {},
+                    priority_class=job.get('priority_class'),
                     # Batch progress fields
                     is_batch=job.get('is_batch'),
                     batch_total_batches=job.get('batch_total_batches'),

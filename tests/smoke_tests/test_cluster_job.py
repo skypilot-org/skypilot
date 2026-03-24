@@ -1442,6 +1442,63 @@ def test_volumes_on_kubernetes():
     smoke_tests_utils.run_one_test(test)
 
 
+# ---------- Enable Docker on Kubernetes ----------
+@pytest.mark.kubernetes
+@pytest.mark.parametrize(
+    'yaml_file,volumes_needed,sidecar,cache_mount',
+    [
+        ('tests/test_yamls/test_enable_all_default.yaml', [], 'dind',
+         '/var/lib/docker'),
+        ('tests/test_yamls/test_enable_all_dv.yaml',
+         ['docker-all-vol0', 'docker-all-vol1'], 'dind', '/var/lib/docker'),
+        ('tests/test_yamls/test_enable_build_default.yaml', [], 'buildkitd',
+         '/home/user/.local/share/buildkit'),
+        ('tests/test_yamls/test_enable_build_dv.yaml', [
+            'docker-build-vol0', 'docker-build-vol1'
+        ], 'buildkitd', '/home/user/.local/share/buildkit'),
+    ],
+)
+def test_enable_docker_on_kubernetes(yaml_file, volumes_needed, sidecar,
+                                     cache_mount):
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, sky.Kubernetes.max_cluster_name_length())
+
+    setup_cmds: List[str] = []
+    for vol in volumes_needed:
+        setup_cmds.append(
+            f'sky volumes apply -y -n {vol} --type k8s-pvc --size 2GB')
+
+    # kubectl exec into the sidecar to verify cache mount exists.
+    # For _dv cases the mount is a PVC; for default cases it is an emptyDir.
+    verify_mount_cmd = (
+        f'kubectl exec {name_on_cloud}-head -c {sidecar} -- df -a '
+        f'| grep {cache_mount}')
+
+    test_cmds: List[str] = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+        *setup_cmds,
+        f'sky launch -y -c {name} --infra kubernetes {yaml_file}',
+        f'sky logs {name} 1 --status',
+        smoke_tests_utils.run_cloud_cmd_on_cluster(name, verify_mount_cmd),
+    ]
+
+    teardown_parts = [
+        f'sky down -y {name}',
+        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+    ]
+    for vol in volumes_needed:
+        teardown_parts.append(f'sky volumes delete {vol} -y || true')
+    teardown = ' && '.join(teardown_parts)
+
+    test = smoke_tests_utils.Test(
+        'enable_docker_on_kubernetes',
+        test_cmds,
+        teardown,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.kubernetes
 def test_volume_env_mount_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -2632,12 +2689,13 @@ def test_gcp_network_tier_with_gpu():
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky launch -y -c {name} --cloud gcp '
             f'--gpus H100:8 --network-tier best '
+            f'--region asia-southeast1 '
             f'echo "Testing network tier best with GPU"',
             # Check if LD_LIBRARY_PATH contains the required NCCL and TCPX paths for GPU workloads
             f'sky exec {name} {shlex.quote(cmd)} && sky logs {name} --status'
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        timeout=25 * 60,  # 25 mins for GPU provisioning
+        timeout=35 * 60,  # 35 mins for GPU provisioning
     )
     smoke_tests_utils.run_one_test(test)
 

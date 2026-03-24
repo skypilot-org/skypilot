@@ -130,6 +130,7 @@ job_info_table = sqlalchemy.Table(
     sqlalchemy.Column('priority',
                       sqlalchemy.Integer,
                       server_default=str(constants.DEFAULT_PRIORITY)),
+    sqlalchemy.Column('priority_class', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('entrypoint', sqlalchemy.Text, server_default=None),
     sqlalchemy.Column('original_user_yaml_path',
                       sqlalchemy.Text,
@@ -335,6 +336,7 @@ def _get_jobs_dict(r: 'row.RowMapping') -> Dict[str, Any]:
         'user_hash': r.get('user_hash'),
         'workspace': r.get('workspace'),
         'priority': r.get('priority'),
+        'priority_class': r.get('priority_class'),
         'entrypoint': r.get('entrypoint'),
         'original_user_yaml_path': r.get('original_user_yaml_path'),
         'original_user_yaml_content': r.get('original_user_yaml_content'),
@@ -1746,25 +1748,30 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
         return json.loads(task_specs[0])
 
 
-def scheduler_set_waiting(job_ids: List[int], dag_yaml_content: str,
+def scheduler_set_waiting(job_ids: List[int],
+                          dag_yaml_content: str,
                           original_user_yaml_content: str,
                           env_file_content: str,
                           config_file_content: Optional[str],
-                          priority: int) -> None:
+                          priority: int,
+                          priority_class: Optional[str] = None) -> None:
     engine = _db_manager.get_engine()
     with orm.Session(engine) as session:
+        updates = {
+            job_info_table.c.schedule_state:
+                ManagedJobScheduleState.WAITING.value,
+            job_info_table.c.dag_yaml_content: dag_yaml_content,
+            job_info_table.c.original_user_yaml_content:
+                (original_user_yaml_content),
+            job_info_table.c.env_file_content: env_file_content,
+            job_info_table.c.config_file_content: config_file_content,
+            job_info_table.c.priority: priority,
+        }
+        if priority_class is not None:
+            updates[job_info_table.c.priority_class] = priority_class
         updated_count = session.query(job_info_table).filter(
-            sqlalchemy.and_(job_info_table.c.spot_job_id.in_(job_ids),)).update(
-                {
-                    job_info_table.c.schedule_state:
-                        ManagedJobScheduleState.WAITING.value,
-                    job_info_table.c.dag_yaml_content: dag_yaml_content,
-                    job_info_table.c.original_user_yaml_content:
-                        (original_user_yaml_content),
-                    job_info_table.c.env_file_content: env_file_content,
-                    job_info_table.c.config_file_content: config_file_content,
-                    job_info_table.c.priority: priority,
-                })
+            sqlalchemy.and_(
+                job_info_table.c.spot_job_id.in_(job_ids),)).update(updates)
         session.commit()
         assert updated_count == len(job_ids), (job_ids, updated_count)
 

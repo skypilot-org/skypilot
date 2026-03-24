@@ -143,12 +143,14 @@ message ManagedJobInfo {
   // K8s DNS entries mapping instance_id to internal_svc
   // Only populated for Kubernetes clusters
   map<string, string> internal_services = 36;
+  // Named priority class for job scheduling
+  optional string priority_class = 37;
   // Whether this job is a batch coordinator (ds.map()).
-  optional bool is_batch = 37;
+  optional bool is_batch = 38;
   // Batch progress: total number of batches (NULL for non-batch jobs).
-  optional int32 batch_total_batches = 38;
+  optional int32 batch_total_batches = 39;
   // Batch progress: number of completed batches (NULL for non-batch jobs).
-  optional int32 batch_completed_batches = 39;
+  optional int32 batch_completed_batches = 40;
 }
 
 // A pair of internal and external IP addresses

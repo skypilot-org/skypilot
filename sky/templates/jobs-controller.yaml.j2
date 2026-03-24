@@ -74,6 +74,9 @@ run: |
     --pool {{pool}} \
     {%- endif %}
     --priority {{priority}} \
+    {%- if priority_class is not none %}
+    --priority-class {{priority_class}} \
+    {%- endif %}
     --job-id $job_ids_str
 
 

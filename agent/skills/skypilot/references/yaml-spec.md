@@ -39,6 +39,7 @@ resources:
   disk_size: 256
   disk_tier: medium
   network_tier: best
+  max_hourly_cost: 10.0
 
   # Config.
   image_id: ami-0868a20f5a3bf9702
@@ -76,6 +77,8 @@ secrets:
   MY_HF_TOKEN: my-secret-value
   WANDB_API_KEY: my-secret-value-2
 
+api_server_access: true
+
 volumes:
   /mnt/data: volume-name
   /mnt/cache:
@@ -88,6 +91,11 @@ file_mounts:
   /checkpoints:
     source: s3://existing-bucket
     mode: MOUNT
+  # Mount with VFS caching and a pre-tuned workload type
+  /data:
+    source: s3://my-model-data
+    mode: MOUNT_CACHED
+    type: DATASET_RO
   /datasets-s3: s3://my-awesome-dataset
 
 setup: |
@@ -586,6 +594,30 @@ resources:
 ```
 
 
+### ``resources.max_hourly_cost``
+Maximum hourly cost in USD for instances (optional).
+
+If specified, only instances with an hourly price at or below this limit will be considered during resource optimization. This is useful for setting a budget cap on the per-instance cost.
+
+When `use_spot` is true, the limit is applied against spot prices; otherwise, it is applied against on-demand prices.
+
+Must be a positive value.
+
+```yaml
+resources:
+  accelerators: A100
+  max_hourly_cost: 10.0
+```
+
+```yaml
+# Combined with spot instances: filters by spot price
+resources:
+  use_spot: true
+  max_hourly_cost: 5.0
+
+```
+
+
 ### ``resources.ports``
 
 Ports to expose (optional).
@@ -978,6 +1010,20 @@ secrets:
 ```
 
 
+### ``api_server_access``
+
+Whether to inject API server credentials into the task's environment so that it can call `sky` CLI/SDK to launch nested SkyPilot operations. Defaults to `true`. Set to `false` to disable.
+
+When enabled and the API server supports it, SkyPilot automatically injects credentials. No setup is required for most users.
+
+```yaml
+# Opt out of API server access injection
+api_server_access: false
+```
+
+See Nested SkyPilot from managed jobs for details.
+
+
 ### ``volumes``
 
 SkyPilot supports managing persistent and ephemeral volumes for tasks or jobs on Kubernetes clusters. Refer to volumes on Kubernetes for more details.
@@ -1026,6 +1072,12 @@ file_mounts:
     persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
     mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
+  # Mount with VFS caching and a pre-tuned workload type for model checkpoints.
+  /checkpoints:
+    source: s3://my-checkpoint-bucket
+    mode: MOUNT_CACHED
+    type: MODEL_CHECKPOINT_RW  # Pre-tuned workload type. Optional.
+
   # Copies a cloud object store URI to the cluster. Can be private buckets.
   /datasets-s3: s3://my-awesome-dataset
 
@@ -1040,14 +1092,22 @@ OR
 
 ```yaml
 file_mounts:
-  /remote/data: ./local_data  # Local to remote
+  /remote/config: ./local_config  # Local to remote
   /remote/output: s3://my-bucket/outputs  # Cloud storage
   /remote/models:
     name: my-models-bucket
     source: ~/local_models
     store: gcs
     mode: MOUNT
+  /remote/data:
+    source: gs://my-data-bucket
+    mode: MOUNT_CACHED
+    type: DATASET_RO
 ```
+
+The `type` field specifies a pre-tuned workload type for `MOUNT_CACHED` mode.
+Available types: `MODEL_CHECKPOINT_RO`, `MODEL_CHECKPOINT_RW`, `DATASET_RO`, `DATASET_RW`.
+See mount_cached_workload_types for details on workload types and `config.mount_cached` parameters.
 
 
 ### ``setup``

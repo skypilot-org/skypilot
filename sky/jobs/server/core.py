@@ -472,7 +472,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
 
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
                           dag_uuid: str) -> Tuple[str, str]:
-    """Create a service account token for a managed job with api_access.
+    """Create a service account token for a managed job with api_server_access.
 
     Issues a token as the original user so nested jobs have the same
     identity and permissions as the launching user.
@@ -628,6 +628,7 @@ def launch(
 
     task_names = set()
     priority = None
+    priority_class = None
     for task_ in dag.tasks:
         if task_.name in task_names:
             with ux_utils.print_exception_no_traceback():
@@ -640,11 +641,13 @@ def launch(
 
         # Check for priority in resources
         task_priority = None
+        task_priority_class = None
         if task_.resources:
             # Convert set to list to access elements by index
             resources_list = list(task_.resources)
             # Take first resource's priority as reference
             task_priority = resources_list[0].priority
+            task_priority_class = resources_list[0].priority_class
 
             # Check all other resources have same priority
             for resource in resources_list[1:]:
@@ -655,6 +658,13 @@ def launch(
                             'same priority. Found priority '
                             f'{resource.priority} but expected {task_priority}.'
                         )
+                if resource.priority_class != task_priority_class:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Task {task_.name!r}: All resources must have the '
+                            'same priority class. Found priority class '
+                            f'{resource.priority_class} but expected '
+                            f'{task_priority_class!r}.')
 
         if task_priority is not None:
             if (priority is not None and priority != task_priority):
@@ -664,6 +674,8 @@ def launch(
                         'Either specify a priority in only one task, or set '
                         'the same priority for each task.')
             priority = task_priority
+        if task_priority_class is not None:
+            priority_class = task_priority_class
 
     if priority is None:
         priority = skylet_constants.DEFAULT_PRIORITY
@@ -754,30 +766,31 @@ def launch(
         for task_ in dag.tasks:
             task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-        # Inject API server credentials for tasks with api_access enabled.
+        # Inject API server credentials for tasks with api_server_access.
         # Create a single token for the entire DAG and reuse it across all
         # tasks that need API access, rather than creating one per task.
         # Note: the API server endpoint env var is injected client-side
         # (sky/jobs/client/sdk.py) where get_server_url() returns the
         # externally reachable endpoint.
-        any_api_access = any(task_.api_access for task_ in dag.tasks)
-        if any_api_access:
+        any_api_access = any(task_.api_server_access for task_ in dag.tasks)
+        inject_token = any_api_access
+        if inject_token:
             sa_enabled = os.environ.get(
                 skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
                 'false').lower()
             if sa_enabled != 'true':
-                with ux_utils.print_exception_no_traceback():
-                    env_var = (skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS)
-                    raise ValueError('api_access: true requires service '
-                                     'accounts to be enabled on the API '
-                                     f'server. Set {env_var}=true '
-                                     'environment variable on the server.')
+                logger.debug('Skipping api_server_access token injection: '
+                             'service accounts not enabled on the API server.')
+                inject_token = False
 
             user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
-            if user_id is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Cannot determine user identity for '
-                                       'api_access credential injection.')
+            if inject_token and user_id is None:
+                logger.debug('Skipping api_server_access token injection: '
+                             'cannot determine user identity.')
+                inject_token = False
+
+        if inject_token:
+            assert user_id is not None
             token, token_id = _create_job_api_token(
                 creator_user_id=user_id,
                 job_name=dag.name,
@@ -785,7 +798,7 @@ def launch(
             )
 
             for task_ in dag.tasks:
-                if task_.api_access:
+                if task_.api_server_access:
                     task_._secrets[  # pylint: disable=protected-access
                         skylet_constants.
                         SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)
@@ -810,6 +823,7 @@ def launch(
             'remote_env_file_path': remote_env_file_path,
             'modified_catalogs': modified_catalogs,
             'priority': priority,
+            'priority_class': priority_class,
             'is_consolidation_mode': is_consolidation_mode,
             'python_cmd': sys.executable
                           if is_consolidation_mode else 'python3',
