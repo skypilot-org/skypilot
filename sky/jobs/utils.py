@@ -77,6 +77,15 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+
+def _format_git_commit(metadata: dict) -> str:
+    """Format git commit with dirty indicator for display."""
+    commit = metadata.get('git_commit', '-')
+    if commit and commit != '-' and metadata.get('git_dirty'):
+        return f'{commit} (dirty)'
+    return commit if commit else '-'
+
+
 # Controller checks its job's status every this many seconds.
 # This is a tradeoff between the latency and the resource usage.
 JOB_STATUS_CHECK_GAP_SECONDS = 15
@@ -2336,7 +2345,7 @@ def format_job_table(
                     '-',
                     job_tasks[0]['schedule_state'],
                     generate_details(details, failure_reason),
-                    job_tasks[0].get('metadata', {}).get('git_commit', '-'),
+                    _format_git_commit(job_tasks[0].get('metadata', {})),
                 ])
             if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -2429,7 +2438,7 @@ def format_job_table(
                                      task['failure_reason']),
                 ])
 
-                values.append(task.get('metadata', {}).get('git_commit', '-'))
+                values.append(_format_git_commit(task.get('metadata', {})))
             if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
             job_table.add_row(values)

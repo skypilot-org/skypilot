@@ -16,6 +16,14 @@ from sky.utils import volume
 logger = sky_logging.init_logger(__name__)
 
 
+def _format_git_commit(metadata: dict) -> str:
+    """Format git commit with dirty indicator for display."""
+    commit = metadata.get('git_commit', '-')
+    if commit and commit != '-' and metadata.get('git_dirty'):
+        return f'{commit} (dirty)'
+    return commit if commit else '-'
+
+
 def format_job_queue(jobs: List[responses.ClusterJobRecord]):
     """Format the job queue for display.
 
@@ -40,7 +48,7 @@ def format_job_queue(jobs: List[responses.ClusterJobRecord]):
             job.resources,
             job.status.colored_str(),
             job.log_path,
-            job.metadata.get('git_commit', '-'),
+            _format_git_commit(job.metadata),
         ])
     return job_table
 
