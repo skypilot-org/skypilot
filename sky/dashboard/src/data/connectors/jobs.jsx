@@ -292,6 +292,7 @@ export async function getManagedJobs(options = {}) {
         dag_yaml: job.user_yaml,
         entrypoint: job.entrypoint,
         git_commit: job.metadata?.git_commit || '-',
+        git_dirty: job.metadata?.git_dirty || false,
         links: job.links || {},
         pool: job.pool,
         pool_hash: job.pool_hash,

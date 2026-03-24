@@ -1291,6 +1291,9 @@ function JobDetailsContent({
           {jobData.git_commit && jobData.git_commit !== '-' ? (
             <span className="flex items-center mr-2">
               {jobData.git_commit}
+              {jobData.git_dirty && (
+                <span className="ml-2 text-yellow-600 text-sm">(dirty)</span>
+              )}
               <Tooltip
                 content={isCopied ? 'Copied!' : 'Copy commit'}
                 className="text-muted-foreground"
@@ -1567,6 +1570,7 @@ JobDetailsContent.propTypes = {
     resources_str_full: PropTypes.string,
     resources_str: PropTypes.string,
     git_commit: PropTypes.string,
+    git_dirty: PropTypes.bool,
     pool: PropTypes.string,
     pool_hash: PropTypes.string,
     entrypoint: PropTypes.string,
