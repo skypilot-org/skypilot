@@ -1360,7 +1360,6 @@ class Resources:
         Raises:
             ValueError: if the attribute is invalid.
         """
-
         if self._network_tier == resources_utils.NetworkTier.BEST:
             if isinstance(self._cloud, clouds.GCP):
                 # Handle GPU Direct TCPX requirement for docker images
@@ -1425,8 +1424,8 @@ class Resources:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS/GCP/Azure/IBM/OCI/'
-                    'Kubernetes. For Lambda cloud, use "docker:" prefix for '
-                    'Docker images.') from e
+                    'Kubernetes/Nebius. For Lambda cloud, use "docker:" '
+                    'prefix for Docker images.') from e
 
         if self._region is not None:
             # If the image_id has None as key (region-agnostic),
