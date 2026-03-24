@@ -351,21 +351,21 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
 
             controller_addr = f'http://{controller_host}:{controller_port}'
 
-            # Start the load balancer (not needed for pools — batch
-            # coordination now runs as a managed job).
-            if not service_spec.pool:
-                lb_port_start = constants.LOAD_BALANCER_PORT_START
-                load_balancer_port = (
-                    common_utils.find_free_port(lb_port_start)
-                    if not is_recovery else
-                    serve_state.get_service_load_balancer_port(service_name))
-                load_balancer_log_file = os.path.expanduser(
-                    serve_utils.generate_remote_load_balancer_log_file_name(
-                        service_name))
+            # Start the load balancer.
+            load_balancer_port = (
+                common_utils.find_free_port(constants.LOAD_BALANCER_PORT_START)
+                if not is_recovery else
+                serve_state.get_service_load_balancer_port(service_name))
+            load_balancer_log_file = os.path.expanduser(
+                serve_utils.generate_remote_load_balancer_log_file_name(
+                    service_name))
 
-                # TODO(tian): Probably we could enable multiple ports
-                # specified in service spec and we could start multiple
-                # load balancers.
+            # TODO(tian): Probably we could enable multiple ports specified in
+            # service spec and we could start multiple load balancers.
+            # After that, we will have a mapping from replica port to endpoint.
+            # NOTE(tian): We don't need the load balancer for pool.
+            # Skip the load balancer process for pool.
+            if not service_spec.pool:
                 load_balancer_process = multiprocessing.Process(
                     target=ux_utils.RedirectOutputForProcess(
                         load_balancer.run_load_balancer,
@@ -376,14 +376,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                           service_spec.target_qps_per_replica))
                 load_balancer_process.start()
 
-                if not is_recovery:
-                    serve_state.set_service_load_balancer_port(
-                        service_name, load_balancer_port)
-            else:
-                # Pools don't need a load balancer — batch coordination
-                # runs as a managed job.  Leave lb port as None; the
-                # registration check handles this.
-                pass
+            if not is_recovery:
+                serve_state.set_service_load_balancer_port(
+                    service_name, load_balancer_port)
 
         while True:
             _handle_signal(service_name)
