@@ -64,6 +64,7 @@ from sky.serve.server import server as serve_rest
 from sky.server import common
 from sky.server import config as server_config
 from sky.server import constants as server_constants
+from sky.server import csp_utils
 from sky.server import daemons
 from sky.server import metrics
 from sky.server import middleware_utils
@@ -701,10 +702,10 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     # Content-Security-Policy directives:
     # - default-src 'self': Only allow resources from the same origin
-    # - script-src 'self' 'unsafe-inline': Allow same-origin scripts and
-    #   inline scripts (needed for Next.js __NEXT_DATA__)
-    # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
-    #   inline styles (needed for MUI/Emotion dynamic style injection)
+    # - script-src / style-src: For HTML responses a per-request nonce is
+    #   used ('nonce-<value>') so inline scripts/styles are allowed only
+    #   when they carry the matching nonce attribute.  Non-HTML responses
+    #   get a strict 'self'-only policy (no inline allowance needed).
     # - font-src 'self': Only allow same-origin fonts
     # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
     #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
@@ -717,22 +718,32 @@ class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     # - base-uri 'self': Restrict <base> element to same origin
     # - form-action 'self': Restrict form submissions to same origin
     # - frame-ancestors 'self': Prevent clickjacking via framing
-    _CSP_POLICY = ('default-src \'self\'; '
-                   'script-src \'self\' \'unsafe-inline\'; '
-                   'style-src \'self\' \'unsafe-inline\'; '
-                   'font-src \'self\'; '
-                   'connect-src \'self\' http://localhost:* '
-                   'http://127.0.0.1:*; '
-                   'frame-src \'self\'; '
-                   'img-src \'self\' data:; '
-                   'object-src \'none\'; '
-                   'base-uri \'self\'; '
-                   'form-action \'self\'; '
-                   'frame-ancestors \'self\'')
+    _CSP_TEMPLATE = ('default-src \'self\'; '
+                     'script-src {script_src}; '
+                     'style-src {style_src}; '
+                     'font-src \'self\'; '
+                     'connect-src \'self\' http://localhost:* '
+                     'http://127.0.0.1:*; '
+                     'frame-src \'self\'; '
+                     'img-src \'self\' data:; '
+                     'object-src \'none\'; '
+                     'base-uri \'self\'; '
+                     'form-action \'self\'; '
+                     'frame-ancestors \'self\'')
 
     async def dispatch(self, request: fastapi.Request, call_next):
         response = await call_next(request)
-        response.headers['Content-Security-Policy'] = self._CSP_POLICY
+        # Endpoints that serve HTML set request.state.csp_nonce so the
+        # CSP header can reference the nonce that was injected into the
+        # HTML body.  Non-HTML responses get a strict policy with no
+        # inline allowance.
+        nonce = getattr(request.state, 'csp_nonce', None)
+        if nonce:
+            src = f'\'self\' \'nonce-{nonce}\''
+        else:
+            src = '\'self\''
+        csp = self._CSP_TEMPLATE.format(script_src=src, style_src=src)
+        response.headers['Content-Security-Policy'] = csp
         # X-Frame-Options for legacy browsers that don't support CSP
         # frame-ancestors directive.
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
@@ -956,6 +967,10 @@ async def token(request: fastapi.Request,
         'SKYPILOT_API_SERVER_USER_TOKEN_PLACEHOLDER',
         base64_str).replace('USER_PLACEHOLDER', user_info_string)
 
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+    html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
+
     return fastapi.responses.HTMLResponse(
         content=html_content,
         headers={
@@ -1051,6 +1066,10 @@ async def authorize_page(
         html_content = f.read()
 
     html_content = html_content.replace('USER_PLACEHOLDER', user_info)
+
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+    html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
 
     return fastapi.responses.HTMLResponse(
         content=html_content,
@@ -2201,8 +2220,14 @@ async def stream(
         html_dir = pathlib.Path(__file__).parent / 'html'
         with open(html_dir / 'log.html', 'r', encoding='utf-8') as file:
             html_content = file.read()
+        html_content = html_content.replace('{stream_url}', str(stream_url))
+
+        nonce = csp_utils.generate_nonce()
+        request.state.csp_nonce = nonce
+        html_content = csp_utils.inject_nonce_into_html(html_content, nonce)
+
         return fastapi.responses.HTMLResponse(
-            html_content.replace('{stream_url}', str(stream_url)),
+            html_content,
             headers={
                 'Cache-Control': 'no-cache, no-transform',
                 'X-Accel-Buffering': 'no'
@@ -3019,16 +3044,37 @@ def _resolve_dynamic_route(dashboard_dir: str, path: str) -> Optional[str]:
     return None
 
 
+def _serve_html_with_nonce(
+    request: fastapi.Request,
+    file_path: str,
+) -> fastapi.responses.HTMLResponse:
+    """Read an HTML file, inject a CSP nonce, and return as HTMLResponse.
+
+    The nonce is also stored in ``request.state.csp_nonce`` so that
+    :class:`SecurityHeadersMiddleware` can reference it in the CSP header.
+    """
+    nonce = csp_utils.generate_nonce()
+    request.state.csp_nonce = nonce
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    content = csp_utils.inject_nonce_into_html(content, nonce)
+    return fastapi.responses.HTMLResponse(content=content)
+
+
 @app.get('/dashboard/{full_path:path}')
-async def serve_dashboard(full_path: str):
+async def serve_dashboard(request: fastapi.Request, full_path: str):
     """Serves the Next.js dashboard application.
 
     Args:
+        request: The incoming HTTP request (used to attach the CSP nonce).
         full_path: The path requested by the client.
         e.g. /clusters, /jobs
 
     Returns:
-        FileResponse for static files or index.html for client-side routing.
+        FileResponse for static files, or nonce-injected HTMLResponse for
+        HTML pages.
 
     Raises:
         HTTPException: If the path is invalid or file not found.
@@ -3042,6 +3088,8 @@ async def serve_dashboard(full_path: str):
     # /favicon.ico, and /_next/, etc.
     file_path = os.path.join(server_constants.DASHBOARD_DIR, safe_full_path)
     if os.path.isfile(file_path):
+        if file_path.endswith('.html'):
+            return _serve_html_with_nonce(request, file_path)
         return fastapi.responses.FileResponse(file_path)
 
     # Try serving a pre-rendered HTML page for the path.
@@ -3049,7 +3097,7 @@ async def serve_dashboard(full_path: str):
     html_path = os.path.join(server_constants.DASHBOARD_DIR,
                              f'{safe_full_path}.html')
     if os.path.isfile(html_path):
-        return fastapi.responses.FileResponse(html_path)
+        return _serve_html_with_nonce(request, html_path)
 
     # Resolve Next.js dynamic routes using the routes manifest.
     # Handles patterns like:
@@ -3060,15 +3108,12 @@ async def serve_dashboard(full_path: str):
         resolved = _resolve_dynamic_route(server_constants.DASHBOARD_DIR,
                                           safe_full_path)
         if resolved is not None:
-            return fastapi.responses.FileResponse(resolved)
+            return _serve_html_with_nonce(request, resolved)
 
     # Serve index.html as a last resort.
     index_path = os.path.join(server_constants.DASHBOARD_DIR, 'index.html')
     try:
-        with open(index_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        return fastapi.responses.HTMLResponse(content=content)
+        return _serve_html_with_nonce(request, index_path)
     except Exception as e:
         logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))

@@ -198,6 +198,11 @@ export function TourProvider({ children }) {
       // Add global CSS styling for tour
       const globalStyle = document.createElement('style');
       globalStyle.id = 'shepherd-global-custom-style';
+      // Propagate CSP nonce so the dynamic <style> is not blocked.
+      const cspMeta = document.querySelector('meta[name="csp-nonce"]');
+      if (cspMeta) {
+        globalStyle.nonce = cspMeta.getAttribute('content');
+      }
       globalStyle.textContent = `
           .shepherd-element {
             /* Uniform 1px border using inner box-shadow so corners stay consistent */

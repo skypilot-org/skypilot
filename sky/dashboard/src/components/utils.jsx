@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/select';
 import { REFRESH_INTERVALS, UI_CONFIG } from '@/lib/config';
 import Link from 'next/link';
+import { getNonce } from '@/utils/csp';
 
 // Refresh interval in milliseconds
 export const REFRESH_INTERVAL = REFRESH_INTERVALS.REFRESH_INTERVAL;
@@ -457,7 +458,7 @@ export function LogFilter({
 
   return (
     <div>
-      <style>{logStyles}</style>
+      <style nonce={getNonce()}>{logStyles}</style>
       <div
         className="logs-container whitespace-pre-wrap break-all font-mono text-sm text-gray-900"
         aria-label="job-logs"
