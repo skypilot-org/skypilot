@@ -807,6 +807,7 @@ def open_browser(url: str) -> bool:
             ['cmd.exe', '/c', 'start', url],
         ]:
             try:
+                logger.debug(f'trying to open browser via {cmd}')
                 result = subprocess.run(cmd,
                                         capture_output=True,
                                         timeout=10,
@@ -814,8 +815,10 @@ def open_browser(url: str) -> bool:
                 if result.returncode == 0:
                     return True
             except FileNotFoundError:
+                logger.debug(f'{cmd[0]} failed', exc_info=True)
                 continue
             except Exception:  # pylint: disable=broad-except
+                logger.debug(f'failed', exc_info=True)
                 continue
         return False
 
