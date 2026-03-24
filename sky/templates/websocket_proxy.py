@@ -292,19 +292,20 @@ async def _handle_redirect(redirect_info: dict, timestamps_supported: bool,
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
+    # TODO(aylei): remove the separate /api/health call and use the header
+    # during websocket handshake to determine the server version.
+    health_url = f'{server_url}/api/health'
+    cookie_hdr = server_common.get_cookie_header_for_url(health_url)
+    health_response = requests.get(health_url, headers=cookie_hdr)
+    health_data = health_response.json()
+    server_api_version = int(health_data.get('api_version', 0))
 
     disable_latency_measurement = os.environ.get(
         skylet_constants.SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR, '0') == '1'
     if disable_latency_measurement:
         timestamps_are_supported = False
     else:
-        # TODO(aylei): remove the separate /api/health call and use the header
-        # during websocket handshake to determine the server version.
-        health_url = f'{server_url}/api/health'
-        cookie_hdr = server_common.get_cookie_header_for_url(health_url)
-        health_response = requests.get(health_url, headers=cookie_hdr)
-        health_data = health_response.json()
-        timestamps_are_supported = int(health_data.get('api_version', 0)) > 21
+        timestamps_are_supported = server_api_version > 21
 
     # Capture the original API server URL for login hint if authentication
     # is required.
@@ -323,16 +324,12 @@ if __name__ == '__main__':
     endpoint = sys.argv[3] if len(sys.argv) > 3 else 'kubernetes-pod-ssh-proxy'
     # Worker index for Slurm.
     worker_idx = sys.argv[4] if len(sys.argv) > 4 else '0'
-    cluster_name = sys.argv[2]
     websocket_url = (f'{server_url}/{endpoint}'
-                     f'?cluster_name={cluster_name}'
+                     f'?cluster_name={sys.argv[2]}'
                      f'&worker={worker_idx}'
                      f'{client_version_str}')
 
-    # New servers (api_version > 21, i.e. timestamps_are_supported) support
-    # the in-band REDIRECT first-frame protocol. Old servers don't support
-    # redirect at all, so just connect directly.
-    if timestamps_are_supported:
+    if server_api_version >= constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION:
         asyncio.run(
             _connect_with_redirect(websocket_url, timestamps_are_supported,
                                    _login_url))
