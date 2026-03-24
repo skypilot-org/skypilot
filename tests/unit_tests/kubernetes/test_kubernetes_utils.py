@@ -1437,18 +1437,13 @@ def test_combine_pod_config_fields_ssh_cloud():
                                                  context=ssh_context)
 
         # Verify that get_effective_region_config was called with 'ssh' cloud
-        # and context without the "ssh-" prefix, once for enable_docker and
-        # once for pod_config.
-        assert mock_get_config.call_count == 2
+        # and context without the "ssh-" prefix for pod_config.
+        assert mock_get_config.call_count == 1
         mock_get_config.assert_has_calls([
             call(cloud='ssh',
                  region='my-cluster',
                  keys=('pod_config',),
                  default_value={}),
-            call(cloud='ssh',
-                 region='my-cluster',
-                 keys=('enable_docker',),
-                 default_value=None),
         ],
                                          any_order=False)
 
@@ -1509,18 +1504,13 @@ def test_combine_pod_config_fields_kubernetes_cloud():
                                                  context=k8s_context)
 
         # Verify that get_effective_region_config was called with 'kubernetes'
-        # cloud and the context as-is, once for enable_docker and once for
-        # pod_config.
-        assert mock_get_config.call_count == 2
+        # cloud and the context as-is for pod_config.
+        assert mock_get_config.call_count == 1
         mock_get_config.assert_has_calls([
             call(cloud='kubernetes',
                  region=k8s_context,
                  keys=('pod_config',),
                  default_value={}),
-            call(cloud='kubernetes',
-                 region=k8s_context,
-                 keys=('enable_docker',),
-                 default_value=None),
         ],
                                          any_order=False)
 
@@ -2002,16 +1992,12 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
             "Kubernetes config leaked to SSH!"
 
         # Verify get_effective_region_config was called with 'ssh'
-        assert mock_get_config.call_count == 2
+        assert mock_get_config.call_count == 1
         mock_get_config.assert_has_calls([
             call(cloud='ssh',
                  region='test-cluster',
                  keys=('pod_config',),
                  default_value={}),
-            call(cloud='ssh',
-                 region='test-cluster',
-                 keys=('enable_docker',),
-                 default_value=None),
         ],
                                          any_order=False)
 
@@ -2039,16 +2025,12 @@ def test_combine_pod_config_fields_ssh_and_kubernetes_isolation():
             "SSH config leaked to Kubernetes!"
 
         # Verify get_effective_region_config was called with 'kubernetes'
-        assert mock_get_config.call_count == 2
+        assert mock_get_config.call_count == 1
         mock_get_config.assert_has_calls([
             call(cloud='kubernetes',
                  region=k8s_context,
                  keys=('pod_config',),
                  default_value={}),
-            call(cloud='kubernetes',
-                 region=k8s_context,
-                 keys=('enable_docker',),
-                 default_value=None),
         ],
                                          any_order=False)
 
@@ -3016,135 +2998,11 @@ _BASE_CLUSTER_YAML = {
 }
 
 
-class TestDockerSidecarToPodConfig(unittest.TestCase):
-    """Tests for _docker_sidecar_to_pod_config()."""
-
-    def _get_result(self, mode: utils.DockerMode):
-        cfg = utils.DockerConfig(mode=mode)
-        return utils._docker_sidecar_to_pod_config(cfg)
-
-    # ---- DinD ----
-
-    def test_dind_has_ray_node_env(self):
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        containers = pod_cfg['spec']['containers']
-        ray = next(c for c in containers if c['name'] == 'ray-node')
-        env_names = [e['name'] for e in ray['env']]
-        assert 'DOCKER_HOST' in env_names
-
-    def test_dind_is_privileged(self):
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        containers = pod_cfg['spec']['containers']
-        dind = next(c for c in containers if c['name'] == 'dind')
-        assert dind['securityContext']['privileged'] is True
-
-    def test_dind_no_cache_volume_by_default(self):
-        """No cache volume is injected; PVC is added later in _create_pods."""
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
-        assert 'dind-storage' not in volume_names
-
-    def test_dind_has_init_container(self):
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        init_containers = pod_cfg['spec']['initContainers']
-        assert len(init_containers) == 1
-        assert init_containers[0]['name'] == 'install-docker-cli'
-        assert 'docker' in init_containers[0]['image']
-
-    def test_dind_has_docker_tools_volume(self):
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
-        assert 'docker-tools' in volume_names
-
-    def test_dind_ray_node_has_docker_tools_mount(self):
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        containers = pod_cfg['spec']['containers']
-        ray = next(c for c in containers if c['name'] == 'ray-node')
-        mount_names = [m['name'] for m in ray['volumeMounts']]
-        assert 'docker-tools' in mount_names
-
-    def test_dind_init_copies_buildx_plugin(self):
-        """DinD mode also installs buildx for multi-platform builds."""
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        init_containers = pod_cfg['spec']['initContainers']
-        cmd = init_containers[0]['command'][-1]
-        assert 'docker-buildx' in cmd
-        assert 'cli-plugins' in cmd
-
-    def test_dind_ray_node_has_post_start_hook(self):
-        pod_cfg = self._get_result(utils.DockerMode.ALL)
-        containers = pod_cfg['spec']['containers']
-        ray = next(c for c in containers if c['name'] == 'ray-node')
-        assert 'lifecycle' in ray
-        assert 'postStart' in ray['lifecycle']
-        cmd = ray['lifecycle']['postStart']['exec']['command'][-1]
-        assert 'sudo ln -sf' in cmd
-        assert '/usr/local/bin/docker' in cmd
-        assert 'cli-plugins' in cmd
-        assert '|| true' in cmd
-
-    # ---- BuildKit ----
-
-    def test_buildkit_has_ray_node_env(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        containers = pod_cfg['spec']['containers']
-        ray = next(c for c in containers if c['name'] == 'ray-node')
-        env_names = [e['name'] for e in ray['env']]
-        assert 'BUILDKIT_HOST' in env_names
-
-    def test_buildkit_runs_as_user_1000(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        containers = pod_cfg['spec']['containers']
-        bkd = next(c for c in containers if c['name'] == 'buildkitd')
-        assert bkd['securityContext']['runAsUser'] == 1000
-        assert bkd['securityContext']['runAsGroup'] == 1000
-
-    def test_buildkit_no_cache_volume_by_default(self):
-        """No cache volume is injected; PVC is added later in _create_pods."""
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
-        assert 'buildkit-cache' not in volume_names
-
-    def test_buildkit_has_init_container(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        init_containers = pod_cfg['spec']['initContainers']
-        assert len(init_containers) == 1
-        assert init_containers[0]['name'] == 'install-docker-cli'
-
-    def test_buildkit_init_copies_buildx_plugin(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        init_containers = pod_cfg['spec']['initContainers']
-        cmd = init_containers[0]['command'][-1]
-        assert 'docker-buildx' in cmd
-        assert 'cli-plugins' in cmd
-
-    def test_buildkit_has_docker_tools_volume(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        volume_names = [v['name'] for v in pod_cfg['spec']['volumes']]
-        assert 'docker-tools' in volume_names
-
-    def test_buildkit_ray_node_has_docker_tools_mount(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        containers = pod_cfg['spec']['containers']
-        ray = next(c for c in containers if c['name'] == 'ray-node')
-        mount_names = [m['name'] for m in ray['volumeMounts']]
-        assert 'docker-tools' in mount_names
-
-    def test_buildkit_ray_node_post_start_configures_buildx(self):
-        pod_cfg = self._get_result(utils.DockerMode.BUILD)
-        containers = pod_cfg['spec']['containers']
-        ray = next(c for c in containers if c['name'] == 'ray-node')
-        assert 'lifecycle' in ray
-        cmd = ray['lifecycle']['postStart']['exec']['command'][-1]
-        assert 'docker buildx create' in cmd
-        assert 'skypilot-builder' in cmd
-        assert 'cli-plugins' in cmd
-        assert '|| true' in cmd
-
-    # ---- _DOCKER_SIDECAR_DEFAULTS ----
+class TestDockerSidecarDefaults(unittest.TestCase):
+    """Tests for DOCKER_SIDECAR_DEFAULTS."""
 
     def test_defaults_returns_valid_dind(self):
-        defaults = utils._DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.ALL]
+        defaults = utils.DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.ALL]
         assert isinstance(defaults, utils.DockerSidecarDefaults)
         assert defaults.image
         assert defaults.cli_image
@@ -3152,7 +3010,7 @@ class TestDockerSidecarToPodConfig(unittest.TestCase):
         assert defaults.cache_mount
 
     def test_defaults_returns_valid_buildkit(self):
-        defaults = utils._DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.BUILD]
+        defaults = utils.DOCKER_SIDECAR_DEFAULTS[utils.DockerMode.BUILD]
         assert isinstance(defaults, utils.DockerSidecarDefaults)
         assert defaults.cli_image
         assert defaults.cache_mount == '/home/user/.local/share/buildkit'
@@ -3236,19 +3094,44 @@ class TestNormalizeEnableDockerConfig(unittest.TestCase):
 
 
 class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
-    """Tests for combine_pod_config_fields() with enable_docker config."""
+    """Tests for combine_pod_config_fields() after docker sidecar refactor.
+
+    Docker sidecar injection is now handled by the Jinja2 template
+    (kubernetes-ray.yml.j2), not by combine_pod_config_fields().  These tests
+    verify that combine_pod_config_fields() no longer injects docker sidecars,
+    and that pod_config merging still works correctly when sidecars are
+    already present in the rendered template.
+    """
 
     def _base_yaml(self):
         import copy
         return copy.deepcopy(_BASE_CLUSTER_YAML)
 
-    def test_dind_injected_from_global_config(self):
-        """DinD containers and volumes appear when global enable_docker is true."""
+    def _base_yaml_with_dind(self):
+        """Simulate a template-rendered YAML that already has a dind sidecar."""
+        import copy
+        yaml_obj = copy.deepcopy(_BASE_CLUSTER_YAML)
+        node_cfg = yaml_obj['available_node_types']['ray_head_default'][
+            'node_config']
+        node_cfg['spec']['containers'].append({
+            'name': 'dind',
+            'image': 'docker:29.3-dind',
+            'securityContext': {
+                'privileged': True
+            },
+        })
+        node_cfg['spec']['volumes'] = [{'name': 'docker-sock', 'emptyDir': {}}]
+        yaml_obj['provider']['docker_config'] = {
+            'mode': 'ALL',
+            'cache_volume': None,
+        }
+        return yaml_obj
+
+    def test_combine_does_not_inject_docker_sidecars(self):
+        """combine_pod_config_fields no longer injects docker sidecars."""
         cluster_yaml = self._base_yaml()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('enable_docker',):
-                return True
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3263,77 +3146,15 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
         node_cfg = result['available_node_types']['ray_head_default'][
             'node_config']
         container_names = [c['name'] for c in node_cfg['spec']['containers']]
-        assert 'dind' in container_names
-        assert 'ray-node' in container_names
-        volume_names = [v['name'] for v in node_cfg['spec']['volumes']]
-        assert 'docker-sock-dir' in volume_names
-        # No cache volume by default; PVC is injected later in _create_pods.
-        assert 'dind-storage' not in volume_names
-
-    def test_buildkit_injected_from_global_config(self):
-        """BuildKit sidecar is injected when enable_docker is 'BUILD'."""
-        cluster_yaml = self._base_yaml()
-
-        def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('enable_docker',):
-                return 'BUILD'
-            return default_value
-
-        with patch('sky.skypilot_config.get_effective_region_config',
-                   side_effect=mock_get_config):
-            from sky import clouds as sky_clouds
-            result = utils.combine_pod_config_fields(
-                cluster_yaml,
-                cluster_config_overrides={},
-                cloud=sky_clouds.Kubernetes(),
-                context='test-ctx')
-
-        node_cfg = result['available_node_types']['ray_head_default'][
-            'node_config']
-        container_names = [c['name'] for c in node_cfg['spec']['containers']]
-        assert 'buildkitd' in container_names
-        volume_names = [v['name'] for v in node_cfg['spec']['volumes']]
-        assert 'buildkit-sock' in volume_names
-        # No cache volume by default; PVC is injected later in _create_pods.
-        assert 'buildkit-cache' not in volume_names
-
-    def test_task_enable_docker_overrides_global(self):
-        """Task-level enable_docker config fully replaces global config."""
-        cluster_yaml = self._base_yaml()
-
-        def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('enable_docker',):
-                # Global says dind
-                return True
-            return default_value
-
-        # Task overrides to buildkit
-        overrides = {'kubernetes': {'enable_docker': 'BUILD'}}
-
-        with patch('sky.skypilot_config.get_effective_region_config',
-                   side_effect=mock_get_config):
-            from sky import clouds as sky_clouds
-            result = utils.combine_pod_config_fields(
-                cluster_yaml,
-                cluster_config_overrides=overrides,
-                cloud=sky_clouds.Kubernetes(),
-                context='test-ctx')
-
-        node_cfg = result['available_node_types']['ray_head_default'][
-            'node_config']
-        container_names = [c['name'] for c in node_cfg['spec']['containers']]
-        assert 'buildkitd' in container_names
         assert 'dind' not in container_names
+        assert 'buildkitd' not in container_names
 
-    def test_pod_config_overrides_enable_docker(self):
-        """Explicit pod_config takes precedence over auto-injected enable_docker."""
-        cluster_yaml = self._base_yaml()
+    def test_pod_config_can_override_template_rendered_dind(self):
+        """pod_config merging can override dind container from template."""
+        cluster_yaml = self._base_yaml_with_dind()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('enable_docker',):
-                return True
             if keys == ('pod_config',):
-                # User overrides the dind image
                 return {
                     'spec': {
                         'containers': [{
@@ -3359,35 +3180,20 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
             c for c in node_cfg['spec']['containers'] if c['name'] == 'dind')
         assert dind['image'] == 'docker:custom-image'
 
-    def test_docker_config_stored_in_provider(self):
-        """Effective docker config is persisted into provider."""
-        cluster_yaml = self._base_yaml()
+    def test_pod_config_can_add_extra_sidecar(self):
+        """pod_config merging can add an extra container alongside dind."""
+        cluster_yaml = self._base_yaml_with_dind()
 
         def mock_get_config(cloud, region, keys, default_value=None):
-            if keys == ('enable_docker',):
-                return {'mode': 'ALL', 'cache_volume': 'my-cache'}
-            return default_value
-
-        with patch('sky.skypilot_config.get_effective_region_config',
-                   side_effect=mock_get_config):
-            from sky import clouds as sky_clouds
-            result = utils.combine_pod_config_fields(
-                cluster_yaml,
-                cluster_config_overrides={},
-                cloud=sky_clouds.Kubernetes(),
-                context='test-ctx')
-
-        assert result['provider']['docker_config'] == {
-            'mode': 'ALL',
-            'cache_volume': 'my-cache',
-        }
-
-    def test_no_enable_docker_config_no_injection(self):
-        """No sidecar containers when enable_docker config is absent."""
-        cluster_yaml = self._base_yaml()
-
-        def mock_get_config(cloud, region, keys, default_value=None):
-            # enable_docker absent; pod_config returns empty dict
+            if keys == ('pod_config',):
+                return {
+                    'spec': {
+                        'containers': [{
+                            'name': 'my-sidecar',
+                            'image': 'busybox:latest',
+                        }]
+                    }
+                }
             return default_value
 
         with patch('sky.skypilot_config.get_effective_region_config',
@@ -3402,8 +3208,9 @@ class TestCombinePodConfigFieldsWithEnableDocker(unittest.TestCase):
         node_cfg = result['available_node_types']['ray_head_default'][
             'node_config']
         container_names = [c['name'] for c in node_cfg['spec']['containers']]
-        assert 'dind' not in container_names
-        assert 'buildkitd' not in container_names
+        assert 'dind' in container_names
+        assert 'my-sidecar' in container_names
+        assert 'ray-node' in container_names
 
 
 class TestInjectDockerCacheVolume(unittest.TestCase):
