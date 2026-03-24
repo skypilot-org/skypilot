@@ -523,28 +523,56 @@ class Task:
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
 
+        Also captures git metadata (commit hash and dirty status) when
+        the task has meaningful git context (workdir set or YAML-based).
+
         Note: if this function is called on a remote SkyPilot API server,
         it must be after the client side has sync-ed all files to the
         remote server.
         """
-        if self.workdir is None:
-            return
-        # Only expand the workdir if it is a string
-        if isinstance(self.workdir, dict):
-            git_ref = self.workdir.get('ref')
-            if git_ref is not None:
-                self._metadata['git_commit'] = git_ref
-            return
-        user_workdir = self.workdir
-        self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
-        if not os.path.isdir(self.workdir):
-            # Symlink to a dir is legal (isdir() follows symlinks).
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Workdir must be a valid directory (or '
-                    f'a symlink to a directory). {user_workdir} not found.')
+        # Guard: skip git metadata capture if already set (client-side).
+        # The server re-calls dag.validate() -> expand_and_validate_workdir(),
+        # and os.getcwd() on the server would produce incorrect metadata.
+        if 'git_commit' not in self._metadata:
+            if isinstance(self.workdir, dict):
+                git_ref = self.workdir.get('ref')
+                if git_ref is not None:
+                    self._metadata['git_commit'] = git_ref
+                return
 
-        self._metadata['git_commit'] = common_utils.get_git_commit(self.workdir)
+            git_dir = None
+            if self.workdir is not None:
+                user_workdir = self.workdir
+                self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
+                if not os.path.isdir(self.workdir):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Workdir must be a valid directory (or '
+                            f'a symlink to a directory). '
+                            f'{user_workdir} not found.')
+                git_dir = self.workdir
+            elif self._user_specified_yaml is not None:
+                git_dir = os.getcwd()
+
+            if git_dir is not None:
+                self._metadata['git_commit'] = (
+                    common_utils.get_git_commit(git_dir))
+                self._metadata['git_dirty'] = (
+                    common_utils.get_git_dirty(git_dir))
+        else:
+            # Metadata already set (server-side re-validation).
+            # Still validate and resolve workdir path if present.
+            if isinstance(self.workdir, dict):
+                return
+            if self.workdir is not None:
+                user_workdir = self.workdir
+                self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
+                if not os.path.isdir(self.workdir):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Workdir must be a valid directory (or '
+                            f'a symlink to a directory). '
+                            f'{user_workdir} not found.')
 
     @staticmethod
     def from_yaml_config(
