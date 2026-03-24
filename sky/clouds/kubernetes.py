@@ -858,6 +858,33 @@ class Kubernetes(clouds.Cloud):
         deploy_vars['k8s_ipc_lock_capability'] = (
             network_type.requires_ipc_lock_capability())
 
+        # Docker sidecar (DinD / BuildKit) support.
+        raw_docker_cfg = skypilot_config.get_effective_region_config(
+            cloud='kubernetes',
+            region=context,
+            keys=('enable_docker',),
+            default_value=None,
+            override_configs=resources.cluster_config_overrides)
+        docker_cfg = kubernetes_utils.normalize_enable_docker_config(
+            raw_docker_cfg)
+        if docker_cfg is not None:
+            docker_mode = docker_cfg.mode
+            dind_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.ALL]
+            build_defaults = kubernetes_utils.DOCKER_SIDECAR_DEFAULTS[
+                kubernetes_utils.DockerMode.BUILD]
+            deploy_vars['k8s_enable_docker_all'] = (
+                docker_mode == kubernetes_utils.DockerMode.ALL)
+            deploy_vars['k8s_enable_docker_build'] = (
+                docker_mode == kubernetes_utils.DockerMode.BUILD)
+            deploy_vars['k8s_docker_dind_image'] = dind_defaults.image
+            deploy_vars['k8s_docker_buildkit_image'] = build_defaults.image
+            deploy_vars['k8s_docker_config_dict'] = docker_cfg.to_dict()
+        else:
+            deploy_vars['k8s_enable_docker_all'] = False
+            deploy_vars['k8s_enable_docker_build'] = False
+            deploy_vars['k8s_docker_config_dict'] = None
+
         return deploy_vars
 
     @staticmethod
