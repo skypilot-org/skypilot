@@ -1811,6 +1811,17 @@ class Task:
             secrets = {k: '<redacted>' for k, v in secrets.items()}
         add_if_not_none('secrets', secrets, no_empty=True)
 
+        # Add managed secrets references
+        if self._managed_secret_refs:
+            managed_secrets = []
+            for ref in self._managed_secret_refs:
+                if ref.mount_path is not None:
+                    managed_secrets.append(
+                        {ref.name: {'mount_path': ref.mount_path}})
+                else:
+                    managed_secrets.append(ref.name)
+            config['managed_secrets'] = managed_secrets
+
         add_if_not_none('file_mounts', {})
 
         if self.file_mounts is not None:
