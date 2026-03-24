@@ -21,6 +21,7 @@ Lifecycle::
 """
 import collections
 import contextvars
+import json
 import logging
 import os
 import signal
@@ -333,19 +334,17 @@ class BatchCoordinator:
 
     def _generate_worker_startup_code(self) -> str:
         """Generate code to start the long-running worker service."""
-        import json as _json  # pylint: disable=import-outside-toplevel
-
         job_id = str(self._managed_job_id)
         activate = self.activate_env.strip()
         activate_line = f'{activate} &&' if activate else ''
         sky_runtime = skylet_constants.SKY_REMOTE_PYTHON_ENV
 
         # Serialize typed format dicts as JSON env vars for workers.
-        input_format_json = _json.dumps(self._input_format.to_dict()).replace(
+        input_format_json = json.dumps(self._input_format.to_dict()).replace(
             '\'', '\'\\\'\'')
         # Pass output formats as a JSON array for multi-output support.
-        output_formats_json = _json.dumps(self._output_formats_dict or
-                                          []).replace('\'', '\'\\\'\'')
+        output_formats_json = json.dumps(self._output_formats_dict or
+                                         []).replace('\'', '\'\\\'\'')
 
         return textwrap.dedent(f"""\
             set -e

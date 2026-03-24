@@ -4044,22 +4044,24 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f'Returncode: {returncode}') from e
         return job_id, log_dir
 
-    def set_job_info_without_job_id(self,
-                                    handle: CloudVmRayResourceHandle,
-                                    name: str,
-                                    workspace: str,
-                                    entrypoint: str,
-                                    pool: Optional[str],
-                                    pool_hash: Optional[str],
-                                    user_hash: Optional[str],
-                                    task_ids: List[int],
-                                    task_names: List[str],
-                                    resources_str: str,
-                                    metadata_jsons: List[str],
-                                    is_primary_in_job_groups: List[bool],
-                                    num_jobs: int = 1,
-                                    execution: str = DEFAULT_EXECUTION.value,
-                                    is_batch: bool = False) -> List[int]:
+    def set_job_info_without_job_id(
+        self,
+        handle: CloudVmRayResourceHandle,
+        name: str,
+        workspace: str,
+        entrypoint: str,
+        pool: Optional[str],
+        pool_hash: Optional[str],
+        user_hash: Optional[str],
+        task_ids: List[int],
+        task_names: List[str],
+        resources_str: str,
+        metadata_jsons: List[str],
+        is_primary_in_job_groups: List[bool],
+        num_jobs: int = 1,
+        execution: str = DEFAULT_EXECUTION.value,
+        is_batch: bool = False,
+    ) -> List[int]:
         """Set job info without creating entries in the jobs table.
 
         This creates entries in job_info_table and spot_table without creating

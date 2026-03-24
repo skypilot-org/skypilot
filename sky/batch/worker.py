@@ -56,8 +56,8 @@ _current_batch_lock = threading.Lock()
 
 _output_path: Optional[str] = None
 _job_id: Optional[str] = None
-_dataset_format: Optional[Any] = None  # InputDatasetFormat instance
-_output_formats: List[Any] = []  # List of OutputFormat instances
+_dataset_format: Optional[io_formats.InputFormat] = None
+_output_formats: List[io_formats.OutputFormat] = []
 
 # ---------------------------------------------------------------------------
 # HTTP handler (localhost only)
@@ -258,7 +258,7 @@ def save_results(results: List[Dict[str, Any]]) -> None:
             'input item.')
 
     # Upload results using all output formats.
-    assert _output_formats, 'Worker not initialized'
+    assert _output_formats and _job_id, 'Worker not initialized'
     for fmt in _output_formats:
         chunk_path = fmt.upload_chunk(results, fmt.path, batch_item.batch_idx,
                                       batch_item.start_idx, batch_item.end_idx,
