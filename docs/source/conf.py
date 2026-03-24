@@ -128,7 +128,7 @@ html_theme_options = {
         'icon': 'fab fa-github',
     }],
     'use_edit_page_button': True,
-    'announcement': '',  # Put announcements such as meetups here.
+    'announcement': '<div style="padding: 24px; text-align: center; font-size: 0.8rem; line-height: 1;">👋 Join us for the <b>SkyPilot AI Infra Meetup</b> in San Francisco on March 25! <a href="https://luma.com/h52qyhmt?utm_source=skydocs">Register here</a></div>',
     'secondary_sidebar_items': [
         'page-toc',
         'edit-this-page',

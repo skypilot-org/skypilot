@@ -3,14 +3,15 @@
 .. |community-badge| image:: https://img.shields.io/badge/Community%20Maintained-EAFAFF?style=flat
    :alt: Community Maintained
 
-.. |early-access-badge| image:: https://img.shields.io/badge/Early%20Access-F66A0A?style=flat
-   :alt: Early Access
-
 Installation
 ============
 
 Install SkyPilot
 ----------------
+
+.. tip::
+
+   To use SkyPilot with AI agent (Claude Code, Codex, etc.), install :ref:`SkyPilot Skill <skill>` to give your agent full SkyPilot expertise.
 
 SkyPilot supports installation with ``uv`` or ``pip``.
 
@@ -235,6 +236,7 @@ This will produce a summary like:
     Seeweb: enabled
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
+    VastData: enabled
     Kubernetes: enabled
     Slurm: enabled
 
@@ -370,12 +372,12 @@ See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. _slurm-installation:
 
-Slurm |early-access-badge|
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Slurm
+~~~~~
 
 .. note::
 
-    **Early Access:** Slurm support is under active development. If you're interested in trying it out,
+    Slurm support is under active development. We'd love to hear from you —
     please `fill out this form <https://forms.gle/rfdWQcd9oQgp41Hm8>`_.
 
 SkyPilot can run workloads on Slurm clusters. The only requirement is SSH access to a Slurm login node.
@@ -1562,6 +1564,82 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+.. _vastdata-installation:
+
+VastData object storage
+~~~~~~~~~~~~~~~~~~~~~~~
+
+`VastData <https://vastdata.com/>`__ offers S3-compatible object storage. SkyPilot can download/upload data to VastData buckets and mount them as a local filesystem on clusters launched by SkyPilot. To set up VastData support:
+
+.. note::
+
+  VastData (object storage) is a separate company from Vast.ai (GPU compute). This integration is for VastData's S3-compatible object storage only.
+
+Install the necessary dependencies for VastData:
+
+.. tab-set::
+  .. tab-item:: uv venv
+    :sync: uv-venv-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv pip install "skypilot[vastdata]"
+      # From nightly build
+      uv pip install "skypilot-nightly[vastdata]"
+
+  .. tab-item:: uv tool
+    :sync: uv-tool-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      uv tool install --with pip "skypilot[vastdata]"
+      # From nightly build
+      uv tool install --with pip "skypilot-nightly[vastdata]"
+
+  .. tab-item:: pip
+    :sync: pip-tab
+
+    .. code-block:: shell
+
+      # SkyPilot requires 3.7 <= python <= 3.13.
+      # From stable release
+      pip install "skypilot[vastdata]"
+      # From nightly build
+      pip install "skypilot-nightly[vastdata]"
+      # From source
+      pip install -e ".[vastdata]"
+
+SkyPilot uses separate configuration files for VastData to avoid conflicts with your AWS credentials. Run the following command to configure your VastData access credentials:
+
+.. code-block:: shell
+
+  AWS_SHARED_CREDENTIALS_FILE=~/.vastdata/vastdata.credentials aws configure --profile vastdata
+
+When prompted, enter your VastData credentials:
+
+.. code-block:: text
+
+  AWS Access Key ID [None]: <your_access_key_id>
+  AWS Secret Access Key [None]: <your_secret_access_key>
+  Default region name [None]: auto
+  Default output format [None]: json
+
+Next, configure the endpoint URL for VastData Object Storage. Replace ``<your_vastdata_endpoint>`` with your VastData S3 endpoint (e.g., ``https://s3.example.vastdata.com``):
+
+.. code-block:: shell
+
+  AWS_CONFIG_FILE=~/.vastdata/vastdata.config aws configure set endpoint_url <your_vastdata_endpoint> --profile vastdata
+
+You can verify your credentials are set up correctly by running:
+
+.. code-block:: shell
+
+  sky check vastdata
+
 
 Prime Intellect |community-badge|
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1670,6 +1748,24 @@ Seeweb |community-badge|
 
   [DEFAULT]
   api_key = <your-api-token>
+
+Verda |community-badge|
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`Verda <https://www.verda.com/>`_ is the sovereign European GPU Cloud Provider. To use Verda with SkyPilot:
+
+1. Log into your `Verda Console : <https://console.verda.com/>`__.
+2. Navigate to *Credentials → Cloud API Credentials* in the console, and press **Create**.
+3. Create the file :code:`~/.verda/config.json` with the following contents:
+
+.. code-block:: shell
+
+      mkdir -p ~/.verda
+      echo { "client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET" } > ~/.verda/config.json
+
+4. Alternatively, you can set the environment variables :code:`VERDA_CLIENT_ID` and :code:`VERDA_CLIENT_SECRET`.
+5. You are all set! Verda Cloud does not require any additional setup or dependencies.
+
 
 .. _docker-image:
 

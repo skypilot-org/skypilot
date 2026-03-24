@@ -11,8 +11,12 @@ import enum
 import os
 import pathlib
 import re
+import select
 import shlex
+import signal
+import sys
 import textwrap
+import threading
 import time
 import traceback
 import typing
@@ -41,6 +45,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import infra_utils
@@ -100,12 +105,8 @@ _JOB_CANCELLED_MESSAGE = (
 # update the state.
 _FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 120
 
-# After enabling consolidation mode, we need to restart the API server to get
-# the jobs refresh deamon and correct number of executors. We use this file to
-# indicate that the API server has been restarted after enabling consolidation
-# mode.
-_JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
-    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
+# Content written to the jobs cancel signal file.
+_JOBS_GRACEFUL_CANCEL_SIGNAL = 'graceful'
 
 # The response fields for managed jobs that require cluster handle
 _CLUSTER_HANDLE_FIELDS = [
@@ -118,6 +119,9 @@ _CLUSTER_HANDLE_FIELDS = [
     'accelerators',
     'cluster_name_on_cloud',
     'labels',
+    # Network endpoint information (extracted from cluster handle)
+    'internal_external_ips',
+    'internal_services',
 ]
 
 # The response fields for managed jobs that are not stored in the database
@@ -148,6 +152,8 @@ class UserSignal(enum.Enum):
 def terminate_cluster(
     cluster_name: str,
     max_retry: int = 6,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> None:
     """Terminate the cluster."""
     from sky import core  # pylint: disable=import-outside-toplevel
@@ -167,7 +173,9 @@ def terminate_cluster(
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            core.down(cluster_name)
+            core.down(cluster_name,
+                      graceful=graceful,
+                      graceful_timeout=graceful_timeout)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
@@ -221,47 +229,95 @@ def _validate_consolidation_mode_config(
                     f'lose the job history.{colorama.Style.RESET_ALL}')
 
 
+def setup_consolidation_mode_on_startup(deploy: bool) -> None:
+    """Set up consolidation mode signal file on API server startup.
+
+    Must be called AFTER global_user_state DB is initialized and
+    server user hash is restored, so we can query for existing controller
+    clusters.
+
+    For explicit config (True/False): touches or removes signal file.
+    For unset config (None):
+      - in local mode (deploy=False): default to disabled
+      - in deploy mode: default to enabled if no existing controller clusters
+        found in DB, otherwise disabled (to continue using existing controller)
+    """
+    config_value = skypilot_config.get_nested(
+        ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+    signal_file = pathlib.Path(
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+
+    if config_value is not None:
+        assert isinstance(config_value, bool), config_value
+        enabled = config_value
+    else:
+        # config_value is None — not explicitly set
+        if deploy:
+            # Deploy mode, config not set: auto-enable unless controllers exist
+            existing = global_user_state.get_cluster_names_start_with(
+                common_lib.JOB_CONTROLLER_PREFIX)
+            if existing:
+                logger.info(
+                    'Found existing jobs controller cluster(s): '
+                    f'{existing}. Not auto-enabling consolidation mode.')
+                enabled = False
+            else:
+                logger.info('Auto-enabling jobs consolidation mode for deploy '
+                            'mode server.')
+                enabled = True
+        else:
+            # Local API server: don't auto-enable
+            enabled = False
+
+    _validate_consolidation_mode_config(enabled)
+
+    if enabled:
+        signal_file.touch()
+    elif signal_file.exists():
+        signal_file.unlink()
+
+
 # Whether to use consolidation mode or not. When this is enabled, the managed
 # jobs controller will not be running on a separate cluster, but locally on the
 # API Server. Under the hood, we submit the job monitoring logic as processes
 # directly in the API Server.
-# Use LRU Cache so that the check is only done once.
-@annotations.lru_cache(scope='request', maxsize=2)
-def is_consolidation_mode(on_api_restart: bool = False) -> bool:
+# The signal file is the source of truth, managed by
+# setup_consolidation_mode_on_startup() at server start. Config changes
+# (enabling or disabling) require a server restart to take effect.
+@annotations.lru_cache(scope='request', maxsize=1)
+def is_consolidation_mode() -> bool:
     if os.environ.get(constants.OVERRIDE_CONSOLIDATION_MODE) is not None:
         return True
 
-    config_consolidation_mode = skypilot_config.get_nested(
-        ('jobs', 'controller', 'consolidation_mode'), default_value=False)
-
     signal_file = pathlib.Path(
-        _JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE).expanduser()
-
-    if on_api_restart:
-        if config_consolidation_mode:
-            signal_file.touch()
-    else:
-        restart_signal_file_exists = signal_file.exists()
-        if not restart_signal_file_exists:
-            if config_consolidation_mode:
-                logger.warning(f'{colorama.Fore.YELLOW}Consolidation mode for '
-                               'managed jobs is enabled in the server config, '
-                               'but the API server has not been restarted yet. '
-                               'Please restart the API server to enable it.'
-                               f'{colorama.Style.RESET_ALL}')
-                return False
-        elif not config_consolidation_mode:
-            # Cleanup the signal file if the consolidation mode is disabled in
-            # the config. This allow the user to disable the consolidation mode
-            # without restarting the API server.
-            signal_file.unlink()
+        managed_job_constants.JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE
+    ).expanduser()
+    effective = signal_file.exists()
 
     # We should only do this check on API server, as the controller will not
     # have related config and will always seemingly disabled for consolidation
     # mode. Check #6611 for more details.
     if os.environ.get(constants.ENV_VAR_IS_SKYPILOT_SERVER) is not None:
-        _validate_consolidation_mode_config(config_consolidation_mode)
-    return config_consolidation_mode
+        # Warn if explicit config disagrees with actual state — the admin
+        # needs to restart the server for the config change to take effect.
+        config_value = skypilot_config.get_nested(
+            ('jobs', 'controller', 'consolidation_mode'), default_value=None)
+        if config_value is not None and config_value != effective:
+            expected = 'enabled' if config_value else 'disabled'
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Consolidation mode for managed jobs '
+                f'is {expected} in the server config, but the API server has '
+                'not been restarted yet. Please restart the API server to '
+                f'apply the change.{colorama.Style.RESET_ALL}')
+        # Validation may print a warning. Run validation against the intended
+        # (config) value to print warnings that should be addressed before the
+        # server is restarted.
+        if config_value is not None:
+            assert isinstance(config_value, bool), config_value
+            _validate_consolidation_mode_config(config_value)
+
+    return effective
 
 
 def ha_recovery_for_consolidation_mode() -> None:
@@ -521,6 +577,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         tasks = managed_job_state.get_managed_job_tasks(job_id)
         for task in tasks:
             pool = task.get('pool', None)
+            cluster_name: Optional[str] = None
             if pool is None:
                 task_name = task['job_name']
                 cluster_name = generate_managed_job_cluster_name(
@@ -528,6 +585,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             else:
                 cluster_name, _ = (
                     managed_job_state.get_pool_submit_info(job_id))
+            if cluster_name is None:
+                continue
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
@@ -806,7 +865,9 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
 def cancel_jobs_by_id(job_ids: Optional[List[int]],
                       all_users: bool = False,
                       current_workspace: Optional[str] = None,
-                      user_hash: Optional[str] = None) -> str:
+                      user_hash: Optional[str] = None,
+                      graceful: bool = False,
+                      graceful_timeout: Optional[int] = None) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
@@ -860,12 +921,22 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
                 with signal_file.open('w', encoding='utf-8') as f:
                     f.write(UserSignal.CANCEL.value)
                     f.flush()
+            if graceful:
+                logger.warning(f'Job {job_id} is on legacy controller, '
+                               'graceful shutdown not supported.')
         else:
             # New controller process.
             try:
                 signal_file = pathlib.Path(
                     managed_job_constants.CONSOLIDATED_SIGNAL_PATH, f'{job_id}')
-                signal_file.touch()
+                with filelock.FileLock(str(signal_file) + '.lock'):
+                    if graceful:
+                        content = _JOBS_GRACEFUL_CANCEL_SIGNAL
+                        if graceful_timeout is not None:
+                            content += f':{graceful_timeout}'
+                        signal_file.write_text(content, encoding='utf-8')
+                    else:
+                        signal_file.touch()
             except OSError as e:
                 logger.error(f'Failed to cancel job {job_id}: {e}')
                 # Don't add it to the to be cancelled job ids
@@ -896,7 +967,9 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]],
 
 
 def cancel_job_by_name(job_name: str,
-                       current_workspace: Optional[str] = None) -> str:
+                       current_workspace: Optional[str] = None,
+                       graceful: bool = False,
+                       graceful_timeout: Optional[int] = None) -> str:
     """Cancel a job by name."""
     job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
     if not job_ids:
@@ -905,7 +978,10 @@ def cancel_job_by_name(job_name: str,
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    msg = cancel_jobs_by_id(job_ids, current_workspace=current_workspace)
+    msg = cancel_jobs_by_id(job_ids,
+                            current_workspace=current_workspace,
+                            graceful=graceful,
+                            graceful_timeout=graceful_timeout)
     return f'{job_name!r} {msg}'
 
 
@@ -946,6 +1022,78 @@ def stream_logs_by_id(
         failure of the job. 0 if success, 100 if the job failed.
         See exceptions.JobExitCode for possible exit codes.
     """
+
+    # Start a background watchdog thread that detects when the kubectl
+    # exec connection has been dropped (client disconnect). On Kubernetes,
+    # kubectl exec -i does not allocate a PTY, so no SIGHUP is sent when
+    # the connection drops. The only signal is that stdin reaches EOF
+    # (the kubelet closes the stdin pipe). This thread monitors stdin and
+    # terminates the process when disconnection is detected, preventing
+    # leaked stream_logs processes on the controller. Changing the exec call to
+    # also include -t does not result in the kubelet sending a SIGHUP to the
+    # remote end of the connection.
+    #
+    # The API server now passes stdin=subprocess.PIPE (instead of
+    # DEVNULL) to kubectl exec -i, so stdin on the controller is a live
+    # pipe that only reaches EOF when the connection actually drops.
+    #
+    # For SSH controllers, stdin is a PTY (from ssh -tt), so SIGHUP
+    # handles cleanup natively. For consolidation mode or other local
+    # invocations, stdin may be /dev/null or already closed (EOF). We
+    # check at startup: if stdin is already at EOF, we skip stdin
+    # monitoring entirely to avoid false positives. Only a live stdin
+    # (not yet at EOF) is worth monitoring this is the case for
+    # kubectl exec -i with stdin=subprocess.PIPE.
+    check_stdin_eof = False
+    try:
+        readable, _, _ = select.select([sys.stdin], [], [], 0)
+        if readable:
+            # stdin is immediately readable check if it's already EOF
+            data = os.read(sys.stdin.fileno(), 1)
+            if data:
+                # Got actual data (unexpected but harmless); stdin is live
+                check_stdin_eof = True
+            # else: EOF at startup, don't monitor
+        else:
+            # stdin is not immediately readable it's a live pipe/TTY
+            # waiting for input, meaning we have a real connection
+            check_stdin_eof = True
+    except (ValueError, OSError):
+        # stdin is already closed or invalid — not useful for monitoring
+        pass
+
+    def _orphan_watchdog() -> None:
+        """Background thread that monitors for connection drop."""
+        initial_parent_pid = os.getppid()
+        while True:
+            time.sleep(5)
+            # Check 1: Parent PID changed (reparented to init/subreaper)
+            if os.getppid() != initial_parent_pid:
+                logger.info('Parent process died, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+            # Check 2: stdin EOF (kubectl exec -i connection dropped).
+            # Only checked when stdin is a pipe (Kubernetes), not a TTY
+            # (SSH). With SSH -tt, the PTY delivers SIGHUP on disconnect,
+            # so this check is unnecessary and could cause false positives.
+            if not check_stdin_eof:
+                continue
+            try:
+                readable, _, _ = select.select([sys.stdin], [], [], 0)
+                if readable:
+                    data = os.read(sys.stdin.fileno(), 1)
+                    if not data:
+                        logger.info('stdin EOF detected (connection dropped), '
+                                    'terminating.')
+                        os.kill(os.getpid(), signal.SIGTERM)
+                        return
+            except (ValueError, OSError):
+                logger.info('stdin closed, terminating.')
+                os.kill(os.getpid(), signal.SIGTERM)
+                return
+
+    watchdog = threading.Thread(target=_orphan_watchdog, daemon=True)
+    watchdog.start()
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -1099,19 +1247,21 @@ def stream_logs_by_id(
                                tail=tail)
 
         backend = backends.CloudVmRayBackend()
-        task_id, managed_job_status = (
+        latest_task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
 
         # If a task filter was specified, use the filtered task_id instead of
         # the latest task_id. This allows viewing logs for a specific task in
         # a JobGroup with parallel execution.
         if filtered_task_id is not None:
-            task_id = filtered_task_id
+            latest_task_id = filtered_task_id
 
         # We wait for managed_job_status to be not None above. Once we see that
         # it's not None, we don't expect it to every become None again.
-        assert managed_job_status is not None, (job_id, task_id,
+        assert managed_job_status is not None, (job_id, latest_task_id,
                                                 managed_job_status)
+        assert latest_task_id is not None, (job_id, latest_task_id)
+        task_id = latest_task_id
 
         while should_keep_logging(managed_job_status):
             handle = None
@@ -1148,13 +1298,15 @@ def stream_logs_by_id(
                     status_display.update(msg)
                     prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                task_id, managed_job_status = (
+                latest_task_id, managed_job_status = (
                     managed_job_state.get_latest_task_id_status(job_id))
                 # Preserve filtered task_id if specified
                 if filtered_task_id is not None:
-                    task_id = filtered_task_id
-                assert managed_job_status is not None, (job_id, task_id,
+                    latest_task_id = filtered_task_id
+                assert managed_job_status is not None, (job_id, latest_task_id,
                                                         managed_job_status)
+                assert latest_task_id is not None, (job_id, latest_task_id)
+                task_id = latest_task_id
                 continue
             assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
@@ -1241,13 +1393,16 @@ def stream_logs_by_id(
                     status_display.start()
                     original_task_id = task_id
                     while True:
-                        task_id, managed_job_status = (
+                        latest_task_id, managed_job_status = (
                             managed_job_state.get_latest_task_id_status(job_id))
-                        if original_task_id != task_id:
+                        if original_task_id != latest_task_id:
                             break
                         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-                    assert managed_job_status is not None, (job_id, task_id,
+                    assert managed_job_status is not None, (job_id,
+                                                            latest_task_id,
                                                             managed_job_status)
+                    assert latest_task_id is not None, (job_id, latest_task_id)
+                    task_id = latest_task_id
                     continue
 
                 # The job can be cancelled by the user or the controller (when
@@ -1604,6 +1759,18 @@ def _populate_job_record_from_handle(
     job['accelerators'] = handle.launched_resources.accelerators
     job['labels'] = handle.launched_resources.labels
     job['cluster_name_on_cloud'] = handle.cluster_name_on_cloud
+    # Network endpoint information
+    job['internal_external_ips'] = handle.stable_internal_external_ips
+    # Extract internal_svc entries if available
+    internal_services = None
+    if handle.cached_cluster_info is not None:
+        internal_services = {}
+        for instance_id, instance_infos in (
+                handle.cached_cluster_info.instances.items()):
+            for info in instance_infos:
+                if info.internal_svc is not None:
+                    internal_services[instance_id] = info.internal_svc
+    job['internal_services'] = internal_services
 
 
 def get_managed_job_queue(
@@ -1741,6 +1908,8 @@ def get_managed_job_queue(
                 job['infra'] = '-'
                 job['labels'] = None
                 job['cluster_name_on_cloud'] = None
+                job['internal_services'] = None
+                job['internal_external_ips'] = None
 
     _populate_job_records_from_handles(jobs_with_handle)
 
@@ -2372,7 +2541,45 @@ def _job_proto_to_dict(
             job_dict['schedule_state']))
     job_dict['schedule_state'] = (schedule_state_enum.value
                                   if schedule_state_enum is not None else None)
+    # Convert internal_external_ips from list of dicts to list of tuples
+    # MessageToDict converts IpPair messages to dicts like
+    # {"internal_ip": "...", "external_ip": "..."}, but ManagedJobRecord
+    # expects a list of (internal_ip, external_ip) tuples.
+    if 'internal_external_ips' in job_dict:
+        ip_pairs = job_dict['internal_external_ips']
+        if ip_pairs:
+            job_dict['internal_external_ips'] = [
+                (ip_pair.get('internal_ip', ''), ip_pair.get('external_ip', ''))
+                for ip_pair in ip_pairs
+            ]
+        else:
+            job_dict['internal_external_ips'] = None
+    # Convert empty internal_services dict to None for consistency
+    if 'internal_services' in job_dict and not job_dict['internal_services']:
+        job_dict['internal_services'] = None
     return job_dict
+
+
+def parse_job_cancel_file(content: str) -> Tuple[bool, Optional[int]]:
+    """Parse the job cancel signal file to check if graceful cancel is enabled.
+
+    Args:
+        content: content of the signal file, if any.
+
+    Returns:
+        A tuple of whether graceful cancel is enabled, and cancel timeout if
+        present.
+    """
+    graceful, graceful_timeout = False, None
+    if content and content.startswith(_JOBS_GRACEFUL_CANCEL_SIGNAL):
+        graceful = True
+        if ':' in content:
+            try:
+                graceful_timeout = int(content.split(':')[1])
+            except (ValueError, IndexError):
+                logger.warning('Incorrect graceful signal contents. Got: '
+                               f'{content}. Ignoring timeout...')
+    return graceful, graceful_timeout
 
 
 class ManagedJobCodeGen:
@@ -2481,7 +2688,9 @@ class ManagedJobCodeGen:
     @classmethod
     def cancel_jobs_by_id(cls,
                           job_ids: Optional[List[int]],
-                          all_users: bool = False) -> str:
+                          all_users: bool = False,
+                          graceful: bool = False,
+                          graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 2:
@@ -2494,15 +2703,26 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        else:
+        elif managed_job_version < 16:
             msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users},
                             current_workspace={active_workspace!r})
+        else:
+            msg = utils.cancel_jobs_by_id(
+                {job_ids},
+                all_users={all_users},
+                current_workspace={active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
 
     @classmethod
-    def cancel_job_by_name(cls, job_name: str) -> str:
+    def cancel_job_by_name(cls,
+                           job_name: str,
+                           graceful: bool = False,
+                           graceful_timeout: Optional[int] = None) -> str:
         active_workspace = skypilot_config.get_active_workspace()
         code = textwrap.dedent(f"""\
         if managed_job_version < 4:
@@ -2510,8 +2730,15 @@ class ManagedJobCodeGen:
             # supported before #5660. Don't check the workspace.
             # TODO(zhwu): Remove compatibility before 0.12.0
             msg = utils.cancel_job_by_name({job_name!r})
-        else:
+        elif managed_job_version < 16:
             msg = utils.cancel_job_by_name({job_name!r}, {active_workspace!r})
+        else:
+            msg = utils.cancel_job_by_name(
+                {job_name!r},
+                {active_workspace!r},
+                graceful={graceful},
+                graceful_timeout={graceful_timeout},
+            )
         print(msg, end="", flush=True)
         """)
         return cls._build(code)

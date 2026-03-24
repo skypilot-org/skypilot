@@ -27,16 +27,16 @@ check_file_age() {
     return 1  # File is old
 }
 
-# Only run sky show-gpus commands if output files don't exist or are old
+# Only run sky gpus list commands if output files don't exist or are old
 if ! check_file_age "source/compute/show-gpus-all.txt"; then
-    sky show-gpus -a > source/compute/show-gpus-all.txt
+    sky gpus list -a > source/compute/show-gpus-all.txt
     sed '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt > source/compute/show-gpus-all.txt-new
     mv source/compute/show-gpus-all.txt-new source/compute/show-gpus-all.txt
     echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
 fi
 
 if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
-    sky show-gpus H100:8 > source/compute/show-gpus-h100-8.txt
+    sky gpus list H100:8 > source/compute/show-gpus-h100-8.txt
 fi
 
 rm -rf build docs
@@ -63,7 +63,7 @@ if [ "$AUTO_BUILD" = true ]; then
         --port ${PORT:-8000}
 else
     rm -rf build docs
-    
+
     # Set build environment (only if not already set by GitHub Actions)
     if [ -z "$SPHINX_BUILD_PRODUCTION" ]; then
         export SPHINX_BUILD_LOCAL=true

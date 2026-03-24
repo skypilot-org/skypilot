@@ -6,11 +6,15 @@ import React, {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
 } from 'react';
+import { useRouter } from 'next/router';
 import { BASE_PATH, ENDPOINT } from '@/data/connectors/constants';
 import { apiClient } from '@/data/connectors/client';
 import dashboardCache from '@/lib/cache';
+import cachePreloader from '@/lib/cache-preloader';
 import { checkGrafanaAvailability, getGrafanaUrl } from '@/utils/grafana';
+import { canonicalizeGpuName, CANONICAL_GPU_NAMES } from '@/utils/gpuUtils';
 
 const PluginContext = createContext({
   topNavLinks: [],
@@ -19,7 +23,39 @@ const PluginContext = createContext({
   dataEnhancements: {},
   tableColumns: {},
   dataProviders: {},
+  recipeTypes: [],
 });
+
+const NAV_LINKS_CACHE_KEY = 'sky-plugin-nav-links-cache';
+
+function loadCachedNavLinks() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const cached = localStorage.getItem(NAV_LINKS_CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        return parsed.map((link) => ({ ...link, _cached: true }));
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveCachedNavLinks(links) {
+  if (typeof window === 'undefined') return;
+  try {
+    // Strip _cached flag before persisting
+    const toCache = links
+      .filter((link) => !link._cached)
+      .map(({ _cached, ...rest }) => rest);
+    localStorage.setItem(NAV_LINKS_CACHE_KEY, JSON.stringify(toCache));
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 const initialState = {
   topNavLinks: [],
@@ -28,6 +64,7 @@ const initialState = {
   dataEnhancements: {}, // Map of dataSource → array of enhancements
   tableColumns: {}, // Map of table name → array of column configs
   dataProviders: {}, // Map of provider id → provider config (with useHook)
+  recipeTypes: [], // Array of { id, label, fullLabel, icon, color, template }
 };
 
 const actions = {
@@ -37,6 +74,8 @@ const actions = {
   REGISTER_DATA_ENHANCEMENT: 'REGISTER_DATA_ENHANCEMENT',
   REGISTER_TABLE_COLUMN: 'REGISTER_TABLE_COLUMN',
   REGISTER_DATA_PROVIDER: 'REGISTER_DATA_PROVIDER',
+  CLEAR_CACHED_NAV_LINKS: 'CLEAR_CACHED_NAV_LINKS',
+  REGISTER_RECIPE_TYPE: 'REGISTER_RECIPE_TYPE',
 };
 
 function pluginReducer(state, action) {
@@ -118,6 +157,16 @@ function pluginReducer(state, action) {
           ...state.dataProviders,
           [action.payload.id]: action.payload,
         },
+      };
+    case actions.CLEAR_CACHED_NAV_LINKS:
+      return {
+        ...state,
+        topNavLinks: state.topNavLinks.filter((link) => !link._cached),
+      };
+    case actions.REGISTER_RECIPE_TYPE:
+      return {
+        ...state,
+        recipeTypes: upsertById(state.recipeTypes, action.payload),
       };
     default:
       return state;
@@ -255,7 +304,10 @@ function normalizeNavLink(link) {
       link.external ??
       (/^(https?:)?\/\//.test(String(link.href)) || link.target === '_blank'),
     badge: typeof link.badge === 'string' ? link.badge : null,
-    icon: typeof link.icon === 'string' ? link.icon : null,
+    icon:
+      typeof link.icon === 'string' || React.isValidElement(link.icon)
+        ? link.icon
+        : null,
     description:
       typeof link.description === 'string' ? link.description : undefined,
   };
@@ -600,13 +652,85 @@ function createPluginApi(dispatch) {
         basePath: BASE_PATH,
         apiEndpoint: ENDPOINT,
         dashboardCache: dashboardCache,
+        cachePreloader: cachePreloader,
         grafanaUtils: {
           checkGrafanaAvailability,
           getGrafanaUrl,
         },
+        gpuUtils: {
+          canonicalizeGpuName,
+          CANONICAL_GPU_NAMES,
+        },
         // Provide URL normalization utility for plugins
         normalizeUrl: normalizeUrlForHistory,
+        // Navigate using the Next.js router (SPA navigation)
+        navigate: (path) => {
+          const router = window.__pluginRouterRef?.current;
+          if (router) {
+            router.push(path);
+          } else {
+            window.location.href = path;
+          }
+        },
+        // Get current grouped nav links (from all registered plugins)
+        getNavLinks: () => {
+          const stateRef = window.__pluginStateRef;
+          if (!stateRef?.current) return { ungrouped: [], groups: {} };
+          const sorted = [...(stateRef.current.topNavLinks || [])].sort(
+            (a, b) => a.order - b.order
+          );
+          const ungrouped = sorted.filter((link) => !link.group);
+          const grouped = sorted.filter((link) => link.group);
+          const groups = grouped.reduce((acc, link) => {
+            const groupName = link.group;
+            if (!acc[groupName]) acc[groupName] = [];
+            acc[groupName].push(link);
+            return acc;
+          }, {});
+          return { ungrouped, groups };
+        },
+        // Get current plugin routes
+        getPluginRoutes: () => {
+          const stateRef = window.__pluginStateRef;
+          return stateRef?.current?.routes || [];
+        },
+        // Get registered components for a slot
+        getSlotComponents: (slot) => {
+          const stateRef = window.__pluginStateRef;
+          if (!stateRef?.current || !slot) return [];
+          return stateRef.current.components[slot] || [];
+        },
       };
+    },
+    getComponents() {
+      // Lazy import to avoid circular dependencies.
+      // This dynamically provides all components from the ui directory.
+      // eslint-disable-next-line no-undef
+      return require('@/components/ui');
+    },
+    registerRecipeType(config) {
+      if (!config || !config.id || !config.label) {
+        console.warn(
+          '[SkyDashboardPlugin] Invalid recipe type registration:',
+          config
+        );
+        return null;
+      }
+      const normalized = {
+        id: String(config.id),
+        label: String(config.label),
+        fullLabel: config.fullLabel
+          ? String(config.fullLabel)
+          : String(config.label),
+        icon: config.icon || null,
+        color: config.color ? String(config.color) : 'gray',
+        template: config.template ? String(config.template) : '',
+      };
+      dispatch({
+        type: actions.REGISTER_RECIPE_TYPE,
+        payload: normalized,
+      });
+      return normalized.id;
     },
     registerDataProvider(config) {
       if (!config?.id) {
@@ -632,7 +756,30 @@ function createPluginApi(dispatch) {
 }
 
 export function PluginProvider({ children }) {
-  const [state, dispatch] = useReducer(pluginReducer, initialState);
+  const [state, dispatch] = useReducer(pluginReducer, null, () => ({
+    ...initialState,
+    topNavLinks: loadCachedNavLinks(),
+  }));
+  const router = useRouter();
+  const routerRef = useRef(router);
+  const pluginsLoadedRef = useRef(false);
+
+  // Keep router ref up to date
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  // Expose router reference for plugin API navigate()
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.__pluginRouterRef = routerRef;
+      return () => {
+        if (window.__pluginRouterRef === routerRef) {
+          delete window.__pluginRouterRef;
+        }
+      };
+    }
+  }, []);
 
   // Expose state reference for getDataEnhancements to access outside React context
   useEffect(() => {
@@ -645,6 +792,13 @@ export function PluginProvider({ children }) {
       };
     }
   }, [state]);
+
+  // Persist nav links to localStorage after plugins have fully loaded
+  useEffect(() => {
+    if (pluginsLoadedRef.current) {
+      saveCachedNavLinks(state.topNavLinks);
+    }
+  }, [state.topNavLinks]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -666,14 +820,27 @@ export function PluginProvider({ children }) {
       if (cancelled) {
         return;
       }
+      const loadPromises = [];
       manifest.forEach((pluginDescriptor) => {
         const jsPath = extractJsPath(pluginDescriptor);
         if (jsPath && !cancelled) {
           const requiresEarlyInit =
             pluginDescriptor.requires_early_init === true;
-          loadPluginScript(jsPath, requiresEarlyInit);
+          const promise = loadPluginScript(jsPath, requiresEarlyInit);
+          if (promise) {
+            loadPromises.push(promise);
+          }
         }
       });
+      // After all plugin scripts have loaded and registered,
+      // clear stale cached nav links and enable cache persistence
+      if (loadPromises.length > 0) {
+        await Promise.all(loadPromises);
+      }
+      if (!cancelled) {
+        pluginsLoadedRef.current = true;
+        dispatch({ type: actions.CLEAR_CACHED_NAV_LINKS });
+      }
     };
     void bootstrapPlugins();
 
@@ -736,13 +903,28 @@ export function usePluginRoutes() {
   return routes;
 }
 
+export function usePluginRecipeTypes() {
+  const { recipeTypes } = usePluginState();
+  return recipeTypes;
+}
+
 export function usePluginRoute(pathname) {
   const routes = usePluginRoutes();
   return useMemo(() => {
     if (!pathname) {
       return null;
     }
-    return routes.find((route) => route.path === pathname) || null;
+    // Use prefix matching so plugin sub-routes (e.g. /plugins/my-plugin/details)
+    // are handled by the plugin that registered the base path (/plugins/my-plugin).
+    // Sort by path length descending so the most specific match wins.
+    return (
+      [...routes]
+        .sort((a, b) => b.path.length - a.path.length)
+        .find(
+          (route) =>
+            pathname === route.path || pathname.startsWith(route.path + '/')
+        ) || null
+    );
   }, [pathname, routes]);
 }
 

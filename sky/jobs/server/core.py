@@ -10,6 +10,7 @@ from urllib import parse as urlparse
 import uuid
 
 import colorama
+from pydantic import SecretStr as _SecretStr
 
 from sky import backends
 from sky import core
@@ -295,6 +296,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
         # Detect batch coordinator jobs (ds.map()) via task metadata.
         is_batch = any(
             t.metadata.get('batch_coordinator', False) for t in dag.tasks)
+        assert dag.name is not None, 'dag must have a name'
         consolidation_mode_job_id = (
             managed_job_state.set_job_info_without_job_id(
                 dag.name,
@@ -316,6 +318,7 @@ def _maybe_submit_job_locally(prefix: str, dag: 'sky.Dag',
             if dag.is_job_group():
                 is_primary_in_job_group = (dag.primary_tasks is None or
                                            task.name in dag.primary_tasks)
+            assert task.name is not None, 'task must have a name'
             managed_job_state.set_pending(consolidation_mode_job_id, task_id,
                                           task.name, resources_str,
                                           task.metadata_json,
@@ -417,7 +420,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
 
     workspace = skypilot_config.get_active_workspace(force_user_workspace=True)
     entrypoint = common_utils.get_current_command()
-    pool_hash = serve_state.get_service_hash(pool)
+    pool_hash = serve_state.get_service_hash(pool) if pool else None
     user_hash = common_utils.get_user_hash()
 
     # Prepare task data
@@ -465,6 +468,39 @@ def _submit_remotely(controller: controller_utils.Controllers,
         is_primary_in_job_groups=(is_primary_in_job_groups),
         is_batch=is_batch)
     return job_ids
+
+
+def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
+                          dag_uuid: str) -> Tuple[str, str]:
+    """Create a service account token for a managed job with api_access.
+
+    Issues a token as the original user so nested jobs have the same
+    identity and permissions as the launching user.
+
+    Returns:
+        A tuple of (token_string, token_id).
+    """
+    # Lazy imports to avoid circular dependencies and keep import time low.
+    # pylint: disable=import-outside-toplevel
+    from sky.users.token_service import token_service
+
+    token_name = f'managed-job-{job_name or "unnamed"}-{dag_uuid[:8]}'
+
+    token_data = token_service.create_token(
+        creator_user_id=creator_user_id,
+        service_account_user_id=creator_user_id,
+        token_name=token_name,
+        expires_in_days=7)
+
+    global_user_state.add_service_account_token(
+        token_id=token_data['token_id'],
+        token_name=token_name,
+        token_hash=token_data['token_hash'],
+        creator_user_hash=creator_user_id,
+        service_account_user_id=creator_user_id,
+        expires_at=token_data['expires_at'])
+
+    return token_data['token'], token_data['token_id']
 
 
 @timeline.event
@@ -718,6 +754,47 @@ def launch(
         for task_ in dag.tasks:
             task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
+        # Inject API server credentials for tasks with api_access enabled.
+        # Create a single token for the entire DAG and reuse it across all
+        # tasks that need API access, rather than creating one per task.
+        # Note: the API server endpoint env var is injected client-side
+        # (sky/jobs/client/sdk.py) where get_server_url() returns the
+        # externally reachable endpoint.
+        any_api_access = any(task_.api_access for task_ in dag.tasks)
+        if any_api_access:
+            sa_enabled = os.environ.get(
+                skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
+                'false').lower()
+            if sa_enabled != 'true':
+                with ux_utils.print_exception_no_traceback():
+                    env_var = (skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS)
+                    raise ValueError('api_access: true requires service '
+                                     'accounts to be enabled on the API '
+                                     f'server. Set {env_var}=true '
+                                     'environment variable on the server.')
+
+            user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
+            if user_id is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Cannot determine user identity for '
+                                       'api_access credential injection.')
+            token, token_id = _create_job_api_token(
+                creator_user_id=user_id,
+                job_name=dag.name,
+                dag_uuid=dag_uuid,
+            )
+
+            for task_ in dag.tasks:
+                if task_.api_access:
+                    task_._secrets[  # pylint: disable=protected-access
+                        skylet_constants.
+                        SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)
+
+            # Store the token ID so it can be cleaned up when the
+            # job completes.
+            for job_id in job_ids:
+                managed_job_state.set_api_access_token_id(job_id, token_id)
+
         dag_utils.dump_dag_to_yaml(dag, f.name)
 
         vars_to_fill: Dict[str, Any] = {
@@ -952,7 +1029,7 @@ def _maybe_restart_controller(
 
 
 # For backwards compatibility
-# TODO(hailong): Remove before 0.12.0.
+# TODO(lloyd): Remove before 0.13.0.
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
@@ -1103,7 +1180,8 @@ def queue_v2(
             return [], 0, {}, 0
         user_hashes = [user.id for user in users]
 
-    accessible_workspaces = list(workspaces_core.get_workspaces().keys())
+    accessible_workspaces = list(
+        workspaces_core.get_accessible_workspace_names())
 
     if handle.is_grpc_enabled_with_flag:
         try:
@@ -1219,7 +1297,9 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False,
            all_users: bool = False,
-           pool: Optional[str] = None) -> None:
+           pool: Optional[str] = None,
+           graceful: bool = False,
+           graceful_timeout: Optional[int] = None) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -1263,7 +1343,9 @@ def cancel(name: Optional[str] = None,
             current_workspace = skypilot_config.get_active_workspace()
             try:
                 request = managed_jobsv1_pb2.CancelJobsRequest(
-                    current_workspace=current_workspace)
+                    current_workspace=current_workspace,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
 
                 if all_users or all or job_ids:
                     request.all_users = all_users
@@ -1288,10 +1370,13 @@ def cancel(name: Optional[str] = None,
         if use_legacy:
             if all_users or all or job_ids:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
-                    job_ids, all_users=all_users)
+                    job_ids,
+                    all_users=all_users,
+                    graceful=graceful,
+                    graceful_timeout=graceful_timeout)
             elif name is not None:
                 code = managed_job_utils.ManagedJobCodeGen.cancel_job_by_name(
-                    name)
+                    name, graceful=graceful, graceful_timeout=graceful_timeout)
             else:
                 assert pool is not None, (job_ids, name, pool, all)
                 code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_pool(

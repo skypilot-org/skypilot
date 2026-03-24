@@ -79,6 +79,32 @@ def get_or_create_gpu_cluster(name: str, project_id: str, fabric: str) -> str:
     return cluster_id
 
 
+def get_subnet_id(region: str, project_id: str) -> str:
+    #  Check is there subnet if in config
+    subnet_id = skypilot_config.get_effective_region_config(cloud='nebius',
+                                                            region=region,
+                                                            keys=('subnet_id',),
+                                                            default_value=None)
+
+    service = nebius.vpc().SubnetServiceClient(nebius.sdk())
+    sub_nets = nebius.sync_call(
+        service.list(nebius.vpc().ListSubnetsRequest(parent_id=project_id,)))
+
+    # If subnet exists in this region return it else return first subnet
+    if subnet_id is not None:
+        for sub_net in sub_nets.items:
+            if sub_net.metadata.id == subnet_id:
+                return subnet_id
+        logger.warning(
+            f'Subnet ID "{subnet_id}" from config not found for region '
+            f'{region}. Falling back to the first available subnet.')
+
+    if not sub_nets.items:
+        raise ValueError(f'No subnets found for project {project_id} in region '
+                         f'{region}.')
+    return sub_nets.items[0].metadata.id
+
+
 def delete_cluster(name: str, region: str) -> None:
     """Delete a GPU cluster."""
     project_id = get_project_by_region(region)
@@ -188,6 +214,7 @@ def launch(cluster_name_on_cloud: str,
            user_data: str,
            associate_public_ip_address: bool,
            filesystems: List[Dict[str, Any]],
+           disk_tier: str,
            use_static_ip_address: bool = False,
            use_spot: bool = False,
            network_tier: Optional[resources_utils.NetworkTier] = None) -> str:
@@ -232,6 +259,30 @@ def launch(cluster_name_on_cloud: str,
                 cluster_id = get_or_create_gpu_cluster(cluster_name_on_cloud,
                                                        project_id, fabric)
 
+    def _disk_tier_to_disk_type(disk_tier: str) -> Any:
+        tier2type = {
+            str(resources_utils.DiskTier.HIGH):
+                nebius.compute().DiskSpec.DiskType.NETWORK_SSD_IO_M3,
+            str(resources_utils.DiskTier.MEDIUM):
+                nebius.compute().DiskSpec.DiskType.NETWORK_SSD,
+            str(resources_utils.DiskTier.LOW):
+                nebius.compute().DiskSpec.DiskType.NETWORK_SSD_NON_REPLICATED,
+        }
+        return tier2type[str(disk_tier)]
+
+    # Nebius NETWORK_SSD_IO_M3 (HIGH tier) requires disk sizes to be a
+    # multiple of 93 GiB.
+    actual_disk_size = disk_size
+    if (str(disk_tier) == str(resources_utils.DiskTier.HIGH) or
+            str(disk_tier) == str(resources_utils.DiskTier.LOW)):
+        actual_disk_size = nebius_constants.round_up_disk_size(disk_size)
+        if actual_disk_size != disk_size:
+            logger.warning(
+                f'Nebius HIGH and LOW disk tier requires size to be a multiple '
+                f'of {nebius_constants.NEBIUS_DISK_SIZE_STEP_GIB} GiB. '
+                f'Requested {disk_size} GiB, rounding up to '
+                f'{actual_disk_size} GiB.')
+
     service = nebius.compute().DiskServiceClient(nebius.sdk())
     disk = nebius.sync_call(
         service.create(nebius.compute().CreateDiskRequest(
@@ -242,8 +293,8 @@ def launch(cluster_name_on_cloud: str,
             spec=nebius.compute().DiskSpec(
                 source_image_family=nebius.compute().SourceImageFamily(
                     image_family=image_family),
-                size_gibibytes=disk_size,
-                type=nebius.compute().DiskSpec.DiskType.NETWORK_SSD,
+                size_gibibytes=actual_disk_size,
+                type=_disk_tier_to_disk_type(disk_tier),
             ))))
     disk_id = disk.resource_id
     retry_count = 0
@@ -276,10 +327,7 @@ def launch(cluster_name_on_cloud: str,
                 existing_filesystem=nebius.compute().ExistingFilesystem(
                     id=fs['filesystem_id'])))
 
-    service = nebius.vpc().SubnetServiceClient(nebius.sdk())
-    sub_net = nebius.sync_call(
-        service.list(nebius.vpc().ListSubnetsRequest(parent_id=project_id,)))
-
+    sub_net_id = get_subnet_id(region, project_id)
     service = nebius.compute().InstanceServiceClient(nebius.sdk())
     logger.debug(f'Creating instance {instance_name} in project {project_id}.')
     try:
@@ -303,7 +351,7 @@ def launch(cluster_name_on_cloud: str,
                     filesystems=filesystems_spec if filesystems_spec else None,
                     network_interfaces=[
                         nebius.compute().NetworkInterfaceSpec(
-                            subnet_id=sub_net.items[0].metadata.id,
+                            subnet_id=sub_net_id,
                             ip_address=nebius.compute().IPAddress(),
                             name='network-interface-0',
                             public_ip_address=nebius.compute().PublicIPAddress(

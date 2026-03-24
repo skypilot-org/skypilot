@@ -339,6 +339,8 @@ def request_without_retry(method, url, **kwargs) -> 'requests.Response':
     """Send a request to the API server without retry."""
     response = _session.request(method, url, **kwargs)
     handle_server_unavailable(response)
+    # TODO (kyuds): investigate into whether we can remove this as we
+    # explicitly set in `get_api_server_status`.
     remote_api_version = response.headers.get(constants.API_VERSION_HEADER)
     remote_version = response.headers.get(constants.VERSION_HEADER)
     if remote_api_version is not None:

@@ -245,6 +245,9 @@ Below is the available helm value keys and the default value of each key:
     :ref:`enabled <helm-values-digitaloceanCredentials-enabled>`: false
     :ref:`digitaloceanSecretName <helm-values-digitaloceanCredentials-digitaloceanSecretName>`: digitalocean-credentials
 
+  :ref:`slurmCredentials <helm-values-slurmCredentials>`:
+    :ref:`config <helm-values-slurmCredentials-config>`: null
+
   :ref:`extraInitContainers <helm-values-extraInitContainers>`: null
 
   :ref:`podSecurityContext <helm-values-podSecurityContext>`: {}
@@ -636,7 +639,12 @@ Default: ``null``
 ``apiService.sshKeySecret``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Optional secret that contains SSH identity files to the API server to use, all the entries in the secret will be mounted to ``~/.ssh/`` directory in the API server. Refer to :ref:`Deploy SkyPilot on existing machines <existing-machines>` for more details.
+Optional secret that contains SSH identity files for the API server. All entries in the secret will be mounted to the ``~/.ssh/`` directory in the API server.
+
+This is used for:
+
+- :ref:`SSH Node Pools <existing-machines>` - to connect to existing machines
+- :ref:`Slurm clusters <slurm-getting-started>` - to connect to Slurm login nodes
 
 Default: ``null``
 
@@ -2375,6 +2383,31 @@ Default: ``digitalocean-credentials``
   digitaloceanCredentials:
     digitaloceanSecretName: digitalocean-credentials
 
+.. _helm-values-slurmCredentials:
+
+``slurmCredentials``
+~~~~~~~~~~~~~~~~~~~~
+
+.. _helm-values-slurmCredentials-config:
+
+``slurmCredentials.config``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Content of the ``~/.slurm/config`` SSH configuration file for connecting to Slurm login nodes. This file follows the same format described in :ref:`slurm-getting-started`.
+
+Pass the config file content via ``--set-file slurmCredentials.config=/path/to/slurm/config`` when installing or upgrading the Helm chart.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  slurmCredentials:
+    config: |
+      Host mycluster1
+          HostName login.mycluster1.myorg.com
+          User myusername
+          IdentityFile ~/.ssh/id_rsa
+
 .. _helm-values-extraInitContainers:
 
 ``extraInitContainers``
@@ -2550,6 +2583,7 @@ By default, Grafana is configured to work with the ingress controller and auth p
     sidecar:
       datasources:
         enabled: true
+        initDatasources: true
       dashboards:
         enabled: true
     dashboardProviders:

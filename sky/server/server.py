@@ -22,6 +22,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 import traceback
 import typing
 from typing import (Any, Awaitable, Callable, Dict, List, Literal, Optional,
@@ -34,6 +35,7 @@ import anyio
 import fastapi
 from fastapi import responses as fastapi_responses
 from fastapi.middleware import cors
+import filelock
 import jwt as pyjwt
 import starlette.middleware.base
 import uvloop
@@ -98,6 +100,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.db import db_utils
+from sky.utils.kubernetes import gpu_labeler
 from sky.volumes.server import server as volumes_rest
 from sky.workspaces import server as workspaces_rest
 
@@ -250,7 +253,14 @@ def _extract_user_from_header(
 
     user_hash = hashlib.md5(
         user_name.encode()).hexdigest()[:common_utils.USER_HASH_LENGTH]
-    return models.User(id=user_hash, name=user_name)
+    if proxy_config.enabled:
+        return models.User(id=user_hash,
+                           name=user_name,
+                           user_type=models.UserType.LEGACY.value)
+    else:
+        return models.User(id=user_hash,
+                           name=user_name,
+                           user_type=models.UserType.SSO.value)
 
 
 def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
@@ -555,6 +565,57 @@ async def cleanup_upload_ids():
                 upload_ids_to_cleanup.pop((upload_id, user_hash))
 
 
+async def cleanup_unreferenced_file_mounts():
+    """Delete file mounts not referenced by any active request."""
+
+    # Synced cleanup for each directory, runs in asyncio.to_thread to avoid
+    # blocking the event loop.
+    def _do_cleanup():
+        clients_dir = common.API_SERVER_CLIENT_DIR.expanduser().resolve()
+        # Get all blob_id referenced by active requests.
+        active_blob_ids = requests_lib.get_active_file_mounts_blob_ids()
+        if not clients_dir.exists():
+            return
+        for user_dir in clients_dir.iterdir():
+            if not user_dir.is_dir():
+                continue
+            try:
+                blobs_dir = user_dir / 'file_mounts' / 'blobs'
+                if not blobs_dir.exists():
+                    continue
+                # Delete unreferenced extraction dirs older than grace period.
+                grace_cutoff = time.time() - 3600  # 1 hour grace
+                for entry in blobs_dir.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    if entry.name in ('.locks', '.staging'):
+                        continue
+                    blob_id = entry.name
+                    if (blob_id not in active_blob_ids and
+                            entry.stat().st_mtime < grace_cutoff):
+                        logger.info(f'GC: removing unreferenced blob '
+                                    f'{blob_id} for user {user_dir.name}')
+                        shutil.rmtree(entry, ignore_errors=True)
+                # Clean up stale staging directories from interrupted uploads.
+                staging_base = blobs_dir / '.staging'
+                if staging_base.exists():
+                    for staging in staging_base.iterdir():
+                        if staging.is_dir():
+                            if staging.stat().st_mtime < grace_cutoff:
+                                shutil.rmtree(staging, ignore_errors=True)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error cleaning filemounts dir: {user_dir.name}: '
+                             f'{common_utils.format_exception(e)}')
+
+    while True:
+        await asyncio.sleep(3600)  # Run every hour
+        try:
+            await asyncio.to_thread(_do_cleanup)
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error in cleanup_unreferenced_file_mounts: '
+                         f'{common_utils.format_exception(e)}')
+
+
 async def loop_lag_monitor(loop: asyncio.AbstractEventLoop,
                            interval: float = 0.1) -> None:
     target = loop.time() + interval
@@ -627,6 +688,60 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
         asyncio.create_task(loop_lag_monitor(asyncio.get_event_loop()))
     yield
     # Shutdown: Add any cleanup code here if needed
+
+
+class SecurityHeadersMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
+    """Middleware to add security headers to all HTTP responses.
+
+    Adds Content-Security-Policy and other security headers to mitigate
+    XSS, clickjacking, and content-type sniffing attacks.
+
+    Reference: OWASP A02:2025 - Security Misconfiguration (CWE-1021).
+    """
+
+    # Content-Security-Policy directives:
+    # - default-src 'self': Only allow resources from the same origin
+    # - script-src 'self' 'unsafe-inline': Allow same-origin scripts and
+    #   inline scripts (needed for Next.js __NEXT_DATA__)
+    # - style-src 'self' 'unsafe-inline': Allow same-origin styles and
+    #   inline styles (needed for MUI/Emotion dynamic style injection)
+    # - font-src 'self': Only allow same-origin fonts
+    # - connect-src 'self' http://localhost:* http://127.0.0.1:*:
+    #   Allow same-origin fetch/XHR/WebSocket plus localhost connections
+    #   needed by the /token page's legacy auth callback flow (the page's
+    #   JavaScript POSTs the auth token to a local HTTP server started by
+    #   the CLI on localhost)
+    # - frame-src 'self': Allow same-origin iframes (for Grafana panels)
+    # - img-src 'self' data:: Allow same-origin images and data URIs
+    # - object-src 'none': Block all plugin content (Flash, Java, etc.)
+    # - base-uri 'self': Restrict <base> element to same origin
+    # - form-action 'self': Restrict form submissions to same origin
+    # - frame-ancestors 'self': Prevent clickjacking via framing
+    _CSP_POLICY = ('default-src \'self\'; '
+                   'script-src \'self\' \'unsafe-inline\'; '
+                   'style-src \'self\' \'unsafe-inline\'; '
+                   'font-src \'self\'; '
+                   'connect-src \'self\' http://localhost:* '
+                   'http://127.0.0.1:*; '
+                   'frame-src \'self\'; '
+                   'img-src \'self\' data:; '
+                   'object-src \'none\'; '
+                   'base-uri \'self\'; '
+                   'form-action \'self\'; '
+                   'frame-ancestors \'self\'')
+
+    async def dispatch(self, request: fastapi.Request, call_next):
+        response = await call_next(request)
+        response.headers['Content-Security-Policy'] = self._CSP_POLICY
+        # X-Frame-Options for legacy browsers that don't support CSP
+        # frame-ancestors directive.
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['Referrer-Policy'] = (
+            'strict-origin-when-cross-origin')
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=()')
+        return response
 
 
 # Add a new middleware class to handle /internal/dashboard prefix
@@ -769,6 +884,9 @@ app.add_middleware(BearerTokenMiddleware)
 # middleware above.
 app.add_middleware(InitializeRequestAuthUserMiddleware)
 app.add_middleware(RequestIDMiddleware)
+# SecurityHeadersMiddleware is the outermost middleware to ensure security
+# headers (CSP, X-Content-Type-Options, etc.) are added to all responses.
+app.add_middleware(SecurityHeadersMiddleware)
 
 # Load plugins after all the middlewares are added, to keep the core
 # middleware stack intact if a plugin adds new middlewares.
@@ -969,6 +1087,30 @@ async def enabled_clouds(request: fastapi.Request,
     )
 
 
+@app.get('/enabled_clouds/batch')
+async def enabled_clouds_batch(request: fastapi.Request,
+                               workspaces: str = '',
+                               expand: bool = False) -> None:
+    """Gets enabled clouds for multiple workspaces in a single request."""
+    workspace_list = [w.strip() for w in workspaces.split(',') if w.strip()]
+    # API-layer authorization: filter out workspaces the caller cannot access
+    # before the request reaches the core function (defense-in-depth).
+    auth_user = request.state.auth_user
+    if auth_user is not None and workspace_list:
+        workspace_list = list(
+            permission.permission_service.get_accessible_workspace_names(
+                auth_user.id, set(workspace_list)))
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.ENABLED_CLOUDS_BATCH,
+        request_body=payloads.EnabledCloudsBatchBody(workspaces=workspace_list,
+                                                     expand=expand),
+        func=core.enabled_clouds_batch,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
 @app.post('/realtime_kubernetes_gpu_availability')
 async def realtime_kubernetes_gpu_availability(
     request: fastapi.Request,
@@ -1044,6 +1186,21 @@ async def status_kubernetes(request: fastapi.Request) -> None:
         request_body=payloads.RequestBody(),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
+        auth_user=request.state.auth_user,
+    )
+
+
+@app.post('/kubernetes_label_gpus')
+async def kubernetes_label_gpus(
+        request: fastapi.Request,
+        kubernetes_label_gpus_body: payloads.KubernetesLabelGpusBody) -> None:
+    """Labels GPU nodes in a Kubernetes cluster."""
+    await executor.schedule_request_async(
+        request_id=request.state.request_id,
+        request_name=request_names.RequestName.KUBERNETES_LABEL_GPUS,
+        request_body=kubernetes_label_gpus_body,
+        func=gpu_labeler.label_gpus_server,
+        schedule_type=requests_lib.ScheduleType.LONG,  # Can take 10+ min
         auth_user=request.state.auth_user,
     )
 
@@ -1144,25 +1301,33 @@ async def optimize(optimize_body: payloads.OptimizeBody,
     )
 
 
-@app.post('/upload')
-async def upload_zip_file(request: fastapi.Request, user_hash: str,
-                          upload_id: str, chunk_index: int,
-                          total_chunks: int) -> payloads.UploadZipFileResponse:
-    """Uploads a zip file to the API server.
+async def _prepare_client_mount_dir(user_hash: str,
+                                    request: fastapi.Request) -> pathlib.Path:
+    # For anonymous access, use the user hash from client
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        # Otherwise, the authenticated identity should be used.
+        user_id = request.state.auth_user.id
 
-    This endpoints can be called multiple times for the same upload_id with
-    different chunk_index. The server will merge the chunks and unzip the file
-    when all chunks are uploaded.
+    client_file_mounts_dir = (
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+        'file_mounts')
+    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
+    return client_file_mounts_dir
 
-    This implementation is simplified and may need to be improved in the future,
-    e.g., adopting S3-style multipart upload.
 
-    Args:
-        user_hash: The user hash.
-        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
-            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-        chunk_index: The chunk index, starting from 0.
-        total_chunks: The total number of chunks.
+async def _receive_and_assemble_chunks(
+    base_dir: pathlib.Path,
+    zip_name: str,
+    request: fastapi.Request,
+    chunk_index: int,
+    total_chunks: int,
+) -> Optional[payloads.UploadZipFileResponse]:
+    """Receive chunks, assemble into a zip file, and extract.
+
+    Returns:
+        None if the upload is completed,
+        A response to tell the client to upload more chunks otherwise.
     """
     # Field _body would be set if the request body has been received, fail fast
     # to surface potential memory issues, i.e. catch the issue in our smoke
@@ -1173,29 +1338,7 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             status_code=500,
             detail='Upload request body should not be received before streaming'
         )
-    # Add the upload id to the cleanup list.
-    upload_ids_to_cleanup[(upload_id,
-                           user_hash)] = (datetime.datetime.now() +
-                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
-    # For anonymous access, use the user hash from client
-    user_id = user_hash
-    if request.state.auth_user is not None:
-        # Otherwise, the authenticated identity should be used.
-        user_id = request.state.auth_user.id
-
     # TODO(SKY-1271): We need to double check security of uploading zip file.
-    client_file_mounts_dir = (
-        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
-        'file_mounts')
-    await anyio.Path(client_file_mounts_dir).mkdir(parents=True, exist_ok=True)
-
-    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
-    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
-    if not re.match(
-            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
-            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
-        raise ValueError(
-            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
     # Check chunk_index to be a valid integer
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise ValueError(
@@ -1205,11 +1348,11 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
         raise ValueError(
             f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
         )
-
     if total_chunks == 1:
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        await anyio.Path(base_dir).mkdir(parents=True, exist_ok=True)
+        zip_file_path = base_dir / f'{zip_name}.zip'
     else:
-        chunk_dir = client_file_mounts_dir / upload_id
+        chunk_dir = base_dir / zip_name
         await anyio.Path(chunk_dir).mkdir(parents=True, exist_ok=True)
         zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
 
@@ -1243,22 +1386,141 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
             return payloads.UploadZipFileResponse(
                 status=responses.UploadStatus.UPLOADING.value,
                 missing_chunks=missing_chunks)
-        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        zip_file_path = base_dir / f'{zip_name}.zip'
         async with aiofiles.open(zip_file_path, 'wb') as zip_file:
             for chunk in range(total_chunks):
                 async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
                     while True:
-                        # Use 64KB buffer to avoid memory overflow, same size as
-                        # shutil.copyfileobj.
+                        # Use 64KB buffer to avoid memory overflow, same size
+                        # as shutil.copyfileobj.
                         data = await f.read(64 * 1024)
                         if not data:
                             break
                         await zip_file.write(data)
-
     logger.info(f'Uploaded zip file: {zip_file_path}')
-    await unzip_file(zip_file_path, client_file_mounts_dir)
+    await unzip_file(zip_file_path, base_dir)
     if total_chunks > 1:
         await asyncio.to_thread(shutil.rmtree, chunk_dir)
+    return None
+
+
+# TODO(aylei): for backward compatibility, remove after v0.14.0
+@app.post('/upload')
+async def upload_zip_file(request: fastapi.Request, user_hash: str,
+                          upload_id: str, chunk_index: int,
+                          total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Uploads a zip file to the API server.
+
+    This endpoints can be called multiple times for the same upload_id with
+    different chunk_index. The server will merge the chunks and unzip the file
+    when all chunks are uploaded.
+
+    This implementation is simplified and may need to be improved in the future,
+    e.g., adopting S3-style multipart upload.
+
+    Args:
+        user_hash: The user hash.
+        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
+            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+        chunk_index: The chunk index, starting from 0.
+        total_chunks: The total number of chunks.
+    """
+    # Add the upload id to the cleanup list.
+    upload_ids_to_cleanup[(upload_id,
+                           user_hash)] = (datetime.datetime.now() +
+                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
+    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
+    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+    if not re.match(
+            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
+            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
+        raise ValueError(
+            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
+
+    base_dir = await _prepare_client_mount_dir(user_hash, request)
+    missing_chunks = await _receive_and_assemble_chunks(
+        base_dir=base_dir,
+        zip_name=upload_id,
+        request=request,
+        chunk_index=chunk_index,
+        total_chunks=total_chunks)
+    if missing_chunks is not None:
+        return missing_chunks
+    return payloads.UploadZipFileResponse(
+        status=responses.UploadStatus.COMPLETED.value)
+
+
+@app.get('/upload_v2/blob')
+async def check_blob_exists(request: fastapi.Request, user_hash: str,
+                            blob_id: str) -> Dict[str, bool]:
+    """Check if a file mount blob already exists."""
+    if not re.match(r'^[0-9a-f]{64}$', blob_id):
+        raise fastapi.HTTPException(status_code=400,
+                                    detail=f'Invalid blob_id: {blob_id}')
+    user_id = user_hash
+    if request.state.auth_user is not None:
+        user_id = request.state.auth_user.id
+    blob_dir = (common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_id /
+                'file_mounts' / 'blobs' / blob_id)
+    if blob_dir.is_dir():
+        # Refresh mtime to claim a longer lifetime of the blob cache
+        os.utime(blob_dir)
+        return {'exists': True}
+    return {'exists': False}
+
+
+@app.post('/upload_v2')
+async def upload_blob(request: fastapi.Request, user_hash: str, upload_id: str,
+                      chunk_index: int,
+                      total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Upload a file mount blob (chunked).
+
+    Unlike /upload, this endpoint receives chunks, assembles and extracts
+    into a staging directory, then atomically renames to a shared extraction
+    directory (blobs/{upload_id}/) so all requests can reuse it.
+    """
+    if not re.match(r'^[0-9a-f]{64}$', upload_id):
+        raise fastapi.HTTPException(
+            status_code=400, detail=f'Invalid upload_id for v2: {upload_id}')
+    # Here we still isolate the blobs between users, as the upload_id is
+    # provided by the client and we want to be careful about cross-user
+    # blob sharing.
+    mount_dir = await _prepare_client_mount_dir(user_hash, request)
+    blobs_dir = mount_dir / 'blobs'
+    await anyio.Path(blobs_dir).mkdir(parents=True, exist_ok=True)
+    target_dir = blobs_dir / upload_id
+
+    if target_dir.exists():
+        return payloads.UploadZipFileResponse(
+            status=responses.UploadStatus.COMPLETED.value)
+
+    # Per-blob filelock to prevent concurrent uploads of the same blob.
+    locks_dir = blobs_dir / '.locks'
+    await anyio.Path(locks_dir).mkdir(parents=True, exist_ok=True)
+    lock = filelock.AsyncFileLock(
+        lock_file=str(locks_dir / f'{upload_id}.lock'),
+        executor=executor.get_request_thread_executor())
+
+    async with lock:
+        # Re-check after acquiring the lock: another upload may have
+        # completed while we were waiting.
+        if target_dir.exists():
+            return payloads.UploadZipFileResponse(
+                status=responses.UploadStatus.COMPLETED.value)
+
+        # Receive chunks, assemble, and extract into staging dir.
+        staging_dir = blobs_dir / '.staging' / upload_id
+        result = await _receive_and_assemble_chunks(base_dir=staging_dir,
+                                                    zip_name='staging',
+                                                    request=request,
+                                                    chunk_index=chunk_index,
+                                                    total_chunks=total_chunks)
+        if result is not None:
+            return result
+        # Atomic rename of the extracted staging dir to the final
+        # directory (same filesystem).
+        await asyncio.to_thread(os.rename, str(staging_dir), str(target_dir))
+        logger.info(f'Uploaded blob: {target_dir}')
     return payloads.UploadZipFileResponse(
         status=responses.UploadStatus.COMPLETED.value)
 
@@ -2047,6 +2309,8 @@ async def api_status(
         None, description='Number of requests to show.'),
     fields: Optional[List[str]] = fastapi.Query(
         None, description='Fields to get. If None, get all fields.'),
+    cluster_name: Optional[str] = fastapi.Query(
+        None, description='Filter requests by cluster name.'),
 ) -> List[payloads.RequestPayload]:
     """Gets the list of requests."""
     if request_ids is None:
@@ -2059,6 +2323,11 @@ async def api_status(
         request_tasks = await requests_lib.get_request_tasks_async(
             req_filter=requests_lib.RequestTaskFilter(
                 status=statuses,
+                cluster_names=[cluster_name] if cluster_name else None,
+                exclude_request_names=[
+                    server_constants.REQUEST_NAME_PREFIX + d.value
+                    for d in daemons.HIDDEN_REQUEST_NAMES
+                ],
                 limit=limit,
                 fields=fields,
                 sort=True,
@@ -2168,6 +2437,9 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
         ingress_basic_auth_enabled=os.environ.get(
             constants.SKYPILOT_INGRESS_BASIC_AUTH_ENABLED,
             'false').lower() == 'true',
+        # Whether external proxy auth is enabled (from server.yaml config)
+        external_proxy_auth_enabled=server_config.load_external_proxy_config().
+        enabled,
         # Latest version info (if available and newer than current)
         latest_version=latest_version,
     )
@@ -2185,14 +2457,27 @@ async def _get_cluster_and_validate(
 ) -> 'backends.CloudVmRayResourceHandle':
     """Fetch cluster status and validate it's UP and correct cloud type."""
     # Run core.status in another thread to avoid blocking the event loop.
+    # Use summary_response=True to skip expensive DB columns (owner, metadata,
+    # last_creation_yaml) and cluster event queries that are unnecessary for
+    # simple cluster validation. This keeps per-call overhead low enough to
+    # handle 20+ concurrent WebSocket SSH connections without timeout.
     # TODO(aylei): core.status() will be called with server user, which has
     # permission to all workspaces, this will break workspace isolation.
     # It is ok for now, as users with limited access will not get the ssh config
     # for the clusters in non-accessible workspaces.
     with ThreadPoolExecutor(max_workers=1) as thread_pool_executor:
         cluster_records = await context_utils.to_thread_with_executor(
-            thread_pool_executor, core.status, cluster_name, all_users=True)
+            thread_pool_executor,
+            core.status,
+            cluster_name,
+            all_users=True,
+            summary_response=True)
+
+    if not cluster_records:
+        raise fastapi.HTTPException(status_code=404,
+                                    detail=f'Cluster {cluster_name} not found')
     cluster_record = cluster_records[0]
+
     if cluster_record['status'] not in (status_lib.ClusterStatus.INIT,
                                         status_lib.ClusterStatus.UP,
                                         status_lib.ClusterStatus.AUTOSTOPPING):
@@ -2762,6 +3047,15 @@ def _init_or_restore_server_user_hash():
 
 
 if __name__ == '__main__':
+    # Raise the websockets library header limits before importing uvicorn.
+    # The env vars are read by websockets.http11 and websockets.legacy.http
+    # at import time. Enterprise SSO cookies from oauth2proxy can exceed the
+    # default 8KB limit, causing WebSocket upgrade to fail with HTTP 400.
+    os.environ.setdefault('WEBSOCKETS_MAX_LINE_LENGTH',
+                          server_constants.WEBSOCKETS_MAX_HEADER_LINE_LENGTH)
+    os.environ.setdefault('WEBSOCKETS_MAX_NUM_HEADERS',
+                          server_constants.WEBSOCKETS_MAX_NUM_HEADERS)
+
     import uvicorn
 
     from sky.server import uvicorn as skyuvicorn
@@ -2790,19 +3084,6 @@ if __name__ == '__main__':
         logger.error(f'Port {cmd_args.port} is not available, exiting.')
         raise RuntimeError(f'Port {cmd_args.port} is not available')
 
-    # Maybe touch the signal file on API server startup. Do it again here even
-    # if we already touched it in the sky/server/common.py::_start_api_server.
-    # This is because the sky/server/common.py::_start_api_server function call
-    # is running outside the skypilot API server process tree. The process tree
-    # starts within that function (see the `subprocess.Popen` call in
-    # sky/server/common.py::_start_api_server). When pg is used, the
-    # _start_api_server function will not load the config file from db, which
-    # will ignore the consolidation mode config. Here, inside the process tree,
-    # we already reload the config as a server (with env var _start_api_server),
-    # so we will respect the consolidation mode config.
-    # Refers to #7717 for more details.
-    managed_job_utils.is_consolidation_mode(on_api_restart=True)
-
     # Show the privacy policy if it is not already shown. We place it here so
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
@@ -2817,6 +3098,10 @@ if __name__ == '__main__':
     # Restore the server user hash
     logger.info('Initializing server user hash')
     _init_or_restore_server_user_hash()
+    # Set up consolidation mode signal file. Needs global user state DB access
+    # to check for existing controller clusters. Placed after user hash restore
+    # to avoid accidentally using the wrong server hash.
+    managed_job_utils.setup_consolidation_mode_on_startup(cmd_args.deploy)
     # Pre-load plugin RBAC rules before initializing permission service.
     # This ensures plugin RBAC rules are available when policies are created.
     logger.info('Pre-loading plugin RBAC rules')
@@ -2852,6 +3137,7 @@ if __name__ == '__main__':
     try:
         background = uvloop.new_event_loop()
         if os.environ.get(constants.ENV_VAR_SERVER_METRICS_ENABLED):
+            metrics.maybe_register_managed_jobs_collector()
             metrics_server = metrics.build_metrics_server(
                 cmd_args.host, cmd_args.metrics_port)
             global_tasks.append(background.create_task(metrics_server.serve()))
@@ -2863,6 +3149,10 @@ if __name__ == '__main__':
         global_tasks.append(
             background.create_task(
                 managed_job_state.job_event_retention_daemon()))
+        # Unreferenced file mounts cleanup is based on database so should
+        # be a singleton task.
+        global_tasks.append(
+            background.create_task(cleanup_unreferenced_file_mounts()))
         threading.Thread(target=background.run_forever, daemon=True).start()
 
         queue_server, workers = executor.start(config)

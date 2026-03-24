@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TopBar, SidebarProvider } from './sidebar';
 import { useMobile } from '@/hooks/useMobile';
 import { WelcomeNotification } from './WelcomeNotification';
@@ -9,33 +9,65 @@ import {
   UpgradeDetectionProvider,
 } from '@/hooks/useUpgradeDetection';
 import { installUpgradeInterceptor } from '@/utils/apiInterceptor';
+import { PluginSlot } from '@/plugins/PluginSlot';
+
+function DefaultNavbarLayout({ children }) {
+  return (
+    <>
+      {/* Fixed top bar with navigation */}
+      <div className="fixed top-0 left-0 right-0 z-50 shadow-sm">
+        <TopBar />
+      </div>
+
+      {/* Main content */}
+      <div
+        className="transition-all duration-200 ease-in-out min-h-screen"
+        style={{ paddingTop: '56px' }}
+      >
+        <main className="p-6">{children}</main>
+      </div>
+    </>
+  );
+}
 
 function LayoutContent({ children, highlighted }) {
   const isMobile = useMobile();
-  const { reportUpgrade, clearUpgrade, isUpgrading } = useUpgradeDetection();
+  const { reportUpgrade, clearUpgrade } = useUpgradeDetection();
+  const [pluginsSettled, setPluginsSettled] = useState(false);
 
   // Install the fetch interceptor on mount
   useEffect(() => {
     installUpgradeInterceptor(reportUpgrade, clearUpgrade);
   }, [reportUpgrade, clearUpgrade]);
 
+  // Wait briefly for navigation plugins to register before showing layout.
+  // A navigation plugin (e.g. sidebar) dispatches 'skydashboard:navigation-ready'
+  // to cut the wait short. Otherwise we fall back after a timeout.
+  useEffect(() => {
+    const timer = setTimeout(() => setPluginsSettled(true), 200);
+    const handler = () => setPluginsSettled(true);
+    window.addEventListener('skydashboard:navigation-ready', handler);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('skydashboard:navigation-ready', handler);
+    };
+  }, []);
+
+  if (!pluginsSettled) {
+    return <div className="min-h-screen bg-gray-50" />;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Fixed top bar with navigation */}
-      <div className="fixed top-0 left-0 right-0 z-50 shadow-sm">
-        <TopBar />
-      </div>
-
-      {/* Upgrade banner */}
+      {/* Upgrade banner - rendered outside PluginSlot so it shows
+          regardless of which navigation plugin is active */}
       <UpgradeBanner />
 
-      {/* Main content */}
-      <div
-        className="transition-all duration-200 ease-in-out min-h-screen"
-        style={{ paddingTop: isUpgrading ? '112px' : '56px' }}
-      >
-        <main className="p-6">{children}</main>
-      </div>
+      <PluginSlot
+        name="layout.navigation"
+        context={{ children, isMobile }}
+        fallback={<DefaultNavbarLayout>{children}</DefaultNavbarLayout>}
+      />
 
       {/* Welcome notification for first-time visitors */}
       <WelcomeNotification />

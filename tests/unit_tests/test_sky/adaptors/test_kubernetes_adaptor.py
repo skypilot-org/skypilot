@@ -4,7 +4,6 @@ import concurrent.futures
 import gc
 import os
 import tempfile
-import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,6 +12,11 @@ import pytest
 
 from sky.adaptors import kubernetes
 from sky.utils import annotations
+
+
+def _clear_refresh_interval_cache():
+    """Clear the refresh interval env parse cache so tests can change the env."""
+    kubernetes._get_kubeconfig_refresh_interval_seconds.cache_clear()  # pylint: disable=protected-access
 
 
 @pytest.mark.parametrize(
@@ -89,14 +93,111 @@ def test_watch_cleanup(monkeypatch):
     monkeypatch.setattr(kubernetes.kubernetes.watch, 'Watch', FakeWatch)
 
     w = kubernetes.watch()
-    # Keep a handle to the underlying watch instance created by the API
-    # so we can assert its _api_client.close() was called.
+    # Keep a handle to the underlying watch object so we can assert its
+    # _api_client.close() was called on GC.
     underlying = w._client
     del w
     annotations.clear_request_level_cache()
     gc.collect()
 
     assert underlying._api_client.close.call_count == 1
+
+
+def test_kubeconfig_refresh_interval_refreshes_client(monkeypatch):
+    """When SKYPILOT_KUBECONFIG_REFRESH_INTERVAL_SECONDS is set and interval
+    has elapsed, the next API call refreshes the client and closes the old one.
+    """
+    api_clients = []
+
+    def track_get_api_client(context=None):
+        mock_client = MagicMock()
+        api_clients.append(mock_client)
+        return mock_client
+
+    def make_mock_core_api(api_client=None):
+        # Explicit client object so getattr(self._client, 'list_namespaced_pod') always works.
+        client = SimpleNamespace(api_client=api_client)
+        client.list_namespaced_pod = MagicMock(return_value=MagicMock())
+        return client
+
+    monkeypatch.setattr(kubernetes, '_get_api_client', track_get_api_client)
+    monkeypatch.setattr(kubernetes.kubernetes.client, 'CoreV1Api',
+                        make_mock_core_api)
+
+    monkeypatch.setenv(kubernetes.KUBECONFIG_REFRESH_INTERVAL_ENV_VAR, '1')
+    _clear_refresh_interval_cache()
+
+    # Time 0 when wrapper is created (mark refreshed), then 10 when we call
+    # method so interval has elapsed.
+    time_values = iter([0.0, 10.0, 10.0, 10.0])
+    monkeypatch.setattr(time, 'time', lambda: next(time_values, 10.0))
+
+    annotations.clear_request_level_cache()
+    api = kubernetes.core_api()
+    assert len(api_clients) == 1
+
+    api.list_namespaced_pod(namespace='default')
+
+    assert len(api_clients) == 2, 'Refresh should have created a second client'
+    assert api_clients[0].close.call_count == 1, (
+        'Old client should be closed when refresh runs')
+
+
+def test_kubeconfig_refresh_interval_no_refresh_when_interval_not_elapsed(
+        monkeypatch):
+    """When interval has not elapsed, no refresh runs (single client)."""
+    api_clients = []
+
+    def track_get_api_client(context=None):
+        mock_client = MagicMock()
+        api_clients.append(mock_client)
+        return mock_client
+
+    def make_mock_core_api(api_client=None):
+        client = SimpleNamespace(api_client=api_client)
+        client.list_namespaced_pod = MagicMock(return_value=MagicMock())
+        return client
+
+    monkeypatch.setattr(kubernetes, '_get_api_client', track_get_api_client)
+    monkeypatch.setattr(kubernetes.kubernetes.client, 'CoreV1Api',
+                        make_mock_core_api)
+
+    monkeypatch.setenv(kubernetes.KUBECONFIG_REFRESH_INTERVAL_ENV_VAR, '10')
+    _clear_refresh_interval_cache()
+
+    # Time 0 at creation, then 5 when we call method (5 < 10, no refresh).
+    time_values = iter([0.0, 5.0, 5.0])
+    monkeypatch.setattr(time, 'time', lambda: next(time_values, 5.0))
+
+    annotations.clear_request_level_cache()
+    api = kubernetes.core_api()
+    assert len(api_clients) == 1
+
+    api.list_namespaced_pod(namespace='default')
+
+    assert len(api_clients) == 1
+    assert api_clients[0].close.call_count == 0
+
+
+def test_kubeconfig_refresh_interval_disabled_when_unset(monkeypatch):
+    """When env var is unset, interval refresh is disabled."""
+    monkeypatch.delenv(kubernetes.KUBECONFIG_REFRESH_INTERVAL_ENV_VAR,
+                       raising=False)
+    _clear_refresh_interval_cache()
+
+    interval = kubernetes._get_kubeconfig_refresh_interval_seconds()  # pylint: disable=protected-access
+    assert interval == 0.0
+
+
+def test_kubeconfig_refresh_interval_invalid_value_disables_refresh(
+        monkeypatch):
+    """Invalid env value disables refresh and returns 0."""
+    monkeypatch.setenv(kubernetes.KUBECONFIG_REFRESH_INTERVAL_ENV_VAR,
+                       'not-a-number')
+    _clear_refresh_interval_cache()
+
+    interval = kubernetes._get_kubeconfig_refresh_interval_seconds()  # pylint: disable=protected-access
+    assert interval == 0.0
 
 
 def _create_test_kubeconfig(num_contexts):

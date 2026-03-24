@@ -137,12 +137,24 @@ message ManagedJobInfo {
   map<string, string> labels = 33;
   // Name of the cluster on the cloud provider (populated from cluster handle)
   optional string cluster_name_on_cloud = 34;
+  // Network endpoint information (replaces pickled handle)
+  // List of (internal_ip, external_ip) tuples for all nodes
+  repeated IpPair internal_external_ips = 35;
+  // K8s DNS entries mapping instance_id to internal_svc
+  // Only populated for Kubernetes clusters
+  map<string, string> internal_services = 36;
   // Whether this job is a batch coordinator (ds.map()).
-  optional bool is_batch = 35;
+  optional bool is_batch = 37;
   // Batch progress: total number of batches (NULL for non-batch jobs).
-  optional int32 batch_total_batches = 36;
+  optional int32 batch_total_batches = 38;
   // Batch progress: number of completed batches (NULL for non-batch jobs).
-  optional int32 batch_completed_batches = 37;
+  optional int32 batch_completed_batches = 39;
+}
+
+// A pair of internal and external IP addresses
+message IpPair {
+  string internal_ip = 1;
+  string external_ip = 2;
 }
 
 message GetJobTableResponse {
@@ -170,6 +182,9 @@ message CancelJobsRequest {
     string job_name = 5;
     string pool_name = 6;
   }
+
+  optional bool graceful = 7;
+  optional int64 graceful_timeout = 8;
 }
 
 message CancelJobsResponse {

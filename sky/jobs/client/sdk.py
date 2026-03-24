@@ -13,6 +13,7 @@ from sky.client import sdk
 from sky.schemas.api import responses
 from sky.serve.client import impl
 from sky.server import common as server_common
+from sky.server import constants as server_constants
 from sky.server import rest
 from sky.server import versions
 from sky.server.requests import payloads
@@ -86,6 +87,9 @@ def launch(
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
 
+    if name is not None:
+        dag.name = name
+
     with admin_policy_utils.apply_and_use_config_in_current_request(
             dag,
             request_name=request_names.AdminPolicyRequestName.JOBS_LAUNCH,
@@ -117,13 +121,44 @@ def launch(
                               abort=True,
                               show_default=True)
 
-        dag = client_common.upload_mounts_to_api_server(dag)
+        # Inject the client's API server endpoint for tasks with
+        # api_access. Done client-side because get_server_url()
+        # returns the externally reachable endpoint here, whereas
+        # the server sees 127.0.0.1.
+        any_api_access = any(t.api_access for t in dag.tasks)
+        if any_api_access:
+            remote_api_version = versions.get_remote_api_version()
+            if (remote_api_version is not None and remote_api_version <
+                    server_constants.MIN_API_ACCESS_API_VERSION):
+                raise click.UsageError(
+                    'api_access: true requires a newer API server. '
+                    'Please upgrade the server to use this '
+                    'feature.')
+            endpoint = server_common.get_server_url()
+            if server_common.is_api_server_local(endpoint):
+                # Warn instead of raising an error to allow local
+                # testing and CI environments where the server may
+                # be accessible via Docker networking or port
+                # forwarding despite appearing local.
+                logger.warning('api_access: true is set but the API server '
+                               f'appears to be local ({endpoint}). The '
+                               'managed job may not be able to reach the '
+                               'API server from remote clusters.')
+            for task_ in dag.tasks:
+                if task_.api_access:
+                    task_.update_envs({
+                        constants.SKY_API_SERVER_URL_ENV_VAR: endpoint,
+                    })
+
+        dag, file_mounts_blob_id = (
+            client_common.upload_mounts_to_api_server(dag))
         dag_str = dag_utils.dump_dag_to_yaml_str(dag)
         body = payloads.JobsLaunchBody(
             task=dag_str,
             name=name,
             pool=pool,
             num_jobs=num_jobs,
+            file_mounts_blob_id=file_mounts_blob_id,
         )
         response = server_common.make_authenticated_request(
             'POST',
@@ -184,6 +219,8 @@ def queue_v2(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
         total (int): Total number of jobs after filter,
@@ -226,14 +263,17 @@ def queue_v2(
 # server supports it, which breaks the backward compatibility.
 # In https://github.com/skypilot-org/skypilot/pull/8015, we revert the change
 # and add a new function `queue_v2` to return the new typed data.
+# TODO(lloyd): Remove version=1 support before 0.13.
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def queue(
     refresh: bool,
     skip_finished: bool = False,
     all_users: bool = False,
-    job_ids: Optional[List[int]] = None
-) -> server_common.RequestId[List[responses.ManagedJobRecord]]:
+    job_ids: Optional[List[int]] = None,
+    version: int = 1,
+) -> server_common.RequestId[Union[List[responses.ManagedJobRecord], Tuple[
+        List[responses.ManagedJobRecord], int, Dict[str, int], int]]]:
     """Gets statuses of managed jobs.
 
     Deprecated. Please use queue_v2 instead for better performance.
@@ -245,6 +285,7 @@ def queue(
         skip_finished: Whether to skip finished jobs.
         all_users: Whether to show all users' jobs.
         job_ids: IDs of the managed jobs to show.
+        version: Queue API version to use. Must be 1 or 2.
 
     Returns:
         The request ID of the queue request.
@@ -269,6 +310,8 @@ def queue(
                 'region': (str) region of the cluster,
                 'task_id': (int), set to 0 (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
                 'task_name': (str), same as job_name (except in pipelines, which may have multiple tasks), # pylint: disable=line-too-long
+                'internal_external_ips': (List[Tuple[str, str]]) List of (internal_ip, external_ip) tuples for all nodes, # pylint: disable=line-too-long
+                'internal_services': (Dict[str, str]) K8s DNS entries, which maps Pod name to internal service (only for K8s), # pylint: disable=line-too-long
               }
             ]
 
@@ -277,6 +320,19 @@ def queue(
           does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
+    if version not in (1, 2):
+        raise ValueError(f'Invalid queue version: {version}. Must be 1 or 2.')
+
+    if version == 2:
+        return queue_v2(refresh=refresh,
+                        skip_finished=skip_finished,
+                        all_users=all_users,
+                        job_ids=job_ids)
+
+    logger.warning('sky.jobs.queue(version=1) is deprecated and will be '
+                   'removed in v0.13. Use sky.jobs.queue(version=2) or '
+                   'sky.jobs.queue_v2() instead.')
+
     body = payloads.JobsQueueBody(
         refresh=refresh,
         skip_finished=skip_finished,
@@ -299,6 +355,8 @@ def cancel(
     all: bool = False,  # pylint: disable=redefined-builtin
     all_users: bool = False,
     pool: Optional[str] = None,
+    graceful: bool = False,
+    graceful_timeout: Optional[int] = None,
 ) -> server_common.RequestId[None]:
     """Cancels managed jobs.
 
@@ -310,6 +368,10 @@ def cancel(
         all: Whether to cancel all managed jobs.
         all_users: Whether to cancel all managed jobs from all users.
         pool: Pool name to cancel.
+        graceful: Cancel the user's task but block until MOUNT_CACHED data is
+            fully uploaded. This helps with preserving user data integrity.
+        graceful_timeout: If not None, sets a timeout for the graceful option
+            above (in seconds).
 
     Returns:
         The request ID of the cancel request.
@@ -324,12 +386,20 @@ def cancel(
         raise click.UsageError('Pools are not supported in your API server. '
                                'Please upgrade to a newer API server to use '
                                'pools.')
+    if graceful and (remote_api_version is None or remote_api_version < 39):
+        logger.warning('`--graceful` is ignored because the server does '
+                       'not support it yet.')
+    if graceful and pool is not None:
+        logger.warning('Pools are not cleaned up after job cancel, so '
+                       '`--graceful` is ignored.')
     body = payloads.JobsCancelBody(
         name=name,
         job_ids=job_ids,
         all=all,
         all_users=all_users,
         pool=pool,
+        graceful=graceful,
+        graceful_timeout=graceful_timeout,
     )
     response = server_common.make_authenticated_request(
         'POST',

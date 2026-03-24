@@ -2,8 +2,6 @@
 import os
 from typing import Any, Dict, Union
 
-from sky.skylet import constants as skylet_constants
-
 # Environment variable for JobGroup name, injected into all jobs in a JobGroup
 SKYPILOT_JOBGROUP_NAME_ENV_VAR = 'SKYPILOT_JOBGROUP_NAME'
 
@@ -23,6 +21,12 @@ SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # at the same time (e.g. during a rolling update), recovery can only happen once
 # the previous API server has exited.
 CONSOLIDATION_MODE_LOCK_ID = '~/.sky/consolidation_mode_lock'
+
+# Signal file indicating the API server has been restarted after enabling
+# consolidation mode. Created by setup_consolidation_mode_on_startup() in
+# sky/jobs/utils.py.
+JOBS_CONSOLIDATION_RELOADED_SIGNAL_FILE = (
+    '~/.sky/.jobs_controller_consolidation_reloaded_signal')
 
 # Resources as a dict for the jobs controller.
 # We use 50 GB disk size to reduce the cost.
@@ -58,26 +62,4 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 # WARNING: If you update this due to a codegen change, make sure to make the
 # corresponding change in the ManagedJobsService AND bump the SKYLET_VERSION.
-MANAGED_JOBS_VERSION = 15  # new fields for job groups
-
-# The command for setting up the jobs dashboard on the controller. It firstly
-# checks if the systemd services are available, and if not (e.g., Kubernetes
-# containers may not have systemd), it starts the dashboard manually.
-DASHBOARD_SETUP_CMD = (
-    'if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; '
-    'then '
-    '  systemctl --user daemon-reload; '
-    '  systemctl --user enable --now skypilot-dashboard; '
-    'else '
-    '  echo "Systemd services not found. Starting SkyPilot dashboard '
-    'manually."; '
-    # Kill any old dashboard processes;
-    '  ps aux | grep -v nohup | grep -v grep | '
-    '  grep -- \'-m sky.jobs.dashboard.dashboard\' | awk \'{print $2}\' | '
-    '  xargs kill > /dev/null 2>&1 || true;'
-    # Launch the dashboard in the background if not already running
-    '  (ps aux | grep -v nohup | grep -v grep | '
-    '  grep -q -- \'-m sky.jobs.dashboard.dashboard\') || '
-    f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
-    '>> ~/.sky/job-dashboard.log 2>&1 &); '
-    'fi')
+MANAGED_JOBS_VERSION = 16  # new fields for job graceful cancel

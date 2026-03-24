@@ -1,8 +1,8 @@
 # Basic Managed Job Template
 name: my-job
 
-resources:
-  accelerators: A10G:1
+# resources:
+#   accelerators: A10G:1
 
 setup: |
   pip install torch

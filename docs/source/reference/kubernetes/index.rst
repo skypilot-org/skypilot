@@ -104,6 +104,7 @@ Table of contents
    kubernetes-setup
    kubernetes-priorities
    multi-kubernetes
+   Configuring Pricing <kubernetes-pricing>
    SkyPilot vs. Vanilla Kubernetes <skypilot-and-vanilla-k8s>
    Examples <examples/index>
    kubernetes-troubleshooting

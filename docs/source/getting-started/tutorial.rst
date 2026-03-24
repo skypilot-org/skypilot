@@ -38,7 +38,7 @@ This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `mi
           git clone --depth 1 https://github.com/pytorch/examples || true
           cd examples
           git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp
-          pip install -r requirements.txt
+          uv pip install --system -r requirements.txt
 
       run: |
           cd examples/mingpt
@@ -100,7 +100,7 @@ This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `mi
               'git clone --depth 1 https://github.com/pytorch/examples || true',
               'cd examples',
               'git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp',
-              'pip install -r requirements.txt',
+              'uv pip install --system -r requirements.txt',
           ],
           run=[
               'cd examples/mingpt',

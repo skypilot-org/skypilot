@@ -104,7 +104,9 @@ SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
 # set UV_SYSTEM_PYTHON to false in case the
 # user provided docker image set it to true.
 # unset PYTHONPATH in case the user provided docker image set it.
-SKY_UV_CMD = ('UV_SYSTEM_PYTHON=false '
+# UV_LINK_MODE=copy avoids a uv >=0.10.5 bug where clone/reflink mode
+# strips execute permissions on XFS filesystems, breaking Ray binaries.
+SKY_UV_CMD = ('UV_LINK_MODE=copy UV_SYSTEM_PYTHON=false '
               f'{SKY_UNSET_PYTHONPATH_AND_SET_CWD} {SKY_UV_INSTALL_DIR}/uv')
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
@@ -147,7 +149,7 @@ MANAGED_JOB_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}MANAGED_JOB_ID'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '34'  # Add fields to ManagedJobInfo proto for GPU metrics.
+SKYLET_VERSION = '35'  # Add fields to ManagedJobInfo proto for handle.
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -212,13 +214,14 @@ CONDA_INSTALLATION_COMMANDS = (
     '{ '
     # Use uname -m to get the architecture of the machine and download the
     # corresponding Miniconda3-Linux.sh script.
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
+    # Download to /tmp to ensure write access for non-root users.
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o /tmp/Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
     '{ '
-    f'bash Miniconda3-Linux.sh -b -p "{SKY_CONDA_ROOT}" || true; '
+    f'bash /tmp/Miniconda3-Linux.sh -b -p "{SKY_CONDA_ROOT}" || true; '
     f'eval "$({SKY_CONDA_ROOT}/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
@@ -371,6 +374,11 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# The name for the environment variable that stores the client user hash.
+# This captures the machine-local identity of the actual client user, used to
+# aggregate usage across multiple API servers when basic auth is enabled.
+CLIENT_USER_HASH_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}CLIENT_USER_HASH'
+
 # SSH configuration to allow more concurrent sessions and connections.
 # Default MaxSessions is 10.
 # Default MaxStartups is 10:30:60, meaning:
@@ -487,12 +495,15 @@ OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('kubernetes', 'dws'),
     ('kubernetes', 'kueue'),
     ('kubernetes', 'remote_identity'),
+    ('azure', 'remote_identity'),
+    ('azure', 'vpc_name'),
     ('gcp', 'managed_instance_group'),
     ('gcp', 'enable_gvnic'),
     ('gcp', 'enable_gpu_direct'),
     ('gcp', 'placement_policy'),
     ('vast', 'datacenter_only'),
     ('vast', 'create_instance_kwargs'),
+    ('slurm', 'sbatch_options'),
     ('active_workspace',),
 ]
 # When overriding the SkyPilot configs on the API server with the client one,
@@ -517,6 +528,9 @@ SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [
     ('serve', 'controller', 'consolidation_mode'),
     ('jobs', 'controller', 'controller_logs_gc_retention_hours'),
     ('jobs', 'controller', 'task_logs_gc_retention_hours'),
+    # Slurm cluster configs (workdir, tmpdir, etc.) are admin-managed
+    # server-side settings and should not be overridden by clients.
+    ('slurm', 'cluster_configs'),
 ]
 
 # Constants for Azure blob storage
@@ -598,7 +612,7 @@ CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
               'paperspace', 'primeintellect', 'do', 'nebius', 'ssh', 'slurm',
-              'hyperbolic', 'seeweb', 'shadeform', 'yotta')
+              'hyperbolic', 'seeweb', 'shadeform', 'yotta', 'mithril', 'verda')
 # END constants used for service catalog.
 
 # The user ID of the SkyPilot system.
@@ -649,6 +663,8 @@ MEMORY_SIZE_UNITS = {
     'pi': 2**50,
 }
 
+SUB_PATH_PATTERN = '^[a-zA-Z0-9._-][a-zA-Z0-9./_-]*$'
+
 MEMORY_SIZE_PATTERN = (
     '^[0-9]+('
     f'{"|".join([unit.lower() for unit in MEMORY_SIZE_UNITS])}|'
@@ -680,7 +696,8 @@ SLURM_PROCTRACK_TYPE_FILE = '.sky_proctrack_type'
 SSH_DISABLE_LATENCY_MEASUREMENT_ENV_VAR = (
     f'{SKYPILOT_ENV_VAR_PREFIX}SSH_DISABLE_LATENCY_MEASUREMENT')
 
-SSD_LOCAL_DISK = 'ssd'
-HDD_LOCAL_DISK = 'hdd'
+# Maximum number of node name entries to keep per node in the lineage.
+MAX_NODE_NAME_LINEAGE = 10
 
-LOCAL_DISK_TYPES = {SSD_LOCAL_DISK, HDD_LOCAL_DISK}
+# Clouds that provide storage only (no compute).
+STORAGE_ONLY_CLOUDS = ['cloudflare', 'coreweave', 'vastdata']

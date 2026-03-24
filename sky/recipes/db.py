@@ -5,11 +5,9 @@ used in the Recipes feature. The database stores recipes that can be
 pinned globally, filtered by category/tags, and deployed as clusters, jobs,
 pools, or volumes.
 """
-import functools
 import os
-import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import sqlalchemy
 from sqlalchemy import orm
@@ -17,16 +15,13 @@ from sqlalchemy.ext import declarative
 
 from sky import exceptions
 from sky import sky_logging
+from sky.recipes.utils import recipe_type_to_str
 from sky.recipes.utils import RecipeType
 from sky.utils import common_utils
 from sky.utils.db import db_utils
 from sky.utils.db import migration_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# SQLAlchemy engine
-_SQLALCHEMY_ENGINE: Optional[sqlalchemy.engine.Engine] = None
-_SQLALCHEMY_ENGINE_LOCK = threading.Lock()
 
 # SQLAlchemy Base
 Base = declarative.declarative_base()
@@ -155,45 +150,14 @@ def _insert_default_templates(engine: sqlalchemy.engine.Engine) -> None:
                     created_at=now,
                     updated_at=now,
                     is_editable=0,
-                    is_pinnable=0,
+                    is_pinnable=1,
                 ))
             session.commit()
 
 
-def initialize_and_get_db() -> sqlalchemy.engine.Engine:
-    """Initialize and return the database engine."""
-    global _SQLALCHEMY_ENGINE
-
-    if _SQLALCHEMY_ENGINE is not None:
-        return _SQLALCHEMY_ENGINE
-
-    with _SQLALCHEMY_ENGINE_LOCK:
-        if _SQLALCHEMY_ENGINE is not None:
-            return _SQLALCHEMY_ENGINE
-
-        # Get an engine to the db
-        engine = db_utils.get_engine('recipes')
-
-        # Run migrations
-        _create_table(engine)
-
-        # Insert default templates after migrations
-        _insert_default_templates(engine)
-
-        _SQLALCHEMY_ENGINE = engine
-        return _SQLALCHEMY_ENGINE
-
-
-def _init_db(func: Callable) -> Callable:
-    """Decorator to initialize database connection before function call."""
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        initialize_and_get_db()
-        return func(*args, **kwargs)
-
-    return wrapper
-
+_db_manager = db_utils.DatabaseManager('recipes',
+                                       _create_table,
+                                       post_init_fn=_insert_default_templates)
 
 # =============================================================================
 # Data classes
@@ -211,7 +175,7 @@ class Recipe:
         self,
         name: str,
         content: str,
-        recipe_type: RecipeType,
+        recipe_type: Union[RecipeType, str],
         user_id: str,
         description: Optional[str] = None,
         pinned: bool = False,
@@ -243,7 +207,7 @@ class Recipe:
             'name': self.name,
             'description': self.description,
             'content': self.content,
-            'recipe_type': self.recipe_type.value,
+            'recipe_type': recipe_type_to_str(self.recipe_type),
             'pinned': self.pinned,
             'user_id': self.user_id,
             'user_name': self.user_name,
@@ -280,11 +244,10 @@ class Recipe:
 # =============================================================================
 
 
-@_init_db
 def create_recipe(
     name: str,
     content: str,
-    recipe_type: RecipeType,
+    recipe_type: Union[RecipeType, str],
     user_id: str,
     user_name: Optional[str] = None,
     description: Optional[str] = None,
@@ -307,8 +270,7 @@ def create_recipe(
         exceptions.InvalidRecipeNameError: If the name format is invalid.
         exceptions.RecipeAlreadyExistsError: If a recipe with this name exists.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-
+    engine = _db_manager.get_engine()
     # Validate name format
     common_utils.check_recipe_name_is_valid(name)
 
@@ -318,12 +280,12 @@ def create_recipe(
     # uniqueness. Catching IntegrityError avoids race conditions between
     # check and insert, and works for both SQLite and PostgreSQL.
     try:
-        with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        with orm.Session(engine) as session:
             session.execute(recipes_table.insert().values(
                 name=name,
                 description=description,
                 content=content,
-                recipe_type=recipe_type.value,
+                recipe_type=recipe_type_to_str(recipe_type),
                 pinned=0,
                 user_id=user_id,
                 user_name=user_name,
@@ -350,7 +312,6 @@ def create_recipe(
     )
 
 
-@_init_db
 def get_recipe(recipe_name: str) -> Optional[Recipe]:
     """Get a recipe by name.
 
@@ -360,9 +321,8 @@ def get_recipe(recipe_name: str) -> Optional[Recipe]:
     Returns:
         The Recipe if found, None otherwise.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    engine = _db_manager.get_engine()
+    with orm.Session(engine) as session:
         result = session.execute(
             sqlalchemy.select(recipes_table).where(
                 recipes_table.c.name == recipe_name))
@@ -372,12 +332,11 @@ def get_recipe(recipe_name: str) -> Optional[Recipe]:
         return Recipe.from_row(row)
 
 
-@_init_db
 def list_recipes(
     user_id: Optional[str] = None,
     pinned_only: bool = False,
     my_recipes_only: bool = False,
-    recipe_type: Optional[RecipeType] = None,
+    recipe_type: Optional[Union[RecipeType, str]] = None,
 ) -> List[Recipe]:
     """List recipes with optional filters.
 
@@ -393,8 +352,7 @@ def list_recipes(
     Returns:
         List of matching YamlTemplate objects.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-
+    engine = _db_manager.get_engine()
     query = sqlalchemy.select(recipes_table)
 
     if pinned_only:
@@ -403,19 +361,19 @@ def list_recipes(
         query = query.where(recipes_table.c.user_id == user_id)
 
     if recipe_type:
-        query = query.where(recipes_table.c.recipe_type == recipe_type.value)
+        query = query.where(
+            recipes_table.c.recipe_type == recipe_type_to_str(recipe_type))
 
     query = query.order_by(recipes_table.c.pinned.desc(),
                            recipes_table.c.name.asc())
 
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         result = session.execute(query)
         rows = result.fetchall()
 
     return [Recipe.from_row(row) for row in rows]
 
 
-@_init_db
 def update_recipe(
     recipe_name: str,
     user_id: str,
@@ -441,11 +399,9 @@ def update_recipe(
     Raises:
         ValueError: If the recipe is not found or not editable.
     """
-    assert _SQLALCHEMY_ENGINE is not None
-
+    engine = _db_manager.get_engine()
     # TODO(lloyd): We might want to change this in the future to change who is
     # allowed to update a recipe.
-
     updates: Dict[str, Any] = {}
     if description is not None:
         updates['description'] = description
@@ -463,7 +419,7 @@ def update_recipe(
     # Atomic update with editability check in WHERE clause.
     # This avoids race conditions between check and update, and works
     # for both SQLite and PostgreSQL.
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         result = session.execute(recipes_table.update().where(
             recipes_table.c.name == recipe_name).where(
                 recipes_table.c.is_editable == 1).values(**updates))
@@ -481,7 +437,6 @@ def update_recipe(
     return get_recipe(recipe_name)
 
 
-@_init_db
 def delete_recipe(recipe_name: str, user_id: str) -> bool:
     """Delete a recipe.
 
@@ -497,12 +452,12 @@ def delete_recipe(recipe_name: str, user_id: str) -> bool:
     Raises:
         ValueError: If the recipe is not editable (e.g., default recipes).
     """
-    assert _SQLALCHEMY_ENGINE is not None
+    engine = _db_manager.get_engine()
 
     # Atomic delete with ownership and editability checks in WHERE clause.
     # This avoids race conditions between check and delete, and works
     # for both SQLite and PostgreSQL.
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         result = session.execute(recipes_table.delete().where(
             recipes_table.c.name == recipe_name).where(
                 recipes_table.c.is_editable == 1).where(
@@ -523,7 +478,6 @@ def delete_recipe(recipe_name: str, user_id: str) -> bool:
         return False
 
 
-@_init_db
 def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
     """Toggle the pinned status of a recipe.
 
@@ -540,12 +494,11 @@ def toggle_pin(recipe_name: str, pinned: bool) -> Optional[Recipe]:
     Raises:
         ValueError: If the recipe is not pinnable (e.g., default recipes).
     """
-    assert _SQLALCHEMY_ENGINE is not None
-
+    engine = _db_manager.get_engine()
     # Atomic update with pinnable check in WHERE clause.
     # This avoids race conditions between check and update, and works
     # for both SQLite and PostgreSQL.
-    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+    with orm.Session(engine) as session:
         result = session.execute(recipes_table.update().where(
             recipes_table.c.name == recipe_name).where(
                 recipes_table.c.is_pinnable == 1).values(

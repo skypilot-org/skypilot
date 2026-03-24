@@ -39,9 +39,12 @@ from sky.adaptors import runpod
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.adaptors import shadeform as shadeform_adaptor
 from sky.adaptors import vast
+from sky.adaptors import verda
+from sky.adaptors.verda import VerdaClient
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
+from sky.provision.mithril import utils as mithril_utils
 from sky.provision.primeintellect import utils as primeintellect_utils
 from sky.utils import auth_utils
 from sky.utils import common_utils
@@ -354,6 +357,29 @@ def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return configure_ssh_info(config)
 
 
+def setup_verda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Verda Cloud.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Cloud account.
+    """
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        verda_config = verda.get_verda_configuration()
+        if not verda_config[0]:
+            raise Exception(verda_config[1])
+
+        verda_client = VerdaClient()
+        current_key_list = verda_client.ssh_keys_get()
+        # Only add an ssh key if it hasn't already been added
+        if not any(ssh_key.public_key == public_key
+                   for ssh_key in current_key_list):
+            verda_client.ssh_keys_create(name='skypilot-key', key=public_key)
+
+    config['auth']['ssh_public_key'] = public_key_path
+    return configure_ssh_info(config)
+
+
 def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     _, public_key_path = auth_utils.get_or_generate_keys()
@@ -447,6 +473,28 @@ def setup_primeintellect_authentication(
     # Default username for Prime Intellect images
     config['auth']['ssh_user'] = 'ubuntu'
     config['auth']['ssh_public_key'] = public_key_path
+
+    return configure_ssh_info(config)
+
+
+def setup_mithril_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Mithril.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Mithril account.
+    """
+    _, public_key_path = auth_utils.get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='utf-8') as f:
+        public_key = f.read().strip()
+
+    # Register the public key with Mithril (no-op if already exists).
+    ssh_key_id = mithril_utils.get_or_add_ssh_key(public_key)
+
+    # Keep cloud-specific SSH key ID in auth config so the provisioner can
+    # launch instances without re-registering keys.
+    config.setdefault('auth', {})
+    config['auth']['ssh_user'] = 'ubuntu'
+    config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_key_id'] = ssh_key_id
 
     return configure_ssh_info(config)
 

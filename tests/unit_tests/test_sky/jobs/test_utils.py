@@ -531,6 +531,7 @@ class TestGetManagedJobQueue:
         mock_handle.launched_resources.region = 'us-west-2'
         mock_handle.launched_resources.zone = 'us-west-2a'
         mock_handle.launched_resources.accelerators = {'V100': 1}
+        mock_handle.cached_cluster_info = None
 
         def fake_get_cluster_name_to_handle_map(is_managed: bool = True):
             return {'test-cluster': mock_handle}

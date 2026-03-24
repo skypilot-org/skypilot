@@ -1,0 +1,82 @@
+[
+  {
+    "query": "I need to fine-tune Llama 3.1 70B on my custom dataset. I have AWS and GCP credentials set up. Can you write me a task YAML that uses 8xH100s and make sure it checkpoints to S3 every 1000 steps? I want to use spot instances to save money.",
+    "should_trigger": true
+  },
+  {
+    "query": "we have a kubernetes cluster at work and I want to run a vllm inference server on it with 2 A100s. need it to autoscale based on traffic — during business hours we get ~50 qps but at night it drops to almost nothing. whats the best way to set this up",
+    "should_trigger": true
+  },
+  {
+    "query": "My training job keeps getting preempted on GCP. I'm using spot T4s for a BERT fine-tuning run that takes about 6 hours. Is there a way to automatically recover and resume from the last checkpoint when I get preempted? I don't want to babysit it.",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to launch a dev environment with a single H100 GPU where I can SSH in and iterate on my code. Something that auto-shuts down after 30 minutes of idle so I don't waste money. I have credentials for AWS, GCP, and Lambda — just pick whatever's cheapest.",
+    "should_trigger": true
+  },
+  {
+    "query": "Need to run a hyperparameter sweep for my RL training — 12 different configs, each needs an A100 for about 4 hours. I want them to run in parallel across whatever clouds have availability. Each job should be independent and recover if it gets interrupted.",
+    "should_trigger": true
+  },
+  {
+    "query": "We're trying to figure out which cloud has the cheapest H200 GPUs right now. We need 8xH200 for about a week of training. Can you compare prices across AWS, GCP, Azure, Lambda, and Coreweave?",
+    "should_trigger": true
+  },
+  {
+    "query": "i have a slurm cluster at my university and also an AWS account. i want to submit training jobs that try the slurm cluster first (its free) and fall back to aws if slurm is full. how do i set that up?",
+    "should_trigger": true
+  },
+  {
+    "query": "I need to do multi-node distributed training with PyTorch DDP across 4 nodes, each with 8 H100s. The nodes need to communicate over high-bandwidth interconnect. Can you help me write the config and launch it?",
+    "should_trigger": true
+  },
+  {
+    "query": "Help me deploy a production ML serving endpoint for our recommendation model. We need it to handle variable load, scale down to 1 replica at night, and scale up to 5 during peak. We want to serve from both AWS and GCP for redundancy.",
+    "should_trigger": true
+  },
+  {
+    "query": "I have a skypilot task.yaml file in my repo at configs/train.yaml but when I try to launch it I get 'resources not available' errors. Can you help me debug this and maybe add fallback options so it tries different GPU types?",
+    "should_trigger": true
+  },
+  {
+    "query": "I want to deploy my FastAPI web application to AWS. It's a standard REST API with a PostgreSQL database, no ML or GPU needed. Should I use ECS, Lambda, or EC2? Help me write the Terraform config.",
+    "should_trigger": false
+  },
+  {
+    "query": "Can you help me set up a new Kubernetes cluster from scratch on AWS using eksctl? I need to configure node groups, set up the VPC, install the ingress controller, and configure RBAC for my team.",
+    "should_trigger": false
+  },
+  {
+    "query": "I'm trying to optimize my PyTorch model's training loop — it's running on my local RTX 4090 but the GPU utilization is only 40%. Can you profile the code and suggest where the bottlenecks are? I think the dataloader might be the issue.",
+    "should_trigger": false
+  },
+  {
+    "query": "I want to fine-tune GPT-4o through the OpenAI API using my custom dataset. I have a JSONL file with 10k examples. Can you help me write the fine-tuning script using the openai Python SDK and set up the hyperparameters?",
+    "should_trigger": false
+  },
+  {
+    "query": "Help me write a Helm chart for deploying our microservice application to Kubernetes. It needs a Deployment, Service, HPA, and Ingress. The app is a Node.js API server.",
+    "should_trigger": false
+  },
+  {
+    "query": "I need to build a CI/CD pipeline in GitHub Actions that runs our ML model tests on every PR. The tests need a GPU runner — can you help me configure the workflow YAML for self-hosted GPU runners?",
+    "should_trigger": false
+  },
+  {
+    "query": "We're evaluating cloud GPU providers for our startup. Can you make me a spreadsheet comparing pricing, availability, and features of AWS, GCP, Azure, Lambda, CoreWeave, and Together AI? I just need the research, not launching anything.",
+    "should_trigger": false
+  },
+  {
+    "query": "I want to use Ray Serve to deploy my model on a Ray cluster that I already have running. Help me write the Ray Serve deployment script and configure autoscaling. I'm managing the cluster myself through Ray.",
+    "should_trigger": false
+  },
+  {
+    "query": "Can you help me write a Dockerfile and docker-compose.yml for my ML training environment? I want to run training locally in a container with GPU passthrough. I'm using nvidia-docker on my workstation.",
+    "should_trigger": false
+  },
+  {
+    "query": "I need to set up Weights & Biases experiment tracking for my training runs. Can you help me integrate wandb into my training script and configure the project dashboard?",
+    "should_trigger": false
+  }
+]

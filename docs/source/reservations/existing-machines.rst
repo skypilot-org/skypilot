@@ -180,8 +180,8 @@ To use the CLI to see what GPUs are available, run:
 
 .. code-block:: console
 
-   $ sky show-gpus --infra ssh
-   $ sky show-gpus --infra ssh/my-cluster
+   $ sky gpus list --infra ssh
+   $ sky gpus list --infra ssh/my-cluster
 
 
 Using multiple SSH Node Pools

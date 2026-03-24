@@ -7,7 +7,7 @@ The existing encoders.py handles object -> dict conversion at set_return_value()
 time. This module handles dict -> JSON string serialization at encode() time,
 with version-aware field filtering for backward compatibility.
 """
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
 import orjson
 
@@ -73,3 +73,66 @@ def serialize_kubernetes_node_info(return_value: Dict[str, Any]) -> str:
                 node_info.pop('is_cordoned', None)
                 node_info.pop('taints', None)
     return orjson.dumps(return_value).decode('utf-8')
+
+
+def _needs_autostopping_compat() -> bool:
+    """Check if the client predates API version 29 (AUTOSTOPPING).
+
+    Before API version 29, AUTOSTOPPING did not exist and clusters being
+    autostopped were set to INIT during status refresh. Old clients crash
+    with ValueError if they receive the unknown status string.
+    """
+    remote_api_version = versions.get_remote_api_version()
+    return remote_api_version is not None and remote_api_version < 29
+
+
+@register_serializer('status')
+def serialize_status(return_value: Any) -> str:
+    """Serialize cluster status with AUTOSTOPPING compat for old clients."""
+    if return_value is not None and _needs_autostopping_compat():
+        for cluster in return_value:
+            if cluster['status'] == 'AUTOSTOPPING':
+                cluster['status'] = 'INIT'
+    return orjson.dumps(return_value).decode('utf-8')
+
+
+@register_serializer('status_kubernetes')
+def serialize_status_kubernetes(return_value: Any) -> str:
+    """Serialize kubernetes status with AUTOSTOPPING compat for old clients."""
+    if return_value is not None and _needs_autostopping_compat():
+        for cluster in return_value[0] + return_value[1]:
+            if cluster['status'] == 'AUTOSTOPPING':
+                cluster['status'] = 'INIT'
+    return orjson.dumps(return_value).decode('utf-8')
+
+
+@register_serializer('cost_report')
+def serialize_cost_report(return_value: Any) -> str:
+    """Serialize cost report with AUTOSTOPPING compat for old clients."""
+    if return_value is not None and _needs_autostopping_compat():
+        for cluster_report in return_value:
+            if cluster_report['status'] == 'AUTOSTOPPING':
+                cluster_report['status'] = 'INIT'
+    return orjson.dumps(return_value).decode('utf-8')
+
+
+@register_serializer('realtime_slurm_gpu_availability')
+def serialize_realtime_slurm_gpu_availability(return_value: List[Any]) -> str:
+    """Serialize Slurm GPU availability with version compatibility.
+
+    The error field (3rd element) was added in API version 35. Strip it
+    for old clients that don't recognize it.
+    """
+    if not return_value:
+        return orjson.dumps(return_value).decode('utf-8')
+    encoded = return_value
+    remote_api_version = versions.get_remote_api_version()
+    if remote_api_version is not None and remote_api_version < 36:
+        # Strip error field and filter out error entries for old clients.
+        # Old servers never included failed clusters in the response.
+        encoded = [
+            item[:2]
+            for item in return_value
+            if len(item) < 3 or item[2] is None
+        ]
+    return orjson.dumps(encoded).decode('utf-8')

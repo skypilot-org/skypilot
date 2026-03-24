@@ -19,7 +19,7 @@ setup: |
 
   uv pip install "ray[train]" "click<8.2.0"
   uv pip install tqdm
-  uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+  uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 run: |
   sudo chmod 777 -R /var/tmp

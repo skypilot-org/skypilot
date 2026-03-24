@@ -681,6 +681,39 @@ def test_docker_login_config_no_mixed_envs_secrets():
             resources_lib.Resources(image_id='docker:ubuntu:latest'))
 
 
+def test_docker_login_config_redacted_in_display_yaml_secrets():
+    """Test that _docker_login_config password is redacted in display YAML
+    when docker vars are in secrets."""
+    task_obj = task.Task(name='test-docker-redact',
+                         run='echo hello',
+                         secrets={
+                             'SKYPILOT_DOCKER_USERNAME': 'myuser',
+                             'SKYPILOT_DOCKER_SERVER': 'registry.example.com',
+                             'SKYPILOT_DOCKER_PASSWORD': 'super-secret-password'
+                         })
+    task_obj.set_resources(
+        resources_lib.Resources(image_id='docker:nginx:latest'))
+
+    # Display YAML should have redacted password
+    display_config = task_obj.to_yaml_config(use_user_specified_yaml=True)
+    resources_config = display_config.get('resources', {})
+    docker_config = resources_config.get('_docker_login_config')
+    assert docker_config is not None
+    assert docker_config['password'] == '<redacted>'
+    assert docker_config['username'] == 'myuser'
+    assert docker_config['server'] == 'registry.example.com'
+
+    # Secrets should also be redacted
+    assert display_config['secrets']['SKYPILOT_DOCKER_PASSWORD'] == '<redacted>'
+
+    # Execution YAML should have the actual password
+    exec_config = task_obj.to_yaml_config(use_user_specified_yaml=False)
+    exec_resources = exec_config.get('resources', {})
+    exec_docker = exec_resources.get('_docker_login_config')
+    assert exec_docker is not None
+    assert exec_docker['password'] == 'super-secret-password'
+
+
 def make_mock_volume_config(name='vol1',
                             type='pvc',
                             cloud='aws',
@@ -1201,6 +1234,29 @@ secrets:
         assert not isinstance(value, str), \
             f'Secret {key} should not be a plain string'
         assert value.get_secret_value() == expected_secrets[key]
+
+
+def test_api_access_from_yaml_config():
+    """Test that api_access is parsed from YAML and serialized correctly."""
+    # Test default (False)
+    config = {'run': 'echo hello'}
+    task_obj = task.Task.from_yaml_config(config)
+    assert task_obj.api_access is False
+
+    # Test explicit True
+    config_with_access = {'run': 'echo hello', 'api_access': True}
+    task_obj = task.Task.from_yaml_config(config_with_access)
+    assert task_obj.api_access is True
+
+    # Test serialization round-trip
+    yaml_config = task_obj.to_yaml_config()
+    assert yaml_config.get('api_access') is True
+
+    # Test that False is not serialized (to keep YAML clean)
+    config_no_access = {'run': 'echo hello', 'api_access': False}
+    task_obj = task.Task.from_yaml_config(config_no_access)
+    yaml_config = task_obj.to_yaml_config()
+    assert 'api_access' not in yaml_config
 
 
 def test_secrets_not_plaintext_from_yaml():

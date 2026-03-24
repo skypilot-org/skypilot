@@ -42,12 +42,12 @@ SkyPilot gives **AI teams** a simple interface to run jobs on any infra.
 .. grid:: 1 1 1 1
     :gutter: 3
 
-
     .. grid-item-card::
         :link: https://demo.skypilot.co/dashboard/
         :text-align: center
 
         🌟 **SkyPilot Demo** 🌟: Click to see a 1-minute tour
+
 
 Why SkyPilot
 ----------------------
@@ -282,6 +282,7 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
+   Agent Skills <../getting-started/skill>
    ../examples/index
    ../sky-computing
 
@@ -344,6 +345,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   SkyPilot Recipes <../reference/recipes>
    Migrating from Slurm <../reference/slurm-migration>
    External Links <../running-jobs/external-links>
    ../reference/async
@@ -377,4 +379,3 @@ Read the research:
    ../reference/config
    SkyPilot Internals <../reference/architecture/internals>
    ../developers/index
-

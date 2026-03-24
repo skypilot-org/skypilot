@@ -105,7 +105,7 @@ jobs:
           sky -v
           sky -c
           sky check
-          sky show-gpus
+          sky gpus list
           sky dashboard || (echo "Launch dashboard failed" && exit 1)
 
           # Verify dashboard endpoint is accessible

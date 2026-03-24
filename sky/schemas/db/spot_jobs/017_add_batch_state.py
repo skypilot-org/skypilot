@@ -16,8 +16,8 @@ This migration adds:
 
 On controller crash, DISPATCHED batches are reset to PENDING for re-dispatch.
 
-Revision ID: 015
-Revises: 014
+Revision ID: 017
+Revises: 016
 Create Date: 2026-02-27
 
 """
@@ -31,8 +31,8 @@ from sky.jobs.state import Base
 from sky.utils.db import db_utils
 
 # revision identifiers, used by Alembic.
-revision: str = '015'
-down_revision: Union[str, Sequence[str], None] = '014'
+revision: str = '017'
+down_revision: Union[str, Sequence[str], None] = '016'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

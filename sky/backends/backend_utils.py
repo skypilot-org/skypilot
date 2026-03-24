@@ -765,19 +765,24 @@ def write_cluster_config(
                     region=None,
                     keys=('allowed_contexts',),
                     default_value=None)
-            if allowed_contexts is None:
-                # Exclude both Kubernetes and SSH explicitly since:
-                # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
-                #    inherits from Kubernetes)
-                # 2. Both share the same get_credential_file_mounts() which
-                #    returns the kubeconfig. So if we don't exclude both, the
-                #    unexcluded one will upload the kubeconfig.
-                # TODO(romilb): This is a workaround. The right long-term fix
-                # is to have SSH Node Pools use its own kubeconfig instead of
-                # sharing the global kubeconfig at ~/.kube/config. In the
-                # interim, SSH Node Pools' get_credential_file_mounts can filter
-                # contexts starting with ssh- and create a temp kubeconfig
-                # to upload.
+            # Exclude both Kubernetes and SSH explicitly since:
+            # 1. isinstance(cloud, clouds.Kubernetes) matches both (SSH
+            #    inherits from Kubernetes)
+            # 2. Both share the same get_credential_file_mounts() which
+            #    returns the kubeconfig. So if we don't exclude both, the
+            #    unexcluded one will upload the kubeconfig.
+            # TODO(romilb): This is a workaround. The right long-term fix
+            # is to have SSH Node Pools use its own kubeconfig instead of
+            # sharing the global kubeconfig at ~/.kube/config. In the
+            # interim, SSH Node Pools' get_credential_file_mounts can filter
+            # contexts starting with ssh- and create a temp kubeconfig
+            # to upload.
+            # When allowed_contexts is not set, or when it is set for a
+            # non-controller cluster, we exclude kubeconfig upload. Controller
+            # clusters need kubeconfig to manage other K8s clusters.
+            is_controller = controller_utils.Controllers.from_name(
+                cluster_name, expect_exact_match=False) is not None
+            if allowed_contexts is None or not is_controller:
                 excluded_clouds.add(clouds.Kubernetes())
                 excluded_clouds.add(clouds.SSH())
         else:
@@ -942,6 +947,7 @@ def write_cluster_config(
                     path=vol.path,
                     volume_name_on_cloud=vol.volume_config.name_on_cloud,
                     volume_id_on_cloud=vol.volume_config.id_on_cloud,
+                    sub_path=vol.sub_path,
                 )
                 volume_mount_vars.append(volume_info)
 
@@ -966,6 +972,11 @@ def write_cluster_config(
             # controller_utils.shared_controller_vars_to_fill().
             'user': common_utils.get_cleaned_username(
                 os.environ.get(constants.USER_ENV_VAR, '')),
+            'workspace': skypilot_config.get_active_workspace(),
+            # The original username before cleaning, used in pod
+            # annotations where character restrictions don't apply.
+            'original_user': (os.environ.get(constants.USER_ENV_VAR, '') or
+                              common_utils.get_current_user_name()),
 
             # Networking configs
             'use_internal_ips': skypilot_config.get_effective_region_config(
@@ -982,7 +993,8 @@ def write_cluster_config(
                 cloud=str(cloud).lower(),
                 region=region.name,
                 keys=('vpc_name',),
-                default_value=None),
+                default_value=None,
+                override_configs=to_provision.cluster_config_overrides),
             # User-supplied labels.
             'labels': labels,
             # User-supplied remote_identity
@@ -1211,6 +1223,10 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, tmp_yaml_path: str):
         config = auth.setup_primeintellect_authentication(config)
     elif isinstance(cloud, clouds.Seeweb):
         config = auth.setup_seeweb_authentication(config)
+    elif isinstance(cloud, clouds.Mithril):
+        config = auth.setup_mithril_authentication(config)
+    elif isinstance(cloud, clouds.Verda):
+        config = auth.setup_verda_authentication(config)
     else:
         assert False, cloud
     yaml_utils.dump_yaml(tmp_yaml_path, config)
@@ -2274,6 +2290,7 @@ def _update_cluster_status(
           the node number larger than expected.
     """
     handle = record['handle']
+    status = record['status']
     if handle.cluster_yaml is None:
         # Remove cluster from db since this cluster does not have a config file
         # or any other ongoing requests
@@ -2714,13 +2731,15 @@ def _update_cluster_status(
         if status_reason:
             log_message += f' ({status_reason})'
         log_message += '. Transitioned to INIT.'
-        global_user_state.add_cluster_event(
-            cluster_name,
-            status_lib.ClusterStatus.INIT,
-            log_message,
-            global_user_state.ClusterEventType.STATUS_CHANGE,
-            nop_if_duplicate=True,
-            duplicate_regex=init_reason_regex)
+        # Do not add event if the cluster is already in INIT status.
+        if status != status_lib.ClusterStatus.INIT:
+            global_user_state.add_cluster_event(
+                cluster_name,
+                status_lib.ClusterStatus.INIT,
+                log_message,
+                global_user_state.ClusterEventType.STATUS_CHANGE,
+                nop_if_duplicate=True,
+                duplicate_regex=init_reason_regex)
         global_user_state.add_or_update_cluster(
             cluster_name,
             handle,
@@ -3253,7 +3272,7 @@ class CloudFilter(enum.Enum):
 def _get_glob_clusters(
         clusters: List[str],
         silent: bool = False,
-        workspaces_filter: Optional[Dict[str, Any]] = None) -> List[str]:
+        workspaces_filter: Optional[Set[str]] = None) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
     for cluster in clusters:
@@ -3390,7 +3409,7 @@ def get_clusters(
         A list of cluster records. If the cluster does not exist or has been
         terminated, the record will be omitted from the returned list.
     """
-    accessible_workspaces = workspaces_core.get_workspaces()
+    accessible_workspaces = workspaces_core.get_accessible_workspace_names()
     if cluster_names is not None:
         if isinstance(cluster_names, str):
             cluster_names = [cluster_names]

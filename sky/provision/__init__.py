@@ -22,6 +22,7 @@ from sky.provision import gcp
 from sky.provision import hyperbolic
 from sky.provision import kubernetes
 from sky.provision import lambda_cloud
+from sky.provision import mithril
 from sky.provision import nebius
 from sky.provision import oci
 from sky.provision import primeintellect
@@ -32,6 +33,7 @@ from sky.provision import shadeform
 from sky.provision import slurm
 from sky.provision import ssh
 from sky.provision import vast
+from sky.provision import verda
 from sky.provision import vsphere
 from sky.provision import yotta
 from sky.utils import command_runner

@@ -193,7 +193,7 @@ def check(
     infra_list: Optional[Tuple[str, ...]],
     verbose: bool,
     workspace: Optional[str] = None
-) -> server_common.RequestId[Dict[str, List[str]]]:
+) -> server_common.RequestId[Dict[str, Dict[str, List[str]]]]:
     """Checks the credentials to enable clouds.
 
     Args:
@@ -206,7 +206,8 @@ def check(
         The request ID of the check request.
 
     Request Returns:
-        None
+        Dict mapping workspace name to a dict of cloud name to list of
+        enabled capability strings (e.g. 'compute', 'storage').
     """
     if infra_list is None:
         clouds = None
@@ -352,6 +353,40 @@ def list_accelerator_counts(
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
+@versions.minimal_api_version(34)
+@annotations.client_api
+def kubernetes_label_gpus(
+    context: Optional[str] = None,
+    cleanup_only: bool = False,
+    wait_for_completion: bool = True,
+) -> server_common.RequestId[Dict[str, Any]]:
+    """Labels GPU nodes in a Kubernetes cluster for use with SkyPilot.
+
+    Note: Currently only supports NVIDIA GPUs. AMD GPUs must be labeled
+    manually.
+
+    Args:
+        context: Kubernetes context to use. If None, uses current context.
+        cleanup_only: If True, only cleanup existing labeling resources.
+        wait_for_completion: If True, wait for labeling jobs to complete.
+
+    Returns:
+        RequestId for the labeling operation.
+    """
+    body = payloads.KubernetesLabelGpusBody(
+        context=context,
+        cleanup_only=cleanup_only,
+        wait_for_completion=wait_for_completion,
+    )
+    response = server_common.make_authenticated_request(
+        'POST',
+        '/kubernetes_label_gpus',
+        json=json.loads(body.model_dump_json()))
+    return server_common.get_request_id(response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
 @annotations.client_api
 def optimize(
     dag: 'sky.Dag',
@@ -428,9 +463,17 @@ def validate(
             see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     remote_api_version = versions.get_remote_api_version()
+
+    def _omit(version: int) -> bool:
+        return remote_api_version is None or remote_api_version < version
+
     # TODO(kevin): remove this in v0.13.0
-    omit_user_specified_yaml = (remote_api_version is None or
-                                remote_api_version < 15)
+    omit_user_specified_yaml = _omit(15)
+    # TODO (kyuds): remove these in v0.13.0
+    omit_local_disk = _omit(35)
+    omit_mount_cached_config = _omit(37)
+    omit_file_mount_type = _omit(40)
+
     for task in dag.tasks:
         if omit_user_specified_yaml:
             # pylint: disable=protected-access
@@ -438,6 +481,23 @@ def validate(
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
+        if omit_local_disk:
+            for resource in task.resources:
+                # pylint: disable=protected-access
+                resource._set_local_disk(None)
+            logger.debug('`local_disk` is ignored because the server does '
+                         'not support it yet.')
+        if omit_mount_cached_config:
+            for storage in task.storage_mounts.values():
+                storage.mount_cached_config = None
+            logger.debug('`mount_cached_config` is ignored because the server '
+                         'does not support it yet.')
+        if omit_file_mount_type:
+            for storage in task.storage_mounts.values():
+                storage.file_mount_type = None
+            logger.debug('`type` is ignored because the server does not '
+                         'support it yet.')
+
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
@@ -734,7 +794,7 @@ def _launch(
         click.secho('Running on cluster: ', fg='cyan', nl=False)
         click.secho(cluster_name)
 
-    dag = client_common.upload_mounts_to_api_server(dag)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(dag)
 
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
 
@@ -754,6 +814,7 @@ def _launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
     response = server_common.make_authenticated_request(
         'POST', '/launch', json=json.loads(body.model_dump_json()), timeout=5)
@@ -826,7 +887,8 @@ def exec(  # pylint: disable=redefined-builtin
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
-    dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
+    dag, file_mounts_blob_id = client_common.upload_mounts_to_api_server(
+        dag, workdir_only=True)
     dag_str = dag_utils.dump_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
@@ -834,6 +896,7 @@ def exec(  # pylint: disable=redefined-builtin
         dryrun=dryrun,
         down=down,
         backend=backend.NAME if backend else None,
+        file_mounts_blob_id=file_mounts_blob_id,
     )
 
     response = server_common.make_authenticated_request(
@@ -2287,6 +2350,7 @@ def api_status(
     all_status: bool = False,
     limit: Optional[int] = None,
     fields: Optional[List[str]] = None,
+    cluster_name: Optional[str] = None,
 ) -> List[payloads.RequestPayload]:
     """Lists all requests.
 
@@ -2297,6 +2361,8 @@ def api_status(
             is ignored if request_ids is not None.
         limit: The number of requests to show. If None, show all requests.
         fields: The fields to get. If None, get all fields.
+        cluster_name: Filter requests by cluster name.
+            If None, show all requests.
 
     Returns:
         A list of request payloads.
@@ -2305,11 +2371,18 @@ def api_status(
         logger.info('SkyPilot API server is not running.')
         return []
 
+    # Backward compatibility check for the new flag cluster_name
+    version = versions.get_remote_api_version()
+    if (cluster_name is not None) and (version is None or version < 38):
+        logger.warning(
+            'The flag is ignored because the server does not support it yet.')
+
     body = payloads.RequestStatusBody(
         request_ids=request_ids,
         all_status=all_status,
         limit=limit,
         fields=fields,
+        cluster_name=cluster_name,
     )
     response = server_common.make_authenticated_request(
         'GET',
@@ -2323,7 +2396,6 @@ def api_status(
 
 # === API server management APIs ===
 @usage_lib.entrypoint
-@server_common.check_server_healthy_or_start
 @annotations.client_api
 def api_info() -> responses.APIHealthResponse:
     """Gets the server's status, commit and version.
@@ -2890,7 +2962,7 @@ def api_login(endpoint: Optional[str] = None,
 
     # see https://github.com/python/mypy/issues/5107 on why
     # typing is disabled on this line
-    server_common.get_api_server_status.cache_clear()  # type: ignore
+    server_common.get_api_server_status_response.cache_clear()  # type: ignore
     # After successful authentication, check server health again to get user
     # identity
     server_status, final_api_server_info = server_common.check_server_healthy(

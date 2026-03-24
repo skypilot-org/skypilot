@@ -64,6 +64,7 @@ const DEFAULT_FIELDS = [
   'is_batch',
   'batch_total_batches',
   'batch_completed_batches',
+  'node_names',
 ];
 
 /**
@@ -297,6 +298,7 @@ export async function getManagedJobs(options = {}) {
         job_id_on_pool_cluster: job.job_id_on_pool_cluster,
         accelerators: job.accelerators, // Include accelerators field
         labels: job.labels || {}, // Include labels field
+        node_names: job.node_names, // Node names for dashboard display
         // JobGroup fields
         is_job_group: job.is_job_group,
         execution: job.execution,

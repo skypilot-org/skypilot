@@ -35,8 +35,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
-        { selector: '.toctree-l1 > a', text: 'External Logging Storage' },
-        { selector: '.toctree-l1 > a', text: 'Volumes' },
         { selector: '.toctree-l2 > a', text: 'Upgrading API Server' },
         { selector: '.toctree-l1 > a', text: 'High Availability Controller' },
         { selector: '.toctree-l2 > a', text: 'High Availability Controller' },
@@ -44,6 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Using a Pool of Workers' },
         { selector: '.toctree-l1 > a', text: 'Job Groups' },
         { selector: '.toctree-l1 > a', text: 'Using Slurm' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot Recipes' },
+        { selector: '.toctree-l1 > a', text: 'Agent Skills' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
@@ -61,4 +61,106 @@ document.addEventListener("DOMContentLoaded", function () {
         style.innerHTML = '.prev-next-area a.left-prev { display: none; }';
         document.head.appendChild(style);
     }
+});
+
+// Copy page as Markdown — split button next to page title.
+document.addEventListener('DOMContentLoaded', () => {
+    const h1 = document.querySelector('.bd-content h1');
+    if (!h1) return;
+
+    // Build the .html.md URL for the current page.
+    let pagePath = window.location.pathname;
+    if (pagePath.endsWith('/')) pagePath += 'index.html';
+    const mdUrl = pagePath + '.md';
+
+    // SVG icons.
+    const copyIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    const arrowIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>';
+    const chevronIcon = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+    const checkIcon = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+    // Build the split button widget.
+    const wrapper = document.createElement('div');
+    wrapper.className = 'copy-page-wrapper';
+    wrapper.innerHTML =
+        `<div class="copy-page-split">` +
+            `<button class="copy-page-main" title="Copy page as Markdown">${copyIcon}<span class="copy-page-label">Copy page</span></button>` +
+            `<button class="copy-page-toggle" title="More options">${chevronIcon}</button>` +
+        `</div>` +
+        `<div class="copy-page-dropdown">` +
+            `<button class="copy-page-item" data-action="copy">${copyIcon} Copy page as Markdown</button>` +
+            `<button class="copy-page-item" data-action="open">${arrowIcon} Open Markdown</button>` +
+        `</div>`;
+
+    // Insert after the h1 — position absolutely relative to h1's section.
+    h1.style.position = 'relative';
+    h1.appendChild(wrapper);
+
+    const mainBtn = wrapper.querySelector('.copy-page-main');
+    const toggleBtn = wrapper.querySelector('.copy-page-toggle');
+    const dropdown = wrapper.querySelector('.copy-page-dropdown');
+    const label = wrapper.querySelector('.copy-page-label');
+
+    const copyMarkdown = async () => {
+        const response = await fetch(mdUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        await navigator.clipboard.writeText(text);
+    };
+
+    const showCopied = () => {
+        label.textContent = 'Copied!';
+        mainBtn.querySelector('svg').outerHTML = checkIcon;
+        wrapper.classList.add('copy-page-success');
+        setTimeout(() => {
+            label.textContent = 'Copy page';
+            mainBtn.querySelector('svg').outerHTML = copyIcon;
+            wrapper.classList.remove('copy-page-success');
+        }, 2000);
+    };
+
+    const showFailed = () => {
+        label.textContent = 'Failed to copy';
+        setTimeout(() => { label.textContent = 'Copy page'; }, 2000);
+    };
+
+    const handleCopy = async () => {
+        try {
+            await copyMarkdown();
+            showCopied();
+        } catch (err) {
+            console.error('Failed to copy markdown:', err);
+            showFailed();
+        }
+    };
+
+    // Main button: copy immediately.
+    mainBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleCopy();
+    });
+
+    // Toggle dropdown.
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.toggle('open');
+    });
+
+    // Dropdown items.
+    dropdown.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-action]');
+        if (!item) return;
+        e.stopPropagation();
+        dropdown.classList.remove('open');
+        if (item.dataset.action === 'copy') {
+            handleCopy();
+        } else if (item.dataset.action === 'open') {
+            window.open(mdUrl, '_blank');
+        }
+    });
+
+    // Close dropdown on outside click.
+    document.addEventListener('click', () => {
+        dropdown.classList.remove('open');
+    });
 });

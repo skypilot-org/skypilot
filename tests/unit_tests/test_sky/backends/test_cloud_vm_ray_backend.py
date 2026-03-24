@@ -309,6 +309,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
 
     INITIAL_TUNNEL_PORT = 10000
     INITIAL_TUNNEL_PID = 12345
+    PROCESS_JOIN_TIMEOUT_SECONDS = 30
 
     def _simulate_process_get_grpc_channel(self, queue, tunnel_creation_count,
                                            tunnel_port, tunnel_pid,
@@ -389,7 +390,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
             p.start()
 
         for p in processes:
-            p.join(timeout=15)
+            p.join(timeout=self.PROCESS_JOIN_TIMEOUT_SECONDS)
             if p.is_alive():
                 p.terminate()
                 p.join()
@@ -420,7 +421,7 @@ class TestCloudVmRayBackendGetGrpcChannel:
             p.start()
 
         for p in processes:
-            p.join(timeout=15)
+            p.join(timeout=self.PROCESS_JOIN_TIMEOUT_SECONDS)
             if p.is_alive():
                 p.terminate()
                 p.join()
