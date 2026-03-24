@@ -1474,6 +1474,71 @@ def test_volume_env_mount_kubernetes():
         smoke_tests_utils.run_one_test(test)
 
 
+# ---------- HostPath Volumes on Kubernetes ----------
+@pytest.mark.kubernetes
+def test_hostpath_volume_on_kubernetes():
+    name = smoke_tests_utils.get_cluster_name()
+    volume_name = f'{name}-hp'
+    host_path = '/tmp/skypilot-hostpath-test'
+    volume_yaml = textwrap.dedent(f"""\
+        name: {volume_name}
+        type: k8s-hostpath
+        use_existing: true
+        config:
+          host_path: {host_path}
+    """)
+    task_yaml = textwrap.dedent(f"""\
+        name: min
+        resources:
+          cpus: 0.1+
+        volumes:
+          /mnt/hostpath: {volume_name}
+
+        run: |
+          set -e
+          echo "check hostpath volume"
+          touch /mnt/hostpath/test.txt
+          echo "hello from hostpath" > /mnt/hostpath/test.txt
+          cat /mnt/hostpath/test.txt | grep "hello from hostpath"
+          ls -lart /mnt/hostpath
+          echo "hostpath volume check passed"
+    """)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as vol_f, \
+         tempfile.NamedTemporaryFile(suffix='.yaml', mode='w',
+                                     delete=False) as task_f:
+        vol_f.write(volume_yaml)
+        vol_f.flush()
+        task_f.write(task_yaml)
+        task_f.flush()
+        test = smoke_tests_utils.Test(
+            'hostpath_volume_on_kubernetes',
+            [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
+                # Apply the hostpath volume
+                f'sky volumes apply -y {vol_f.name}',
+                f'sky volumes ls | grep {volume_name}',
+                # Launch with hostpath volume and verify the job succeeds
+                f'sky launch -y -c {name} --infra kubernetes {task_f.name}',
+                f'sky logs {name} 1 --status',
+                # Verify the pod spec contains the hostPath volume
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'pod=$(kubectl get pods -l skypilot-cluster={name} '
+                    f'-o jsonpath="{{.items[0].metadata.name}}") && '
+                    f'spec=$(kubectl get pod $pod -o yaml) && '
+                    f'echo "$spec" | grep "hostPath" && '
+                    f'echo "$spec" | grep "path: {host_path}"',
+                ),
+            ],
+            f'sky down -y {name} && '
+            f'sky volumes delete {volume_name} -y || true && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Container logs from task on Kubernetes ----------
 
 
