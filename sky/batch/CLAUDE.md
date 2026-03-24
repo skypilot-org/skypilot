@@ -67,9 +67,10 @@ Multi-output is supported: `ds.map(..., output=[ImageOutput(...), JsonOutput(...
 
 ## Progress Reporting
 
-- Coordinator writes progress directly to DB via `managed_job_state.set_batch_progress()`
-- Client reads progress from `ManagedJobRecord` fields (`batch_total_batches`, `batch_completed_batches`) via `sky.jobs.queue_v2()`
-- No HTTP roundtrip — coordinator runs in the same process as the DB
+- Coordinator writes per-batch status records to DB via `managed_job_state.save_batch_states()` and `managed_job_state.set_batch_status()`
+- `batch_total_batches` and `batch_completed_batches` are derived by a SQL aggregation subquery on the `batch_state` table (not denormalized columns)
+- Client reads these derived fields from `ManagedJobRecord` via `sky.jobs.queue_v2()`
+- No HTTP roundtrip for progress — coordinator runs in the same process as the DB
 - Client displays progress using tqdm with batch-level granularity
 
 ## Batch Task Detection

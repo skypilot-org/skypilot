@@ -1,10 +1,12 @@
 """Constants for Sky Batch."""
 
-# Port for controller batch manager API (used by sky/serve for port setup)
+# Reserved port for batch controllers.  The batch coordinator does not run
+# its own HTTP server; these are referenced by sky/serve/server/impl.py
+# for port reservation so the range is not accidentally reused.
 CONTROLLER_BATCH_PORT = 8280
 
-# Port range for batch controllers (analogous to LOAD_BALANCER_PORT_RANGE
-# in sky/serve/constants.py). Referenced by sky/serve for port configuration.
+# Port range reserved for batch controllers (analogous to
+# LOAD_BALANCER_PORT_RANGE in sky/serve/constants.py).
 BATCH_CONTROLLER_PORT_START = 8280
 BATCH_CONTROLLER_PORT_RANGE = '8280-8300'
 

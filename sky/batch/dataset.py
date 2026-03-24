@@ -1,27 +1,32 @@
 """Dataset class for Sky Batch.
 
-Provides a simple interface for loading JSONL data from cloud storage
-and distributing workloads across a pool of workers via managed jobs.
+Provides a simple interface for distributing batch processing workloads
+across a pool of workers via managed jobs.  The Dataset is created from
+a typed ``InputFormat`` (e.g. ``JsonInput``) and dispatched with ``map()``.
 """
 import logging
 import time
+import typing
 from typing import Callable, List, Optional, Union
 import uuid
 
 import tqdm
 
 import sky
+from sky.batch import io_formats
 from sky.batch import remote
 from sky.batch import utils
-from sky.batch.io_formats import InputFormat
-from sky.batch.io_formats import OutputFormat
 from sky.client import sdk
 from sky.jobs import state as managed_job_state
 
 logger = logging.getLogger(__name__)
 
+if typing.TYPE_CHECKING:
+    from sky.schemas.api import responses
 
-def _get_managed_job_record(managed_job_id: int):
+
+def _get_managed_job_record(
+        managed_job_id: int) -> 'responses.ManagedJobRecord':
     """Get the current record of a managed job."""
     request_id = sky.jobs.queue_v2(
         refresh=False,
@@ -107,7 +112,7 @@ class Dataset:
         input_format: The typed input format descriptor.
     """
 
-    def __init__(self, input_format: InputFormat):
+    def __init__(self, input_format: io_formats.InputFormat) -> None:
         """Initialize a Dataset from a typed input format.
 
         Args:
@@ -121,7 +126,8 @@ class Dataset:
             mapper_fn: Callable,
             pool_name: str,
             batch_size: int,
-            output: Union[OutputFormat, List[OutputFormat]],
+            output: Union[io_formats.OutputFormat,
+                          List[io_formats.OutputFormat]],
             activate_env: Optional[str] = None) -> int:
         """Submit batch job as a managed job. Blocks until completion.
 
@@ -160,8 +166,8 @@ class Dataset:
             raise ValueError(f'batch_size must be positive, got: {batch_size}')
 
         # Normalize to list internally.
-        outputs: List[OutputFormat] = (output if isinstance(output, list) else
-                                       [output])
+        outputs: List[io_formats.OutputFormat] = (output if isinstance(
+            output, list) else [output])
 
         for fmt in outputs:
             if not fmt.path:
