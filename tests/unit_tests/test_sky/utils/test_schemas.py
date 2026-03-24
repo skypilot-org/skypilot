@@ -733,5 +733,54 @@ class TestAzureSchema(unittest.TestCase):
             jsonschema.validate(instance=config, schema=self.azure_schema)
 
 
+class TestAWSConfigSchema(unittest.TestCase):
+    """Tests for the AWS config schema, focusing on subnet_names."""
+
+    @classmethod
+    def setUpClass(cls):
+        config_schema = schemas.get_config_schema()
+        cls.aws_schema = config_schema['properties']['aws']
+
+    def test_subnet_names_single_string(self):
+        """Test that AWS accepts a single string for subnet_names."""
+        config = {'subnet_names': 'my-subnet'}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_list(self):
+        """Test that AWS accepts a list of strings for subnet_names."""
+        config = {'subnet_names': ['subnet-a', 'subnet-b']}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_null(self):
+        """Test that AWS accepts null for subnet_names."""
+        config = {'subnet_names': None}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_rejects_integer(self):
+        """Test that AWS rejects non-string subnet_names."""
+        config = {'subnet_names': 123}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_rejects_list_of_integers(self):
+        """Test that AWS rejects list of non-strings for subnet_names."""
+        config = {'subnet_names': [123, 456]}
+        with self.assertRaises(jsonschema.exceptions.ValidationError):
+            jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_with_vpc_name(self):
+        """Test that AWS accepts both subnet_names and vpc_name together."""
+        config = {
+            'vpc_name': 'my-vpc',
+            'subnet_names': ['subnet-a', 'subnet-b'],
+        }
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+    def test_subnet_names_empty_list(self):
+        """Test that AWS accepts an empty list for subnet_names."""
+        config = {'subnet_names': []}
+        jsonschema.validate(instance=config, schema=self.aws_schema)
+
+
 if __name__ == "__main__":
     unittest.main()

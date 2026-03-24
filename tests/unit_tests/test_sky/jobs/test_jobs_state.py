@@ -153,7 +153,11 @@ def _seed_test_jobs(_mock_managed_jobs_db_conn):
             'job_id5': job_id5,
         }
 
-    return asyncio.get_event_loop().run_until_complete(create_job_states())
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(create_job_states())
+    finally:
+        loop.close()
 
 
 class TestMapResponseFieldToDbColumn:
@@ -338,7 +342,11 @@ class TestGetManagedJobsHighestPriority:
                                         500)
             state.scheduler_set_done(job_id3)
 
-        asyncio.get_event_loop().run_until_complete(setup_jobs())
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(setup_jobs())
+        finally:
+            loop.close()
 
         priority = state.get_managed_jobs_highest_priority()
         # Should return 250 (highest among WAITING and LAUNCHING jobs)

@@ -59,7 +59,8 @@ class TestMountingUtilsArm64(unittest.TestCase):
                       cmd)
         # Should contain rclone mount command for ARM64
         self.assertIn('rclone mount :s3:', cmd)
-        self.assertIn('--daemon --allow-other --s3-env-auth=true', cmd)
+        self.assertIn('--s3-env-auth=true', cmd)
+        self.assertIn('--daemon --allow-other', cmd)
         # Should contain goofys command for x86_64
         self.assertIn('goofys', cmd)
         self.assertIn('--stat-cache-ttl', cmd)

@@ -2909,7 +2909,7 @@ def test_managed_jobs_consolidation_mode_file_mount_cleanup(generic_cloud: str):
 @pytest.mark.remote_server
 @pytest.mark.managed_jobs
 def test_managed_jobs_api_access(generic_cloud: str):
-    """Test managed jobs with api_access: nested job launch from a job.
+    """Test managed jobs with api_server_access: nested job launch from a job.
 
     This test only works with kubernetes and remote server enabled. It is the
     only test configuration that gives us an API server that is accessible from

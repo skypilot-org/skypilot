@@ -278,13 +278,18 @@ class Seeweb(clouds.Cloud):
         local_disk: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None,
     ) -> Optional[str]:
         del region, zone  # unused
-        result = catalog.get_default_instance_type(cpus=cpus,
-                                                   memory=memory,
-                                                   disk_tier=disk_tier,
-                                                   local_disk=local_disk,
-                                                   clouds='seeweb')
+        result = catalog.get_default_instance_type(
+            cpus=cpus,
+            memory=memory,
+            disk_tier=disk_tier,
+            local_disk=local_disk,
+            use_spot=use_spot,
+            max_hourly_cost=max_hourly_cost,
+            clouds='seeweb')
         return result
 
     def _get_feasible_launchable_resources(
@@ -322,6 +327,7 @@ class Seeweb(clouds.Cloud):
                     local_disk=resources.local_disk,
                     region=resources.region,
                     zone=resources.zone,
+                    max_hourly_cost=resources.max_hourly_cost,
                     clouds='seeweb',
                 )
 
@@ -345,6 +351,8 @@ class Seeweb(clouds.Cloud):
                     local_disk=resources.local_disk,
                     region=resources.region,
                     zone=resources.zone,
+                    use_spot=resources.use_spot,
+                    max_hourly_cost=resources.max_hourly_cost,
                 )
 
                 if default_instance_type:

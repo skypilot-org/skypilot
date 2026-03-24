@@ -1912,6 +1912,8 @@ def get_clusters(
         handle = pickle.loads(row.handle)
         priority = (handle.launched_resources.priority
                     if handle.launched_resources is not None else None)
+        priority_class = (handle.launched_resources.priority_class
+                          if handle.launched_resources is not None else None)
         # TODO: use namedtuple instead of dict
         record = {
             'name': row.name,
@@ -1920,6 +1922,7 @@ def get_clusters(
             'status': status_lib.ClusterStatus[row.status],
             'priority': priority
                         if priority is not None else constants.DEFAULT_PRIORITY,
+            'priority_class': priority_class,
             'autostop': row.autostop,
             'to_down': bool(row.to_down),
             'cluster_hash': row.cluster_hash,
@@ -2092,6 +2095,8 @@ def get_clusters_from_history(
             'resources': launched_resources,
             'priority': launched_resources.priority
                         if launched_resources is not None else None,
+            'priority_class': launched_resources.priority_class
+                              if launched_resources is not None else None,
             'cluster_hash': row.cluster_hash,
             'usage_intervals': usage_intervals,
             'status': status,
