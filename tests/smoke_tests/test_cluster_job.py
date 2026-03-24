@@ -1518,7 +1518,7 @@ def test_hostpath_volume_on_kubernetes():
                     'kubernetes', name),
                 # Apply the hostpath volume
                 f'sky volumes apply -y {vol_f.name}',
-                f'sky volumes ls | grep {volume_name}',
+                f'vols=$(sky volumes ls) && echo "$vols" && echo "$vols" | grep {volume_name}',
                 # Launch with hostpath volume and verify the job succeeds
                 f'sky launch -y -c {name} --infra kubernetes {task_f.name}',
                 f'sky logs {name} 1 --status',
