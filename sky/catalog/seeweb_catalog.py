@@ -69,16 +69,19 @@ def get_vcpus_mem_from_instance_type(
     return result
 
 
-def get_default_instance_type(cpus: Optional[str] = None,
-                              memory: Optional[str] = None,
-                              disk_tier: Optional[
-                                  resources_utils.DiskTier] = None,
-                              local_disk: Optional[str] = None,
-                              region: Optional[str] = None,
-                              zone: Optional[str] = None) -> Optional[str]:
+def get_default_instance_type(
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional[resources_utils.DiskTier] = None,
+        local_disk: Optional[str] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        use_spot: bool = False,
+        max_hourly_cost: Optional[float] = None) -> Optional[str]:
     del disk_tier, local_disk  # unused
     result = common.get_instance_type_for_cpus_mem_impl(_get_df(), cpus, memory,
-                                                        region, zone)
+                                                        region, zone, use_spot,
+                                                        max_hourly_cost)
     return result
 
 
@@ -115,14 +118,16 @@ def get_accelerators_from_instance_type(
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str,
-        acc_count: int,
-        cpus: Optional[str] = None,
-        memory: Optional[str] = None,
-        use_spot: bool = False,
-        local_disk: Optional[str] = None,
-        region: Optional[str] = None,
-        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
+    acc_name: str,
+    acc_count: int,
+    cpus: Optional[str] = None,
+    memory: Optional[str] = None,
+    use_spot: bool = False,
+    local_disk: Optional[str] = None,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    max_hourly_cost: Optional[float] = None
+) -> Tuple[Optional[List[str]], List[str]]:
     """Returns a list of instance types satisfying
     the required count of accelerators."""
     del local_disk  # unused
@@ -130,14 +135,16 @@ def get_instance_type_for_accelerator(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Seeweb does not support zones.')
 
-    result = common.get_instance_type_for_accelerator_impl(df=_get_df(),
-                                                           acc_name=acc_name,
-                                                           acc_count=acc_count,
-                                                           cpus=cpus,
-                                                           memory=memory,
-                                                           use_spot=use_spot,
-                                                           region=region,
-                                                           zone=zone)
+    result = common.get_instance_type_for_accelerator_impl(
+        df=_get_df(),
+        acc_name=acc_name,
+        acc_count=acc_count,
+        cpus=cpus,
+        memory=memory,
+        use_spot=use_spot,
+        region=region,
+        zone=zone,
+        max_hourly_cost=max_hourly_cost)
     return result
 
 

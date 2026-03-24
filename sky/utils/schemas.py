@@ -310,6 +310,10 @@ def _get_single_resources_schema():
             'local_disk': {
                 'type': 'string',
             },
+            'max_hourly_cost': {
+                'type': 'number',
+                'exclusiveMinimum': 0,
+            },
             'ports': {
                 'anyOf': [{
                     'type': 'string',
@@ -1030,7 +1034,7 @@ def get_task_schema():
                 'type': 'array',
                 'items': get_volume_mount_schema(),
             },
-            'api_access': {
+            'api_server_access': {
                 'type': 'boolean',
             },
             '_metadata': {

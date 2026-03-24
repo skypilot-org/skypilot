@@ -463,7 +463,7 @@ def _submit_remotely(controller: controller_utils.Controllers,
 
 def _create_job_api_token(creator_user_id: str, job_name: Optional[str],
                           dag_uuid: str) -> Tuple[str, str]:
-    """Create a service account token for a managed job with api_access.
+    """Create a service account token for a managed job with api_server_access.
 
     Issues a token as the original user so nested jobs have the same
     identity and permissions as the launching user.
@@ -757,30 +757,31 @@ def launch(
         for task_ in dag.tasks:
             task_.update_envs({'SKYPILOT_NUM_JOBS': str(num_jobs)})
 
-        # Inject API server credentials for tasks with api_access enabled.
+        # Inject API server credentials for tasks with api_server_access.
         # Create a single token for the entire DAG and reuse it across all
         # tasks that need API access, rather than creating one per task.
         # Note: the API server endpoint env var is injected client-side
         # (sky/jobs/client/sdk.py) where get_server_url() returns the
         # externally reachable endpoint.
-        any_api_access = any(task_.api_access for task_ in dag.tasks)
-        if any_api_access:
+        any_api_access = any(task_.api_server_access for task_ in dag.tasks)
+        inject_token = any_api_access
+        if inject_token:
             sa_enabled = os.environ.get(
                 skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS,
                 'false').lower()
             if sa_enabled != 'true':
-                with ux_utils.print_exception_no_traceback():
-                    env_var = (skylet_constants.ENV_VAR_ENABLE_SERVICE_ACCOUNTS)
-                    raise ValueError('api_access: true requires service '
-                                     'accounts to be enabled on the API '
-                                     f'server. Set {env_var}=true '
-                                     'environment variable on the server.')
+                logger.debug('Skipping api_server_access token injection: '
+                             'service accounts not enabled on the API server.')
+                inject_token = False
 
             user_id = os.environ.get(skylet_constants.USER_ID_ENV_VAR)
-            if user_id is None:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Cannot determine user identity for '
-                                       'api_access credential injection.')
+            if inject_token and user_id is None:
+                logger.debug('Skipping api_server_access token injection: '
+                             'cannot determine user identity.')
+                inject_token = False
+
+        if inject_token:
+            assert user_id is not None
             token, token_id = _create_job_api_token(
                 creator_user_id=user_id,
                 job_name=dag.name,
@@ -788,7 +789,7 @@ def launch(
             )
 
             for task_ in dag.tasks:
-                if task_.api_access:
+                if task_.api_server_access:
                     task_._secrets[  # pylint: disable=protected-access
                         skylet_constants.
                         SERVICE_ACCOUNT_TOKEN_ENV_VAR] = _SecretStr(token)

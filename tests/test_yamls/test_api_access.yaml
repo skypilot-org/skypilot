@@ -2,7 +2,7 @@ resources:
   cpus: 2+
   memory: 4+
 
-api_access: true
+api_server_access: true
 
 setup: |
   pip install "skypilot-nightly[remote]" > /dev/null 2>&1
