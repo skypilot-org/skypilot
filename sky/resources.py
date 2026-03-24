@@ -833,7 +833,9 @@ class Resources:
         #     memory as a consumable resource (CR_CPU, CR_Core, CR_Socket),
         #     so the default was set to 0.
         # In both cases, --mem will be omitted from the sbatch script.
-        if memory_gb <= 0 and not isinstance(self._cloud, clouds.Slurm):
+        # Negative memory is never valid for any cloud.
+        is_slurm = isinstance(self._cloud, clouds.Slurm)
+        if memory_gb < 0 or (memory_gb == 0 and not is_slurm):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'The "memory" field should be positive. Found: {memory!r}')
