@@ -100,17 +100,17 @@ class JsonInput(InputFormat):
 
     Args:
         path: Cloud storage path to a ``.jsonl`` file.
-              Supported prefixes: ``s3://``, ``gs://``, ``r2://``.
+              Supported prefixes: ``s3://``, ``gs://``.
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str) -> None:
         super().__init__(path)
         self._validate()
 
     def _validate(self) -> None:
         if not self.path:
             raise ValueError('JsonInput path cannot be empty')
-        supported_prefixes = ('s3://', 'gs://', 'r2://')
+        supported_prefixes = ('s3://', 'gs://')
         if not self.path.startswith(supported_prefixes):
             raise ValueError(
                 f'Unsupported storage path: {self.path}. '
@@ -173,7 +173,7 @@ class JsonOutput(OutputFormat):
 
     Args:
         path: Cloud storage path for the output ``.jsonl`` file.
-              Supported prefixes: ``s3://``, ``gs://``, ``r2://``.
+              Supported prefixes: ``s3://``, ``gs://``.
         column: Optional list of keys (or single key string) to include
                 from each result dict. When ``None`` (default), all fields
                 are written (backward compatible).
@@ -193,7 +193,7 @@ class JsonOutput(OutputFormat):
     def _validate(self) -> None:
         if not self.path:
             raise ValueError('JsonOutput path cannot be empty')
-        supported_prefixes = ('s3://', 'gs://', 'r2://')
+        supported_prefixes = ('s3://', 'gs://')
         if not self.path.startswith(supported_prefixes):
             raise ValueError(
                 f'Unsupported storage path: {self.path}. '
@@ -244,7 +244,7 @@ class ImageOutput(OutputFormat):
     Args:
         path: Cloud storage directory path for output images.
               Must end with ``/``.
-              Supported prefixes: ``s3://``, ``gs://``, ``r2://``.
+              Supported prefixes: ``s3://``, ``gs://``.
         column: Name of the key in result dicts that holds the PIL Image.
                 Defaults to ``'image'``.
     """
@@ -257,7 +257,7 @@ class ImageOutput(OutputFormat):
     def _validate(self) -> None:
         if not self.path:
             raise ValueError('ImageOutput path cannot be empty')
-        supported_prefixes = ('s3://', 'gs://', 'r2://')
+        supported_prefixes = ('s3://', 'gs://')
         if not self.path.startswith(supported_prefixes):
             raise ValueError(
                 f'Unsupported storage path: {self.path}. '

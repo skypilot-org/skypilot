@@ -10,8 +10,7 @@ Each worker node runs a persistent background process that:
 5. ``POST /shutdown`` causes ``load()`` to stop iterating and the mapper to
    return naturally.
 """
-from http.server import BaseHTTPRequestHandler
-from http.server import HTTPServer
+import http.server as http_server
 import json
 import logging
 import os
@@ -65,10 +64,10 @@ _output_formats: List[Any] = []  # List of OutputFormat instances
 # ---------------------------------------------------------------------------
 
 
-class _WorkerHandler(BaseHTTPRequestHandler):
+class _WorkerHandler(http_server.BaseHTTPRequestHandler):
     """Handles ``/feed_batch``, ``/shutdown``, and ``/health``."""
 
-    def do_POST(self):  # pylint: disable=invalid-name
+    def do_POST(self) -> None:  # pylint: disable=invalid-name
         if self.path == '/feed_batch':
             self._handle_feed_batch()
         elif self.path == '/shutdown':
@@ -76,14 +75,14 @@ class _WorkerHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    def do_GET(self):  # pylint: disable=invalid-name
+    def do_GET(self) -> None:  # pylint: disable=invalid-name
         if self.path == '/health':
             self._send_json(200, {'status': 'healthy'})
         else:
             self.send_error(404)
 
     # Suppress default stderr logging for each request.
-    def log_message(self, format, *args):  # pylint: disable=redefined-builtin
+    def log_message(self, format, *args) -> None:  # pylint: disable=redefined-builtin
         logger.debug('WorkerHandler: %s', format % args)
 
     # ---- helpers ----------------------------------------------------------
@@ -275,7 +274,7 @@ def save_results(results: List[Dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_input_format(dataset_path: str):
+def _resolve_input_format(dataset_path: str) -> io_formats.InputFormat:
     """Resolve input format from env var or fall back to path-based detection.
 
     Returns an InputFormat instance.
@@ -290,7 +289,7 @@ def _resolve_input_format(dataset_path: str):
     raise ValueError(f'Unsupported dataset format: {dataset_path}')
 
 
-def _resolve_output_formats(output_path: str):
+def _resolve_output_formats(output_path: str) -> List[io_formats.OutputFormat]:
     """Resolve output formats from env var or fall back to path-based detection.
 
     Returns a list of OutputFormat instances.
@@ -334,8 +333,8 @@ def start_worker(serialized_fn: str, output_path: str, job_id: str,
     _output_formats = _resolve_output_formats(output_path)
 
     # Start HTTP server.
-    server = HTTPServer(('127.0.0.1', constants.WORKER_SERVICE_PORT),
-                        _WorkerHandler)
+    server = http_server.HTTPServer(
+        ('127.0.0.1', constants.WORKER_SERVICE_PORT), _WorkerHandler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     logger.info('Worker service listening on 127.0.0.1:%d',

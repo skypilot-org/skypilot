@@ -8,12 +8,16 @@ import json
 import os
 import tempfile
 import textwrap
+import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.batch import constants
 from sky.data import data_utils
+
+if typing.TYPE_CHECKING:
+    from sky.batch import io_formats
 
 
 def serialize_function(fn: Callable) -> str:
@@ -310,7 +314,7 @@ def upload_bytes_to_cloud(data: bytes, cloud_path: str) -> None:
         raise ValueError(f'Unsupported provider: {provider}')
 
 
-def get_output_format(output_path: str):
+def get_output_format(output_path: str) -> 'io_formats.OutputFormat':
     """Detect the output format from the output path.
 
     Returns:

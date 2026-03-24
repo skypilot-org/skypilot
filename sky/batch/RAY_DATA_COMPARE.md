@@ -57,7 +57,7 @@ ds = sky.batch.Dataset(sky.batch.JsonInput("s3://bucket/data.jsonl"))
 
 - Ray Data returns a lazy `Dataset` that can be chained with transforms. Sky Batch returns a `Dataset` that you call `.map()` on with a single mapper function.
 - Ray Data supports in-memory sources (`from_items`, `from_pandas`). Sky Batch reads from cloud storage only.
-- Ray Data supports local files. Sky Batch requires cloud paths (`s3://`, `gs://`, `r2://`).
+- Ray Data supports local files. Sky Batch requires cloud paths (`s3://`, `gs://`).
 
 ## Writing Data
 

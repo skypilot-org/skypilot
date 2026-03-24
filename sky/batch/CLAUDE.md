@@ -133,4 +133,4 @@ aws s3 ls s3://<bucket>/.sky_batch_tmp/
 - `BatchCoordinator.__init__` still supports env var fallback for backward compat
 - Worker format resolution also has env var fallback chains for backward compat (`SKY_BATCH_OUTPUT_FORMATS` -> `SKY_BATCH_OUTPUT_FORMAT` -> path-based detection)
 - Worker downloads the full dataset once and caches locally per job_id to avoid stale data from previous jobs
-- Cloud storage support: S3 (`s3://`), GCS (`gs://`), R2 (`r2://`) for inputs; S3 and GCS for upload operations
+- Cloud storage support: S3 (`s3://`) and GCS (`gs://`) for both inputs and outputs

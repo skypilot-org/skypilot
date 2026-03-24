@@ -152,7 +152,7 @@ class BatchCoordinator:
     # SIGTERM handler (sky jobs cancel)
     # ------------------------------------------------------------------
 
-    def _handle_sigterm(self, signum, frame):  # pylint: disable=unused-argument
+    def _handle_sigterm(self, signum, frame) -> None:  # pylint: disable=unused-argument
         """Graceful shutdown on ``sky jobs cancel``."""
         logger.info('Received SIGTERM — shutting down workers...')
         self.cancel()
