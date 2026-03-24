@@ -2916,7 +2916,7 @@ def test_managed_jobs_wait_timeout(generic_cloud: str):
         # Wait with a short timeout; the job should still be running.
         request_id = jobs_sdk.wait(name=name, timeout=5, poll_interval=5)
         try:
-            sky.get(request_id)
+            sky.stream_and_get(request_id)
         except Exception as e:  # pylint: disable=broad-except
             assert 'TimeoutError' in type(e).__name__ or 'Timed out' in str(
                 e), f'Expected TimeoutError, got {type(e).__name__}: {e}'
@@ -2951,7 +2951,7 @@ def test_managed_jobs_wait_success(generic_cloud: str):
 
     def sdk_wait_success():
         request_id = jobs_sdk.wait(name=name, poll_interval=5)
-        exit_code = sky.get(request_id)
+        exit_code = sky.stream_and_get(request_id)
         assert exit_code == sky.exceptions.JobExitCode.SUCCEEDED, (
             f'Expected SUCCEEDED (0), got {exit_code}')
 
