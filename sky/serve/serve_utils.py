@@ -1253,9 +1253,6 @@ def wait_service_registration(service_name: str, job_id: int,
                         f'To update an existing {noun}, run: {command_to_run}'
                         f' {service_name} <new-{noun}-yaml>')
             lb_port = record['load_balancer_port']
-            if pool and lb_port is None:
-                # Pools don't use a load balancer.
-                return message_utils.encode_payload(None)
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
         else:

@@ -157,15 +157,13 @@ class RpcRunner:
     def wait_service_registration(cls,
                                   handle: backends.CloudVmRayResourceHandle,
                                   service_name: str, job_id: int,
-                                  pool: bool) -> Optional[int]:
+                                  pool: bool) -> int:
         assert handle.is_grpc_enabled_with_flag
         request = servev1_pb2.WaitServiceRegistrationRequest(
             service_name=service_name, job_id=job_id, pool=pool)
         response = backend_utils.invoke_skylet_with_retries(
             lambda: backends.SkyletClient(handle.get_grpc_channel()
                                          ).wait_service_registration(request))
-        if not response.HasField('lb_port'):
-            return None
         return response.lb_port
 
     @classmethod
