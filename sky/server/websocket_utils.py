@@ -4,7 +4,7 @@ import asyncio
 from enum import IntEnum
 import os
 import struct
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, Optional
 
 import fastapi
 
@@ -12,6 +12,24 @@ from sky import sky_logging
 from sky.metrics import utils as metrics_utils
 
 logger = sky_logging.init_logger(__name__)
+
+# Hook for plugins to inject SSH redirect logic. When set, it is called after
+# WebSocket accept for clients that support the redirect protocol.
+# TODO(aylei): support in slurm ssh handler
+_ssh_redirect_hook: Optional[Callable[[fastapi.WebSocket, str],
+                                      Awaitable[Optional[dict]]]] = None
+
+
+def register_ssh_redirect_hook(
+    hook: Callable[[fastapi.WebSocket, str],
+                   Awaitable[Optional[dict]]],) -> None:
+    """Register a hook that checks whether an SSH connection should redirect.
+
+    The hook is called with (websocket, cluster_name) after the WebSocket is
+    accepted but before the backend connection is established.
+    """
+    global _ssh_redirect_hook
+    _ssh_redirect_hook = hook
 
 
 class SSHMessageType(IntEnum):

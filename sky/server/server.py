@@ -2447,23 +2447,8 @@ async def health(request: fastapi.Request) -> responses.APIHealthResponse:
 
 SSHMessageType = websocket_utils.SSHMessageType
 
-# Hook for plugins to inject SSH redirect logic. When set, it is called after
-# WebSocket accept for clients that support the redirect protocol.
-# TODO(aylei): support in slurm ssh handler
-_ssh_redirect_hook: Optional[Callable[[fastapi.WebSocket, str],
-                                      Awaitable[Optional[dict]]]] = None
-
-
-def register_ssh_redirect_hook(
-    hook: Callable[[fastapi.WebSocket, str],
-                   Awaitable[Optional[dict]]],) -> None:
-    """Register a hook that checks whether an SSH connection should redirect.
-
-    The hook is called with (websocket, cluster_name) after the WebSocket is
-    accepted but before the backend connection is established.
-    """
-    global _ssh_redirect_hook
-    _ssh_redirect_hook = hook
+# Re-export for backward compatibility.
+register_ssh_redirect_hook = websocket_utils.register_ssh_redirect_hook
 
 
 async def _get_cluster_and_validate(
@@ -2525,11 +2510,11 @@ async def kubernetes_pod_ssh_proxy(
         client_version = {client_version}')
 
     # Check if there is a hook wants to redirect this connection.
-    if (_ssh_redirect_hook is not None and client_version is not None and
+    if (websocket_utils._ssh_redirect_hook is not None and client_version is not None and
             client_version >=
             server_constants.MIN_SSH_REDIRECT_PROTOCOL_VERSION):
         try:
-            redirect_info = await _ssh_redirect_hook(websocket, cluster_name)
+            redirect_info = await websocket_utils._ssh_redirect_hook(websocket, cluster_name)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'SSH redirect hook failed for {cluster_name}: {e}')
             redirect_info = None
