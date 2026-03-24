@@ -658,8 +658,11 @@ class Slurm(clouds.Cloud):
                                 f'Please ask your cluster administrator to set '
                                 f'RealMemory in slurm.conf.'
                                 f'{colorama.Style.RESET_ALL}')
-                except Exception:  # pylint: disable=broad-except
-                    pass
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.debug(
+                        f'Failed to get node info for cluster '
+                        f'{cluster!r}: '
+                        f'{common_utils.format_exception(e)}')
         return None
 
     @classmethod
