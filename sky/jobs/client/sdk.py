@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import click
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.client import sdk
@@ -27,14 +26,10 @@ from sky.utils import dag_utils
 
 if typing.TYPE_CHECKING:
     import io
-    import webbrowser
 
     import sky
     from sky import backends
     from sky.serve import serve_utils
-else:
-    # only used in dashboard()
-    webbrowser = adaptors_common.LazyImport('webbrowser')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -553,7 +548,7 @@ def dashboard() -> None:
     params = f'user_hash={user_hash}'
     url = f'{api_server_url}/jobs/dashboard?{params}'
     logger.info(f'Opening dashboard in browser: {url}')
-    webbrowser.open(url)
+    common_utils.open_browser(url)
 
 
 @context.contextual

@@ -788,6 +788,41 @@ def is_wsl() -> bool:
     return 'microsoft' in platform.uname().release.lower()
 
 
+def open_browser(url: str) -> bool:
+    """Open a URL in the default browser, with WSL support.
+
+    On WSL, Python's webbrowser module tries xdg-open which fails because
+    there are no GUI browsers in the Linux environment. This function detects
+    WSL and uses Windows-side browser opening instead.
+
+    Returns:
+        True if the browser was likely opened successfully, False otherwise.
+    """
+    if is_wsl():
+        # On WSL, use Windows-side browser opening.
+        # Try wslview (from wslu package) first, then powershell.exe.
+        for cmd in [
+            ['wslview', url],
+            ['powershell.exe', '/c', 'start', url],
+            ['cmd.exe', '/c', 'start', url],
+        ]:
+            try:
+                result = subprocess.run(cmd,
+                                        capture_output=True,
+                                        timeout=10,
+                                        check=False)
+                if result.returncode == 0:
+                    return True
+            except FileNotFoundError:
+                continue
+            except Exception:  # pylint: disable=broad-except
+                continue
+        return False
+
+    import webbrowser  # pylint: disable=import-outside-toplevel
+    return webbrowser.open(url)
+
+
 def find_free_port(start_port: int) -> int:
     """Finds first free local port starting with 'start_port'.
 
